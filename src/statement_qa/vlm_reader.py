@@ -1,5 +1,7 @@
 """VLM-assisted row reader (OpenRouter gemini-3.7-flash).
 
+v2 — INHERITS THE FROZEN PROMPT SET from the 629-page case
+(src/statement_qa/legacy/prompts.py, owner directive: "العلم تراكمي").
 Chain-derived architecture (validated on real page 5 — 8/10 exact):
 - VLM transcribes printed numbers EXACTLY (Arabic-Indic, ٬ thousands,
   . 00 halalas) — tesseract garbles dense-table digits (skill lesson 6).
@@ -7,8 +9,10 @@ Chain-derived architecture (validated on real page 5 — 8/10 exact):
   the VLM movement token is only a cross-check (side included).
 - VLM rows that fail the chain → suspect → targeted re-read (not silent).
 
-Single-key discipline (skill lesson 10): one stream, retry with backoff,
-JSON-parse gate separate from rate-limit retries.
+Chain-index rule (legacy lesson 3): balance prints AFTER the transaction —
+amt[i+1] == bal[i] − bal[i+1]. Single-key discipline (legacy lesson 10):
+one stream, retry with backoff, JSON-parse gate separate from rate-limit
+retries.
 """
 
 from __future__ import annotations
@@ -22,8 +26,13 @@ import urllib.request
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from statement_qa.legacy.prompts import (
+    FRONTIER_PROMPT, STRUCTURE_AWARE_PROMPT, TOP_BAND_PROMPT, HARD_RULES,
+)
+
 MODEL = os.environ.get("OPENROUTER_MODEL_VLM", "google/gemini-3.7-flash")
-AR_INDIC = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+# BOTH digit tables (legacy lesson: Gemini mixes Arabic-Indic AND Persian)
+AR_INDIC = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 
 
 def _api_key() -> str:
@@ -54,26 +63,26 @@ def _parse_amount(tok: str | None) -> Decimal | None:
         return None
 
 
-def read_rows_vlm(image_path: str) -> list[dict]:
-    """One page image -> [{'movement': Decimal|None, 'balance': Decimal|None}].
+def read_rows_vlm(image_path: str, prompt: str | None = None,
+                  max_tokens: int = 4000) -> list[dict]:
+    """One page image -> [{'movement': Decimal|None, 'balance': Decimal|None,
+                           'desc': str|None, 'date': str|None}].
+
+    Uses the FROZEN era-neutral prompt from the 629-page case by default
+    (FRONTIER_PROMPT) — proven copy-exact behavior. Pass
+    prompt=STRUCTURE_AWARE_PROMPT for red-band anatomy reads, or a
+    TOP_BAND_PROMPT.format(...) for boundary recovery.
 
     Raises RuntimeError after retries; caller decides suspect handling.
     """
+    user_prompt = prompt or FRONTIER_PROMPT
     b64 = base64.b64encode(open(image_path, "rb").read()).decode()
     payload = {
         "model": MODEL,
         "temperature": 0,
+        "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": [
-            {"type": "text", "text": (
-                "This is ONE page of an Al Rajhi bank statement (scanned, Arabic). "
-                "In the lower table, each transaction row has numbers on its LEFT side. "
-                "Transcribe EVERY transaction row as JSON: "
-                '{"rows":[{"movement":"<number closer to the description, exactly as '
-                'printed in Arabic-Indic>",'
-                '"balance":"<leftmost number, exactly as printed>"}]} '
-                "RULES: copy digits EXACTLY as printed (Arabic-Indic with dots/commas "
-                "as-is), NO conversion, null for unreadable, JSON only. Include the "
-                "opening-balance line at top-left and the totals row at bottom.")},
+            {"type": "text", "text": user_prompt},
             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
         ]}],
     }
@@ -87,15 +96,18 @@ def read_rows_vlm(image_path: str) -> list[dict]:
         try:
             out = json.loads(urllib.request.urlopen(req, timeout=180).read().decode())
             content = out["choices"][0]["message"]["content"]
-            m = re.search(r"\{.*\}", content, re.DOTALL)
+            m = re.search(r"[\[{].*[\]}]", content, re.DOTALL)
             if not m:
                 raise ValueError(f"no JSON in VLM answer: {content[:120]}")
             data = json.loads(m.group(0))
+            vlm_rows = data if isinstance(data, list) else data.get("rows", [])
             rows = []
-            for r in data.get("rows", []):
+            for r in vlm_rows:
                 rows.append({
-                    "movement": _parse_amount(r.get("movement")),
+                    "movement": _parse_amount(r.get("amount") or r.get("movement")),
                     "balance": _parse_amount(r.get("balance")),
+                    "desc": r.get("desc") or r.get("desc_main"),
+                    "date": r.get("greg") or r.get("date"),
                 })
             return rows
         except urllib.error.HTTPError as e:

@@ -36,7 +36,10 @@ def _fmt_row(r: dict, idx: int) -> str:
     mv = r.get("movement")
     side = r.get("side") or "غير محسوم"
     ok = "" if r.get("ok") else " [صف مشبوه — يحتاج مراجعة]"
-    return f"صف {idx}: حركة {side} بمبلغ {mv} → الرصيد صار {bal}{ok}"
+    desc = (r.get("desc") or "").replace("\n", " ").strip()
+    desc_part = f" | {desc}" if desc else ""
+    return (f"صف {idx}: حركة {side} بمبلغ {mv} → الرصيد صار {bal}"
+            f"{desc_part}{ok}")
 
 
 def chunk_rows(rows: list[dict], per_chunk: int = _ROWS_PER_CHUNK) -> list[Chunk]:
