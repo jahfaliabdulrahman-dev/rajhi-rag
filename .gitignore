@@ -1,0 +1,15 @@
+# Secrets — never commit .env
+.venv/
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+vectorstore/
+.DS_Store
+
+# Real bank data NEVER leaves this machine
+data/local_sample/
+
+# PDFs are generated locally; only the synthetic sample is published
+*.pdf
+!data/sample/*.pdf
