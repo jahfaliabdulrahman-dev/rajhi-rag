@@ -116,22 +116,37 @@ def chain_derive(rows: list[dict]) -> list[dict]:
 
     Row 0 = opening (its printed balance starts the chain). Suspect rows
     (|Δ| != printed mv) get ok=False; the caller re-reads them.
+
+    Scale guard (×100 ambiguity, from the 629-page case): when a printed
+    balance breaks the chain but ×100 fits (or vice versa), the chain
+    value wins and the row is marked scale_fixed — never silently scaled.
+    None balances (VLM null) don't crash the walk; they mark gaps.
     """
     out: list[dict] = []
     prev: Decimal | None = None
     for r in rows:
         bal = r["balance"]
+        if bal is None:
+            out.append({**r, "derived_movement": None, "side": "",
+                        "ok": False, "opening": False, "scale_fixed": False})
+            prev = None  # chain broken; next row re-anchors
+            continue
         if prev is None:
             out.append({**r, "derived_movement": Decimal("0"), "side": "",
-                        "ok": True, "opening": True})
+                        "ok": True, "opening": True, "scale_fixed": False})
         else:
             delta = bal - prev
             mv = abs(delta)
             side = "credit" if delta > 0 else "debit" if delta < 0 else ""
             printed = r["movement"]
             ok = printed is None or printed == mv
+            scale_fixed = False
+            if not ok and printed is not None and printed != 0:
+                # ×100 ambiguity: printed*100 == mv or printed == mv*100
+                if printed * 100 == mv or printed == mv * 100:
+                    ok, scale_fixed = True, True
             out.append({**r, "derived_movement": mv, "side": side,
-                        "ok": ok, "opening": False})
+                        "ok": ok, "opening": False, "scale_fixed": scale_fixed})
         prev = bal
     return out
 
