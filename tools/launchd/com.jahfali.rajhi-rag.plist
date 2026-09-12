@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jahfali.rajhi-rag</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/Projects/rajhi-rag/.venv/bin/python</string>
+        <string>__HOME__/Projects/rajhi-rag/app.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__HOME__/Projects/rajhi-rag</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/rajhi-rag.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/rajhi-rag.log</string>
+</dict>
+</plist>
