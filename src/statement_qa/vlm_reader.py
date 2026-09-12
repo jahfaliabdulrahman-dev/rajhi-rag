@@ -23,16 +23,15 @@ import os
 import re
 import time
 import urllib.request
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from pathlib import Path
 
 from statement_qa.legacy.prompts import (
     FRONTIER_PROMPT, STRUCTURE_AWARE_PROMPT, TOP_BAND_PROMPT, HARD_RULES,
 )
+from statement_qa.legacy.arabic_digit_parser import norm_num as _legacy_norm_num
 
 MODEL = os.environ.get("OPENROUTER_MODEL_VLM", "google/gemini-3.7-flash")
-# BOTH digit tables (legacy lesson: Gemini mixes Arabic-Indic AND Persian)
-AR_INDIC = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 
 
 def _api_key() -> str:
@@ -48,19 +47,16 @@ def _api_key() -> str:
 def _parse_amount(tok: str | None) -> Decimal | None:
     """Printed Arabic-Indic money token -> Decimal (Western digits, dot halalas).
 
-    '9001.00' -> 9001.00 ; '١١٩.٠٠' -> 119.00 ; null/'' -> None.
+    DELEGATES to the proven legacy parser (629-page case) — it owns the full
+    separator zoo: '٣٠٠,٠٠' -> 300.00 (comma is the decimal point on old
+    prints), '.,..' -> 0.00 (printed zero), '9001.00' -> 9001.00 (lost
+    dot), '١١٩.٠٠-' -> -119.00 (trailing minus). A local re-implementation
+    once regressed all four of these at once — never re-implement; inherit.
     """
     if not tok:
         return None
-    t = tok.translate(AR_INDIC).replace("٬", ",").replace("٫", ".").strip()
-    t = t.replace("-", "").replace("−", "").replace(" ", "")
-    if not t or not re.search(r"\d", t):
-        return None
-    t = t.replace(",", "")
-    try:
-        return Decimal(t)
-    except InvalidOperation:
-        return None
+    v = _legacy_norm_num(tok)
+    return None if v is None else Decimal(str(v))
 
 
 def read_rows_vlm(image_path: str, prompt: str | None = None,

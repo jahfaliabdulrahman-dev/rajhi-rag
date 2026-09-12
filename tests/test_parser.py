@@ -101,3 +101,36 @@ def test_verify_chain_broken_flags_suspect():
     rep = verify_statement(parse_text(text))
     assert rep["balance_chain_ok"] is False
     assert rep["suspect_rows"] == [2]
+
+
+# ---------- vlm_reader amount parser (629-page inheritance regressions) ----------
+
+from statement_qa.vlm_reader import _parse_amount  # noqa: E402
+
+
+def test_parse_amount_comma_decimal():
+    # Old prints: comma IS the decimal point with exactly 2 digits after it.
+    assert _parse_amount("٣٠٠,٠٠") == Decimal("300.00")
+    assert _parse_amount("١٠٠,٠٠") == Decimal("100.00")
+    assert _parse_amount("۲۴۵,۰۰") == Decimal("245.00")   # Persian digits
+
+
+def test_parse_amount_printed_zero_as_dots():
+    # Old pages print a zero balance as dots — must be 0, never None.
+    assert _parse_amount(".,..") == Decimal("0")
+
+
+def test_parse_amount_lost_dot():
+    assert _parse_amount("9001.00") == Decimal("9001.00")
+
+
+def test_parse_amount_trailing_minus():
+    # Negative balances print the minus at the END — sign must survive.
+    assert _parse_amount("١١٩.٠٠-") == Decimal("-119.00")
+    assert _parse_amount("۳۰۰,۰۰-") == Decimal("-300.00")
+
+
+def test_parse_amount_none_and_empty():
+    assert _parse_amount(None) is None
+    assert _parse_amount("") is None
+    assert _parse_amount("سحب الصراف") is None
