@@ -4,6 +4,12 @@ Tab 1 قراءة وتحقق: PDF upload → page renders → VLM+chain rows → 
 suspect flags. No LLM answers here; deterministic provenance only.
 Tab 2 سؤال وجواب: FAISS retrieval + strict-prompt answer with sources.
 Tab 3 عن المشروع: architecture + links.
+
+Design layer (verified against gradio 6.27 — see the gradio-design skill):
+- Arabic RTL 5-layer recipe (container direction, native rtl flags, block
+  flips, upload-badge anchor, LTR footer)
+- Soft/teal theme + IBM Plex Sans Arabic with explicit weights
+- theme/css passed to launch() — Gradio 6 canonical placement
 """
 
 from __future__ import annotations
@@ -29,6 +35,26 @@ from statement_qa.vlm_reader import chain_derive, read_rows_vlm
 
 STATE = {}
 
+RTL_CSS = """
+.gradio-container { direction: rtl; }
+/* Components with no native rtl flag expose dir="ltr" block shells —
+   flip them so labels and toolbars sit on the right */
+.gradio-container .block[dir="ltr"] { direction: rtl; }
+/* File-upload badge is absolutely positioned — swap its anchor side */
+.gradio-container label.float { left: auto !important; right: 6px !important; }
+/* Gradio footer chrome is Latin — keep it LTR inside an RTL app */
+footer { direction: ltr; }
+"""
+
+ARABIC_FONT = gr.themes.GoogleFont("IBM Plex Sans Arabic", weights=(400, 500, 600, 700))
+
+THEME = gr.themes.Soft(
+    primary_hue="teal",
+    neutral_hue="slate",
+    radius_size="md",
+    font=ARABIC_FONT,
+)
+
 
 def _pages_to_pngs(pdf_path: str, dpi: int = 200):
     outdir = tempfile.mkdtemp(prefix="rajhi_pages_")
@@ -44,7 +70,7 @@ def _pages_to_pngs(pdf_path: str, dpi: int = 200):
 def process_pdf(pdf_path: str, progress=gr.Progress()):
     """Tab 1 handler: read all pages, chain-audit, build chunks+index."""
     if not pdf_path:
-        raise gr.Error("ارفع ملف PDF أولاً")
+        raise gr.Error("ارفع ملف PDF أولاً ثم اضغط «قراءة الكشف».")
     pages = _pages_to_pngs(pdf_path)
     all_rows = []
     prev_closing = None
@@ -91,9 +117,9 @@ def process_pdf(pdf_path: str, progress=gr.Progress()):
 
 def ask_question(question: str):
     if not question.strip():
-        return "اكتب سؤالاً أولاً", "", ""
+        return "اكتب سؤالاً أولاً", "", pd.DataFrame()
     if "store" not in STATE:
-        return "ارفع الكشف في تبويب «قراءة وتحقق» أولاً", "", ""
+        return "ارفع الكشف في تبويب «قراءة وتحقق» أولاً", "", pd.DataFrame()
     res_hits = retrieve(STATE["store"], question, k=4)
     from statement_qa.qa import answer_question
 
@@ -112,7 +138,8 @@ def STATE_rows_to_df(hit):
             if r["page"] == hit["page"]]
     return pd.DataFrame([
         {"الصفحة": r["page"], "المبلغ": float(r["movement"]) if r["movement"] else "",
-         "الرصيد": float(r["balance"]), "الاتجاه": r["side"] or "—"}
+         "الرصيد": float(r["balance"]),
+         "الاتجاه": {"debit": "مدين (سحب)", "credit": "دائن (إيداع)"}.get(r["side"], "—")}
         for r in rows
     ])
 
@@ -128,27 +155,32 @@ ABOUT = """# سؤال وجواب على كشف حساب الراجحي 🏦
 العرض العام يستخدم كشفاً اصطناعياً.
 """
 
-with gr.Blocks(title="سؤال وجواب على كشف الراجحي", css="footer {direction:ltr}") as demo:
-    gr.Markdown("# 🏦 سؤال وجواب على كشف الراجحي (RAG عربي)")
+with gr.Blocks(title="سؤال وجواب على كشف الراجحي") as demo:
+    gr.Markdown("# 🏦 سؤال وجواب على كشف الراجحي (RAG عربي)", rtl=True)
     with gr.Tabs():
         with gr.Tab("١. قراءة وتحقق"):
             pdf_in = gr.File(label="ارفع كشف PDF (عينة تجريبية موصى بها)",
                              file_types=[".pdf"])
-            btn = gr.Button("قراءة الكشف وبناء الفهرس", variant="primary")
-            summary = gr.Markdown()
+            btn = gr.Button("قراءة الكشف وبناء الفهرس", variant="primary",
+                            interactive=False)
+            summary = gr.Markdown(rtl=True)
             table = gr.Dataframe(label="الجدول المُستخرج (بالسلسلة الرصيدية)",
                                  interactive=False)
+            # gate the primary action on the required input (no dead-end clicks)
+            pdf_in.change(lambda f: gr.update(interactive=bool(f)),
+                          inputs=pdf_in, outputs=btn)
             btn.click(process_pdf, inputs=pdf_in, outputs=[summary, table])
         with gr.Tab("٢. سؤال وجواب"):
-            q = gr.Textbox(label="سؤالك بالعربية", placeholder="مثال: كم آخر رصيد في الكشف؟")
+            q = gr.Textbox(label="سؤالك بالعربية", placeholder="مثال: كم آخر رصيد في الكشف؟",
+                           rtl=True)
             ask = gr.Button("اسأل", variant="primary")
-            ans = gr.Markdown(label="الجواب")
+            ans = gr.Markdown(label="الجواب", rtl=True)
             with gr.Row():
-                src = gr.Markdown(label="المصادر")
+                src = gr.Markdown(label="المصادر", rtl=True)
             raw = gr.Dataframe(label="الصفوف الخام (من الجدول الحتمي)", interactive=False)
             ask.click(ask_question, inputs=q, outputs=[ans, src, raw])
         with gr.Tab("٣. عن المشروع"):
-            gr.Markdown(ABOUT)
+            gr.Markdown(ABOUT, rtl=True)
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(theme=THEME, css=RTL_CSS)
