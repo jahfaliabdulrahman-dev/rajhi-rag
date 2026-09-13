@@ -111,45 +111,72 @@ def g_end_to_end() -> str:
     assert clean == total, f"{clean}/{total} clean"
     assert total >= 95, f"only {total} rows (expected ≈100-104)"
 
-    data = table["data"] if isinstance(table, dict) else []
+    assert isinstance(table, dict), "table shape changed"
+    headers, data = table.get("headers") or [], table.get("data") or []
+    idx = {h: i for i, h in enumerate(headers)}
+    for col in ("#", "الصفحة", "الوصف", "النوع", "مدين", "دائن", "الرصيد", "الحالة"):
+        assert col in idx, f"missing column {col!r}: {headers}"
     assert len(data) >= 95, f"table carries {len(data)} rows"
+
+    def val(r, col):
+        return r[idx[col]]
 
     def num(x):
         if x in ("", None):
             return None
         return float(str(x).replace(",", "").strip())
 
+    def rows_of(page):
+        return [r for r in data if val(r, "الصفحة") == page]
+
     def txns(page):
-        return [r for r in data if r[0] == page and r[1] == "حركة"]
+        return [r for r in rows_of(page)
+                if val(r, "النوع") not in ("رصيد افتتاحي", "رصيد سابق")]
 
     # Page 1 start — the transfer of 300.00 to balance 300.00 must appear as
-    # a transaction (whether or not the dots-zero opening row was read; when
-    # it wasn't, the side legitimately stays undecided "—" — accept both).
+    # a transaction. When the dots-zero opening row was missed, the side
+    # legitimately stays undecided (amount stays out of BOTH side columns —
+    # never guess a direction); the row shows "◌" in الحالة. Accept that.
     p1_txns = txns(1)
     assert p1_txns, "no transactions on page 1"
     first_t = p1_txns[0]
-    assert num(first_t[3]) == 300.00 and num(first_t[5]) == 300.00, f"p1 first txn: {first_t}"
-    s4 = str(first_t[4])
-    assert s4 == "—" or "دائن" in s4, f"p1 first txn side: {first_t}"
+    assert num(val(first_t, "الرصيد")) == 300.00, f"p1 first txn: {first_t}"
+    c1, d1 = num(val(first_t, "مدين")), num(val(first_t, "دائن"))
+    assert not (c1 is not None and d1 is not None), f"p1 first txn both sides: {first_t}"
+    assert c1 in (None, 300.00) and d1 in (None, 300.00), f"p1 first txn amount: {first_t}"
 
     # Page 2 must be present with its rows (the capture of its top row's
     # amount varies across VLM reads — the chain + 0-suspects gate covers it).
-    assert [r for r in data if r[0] == 2], "no page 2 rows"
+    assert rows_of(2), "no page 2 rows"
 
     # Page 9 closing == 676.00 (verified against the render).
-    p9 = [r for r in data if r[0] == 9]
-    assert p9 and num(p9[-1][5]) == 676.00, f"p9 closing: {p9[-1] if p9 else None}"
+    p9 = rows_of(9)
+    assert p9 and num(val(p9[-1], "الرصيد")) == 676.00, \
+        f"p9 closing: {p9[-1] if p9 else None}"
 
     # THE owner-caught bug: page 10 starts with transfer +1000 -> 1676.
     # It must be a TRANSACTION with its movement — never silently "opening".
-    p10 = [r for r in data if r[0] == 10]
+    p10 = rows_of(10)
     assert p10, "no page 10 rows"
     first10 = p10[0]
-    assert first10[1] == "حركة", f"p10 row0 kind: {first10}"
-    assert num(first10[3]) == 9001.00 and num(first10[5]) == 9001.00, f"p10 row0: {first10}"
-    assert "دائن" in str(first10[4]), f"p10 row0 side: {first10}"
+    assert val(first10, "النوع") not in ("رصيد افتتاحي", "رصيد سابق"), \
+        f"p10 row0 kind: {first10}"
+    assert num(val(first10, "دائن")) == 9001.00, f"p10 row0 credit: {first10}"
+    assert num(val(first10, "الرصيد")) == 9001.00, f"p10 row0: {first10}"
+    assert val(first10, "النوع") == "تحويل وارد", f"p10 row0 type: {first10}"
 
-    return (f"{summary} | p1/p2 starts + p9→p10 continuity locked OK")
+    # Owner's 1000-question (2026-09): the sample carries FOUR 9001.00 rows
+    # of FOUR different REAL types — keep them distinct (the lock against
+    # the old "everything is حركة / مدين==سحب" conflation).
+    k = [r for r in data
+         if val(r, "مدين") == "9001.00" or val(r, "دائن") == "9001.00"]
+    got = sorted(val(r, "النوع") for r in k)
+    want = sorted(["تحويل صادر", "إيداع نقدي (صراف آلي)",
+                   "تحويل وارد", "سحب صراف آلي"])
+    assert got == want, f"9001.00 types: {got}"
+
+    return (f"{summary} | p1/p2 starts + p9→p10 continuity "
+            f"+ 4×1000 types locked OK")
 
 
 def main() -> None:

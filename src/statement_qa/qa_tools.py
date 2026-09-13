@@ -5,25 +5,44 @@ which operate on the chain-verified table (Decimal, exact). The agent picks a
 tool, the tool returns the number WITH its evidence rows (page/row refs), and
 the model only phrases the answer.
 
-Side values in the table are "debit"/"credit"; the tools accept Arabic input
-(مدين/سحب‎, دائن/إيداع‎, الكل) and map it.
+Filters (all optional, combinable):
+- side: the movement DIRECTION only — "مدين" (صادرة) / "دائن" / "الكل".
+  مدين ≠ سحب صراف آلي: a debit can be a transfer, a purchase, a fee…
+- tx_type: the real TYPE label from the deterministic classifier —
+  "سحب صراف آلي", "تحويل صادر", "تحويل وارد", "إيداع نقدي (صراف آلي)",
+  "مشتريات (نقاط بيع)", "فواتير ومدفوعات سداد", …
+- keyword: substring of the description.
+- amount: exact riyal amount after 2dp rounding (accepts 1000 / "9001.00").
 """
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 _MONEY = "{:,.2f}"
+
+_SIDE_AR = {"debit": "مدين", "credit": "دائن"}
 
 
 def _side_match(row_side: str, want: str) -> bool:
     w = (want or "").strip()
     if w in ("", "الكل", "كل", "both", "all"):
         return True
-    if w in ("مدين", "سحب", "مدين (سحب)", "debit", "المدين"):
+    if w in ("مدين", "debit", "المدين"):
         return row_side == "debit"
-    if w in ("دائن", "إيداع", "ايداع", "دائن (إيداع)", "credit", "الدائن"):
+    if w in ("دائن", "credit", "الدائن"):
         return row_side == "credit"
     return True  # unknown filter: don't over-filter
+
+
+def _parse_amount_arg(amount) -> Decimal | None:
+    """Riyal amount -> Decimal(2dp); empty/unparseable -> None (no filter)."""
+    if amount in (None, "", "لا شيء"):
+        return None
+    try:
+        return Decimal(str(amount).replace(",", "").replace("٬", "")
+                       .strip()).quantize(Decimal("0.01"))
+    except (InvalidOperation, ValueError):
+        return None
 
 
 def _number_rows(rows: list[dict]) -> list[dict]:
@@ -49,33 +68,63 @@ def make_qa_tools(rows: list[dict]):
     movements = [r for r in numbered if r.get("kind") == "txn"
                  and r.get("movement") is not None]
 
-    def _filtered(side: str, keyword: str) -> list[dict]:
+    def _filtered(side: str = "الكل", keyword: str = "", tx_type: str = "",
+                  amount=None) -> list[dict]:
         kw = (keyword or "").strip()
-        return [r for r in movements
-                if _side_match(r.get("side", ""), side)
-                and (not kw or kw in _desc(r))]
+        tt = (tx_type or "").strip()
+        amt = _parse_amount_arg(amount)
+        out = []
+        for r in movements:
+            if not _side_match(r.get("side", ""), side):
+                continue
+            if kw and kw not in _desc(r):
+                continue
+            if tt and tt not in (r.get("type") or ""):
+                continue
+            mv = r.get("movement")
+            if amt is not None and (mv is None or mv != amt):
+                continue
+            out.append(r)
+        return out
+
+    def _filter_note(side, keyword, tx_type, amount) -> str:
+        bits = [f"الاتجاه={side or 'الكل'}"]
+        if (tx_type or "").strip():
+            bits.append(f"النوع يحتوي '{tx_type.strip()}'")
+        if (keyword or "").strip():
+            bits.append(f"الوصف يحتوي '{keyword.strip()}'")
+        if amount not in (None, ""):
+            bits.append(f"المبلغ={amount}")
+        return " | ".join(bits)
 
     @tool
-    def sum_movements(side: str = "الكل", keyword: str = "") -> str:
-        """اجمع مبالغ الحركات. side: "مدين" (سحوبات) أو "دائن" (إيداعات) أو "الكل".
-        keyword: كلمة تُبحث في وصف الحركة (مثال: "تحويل"، "سحب الصراف") — اتركها فارغة للكل.
-        مثال: sum_movements(side="مدين") = مجموع كل السحوبات."""
-        sel = _filtered(side, keyword)
-        total = sum((r["movement"] for r in sel), Decimal("0"))
+    def sum_movements(side: str = "الكل", keyword: str = "", tx_type: str = "",
+                      amount: float | None = None) -> str:
+        """اجمع مبالغ الحركات. side: الاتجاه فقط — "مدين" أو "دائن" أو "الكل".
+        tx_type: نوع العملية — "سحب صراف آلي" / "تحويل صادر" / "تحويل وارد" /
+        "إيداع نقدي (صراف آلي)" / "مشتريات (نقاط بيع)" / "فواتير ومدفوعات سداد".
+        keyword: جزء من الوصف. amount: مبلغ محدد بالريال (مثال: 1000).
+        تنبيه: «مدين» تعني أي حركة صادرة وليست «سحب صراف آلي» — للأنواع استخدم tx_type.
+        مثال: sum_movements(tx_type="تحويل صادر") أو sum_movements(tx_type="سحب صراف آلي", amount=1000)."""
+        sel = _filtered(side, keyword, tx_type, amount)
         if not sel:
             return "لا توجد حركات مطابقة لهذا الفلتر في الكشف."
+        total = sum((r["movement"] for r in sel), Decimal("0"))
         examples = "؛ ".join(
-            f"{_MONEY.format(r['movement'])} {_ref(r)}" for r in sel[:3])
+            f"[{r.get('type') or 'غير مصنّف'}] {_MONEY.format(r['movement'])} {_ref(r)}"
+            for r in sel[:3])
         return (f"المجموع = {_MONEY.format(total)} ريال | عدد الحركات = {len(sel)}"
-                f" | مثال: {examples}")
+                f" | أمثلة: {examples}")
 
     @tool
-    def count_movements(side: str = "الكل", keyword: str = "") -> str:
-        """عدّ الحركات (لا يجمع مبالغ). side: "مدين"/"دائن"/"الكل"، keyword: تصفية بالوصف.
-        مثال: count_movements(keyword="تحويل") = عدد التحويلات."""
-        sel = _filtered(side, keyword)
-        return f"العدد = {len(sel)} حركة (الفلتر: {side}" + \
-               (f" | وصف يحتوي '{keyword}'" if (keyword or '').strip() else "") + ")"
+    def count_movements(side: str = "الكل", keyword: str = "", tx_type: str = "",
+                        amount: float | None = None) -> str:
+        """عدّ الحركات (بلا جمع مبالغ). نفس فلاتر sum_movements:
+        side (اتجاه) | tx_type (النوع) | keyword (وصف) | amount (مبلغ بالريال).
+        مثال: count_movements(tx_type="سحب صراف آلي", amount=1000) = عدد السحوبات بهذا المبلغ."""
+        sel = _filtered(side, keyword, tx_type, amount)
+        return (f"العدد = {len(sel)} حركة "
+                f"(الفلتر: {_filter_note(side, keyword, tx_type, amount)})")
 
     @tool
     def balance_extremes() -> str:
@@ -124,16 +173,19 @@ def make_qa_tools(rows: list[dict]):
                 f" | عدد الصفوف = {len(page_rows)}")
 
     @tool
-    def search_rows(keyword: str, limit: int = 15) -> str:
-        """ابحث في وصف الحركات عن كلمة وأعد الصفوف المطابقة (الموقع/المبلغ/الاتجاه/الرصيد).
-        مثال: search_rows(keyword="تحويل") أو search_rows(keyword="نقاط البيع")."""
-        kw = (keyword or "").strip()
-        sel = [r for r in movements if kw and kw in _desc(r)]
+    def search_rows(keyword: str = "", tx_type: str = "", amount: float | None = None,
+                    limit: int = 15) -> str:
+        """ابحث وأعد سطور الحركات المطابقة (الموقع/النوع/الاتجاه/المبلغ/الرصيد/الوصف).
+        فلاتر: keyword (وصف) | tx_type (النوع) | amount (مبلغ محدد، مثال 1000).
+        مثال: search_rows(amount=1000) = كل الحركات بمبلغ 1000 مع أنواعها الحقيقية."""
+        sel = _filtered("الكل", keyword, tx_type, amount)
         if not sel:
-            return f"لا توجد حركات وصفها يحتوي '{keyword}'."
+            return "لا توجد حركات مطابقة."
         shown = sel[:max(1, int(limit))]
         lines = [
-            f"{_ref(r)}: {r.get('side')} {_MONEY.format(r['movement'])}"
+            f"{_ref(r)}: [{r.get('type') or 'غير مصنّف'}] "
+            f"{_SIDE_AR.get(r.get('side') or '', 'غير محسوم')} "
+            f"{_MONEY.format(r['movement'])}"
             f" → الرصيد {_MONEY.format(r['balance']) if r.get('balance') is not None else '—'}"
             f" — {_desc(r)[:70]}"
             for r in shown

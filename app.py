@@ -37,6 +37,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from statement_qa.chunking import chunk_rows
+from statement_qa.classify import annotate_types
 from statement_qa.retriever import build_index
 from statement_qa.vlm_reader import chain_derive, read_rows_vlm
 
@@ -236,18 +237,34 @@ def _kpi_html(n_rows: int, n_clean: int, n_susp: int, last_bal) -> str:
     return f'<div class="ledger-kpi">{inner}</div>'
 
 
+def _row_record(no: int, r: dict) -> dict:
+    """Excel-style display record: real النوع + مدين/دائن split.
+
+    Global row numbers (#) stay stable across filtering — the same numbers
+    the tools cite («صف 94»). Direction lives ONLY in which of the two amount
+    columns carries the value; it is not a type claim.
+    """
+    mv = _money(r["movement"])
+    status = "✓" if r["ok"] else "⚠ مشبوه"
+    if (r["ok"] and r.get("kind") == "txn" and mv
+            and not (r.get("side") or "")):
+        # amount is real but its DIRECTION could not be derived (page-start
+        # edge when the opening row was missed) — never guess a side column
+        status = "◌ اتجاه غير محسوم"
+    return {"#": no,
+            "الصفحة": r["page"],
+            "الوصف": (r.get("desc") or "—"),
+            "النوع": r.get("type") or
+                    ("رصيد افتتاحي" if r.get("kind") == "opening" else "حركة"),
+            "مدين": mv if r["side"] == "debit" else "",
+            "دائن": mv if r["side"] == "credit" else "",
+            "الرصيد": _money(r["balance"]),
+            "الحالة": status}
+
+
 def _rows_df(rows: list[dict]) -> pd.DataFrame:
-    return pd.DataFrame([
-        {"الصفحة": r["page"],
-         "النوع": "افتتاحي" if r["kind"] == "opening" else "حركة",
-         "الوصف": (r.get("desc") or "—"),
-         "المبلغ": _money(r["movement"]),
-         "الاتجاه": {"debit": "مدين (سحب)", "credit": "دائن (إيداع)"
-                     }.get(r["side"], "—"),
-         "الرصيد": _money(r["balance"]),
-         "الحالة": "✓" if r["ok"] else "⚠ مشبوه"}
-        for r in rows
-    ])
+    return pd.DataFrame([_row_record(i, r)
+                         for i, r in enumerate(rows, start=1)])
 
 
 def filter_rows(query: str) -> pd.DataFrame:
@@ -319,6 +336,7 @@ def process_pdf(pdf_path: str, progress=gr.Progress()):
                                  "desc": r.get("desc"), "date": r.get("date")})
             prev_closing = r["balance"]
 
+    annotate_types(all_rows)
     rows_view = _rows_df(all_rows)
 
     progress(0.95, "بناء الفهرس…")
@@ -451,16 +469,12 @@ def ask_followup(history):
 
 
 def STATE_rows_to_df(hit):
-    rows = [r for r in STATE["rows"]
-            if r["page"] == hit["page"]]
-    return pd.DataFrame([
-        {"الصفحة": r["page"],
-         "المبلغ": _money(r["movement"]),
-         "الرصيد": _money(r["balance"]),
-         "الاتجاه": {"debit": "مدين (سحب)", "credit": "دائن (إيداع)"}.get(r["side"], "—"),
-         "الوصف": (r.get("desc") or "—")}
-        for r in rows
-    ])
+    """One page's rows from the SAME unified display builder as the main
+    table — evidence rows keep global #, real النوع and مدين/دائن split."""
+    df = _rows_df(STATE.get("rows") or [])
+    if df.empty:
+        return df
+    return pd.DataFrame(df[df["الصفحة"] == hit["page"]]).reset_index(drop=True)
 
 
 ABOUT = """# عن المشروع

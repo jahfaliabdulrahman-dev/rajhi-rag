@@ -28,17 +28,22 @@ class Chunk:
         return f"p{self.page:03d}-r{self.start_row:02d}-{self.end_row:02d}"
 
 
+_SIDE_AR = {"debit": "مدين", "credit": "دائن"}
+
+
 def _fmt_row(r: dict, idx: int) -> str:
     bal = r.get("balance")
     kind = r.get("kind")
     if kind == "opening":
         return f"صف {idx}: رصيد افتتاحي = {bal}"
     mv = r.get("movement")
-    side = r.get("side") or "غير محسوم"
+    side = _SIDE_AR.get(r.get("side") or "", "غير محسوم")
+    typ = r.get("type") or ""
+    label = typ if typ and typ != "غير مصنّف" else "حركة"
     ok = "" if r.get("ok") else " [صف مشبوه — يحتاج مراجعة]"
     desc = (r.get("desc") or "").replace("\n", " ").strip()
     desc_part = f" | {desc}" if desc else ""
-    return (f"صف {idx}: حركة {side} بمبلغ {mv} → الرصيد صار {bal}"
+    return (f"صف {idx}: {label} ({side}) بمبلغ {mv} → الرصيد صار {bal}"
             f"{desc_part}{ok}")
 
 

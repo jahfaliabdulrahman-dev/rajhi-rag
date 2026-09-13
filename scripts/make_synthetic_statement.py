@@ -24,22 +24,34 @@ FONT = ROOT / "assets" / "fonts" / "NotoNaskhArabic-Regular.ttf"
 LATIN_FONT = "/System/Library/Fonts/Supplemental/Arial.ttf"  # local dev fallback
 OUT = ROOT / "data" / "sample" / "statement_sample.pdf"
 
-DESCS = [
-    "تحويل وارد - شركة أ",
+# Direction-consistent vocabulary: credit-decoded descriptions only ever run
+# as credits and vice versa — a "سحب صراف آلي" that RAISES the balance (or a
+# "راتب" that lowers it) is nonsense the moment type + مدين/دائن columns sit
+# side by side (owner-caught 2026-09-14).
+DEBIT_DESCS = [
     "تحويل صادر - مطعم ب",
     "سحب صراف آلي - الرياض",
-    "راتب شهري - جهة العمل",
     "فاتورة كهرباء - الشركة السعودية",
-    "تحويل وارد - شخص ج",
     "شراء نقاط بيع - سوبرماركت د",
     "رسوم صيانة الحساب",
     "تحويل صادر - شركة هـ",
+]
+CREDIT_DESCS = [
+    "تحويل وارد - شركة أ",
+    "راتب شهري - جهة العمل",
+    "تحويل وارد - شخص ج",
     "إيداع نقدي - فرع الوديقي",
 ]
+DEBIT_AMTS = ["120.50", "450.00", "1800.75", "9001.00"]
+CREDIT_AMTS = ["9001.00", "9001.00", "9000.00", "12500.50"]
 
 
 def make_rows(n_txn: int) -> list[dict]:
-    """Synthetic rows with an exact balance chain (opening -> closing)."""
+    """Synthetic rows with an exact balance chain (opening -> closing).
+
+    Direction comes FROM the description (debit vs credit pools) — never a
+    coin flip — so the public demo stays self-consistent.
+    """
     rng = random.Random(42)
     balance = Decimal("9001.00")
     rows: list[dict] = [
@@ -48,15 +60,17 @@ def make_rows(n_txn: int) -> list[dict]:
     ]
     for i in range(1, n_txn + 1):
         if rng.random() < 0.45:
-            credit = Decimal(rng.choice(["9001.00", "9001.00", "9000.00", "12500.50"]))
+            desc = rng.choice(CREDIT_DESCS)
+            credit = Decimal(rng.choice(CREDIT_AMTS))
             debit = Decimal("0.00")
         else:
+            desc = rng.choice(DEBIT_DESCS)
             credit = Decimal("0.00")
-            debit = Decimal(rng.choice(["120.50", "450.00", "1800.75", "9001.00"]))
+            debit = Decimal(rng.choice(DEBIT_AMTS))
         balance = balance + credit - debit
         rows.append({
             "date": f"{i + 1:02d}/01/2026",
-            "desc": DESCS[i % len(DESCS)],
+            "desc": desc,
             "debit": f"{debit:.2f}" if debit else "",
             "credit": f"{credit:.2f}" if credit else "",
             "balance": f"{balance:.2f}",
