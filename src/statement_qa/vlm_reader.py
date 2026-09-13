@@ -18,10 +18,12 @@ retries.
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import os
 import re
 import time
+import urllib.error
 import urllib.request
 from decimal import Decimal
 from pathlib import Path
@@ -32,6 +34,9 @@ from statement_qa.legacy.prompts import (
 from statement_qa.legacy.arabic_digit_parser import norm_num as _legacy_norm_num
 
 MODEL = os.environ.get("OPENROUTER_MODEL_VLM", "google/gemini-3.7-flash")
+# Response-level blips (RemoteDisconnected et al.) once killed whole runs —
+# they now retry like any network error. 4 attempts: 10s/20s/40s backoff.
+_ATTEMPTS = 4
 
 
 def _api_key() -> str:
@@ -92,7 +97,7 @@ def read_rows_vlm(image_path: str, prompt: str | None = None,
         headers={"Authorization": f"Bearer {_api_key()}",
                  "Content-Type": "application/json"})
     delay = 10
-    for attempt in range(3):
+    for attempt in range(_ATTEMPTS):
         try:
             out = json.loads(urllib.request.urlopen(req, timeout=180).read().decode())
             content = out["choices"][0]["message"]["content"]
@@ -111,12 +116,13 @@ def read_rows_vlm(image_path: str, prompt: str | None = None,
                 })
             return rows
         except urllib.error.HTTPError as e:
-            if e.code == 429 and attempt < 2:
+            if e.code == 429 and attempt < _ATTEMPTS - 1:
                 time.sleep(delay); delay *= 2
                 continue
             raise RuntimeError(f"VLM HTTP {e.code}") from e
-        except (urllib.error.URLError, TimeoutError) as e:
-            if attempt < 2:
+        except (urllib.error.URLError, TimeoutError, ConnectionError,
+                http.client.HTTPException) as e:
+            if attempt < _ATTEMPTS - 1:
                 time.sleep(delay); delay *= 2
                 continue
             raise RuntimeError(f"VLM network: {e}") from e
