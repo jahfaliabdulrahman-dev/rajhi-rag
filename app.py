@@ -524,9 +524,12 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي") as demo:
                                        rtl=True, scale=6)
                         ask = gr.Button("اسأل", variant="primary", scale=1)
                 with gr.Column(scale=2, min_width=320):
-                    src = gr.Markdown(label="المصادر (قطع الاسترجاع)", rtl=True)
-                    with gr.Accordion("الصفوف المُستشهَد بها (كما ذكرها الجواب)", open=False):
+                    with gr.Accordion("الصفوف المُستشهَد بها (كما ذكرها الجواب)", open=True):
                         raw = gr.Dataframe(interactive=False)
+                    # Internal retrieval bookkeeping (chunk IDs) — kept for
+                    # development diagnostics only, collapsed out of the way.
+                    with gr.Accordion("تفاصيل تقنية (قطع الاسترجاع)", open=False):
+                        src = gr.Markdown(rtl=True)
             ask.click(prepare_ask, inputs=[q, chat], outputs=[chat, q],
                       show_progress="hidden", api_name="ask_question"
                       ).then(ask_followup, inputs=[chat],
