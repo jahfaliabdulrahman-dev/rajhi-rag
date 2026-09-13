@@ -2,7 +2,8 @@
 
 Tab 1 قراءة وتحقق: PDF upload → page renders → VLM+chain rows → table +
 suspect flags. No LLM answers here; deterministic provenance only.
-Tab 2 سؤال وجواب: FAISS retrieval + strict-prompt answer with sources.
+Tab 2 سؤال وجواب: FAISS retrieval + LangChain agent with DETERMINISTIC tools
+(sum/count/extremes/page summaries) — the model never computes, it calls.
 Tab 3 عن المشروع: architecture + links.
 
 Design layer (verified against gradio 6.27 — see the gradio-design skill):
@@ -14,9 +15,7 @@ Design layer (verified against gradio 6.27 — see the gradio-design skill):
 
 from __future__ import annotations
 
-import json
 import tempfile
-import time
 from decimal import Decimal
 from pathlib import Path
 
@@ -25,12 +24,11 @@ import pandas as pd
 from pdf2image import convert_from_path
 
 import sys
-from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from statement_qa.chunking import chunk_rows
-from statement_qa.retriever import build_index, retrieve
+from statement_qa.retriever import build_index
 from statement_qa.vlm_reader import chain_derive, read_rows_vlm
 
 STATE = {}
@@ -55,6 +53,9 @@ THEME = gr.themes.Soft(
     font=ARABIC_FONT,
 )
 
+def _money(v) -> str:
+    """Decimal/None -> fixed 2dp display so halalas are always visible."""
+    return f"{v:,.2f}" if v is not None else ""
 
 def _pages_to_pngs(pdf_path: str, dpi: int = 200):
     outdir = tempfile.mkdtemp(prefix="rajhi_pages_")
@@ -66,9 +67,13 @@ def _pages_to_pngs(pdf_path: str, dpi: int = 200):
         out.append(str(p))
     return out
 
-
 def process_pdf(pdf_path: str, progress=gr.Progress()):
-    """Tab 1 handler: read all pages, chain-audit, build chunks+index."""
+    """Tab 1 handler: read all pages, chain-audit, build chunks+index.
+
+    Cross-page continuity: each page receives the previous page's closing
+    balance. A page whose FIRST row is a real transaction (delta == printed
+    amount) keeps its movement — scan boundaries never swallow operations.
+    """
     if not pdf_path:
         raise gr.Error("ارفع ملف PDF أولاً ثم اضغط «قراءة الكشف».")
     pages = _pages_to_pngs(pdf_path)
@@ -76,29 +81,32 @@ def process_pdf(pdf_path: str, progress=gr.Progress()):
     prev_closing = None
     for pg, img in enumerate(pages, start=1):
         progress((pg - 1) / len(pages), f"قراءة صفحة {pg}/{len(pages)}…")
-        rows = chain_derive(read_rows_vlm(img))
-        for i, r in enumerate(rows, start=1):
+        rows = chain_derive(read_rows_vlm(img), prev_balance=prev_closing)
+        for r in rows:
             if r["balance"] is None:
                 continue
             if r["opening"]:
                 all_rows.append({"page": pg, "kind": "opening",
                                  "balance": r["balance"], "movement": None,
-                                 "side": "", "ok": True})
+                                 "side": "", "ok": True,
+                                 "desc": r.get("desc"), "date": r.get("date")})
             else:
                 all_rows.append({"page": pg, "kind": "txn",
                                  "balance": r["balance"],
                                  "movement": r["derived_movement"],
                                  "printed_mv": r["movement"],
-                                 "side": r["side"], "ok": r["ok"]})
+                                 "side": r["side"], "ok": r["ok"],
+                                 "desc": r.get("desc"), "date": r.get("date")})
             prev_closing = r["balance"]
 
     rows_view = pd.DataFrame([
         {"الصفحة": r["page"],
          "النوع": "افتتاحي" if r["kind"] == "opening" else "حركة",
-         "المبلغ": float(r["movement"]) if r["movement"] is not None else "",
+         "الوصف": (r.get("desc") or "—"),
+         "المبلغ": _money(r["movement"]),
          "الاتجاه": {"debit": "مدين (سحب)", "credit": "دائن (إيداع)"
                      }.get(r["side"], "—"),
-         "الرصيد": float(r["balance"]),
+         "الرصيد": _money(r["balance"]),
          "الحالة": "✓" if r["ok"] else "⚠ مشبوه"}
         for r in all_rows
     ])
@@ -114,42 +122,40 @@ def process_pdf(pdf_path: str, progress=gr.Progress()):
                f"جاهز للسؤال والجواب")
     return summary, rows_view
 
-
 def ask_question(question: str):
     if not question.strip():
         return "اكتب سؤالاً أولاً", "", pd.DataFrame()
     if "store" not in STATE:
         return "ارفع الكشف في تبويب «قراءة وتحقق» أولاً", "", pd.DataFrame()
-    res_hits = retrieve(STATE["store"], question, k=4)
     from statement_qa.qa import answer_question
 
-    res = answer_question(STATE["store"], question)
+    res = answer_question(STATE["store"], question, rows=STATE.get("rows"))
     sources_md = "\n".join(
-        f"- {h['chunk_id']} (صفحة {h['page']}، صفوف {h['row_start']}–{h['row_end']})"
-        for h in res_hits)
+        f"- {s['chunk_id']} (صفحة {s['page']}، صفوف {s['row_start']}–{s['row_end']})"
+        for s in res.sources)
     raw_table = pd.concat([
-        STATE_rows_to_df(h) for h in res_hits[:2]
+        STATE_rows_to_df(h) for h in res.sources[:2]
     ], ignore_index=True) if STATE.get("rows") else pd.DataFrame()
     return res.answer, sources_md, raw_table
-
 
 def STATE_rows_to_df(hit):
     rows = [r for r in STATE["rows"]
             if r["page"] == hit["page"]]
     return pd.DataFrame([
-        {"الصفحة": r["page"], "المبلغ": float(r["movement"]) if r["movement"] else "",
-         "الرصيد": float(r["balance"]),
-         "الاتجاه": {"debit": "مدين (سحب)", "credit": "دائن (إيداع)"}.get(r["side"], "—")}
+        {"الصفحة": r["page"],
+         "المبلغ": _money(r["movement"]),
+         "الرصيد": _money(r["balance"]),
+         "الاتجاه": {"debit": "مدين (سحب)", "credit": "دائن (إيداع)"}.get(r["side"], "—"),
+         "الوصف": (r.get("desc") or "—")}
         for r in rows
     ])
-
 
 ABOUT = """# سؤال وجواب على كشف حساب الراجحي 🏦
 
 **المعمارية:** طبقات ثلاث —
 1. **قراءة:** مسح → VLM (نسخ حرفي بالأرقام الهندية) + **السلسلة الرصيدية حَكَم**
 2. **تحقق:** كل حركة مشتقة حسابياً من فرق الأرصدة (لا يُحسب من النص)
-3. **فهم:** RAG عربي — إجابة من القطع حصراً بمصدرها، و"غير موجود في الكشف" عند غياب الدليل
+3. **فهم:** RAG عربي + **أدوات حتمية** — النموذج يستدعي أدوات (جمع/عدد/قصوى) ولا يحسب بنفسه
 
 **قاعدة خصوصية:** لا ترفع كشوفاً حقيقية إلا إذا قبلت بمعالجتها على السحابة —
 العرض العام يستخدم كشفاً اصطناعياً.
@@ -171,7 +177,7 @@ with gr.Blocks(title="سؤال وجواب على كشف الراجحي") as demo
                           inputs=pdf_in, outputs=btn)
             btn.click(process_pdf, inputs=pdf_in, outputs=[summary, table])
         with gr.Tab("٢. سؤال وجواب"):
-            q = gr.Textbox(label="سؤالك بالعربية", placeholder="مثال: كم آخر رصيد في الكشف؟",
+            q = gr.Textbox(label="سؤالك بالعربية", placeholder="مثال: كم مجموع السحوبات في الكشف؟",
                            rtl=True)
             ask = gr.Button("اسأل", variant="primary")
             ans = gr.Markdown(label="الجواب", rtl=True)

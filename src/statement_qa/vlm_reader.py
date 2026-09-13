@@ -56,7 +56,11 @@ def _parse_amount(tok: str | None) -> Decimal | None:
     if not tok:
         return None
     v = _legacy_norm_num(tok)
-    return None if v is None else Decimal(str(v))
+    if v is None:
+        return None
+    # money is 2dp forever: Decimal('300.0') would display as '300.0' —
+    # quantize keeps the halala scale so every display/format shows 300.00
+    return Decimal(str(v)).quantize(Decimal("0.01"))
 
 
 def read_rows_vlm(image_path: str, prompt: str | None = None,
@@ -119,29 +123,74 @@ def read_rows_vlm(image_path: str, prompt: str | None = None,
     raise RuntimeError("VLM retries exhausted")
 
 
-def chain_derive(rows: list[dict]) -> list[dict]:
+_OPENING_MARKERS = ("افتتاح", "سابق")
+
+
+def _looks_opening(r: dict) -> bool:
+    """Opening/carry rows print افتتاح/سابق descriptions; anything else with a
+    printed amount is a transaction we must not swallow."""
+    d = r.get("desc") or ""
+    return any(m in d for m in _OPENING_MARKERS)
+
+
+def chain_derive(rows: list[dict], prev_balance: Decimal | None = None) -> list[dict]:
     """Balance chain is the arbiter: movement/side derived; VLM mv cross-checks.
 
-    Row 0 = opening (its printed balance starts the chain). Suspect rows
-    (|Δ| != printed mv) get ok=False; the caller re-reads them.
+    Row 0 of a fresh read = opening (its printed balance starts the chain).
 
-    Scale guard (×100 ambiguity, from the 629-page case): when a printed
-    balance breaks the chain but ×100 fits (or vice versa), the chain
-    value wins and the row is marked scale_fixed — never silently scaled.
+    prev_balance (closing of the PREVIOUS page) enables cross-page continuity —
+    the first balance row of a new page is NOT blindly an opening:
+    - delta == 0                → carried balance row (رصيد سابق).
+    - delta == the printed amt  → a REAL transaction starting the page (a scan
+      boundary must not swallow its movement: a transfer +1000 turning 676 into
+      1676 was once displayed as "opening 1676", losing the operation entirely).
+    - anything else (incl. unreadable amt) → opening anchor; a movement is NEVER
+      fabricated across a boundary we cannot verify.
+
+    Suspect rows (|Δ| != printed mv) get ok=False; the caller re-reads them.
+    Scale guard (×100 ambiguity, 629-page case): when a printed balance breaks
+    the chain but ×100 fits (or vice versa), the chain value wins and the row is
+    marked scale_fixed — never silently scaled.
     None balances (VLM null) don't crash the walk; they mark gaps.
     """
     out: list[dict] = []
-    prev: Decimal | None = None
+    prev: Decimal | None = prev_balance
+    boundary_pending = prev_balance is not None
     for r in rows:
         bal = r["balance"]
         if bal is None:
             out.append({**r, "derived_movement": None, "side": "",
                         "ok": False, "opening": False, "scale_fixed": False})
             prev = None  # chain broken; next row re-anchors
+            boundary_pending = False
             continue
-        if prev is None:
-            out.append({**r, "derived_movement": Decimal("0"), "side": "",
-                        "ok": True, "opening": True, "scale_fixed": False})
+        if boundary_pending:
+            boundary_pending = False
+            delta = bal - prev
+            printed = r["movement"]
+            if delta == 0:
+                out.append({**r, "derived_movement": Decimal("0"), "side": "",
+                            "ok": True, "opening": True, "scale_fixed": False})
+            elif printed is not None and printed == abs(delta):
+                side = "credit" if delta > 0 else "debit"
+                out.append({**r, "derived_movement": abs(delta), "side": side,
+                            "ok": True, "opening": False, "scale_fixed": False})
+            else:
+                out.append({**r, "derived_movement": Decimal("0"), "side": "",
+                            "ok": True, "opening": True, "scale_fixed": False})
+        elif prev is None:
+            printed = r["movement"]
+            if printed is not None and not _looks_opening(r):
+                # Fresh start whose opening row was not read (VLM occasionally
+                # misses the dots-zero line): the row demonstrably IS a
+                # transaction (printed amount + a real description) — keep its
+                # movement visible; side stays undecided (no previous balance
+                # to derive it from — never guess).
+                out.append({**r, "derived_movement": printed, "side": "",
+                            "ok": True, "opening": False, "scale_fixed": False})
+            else:
+                out.append({**r, "derived_movement": Decimal("0"), "side": "",
+                            "ok": True, "opening": True, "scale_fixed": False})
         else:
             delta = bal - prev
             mv = abs(delta)
