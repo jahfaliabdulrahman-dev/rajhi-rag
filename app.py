@@ -24,6 +24,7 @@ their exact shape (tools/qa_gate.py depends on them).
 
 from __future__ import annotations
 
+import re
 import tempfile
 from pathlib import Path
 
@@ -76,8 +77,8 @@ footer { direction: ltr; }
            font-size: 2.1rem; line-height: 1.3; margin: 0 0 8px; }
 .hero .sub { color: var(--body-text-color-subdued); font-size: .97rem; max-width: 78%; }
 .hero .rule { height: 1px; background: #A98A4A; opacity: .45; margin-top: 16px; }
-.seal { position: absolute; top: 20px; inset-inline-end: 24px; width: 98px; height: 98px;
-        opacity: .95; }
+.seal { position: absolute; top: 50%; transform: translateY(-50%); inset-inline-end: 24px;
+        width: 98px; height: 98px; opacity: .95; }
 
 /* ————— شريط المؤشرات (جدول دفاتر مُسطَّر) ————— */
 .ledger-kpi { display: grid; grid-template-columns: repeat(4, 1fr);
@@ -113,6 +114,12 @@ footer { direction: ltr; }
 /* ————— المحادثة ————— */
 #chat-surface { border: 1px solid var(--border-color-primary); border-radius: 12px;
                 overflow: hidden; }
+
+/* ————— شارة الملف: زر الإكس لا يعلو شريحة العنوان ————— */
+#file-panel .icon-button-wrapper.top-panel {
+    left: 6px !important; right: auto !important;
+    top: 8px !important;
+}
 
 /* الوضع الليلي: ترطيب الإبر — لا انقلاب آلي */
 @media (prefers-color-scheme: dark) {
@@ -284,10 +291,17 @@ def process_pdf(pdf_path: str, progress=gr.Progress()):
         raise gr.Error("ارفع ملف PDF أولاً ثم اضغط «قراءة الكشف».")
     pages = _pages_to_pngs(pdf_path)
     all_rows = []
+    failed_pages: list[int] = []
     prev_closing = None
     for pg, img in enumerate(pages, start=1):
         progress((pg - 1) / len(pages), f"قراءة صفحة {pg}/{len(pages)}…")
-        rows = chain_derive(read_rows_vlm(img), prev_balance=prev_closing)
+        try:
+            rows = chain_derive(read_rows_vlm(img), prev_balance=prev_closing)
+        except Exception:
+            # one flaky page must never kill the whole run (transient VLM /
+            # JSON glitches) — record it, keep going, report it honestly
+            failed_pages.append(pg)
+            continue
         for r in rows:
             if r["balance"] is None:
                 continue
@@ -316,6 +330,8 @@ def process_pdf(pdf_path: str, progress=gr.Progress()):
     n_susp = len(all_rows) - n_ok
     last_bal = next((r["balance"] for r in reversed(all_rows)
                      if r["balance"] is not None), None)
+    if not all_rows:
+        raise gr.Error("تعذرت قراءة الكشف — انقطاع مؤقت من خدمة القراءة. أعد المحاولة.")
     n_pages = len(pages)
     if n_pages == 1:
         pages_ar = "صفحة واحدة"
@@ -325,42 +341,113 @@ def process_pdf(pdf_path: str, progress=gr.Progress()):
         pages_ar = f"{n_pages} صفحات"
     else:
         pages_ar = f"{n_pages} صفحة"
-    summary = (f"✅ تمّت قراءة {pages_ar} وبناء الفهرس — "
-               f"جاهز للسؤال والجواب")
+    if failed_pages:
+        summary = (f"⚠ تمّت قراءة {n_pages - len(failed_pages)} من {n_pages} صفحة "
+                   f"(تعذرت: {failed_pages}) — جاهز للسؤال عن المقروء")
+    else:
+        summary = (f"✅ تمّت قراءة {pages_ar} وبناء الفهرس — "
+                   f"جاهز للسؤال والجواب")
     return (summary, rows_view,
             _kpi_html(len(all_rows), n_ok, n_susp, last_bal), pages, "")
 
 
-def ask_question(question: str, history):
-    """Tab 2 handler: append (question, answer) to the chat surface."""
+def prepare_ask(question: str, history):
+    """Phase 1 (instant): the question appears in the chat immediately and the
+    input clears; the heavy answering runs in the chained phase 2 — the owner
+    asked for the text to move at once, not after the countdown."""
     history = list(history or [])
-    if not question or not question.strip():
-        return history, "", pd.DataFrame(), ""
+    q = (question or "").strip()
+    STATE["pending_q"] = q
+    if not q:
+        return history, ""
+    history.append({"role": "user", "content": q})
+    return history, ""
+
+
+_ARG_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+_REF_RE = re.compile(
+    r"صفحة\s*([٠-٩0-9]+)[^\d٠-٩]{0,14}?صف(?:وف)?\s*([٠-٩0-9]+)"
+    r"(?:\s*[–\-—]\s*([٠-٩0-9]+))?")
+_BARE_REF_RE = re.compile(
+    r"(?:^|[^\d٠-٩])صف(?:وف)?\s*([٠-٩0-9]+)(?:\s*[–\-—]\s*([٠-٩0-9]+))?")
+
+
+def _answer_refs(answer: str) -> list[tuple[int | None, int, int]]:
+    """Citations inside the answer text: (page|None, first_row, last_row)."""
+    refs: list[tuple[int | None, int, int]] = []
+    for m in _REF_RE.finditer(answer or ""):
+        try:
+            pg = int(m.group(1).translate(_ARG_DIGITS))
+            a = int(m.group(2).translate(_ARG_DIGITS))
+            b = int(m.group(3).translate(_ARG_DIGITS)) if m.group(3) else a
+        except ValueError:
+            continue
+        if b < a:
+            a, b = b, a
+        refs.append((pg, a, b))
+    if not refs:
+        for m in _BARE_REF_RE.finditer(answer or ""):
+            try:
+                a = int(m.group(1).translate(_ARG_DIGITS))
+                b = int(m.group(2).translate(_ARG_DIGITS)) if m.group(2) else a
+            except ValueError:
+                continue
+            if b < a:
+                a, b = b, a
+            refs.append((None, a, b))
+    return refs
+
+
+def _rows_for_refs(refs, cap: int = 60) -> pd.DataFrame:
+    rows = STATE.get("rows") or []
+    picked = []
+    for i, r in enumerate(rows, start=1):
+        for pg, a, b in refs:
+            if (pg is None or r["page"] == pg) and a <= i <= b:
+                picked.append(r)
+                break
+    return _rows_df(picked[:cap])
+
+
+def _evidence_rows(answer: str, sources) -> pd.DataFrame:
+    """Rows the ANSWER itself cites — so the raw table supports the reply
+    (owner report: it showed unrelated retrieval rows for tool answers)."""
+    refs = _answer_refs(answer)
+    if refs:
+        df = _rows_for_refs(refs)
+        if not df.empty:
+            return df
+    if not STATE.get("rows"):
+        return pd.DataFrame()
+    frames, seen = [], set()
+    for h in sources:
+        if h["page"] in seen:
+            continue
+        seen.add(h["page"])
+        frames.append(STATE_rows_to_df(h))
+        if len(frames) == 2:
+            break
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def ask_followup(history):
+    """Phase 2: answer STATE['pending_q'] and append the reply to the chat."""
+    history = list(history or [])
+    q = STATE.pop("pending_q", "")
+    if not q:
+        return gr.skip(), gr.skip(), gr.skip()
     if "store" not in STATE:
-        history += [{"role": "user", "content": question},
-                    {"role": "assistant",
-                     "content": "ارفع الكشف في تبويب «قراءة وتحقق» أولاً."}]
-        return history, "", pd.DataFrame(), ""
+        history.append({"role": "assistant",
+                        "content": "ارفع الكشف في تبويب «قراءة وتحقق» أولاً."})
+        return history, "", pd.DataFrame()
     from statement_qa.qa import answer_question
 
-    res = answer_question(STATE["store"], question, rows=STATE.get("rows"))
-    history += [{"role": "user", "content": question},
-                {"role": "assistant", "content": res.answer}]
+    res = answer_question(STATE["store"], q, rows=STATE.get("rows"))
+    history.append({"role": "assistant", "content": res.answer})
     sources_md = "\n".join(
         f"- {s['chunk_id']} (صفحة {s['page']}، صفوف {s['row_start']}–{s['row_end']})"
         for s in res.sources)
-    raw_table = pd.DataFrame()
-    if STATE.get("rows"):
-        frames, seen = [], set()
-        for h in res.sources:
-            if h["page"] in seen:
-                continue
-            seen.add(h["page"])
-            frames.append(STATE_rows_to_df(h))
-            if len(frames) == 2:
-                break
-        raw_table = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-    return history, sources_md, raw_table, ""
+    return history, sources_md, _evidence_rows(res.answer, res.sources)
 
 
 def STATE_rows_to_df(hit):
@@ -396,21 +483,26 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي") as demo:
             with gr.Row():
                 with gr.Column(scale=1, min_width=340):
                     pdf_in = gr.File(label="كشف PDF (عينة تجريبية موصى بها)",
-                                     file_types=[".pdf"])
+                                     file_types=[".pdf"], elem_id="file-panel")
                     btn = gr.Button("قراءة الكشف وبناء الفهرس", variant="primary",
                                     interactive=False)
                     ticker = gr.Markdown("في انتظار الكشف… ارفع ملفاً ثم ابدأ القراءة.",
                                          rtl=True, elem_classes=["ticker"])
                 with gr.Column(scale=2, min_width=420):
                     kpi = gr.HTML("")
-            filter_box = gr.Textbox(
-                label="فلترة الجدول (يُنسَخ ما يُعرَض فقط)",
-                placeholder="كلمة من الوصف، أو: تحويل · سحب · مدين · دائن · مشبوه · رقم صفحة…",
-                rtl=True)
+            with gr.Row():
+                filter_box = gr.Textbox(
+                    label="فلترة الجدول (يُنسَخ ما يُعرَض فقط)",
+                    placeholder="كلمة من الوصف، أو: تحويل · سحب · مدين · دائن · مشبوه · رقم صفحة…",
+                    rtl=True, scale=8)
+                filter_clear = gr.Button("مسح الفلتر", scale=1)
             table = gr.Dataframe(label="الجدول المُستخرج (بالسلسلة الرصيدية)",
                                  interactive=False, elem_classes=["ledger-table"])
             filter_box.input(filter_rows, inputs=filter_box, outputs=table,
                              api_name="filter_rows")
+            filter_box.change(filter_rows, inputs=filter_box, outputs=table)
+            filter_clear.click(lambda: ("", filter_rows("")),
+                               outputs=[filter_box, table])
             with gr.Accordion("صفحات الكشف (معاينة بصرية)", open=False):
                 gallery = gr.Gallery(columns=5, show_label=False)
             pdf_in.change(lambda f: gr.update(interactive=bool(f)),
@@ -433,14 +525,18 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي") as demo:
                         ask = gr.Button("اسأل", variant="primary", scale=1)
                 with gr.Column(scale=2, min_width=320):
                     src = gr.Markdown(label="المصادر (قطع الاسترجاع)", rtl=True)
-                    with gr.Accordion("الصفوف الخام (من الجدول الحتمي)", open=False):
+                    with gr.Accordion("الصفوف المُستشهَد بها (كما ذكرها الجواب)", open=False):
                         raw = gr.Dataframe(interactive=False)
-            ask.click(ask_question, inputs=[q, chat],
-                      outputs=[chat, src, raw, q],
-                      show_progress_on=[chat])
-            q.submit(ask_question, inputs=[q, chat],
-                     outputs=[chat, src, raw, q],
-                     show_progress_on=[chat])
+            ask.click(prepare_ask, inputs=[q, chat], outputs=[chat, q],
+                      show_progress="hidden", api_name="ask_question"
+                      ).then(ask_followup, inputs=[chat],
+                             outputs=[chat, src, raw],
+                             show_progress_on=[chat])
+            q.submit(prepare_ask, inputs=[q, chat], outputs=[chat, q],
+                     show_progress="hidden"
+                     ).then(ask_followup, inputs=[chat],
+                            outputs=[chat, src, raw],
+                            show_progress_on=[chat])
         with gr.Tab("٣. عن المشروع"):
             gr.Markdown(ABOUT, rtl=True)
 
