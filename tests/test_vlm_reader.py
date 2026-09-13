@@ -63,3 +63,51 @@ def test_success_after_one_blip(tmp_path, monkeypatch):
     assert calls["n"] == 2
     assert rows[0]["movement"] == Decimal("300.00")
     assert rows[0]["balance"] == Decimal("300.00")
+
+
+def test_malformed_json_retries_then_succeeds(tmp_path, monkeypatch):
+    """Regression: a JSON glitch mid-run once killed a whole processing job."""
+    calls = {"n": 0}
+    good = json.dumps(
+        [{"amount": None, "balance": ".,..", "desc": "x", "greg": None}],
+        ensure_ascii=False)
+    good_payload = json.dumps(
+        {"choices": [{"message": {"content": good}}]}, ensure_ascii=False).encode()
+    bad_payload = json.dumps(
+        {"choices": [{"message": {"content": "prose without any json at all"}}]},
+        ensure_ascii=False).encode()
+
+    def flaky(*a, **k):
+        calls["n"] += 1
+        return _FakeResp(bad_payload if calls["n"] == 1 else good_payload)
+
+    monkeypatch.setattr(vlm_reader.urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(vlm_reader.time, "sleep", lambda s: None)
+    rows = vlm_reader.read_rows_vlm(_img(tmp_path))
+    assert calls["n"] == 2
+    assert rows[0]["balance"] == Decimal("0.00")
+
+
+def test_always_bad_json_raises_runtime_error(tmp_path, monkeypatch):
+    calls = {"n": 0}
+
+    def bad(*a, **k):
+        calls["n"] += 1
+        return _FakeResp(json.dumps(
+            {"choices": [{"message": {"content": "no json"}}]}).encode())
+
+    monkeypatch.setattr(vlm_reader.urllib.request, "urlopen", bad)
+    monkeypatch.setattr(vlm_reader.time, "sleep", lambda s: None)
+    with pytest.raises(RuntimeError):
+        vlm_reader.read_rows_vlm(_img(tmp_path))
+    assert calls["n"] == vlm_reader._ATTEMPTS
+
+
+def test_trailing_comma_is_repaired(tmp_path, monkeypatch):
+    content = '[{"amount": null, "balance": ".,..", "desc": "x",}]'
+    payload = json.dumps({"choices": [{"message": {"content": content}}]}).encode()
+    monkeypatch.setattr(vlm_reader.urllib.request, "urlopen",
+                        lambda *a, **k: _FakeResp(payload))
+    monkeypatch.setattr(vlm_reader.time, "sleep", lambda s: None)
+    rows = vlm_reader.read_rows_vlm(_img(tmp_path))
+    assert rows[0]["balance"] == Decimal("0.00")

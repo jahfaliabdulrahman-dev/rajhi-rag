@@ -68,6 +68,24 @@ def _parse_amount(tok: str | None) -> Decimal | None:
     return Decimal(str(v)).quantize(Decimal("0.01"))
 
 
+def _extract_json(content: str):
+    """Pull the JSON payload out of a VLM answer.
+
+    VLMs occasionally emit slightly malformed JSON (stray commas, truncation).
+    Repair what is safely repairable; anything else raises so the caller's
+    retry loop re-rolls the call instead of crashing the whole run.
+    """
+    m = re.search(r"[\[{].*[\]}]", content, re.DOTALL)
+    if not m:
+        raise ValueError(f"no JSON in VLM answer: {content[:120]}")
+    text = m.group(0)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        repaired = re.sub(r",\s*([\]}])", r"\1", text)  # trailing commas
+        return json.loads(repaired)
+
+
 def read_rows_vlm(image_path: str, prompt: str | None = None,
                   max_tokens: int = 4000) -> list[dict]:
     """One page image -> [{'movement': Decimal|None, 'balance': Decimal|None,
@@ -101,10 +119,7 @@ def read_rows_vlm(image_path: str, prompt: str | None = None,
         try:
             out = json.loads(urllib.request.urlopen(req, timeout=180).read().decode())
             content = out["choices"][0]["message"]["content"]
-            m = re.search(r"[\[{].*[\]}]", content, re.DOTALL)
-            if not m:
-                raise ValueError(f"no JSON in VLM answer: {content[:120]}")
-            data = json.loads(m.group(0))
+            data = _extract_json(content)
             vlm_rows = data if isinstance(data, list) else data.get("rows", [])
             rows = []
             for r in vlm_rows:
@@ -126,6 +141,11 @@ def read_rows_vlm(image_path: str, prompt: str | None = None,
                 time.sleep(delay); delay *= 2
                 continue
             raise RuntimeError(f"VLM network: {e}") from e
+        except (json.JSONDecodeError, ValueError) as e:
+            if attempt < _ATTEMPTS - 1:
+                time.sleep(delay); delay *= 2
+                continue
+            raise RuntimeError(f"VLM JSON: {e}") from e
     raise RuntimeError("VLM retries exhausted")
 
 
