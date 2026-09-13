@@ -67,3 +67,55 @@ def test_search_rows():
 def test_empty_selection_is_explicit():
     out = _tools()["sum_movements"].invoke({"side": "مدين", "keyword": "لايوجد"})
     assert "لا توجد حركات مطابقة" in out
+
+
+def _thousand_rows():
+    """Owner's live case: four rows of 1000.00, four different real types."""
+    return [
+        {"page": 7, "kind": "txn", "balance": Decimal("4346.00"),
+         "movement": Decimal("1000.00"), "side": "debit", "ok": True,
+         "desc": "التحويل من الحساب الصراف الآلي الى حساب خالد",
+         "date": None, "type": "تحويل صادر"},
+        {"page": 8, "kind": "txn", "balance": Decimal("14246.00"),
+         "movement": Decimal("1000.00"), "side": "credit", "ok": True,
+         "desc": "ايداع الصراف الالي Cash Deposit CA-TUQBA ,TUQBA",
+         "date": None, "type": "إيداع نقدي (صراف آلي)"},
+        {"page": 10, "kind": "txn", "balance": Decimal("1676.00"),
+         "movement": Decimal("1000.00"), "side": "credit", "ok": True,
+         "desc": "تحويل FRACCT/ من IBOUOA", "date": None, "type": "تحويل وارد"},
+        {"page": 10, "kind": "txn", "balance": Decimal("676.00"),
+         "movement": Decimal("1000.00"), "side": "debit", "ok": True,
+         "desc": "سحب الصراف الآلي DAMMAM MAIN, DAMMAM", "date": None,
+         "type": "سحب صراف آلي"},
+    ]
+
+
+def _thousand_tools():
+    return {t.name: t for t in make_qa_tools(_thousand_rows())}
+
+
+def test_thousand_scenario_counts_by_type():
+    """The exact question that once got a muddled answer: كم سحب ب1000؟"""
+    out = _thousand_tools()["count_movements"].invoke(
+        {"tx_type": "سحب صراف آلي", "amount": 1000})
+    assert "العدد = 1" in out
+    out_all = _thousand_tools()["count_movements"].invoke({"amount": 1000})
+    assert "العدد = 4" in out_all
+
+
+def test_thousand_scenario_search_lists_all_types():
+    out = _thousand_tools()["search_rows"].invoke({"amount": 1000})
+    assert "4 حركة مطابقة" in out
+    for typ in ("تحويل صادر", "إيداع نقدي (صراف آلي)",
+                "تحويل وارد", "سحب صراف آلي"):
+        assert typ in out
+
+
+def test_type_filter_substring_matches_family():
+    out = _thousand_tools()["count_movements"].invoke({"tx_type": "تحويل"})
+    assert "العدد = 2" in out
+
+
+def test_sum_by_type():
+    out = _thousand_tools()["sum_movements"].invoke({"tx_type": "سحب صراف آلي"})
+    assert "المجموع = 1,000.00" in out
