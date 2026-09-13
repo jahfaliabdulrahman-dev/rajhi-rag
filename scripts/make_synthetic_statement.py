@@ -83,6 +83,10 @@ def build_pdf(rows: list[dict]) -> None:
     pdf.add_page()
     pdf.add_font("naskh", "", str(FONT))
     pdf.set_font("naskh", size=11)
+    # RTL shaping/bidi — without it fpdf2 draws isolated glyphs in logical
+    # order and the fixture reads reversed/garbled to a VLM (owner-caught
+    # 2026-09-13: descriptions came back reversed, breaking filters).
+    pdf.set_text_shaping(True, direction="rtl")
     latin = _add_latin(pdf)
     if latin:
         pdf.set_fallback_fonts([latin])

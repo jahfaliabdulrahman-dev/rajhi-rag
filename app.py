@@ -96,8 +96,10 @@ footer { direction: ltr; }
 /* elem_classes lands on BOTH the block wrapper and the inner prose element —
    scope the border to the wrapper and the dot to the inner prose only
    (otherwise the dot and dashed frame render twice). */
-.ticker.block { border: 1px dashed #C9BFA6; border-radius: 10px; }
-.ticker.prose { border: none !important; padding: 0 !important; background: transparent; }
+.ticker.block { border: 1px dashed #C9BFA6; border-radius: 10px;
+                padding: 14px 18px !important; }
+.ticker.prose { border: none !important; padding: 0 !important;
+                background: transparent; line-height: 1.7; }
 .ticker.prose::before { content: "●"; color: var(--color-accent); font-size: .72rem;
                         margin-inline-end: 8px; }
 .ticker p { margin: 0 !important; }
@@ -196,7 +198,7 @@ HERO = """
     <circle cx="50" cy="50" r="46.5" fill="none" stroke="#A98A4A" stroke-width="1.1"/>
     <circle cx="50" cy="50" r="40" fill="none" stroke="#A98A4A" stroke-width="0.55"/>
     <text font-size="7.6" fill="#A98A4A" letter-spacing="0.6">
-      <textPath href="#sealArc" startOffset="50%" text-anchor="middle">السلسلة الرصيدية · حَكَم لا يخطئ</textPath>
+      <textPath href="#sealArc" startOffset="25%" text-anchor="middle">السلسلة الرصيدية · حَكَم لا يخطئ</textPath>
     </text>
     <text x="50" y="54" text-anchor="middle" font-family="Amiri, serif" font-size="21" fill="#0E6B57">مُدقَّق</text>
     <text x="50" y="70" text-anchor="middle" font-size="8.5" fill="#6B6355">آلياً</text>
@@ -225,6 +227,39 @@ def _kpi_html(n_rows: int, n_clean: int, n_susp: int, last_bal) -> str:
         f'<div class="cap">{cap}</div></div>'
         for cap, num, cls in cells)
     return f'<div class="ledger-kpi">{inner}</div>'
+
+
+def _rows_df(rows: list[dict]) -> pd.DataFrame:
+    return pd.DataFrame([
+        {"الصفحة": r["page"],
+         "النوع": "افتتاحي" if r["kind"] == "opening" else "حركة",
+         "الوصف": (r.get("desc") or "—"),
+         "المبلغ": _money(r["movement"]),
+         "الاتجاه": {"debit": "مدين (سحب)", "credit": "دائن (إيداع)"
+                     }.get(r["side"], "—"),
+         "الرصيد": _money(r["balance"]),
+         "الحالة": "✓" if r["ok"] else "⚠ مشبوه"}
+        for r in rows
+    ])
+
+
+def filter_rows(query: str) -> pd.DataFrame:
+    """Server-side table filter.
+
+    The returned dataframe CONTAINS only the matching rows, so the table's
+    copy button copies exactly what the user filtered — the built-in search
+    box only filtered the view while copying the full set (owner report).
+    """
+    rows = STATE.get("rows") or []
+    df = _rows_df(rows)
+    q = (query or "").strip()
+    if not q or df.empty:
+        return df
+    ql = q.lower().replace(",", "")
+    hay = df.astype(str).agg(" ".join, axis=1).str.lower()
+    mask = (hay.str.contains(ql, regex=False)
+            | hay.str.replace(",", "", regex=False).str.contains(ql, regex=False))
+    return pd.DataFrame(df.loc[mask]).reset_index(drop=True)
 
 
 def _pages_to_pngs(pdf_path: str, dpi: int = 200):
@@ -270,17 +305,7 @@ def process_pdf(pdf_path: str, progress=gr.Progress()):
                                  "desc": r.get("desc"), "date": r.get("date")})
             prev_closing = r["balance"]
 
-    rows_view = pd.DataFrame([
-        {"الصفحة": r["page"],
-         "النوع": "افتتاحي" if r["kind"] == "opening" else "حركة",
-         "الوصف": (r.get("desc") or "—"),
-         "المبلغ": _money(r["movement"]),
-         "الاتجاه": {"debit": "مدين (سحب)", "credit": "دائن (إيداع)"
-                     }.get(r["side"], "—"),
-         "الرصيد": _money(r["balance"]),
-         "الحالة": "✓" if r["ok"] else "⚠ مشبوه"}
-        for r in all_rows
-    ])
+    rows_view = _rows_df(all_rows)
 
     progress(0.95, "بناء الفهرس…")
     STATE["rows"] = all_rows
@@ -291,10 +316,19 @@ def process_pdf(pdf_path: str, progress=gr.Progress()):
     n_susp = len(all_rows) - n_ok
     last_bal = next((r["balance"] for r in reversed(all_rows)
                      if r["balance"] is not None), None)
-    summary = (f"✅ قراءة {len(pages)} صفحة → {len(all_rows)} صف "
-               f"({n_ok} نظيف السلسلة، {n_susp} مشبوه) — "
+    n_pages = len(pages)
+    if n_pages == 1:
+        pages_ar = "صفحة واحدة"
+    elif n_pages == 2:
+        pages_ar = "صفحتين"
+    elif 3 <= n_pages <= 10:
+        pages_ar = f"{n_pages} صفحات"
+    else:
+        pages_ar = f"{n_pages} صفحة"
+    summary = (f"✅ تمّت قراءة {pages_ar} وبناء الفهرس — "
                f"جاهز للسؤال والجواب")
-    return summary, rows_view, _kpi_html(len(all_rows), n_ok, n_susp, last_bal), pages
+    return (summary, rows_view,
+            _kpi_html(len(all_rows), n_ok, n_susp, last_bal), pages, "")
 
 
 def ask_question(question: str, history):
@@ -315,9 +349,17 @@ def ask_question(question: str, history):
     sources_md = "\n".join(
         f"- {s['chunk_id']} (صفحة {s['page']}، صفوف {s['row_start']}–{s['row_end']})"
         for s in res.sources)
-    raw_table = pd.concat([
-        STATE_rows_to_df(h) for h in res.sources[:2]
-    ], ignore_index=True) if STATE.get("rows") else pd.DataFrame()
+    raw_table = pd.DataFrame()
+    if STATE.get("rows"):
+        frames, seen = [], set()
+        for h in res.sources:
+            if h["page"] in seen:
+                continue
+            seen.add(h["page"])
+            frames.append(STATE_rows_to_df(h))
+            if len(frames) == 2:
+                break
+        raw_table = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
     return history, sources_md, raw_table, ""
 
 
@@ -361,15 +403,21 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي") as demo:
                                          rtl=True, elem_classes=["ticker"])
                 with gr.Column(scale=2, min_width=420):
                     kpi = gr.HTML("")
+            filter_box = gr.Textbox(
+                label="فلترة الجدول (يُنسَخ ما يُعرَض فقط)",
+                placeholder="كلمة من الوصف، أو: تحويل · سحب · مدين · دائن · مشبوه · رقم صفحة…",
+                rtl=True)
             table = gr.Dataframe(label="الجدول المُستخرج (بالسلسلة الرصيدية)",
-                                 interactive=False, elem_classes=["ledger-table"],
-                                 show_search="search")
+                                 interactive=False, elem_classes=["ledger-table"])
+            filter_box.input(filter_rows, inputs=filter_box, outputs=table,
+                             api_name="filter_rows")
             with gr.Accordion("صفحات الكشف (معاينة بصرية)", open=False):
                 gallery = gr.Gallery(columns=5, show_label=False)
             pdf_in.change(lambda f: gr.update(interactive=bool(f)),
                           inputs=pdf_in, outputs=btn)
             btn.click(process_pdf, inputs=pdf_in,
-                      outputs=[ticker, table, kpi, gallery])
+                      outputs=[ticker, table, kpi, gallery, filter_box],
+                      show_progress_on=[ticker])
         with gr.Tab("٢. سؤال وجواب"):
             with gr.Row():
                 with gr.Column(scale=3, min_width=380):
@@ -388,9 +436,11 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي") as demo:
                     with gr.Accordion("الصفوف الخام (من الجدول الحتمي)", open=False):
                         raw = gr.Dataframe(interactive=False)
             ask.click(ask_question, inputs=[q, chat],
-                      outputs=[chat, src, raw, q])
+                      outputs=[chat, src, raw, q],
+                      show_progress_on=[chat])
             q.submit(ask_question, inputs=[q, chat],
-                     outputs=[chat, src, raw, q])
+                     outputs=[chat, src, raw, q],
+                     show_progress_on=[chat])
         with gr.Tab("٣. عن المشروع"):
             gr.Markdown(ABOUT, rtl=True)
 

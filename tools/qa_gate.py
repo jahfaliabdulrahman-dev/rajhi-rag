@@ -97,10 +97,16 @@ def g_end_to_end() -> str:
     res = Client("http://127.0.0.1:7860", verbose=False).predict(
         handle_file(str(pdf)), api_name="/process_pdf")
     summary, table = res[0], res[1]
+    kpi_html = res[2] if len(res) > 2 else ""
 
-    m = re.search(r"→ (\d+) صف \((\d+) نظيف السلسلة، (\d+) مشبوه\)", summary)
-    assert m, f"summary unparseable: {str(summary)[:120]}"
-    total, clean, susp = (int(x) for x in m.groups())
+    # Counts now live in the KPI strip (the ticker no longer repeats them).
+    assert "قراءة" in str(summary) and "جاهز" in str(summary), \
+        f"summary shape: {str(summary)[:120]}"
+    nums = re.findall(r'<div class="num">([\d,\.]+)</div>', str(kpi_html))
+    assert len(nums) == 4, f"kpi numerals not found: {str(kpi_html)[:200]}"
+    total = int(nums[0].replace(",", ""))
+    clean = int(nums[1].replace(",", ""))
+    susp = int(nums[2].replace(",", ""))
     assert susp == 0, f"{susp} suspects in the full run"
     assert clean == total, f"{clean}/{total} clean"
     assert total >= 95, f"only {total} rows (expected ≈100-104)"
