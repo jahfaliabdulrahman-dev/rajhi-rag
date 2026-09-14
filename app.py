@@ -418,18 +418,18 @@ def _answer_refs(answer: str) -> list[tuple[int | None, int, int]]:
 
 def _rows_for_refs(refs, cap: int = 60) -> pd.DataFrame:
     rows = STATE.get("rows") or []
-    picked = []
+    picked: list[tuple[int, dict]] = []
     for i, r in enumerate(rows, start=1):
         for pg, a, b in refs:
             if (pg is None or r["page"] == pg) and a <= i <= b:
-                picked.append(r)
+                picked.append((i, r))
                 break
-    return _rows_df(picked[:cap])
+    return pd.DataFrame([_row_record(i, r) for i, r in picked[:cap]])
 
 
 def _evidence_rows(answer: str, sources) -> pd.DataFrame:
-    """Rows the ANSWER itself cites — so the raw table supports the reply
-    (owner report: it showed unrelated retrieval rows for tool answers)."""
+    """FALLBACK evidence only (no tool trace — prose answers): rows the ANSWER
+    cites, else the retrieval pages. Trace-first lives in ask_followup."""
     refs = _answer_refs(answer)
     if refs:
         df = _rows_for_refs(refs)
@@ -448,16 +448,58 @@ def _evidence_rows(answer: str, sources) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
+_EVIDENCE_CAP = 150
+
+
+def _n_rows_ar(n: int) -> str:
+    if n == 1:
+        return "صف واحد"
+    if n == 2:
+        return "صفَّان"
+    if 3 <= n <= 10:
+        return f"{n} صفوف"
+    return f"{n} صفاً"
+
+
+def _note_update(text: str):
+    return gr.update(value=text, visible=bool(text))
+
+
+def _hide_note():
+    return gr.update(value="", visible=False)
+
+
+def _evidence_from_numbers(nos: list[int]) -> tuple[pd.DataFrame, str]:
+    """Rows by their GLOBAL statement numbers — the SAME numbers the tools
+    cite and the main table shows, so # stays identical across surfaces."""
+    rows = STATE.get("rows") or []
+    pairs = [(i, rows[i - 1]) for i in nos if 1 <= i <= len(rows)]
+    if not pairs:
+        return pd.DataFrame(), ""
+    note = f"◽ {_n_rows_ar(len(pairs))} دخلت في حساب الجواب."
+    if len(pairs) > _EVIDENCE_CAP:
+        note = (f" عُرضت أول {_EVIDENCE_CAP} من أصل "
+                f"{_n_rows_ar(len(pairs))} دخلت في حساب الجواب.")
+        pairs = pairs[:_EVIDENCE_CAP]
+    return (pd.DataFrame([_row_record(i, r) for i, r in pairs]), note)
+
+
 def ask_followup(history):
-    """Phase 2: answer STATE['pending_q'] and append the reply to the chat."""
+    """Phase 2: answer STATE['pending_q'] and append the reply to the chat.
+
+    Evidence panel = the rows the TOOLS actually selected (execution trace),
+    not the examples the answer prose happens to quote (owner report: a
+    13-row sum showed only its 3 quoted examples; a compound question
+    evidenced only its second segment).
+    """
     history = list(history or [])
     q = STATE.pop("pending_q", "")
     if not q:
-        return gr.skip(), gr.skip(), gr.skip()
+        return gr.skip(), gr.skip(), gr.skip(), gr.skip()
     if "store" not in STATE:
         history.append({"role": "assistant",
                         "content": "ارفع الكشف في تبويب «قراءة وتحقق» أولاً."})
-        return history, "", pd.DataFrame()
+        return history, "", pd.DataFrame(), _hide_note()
     from statement_qa.qa import answer_question
 
     res = answer_question(STATE["store"], q, rows=STATE.get("rows"))
@@ -465,16 +507,20 @@ def ask_followup(history):
     sources_md = "\n".join(
         f"- {s['chunk_id']} (صفحة {s['page']}، صفوف {s['row_start']}–{s['row_end']})"
         for s in res.sources)
-    return history, sources_md, _evidence_rows(res.answer, res.sources)
+    if res.used_row_nos:
+        df, note = _evidence_from_numbers(res.used_row_nos)
+        return history, sources_md, df, _note_update(note)
+    return (history, sources_md,
+            _evidence_rows(res.answer, res.sources), _hide_note())
 
 
 def STATE_rows_to_df(hit):
-    """One page's rows from the SAME unified display builder as the main
-    table — evidence rows keep global #, real النوع and مدين/دائن split."""
-    df = _rows_df(STATE.get("rows") or [])
-    if df.empty:
-        return df
-    return pd.DataFrame(df[df["الصفحة"] == hit["page"]]).reset_index(drop=True)
+    """One page's rows with GLOBAL # — same numbers the tools cite and the
+    main table shows (real النوع + مدين/دائن split via the shared builder)."""
+    rows = STATE.get("rows") or []
+    pairs = [(i, r) for i, r in enumerate(rows, start=1)
+             if r["page"] == hit["page"]]
+    return pd.DataFrame([_row_record(i, r) for i, r in pairs])
 
 
 ABOUT = """# عن المشروع
@@ -538,8 +584,10 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي") as demo:
                                        rtl=True, scale=6)
                         ask = gr.Button("اسأل", variant="primary", scale=1)
                 with gr.Column(scale=2, min_width=320):
-                    with gr.Accordion("الصفوف المُستشهَد بها (كما ذكرها الجواب)", open=True):
-                        raw = gr.Dataframe(interactive=False)
+                    with gr.Accordion("الصفوف التي بُني عليها الجواب", open=True):
+                        raw_note = gr.Markdown(visible=False)
+                        raw = gr.Dataframe(interactive=False,
+                                           elem_id="evidence-table")
                     # Internal retrieval bookkeeping (chunk IDs) — kept for
                     # development diagnostics only, collapsed out of the way.
                     with gr.Accordion("تفاصيل تقنية (قطع الاسترجاع)", open=False):
@@ -547,12 +595,12 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي") as demo:
             ask.click(prepare_ask, inputs=[q, chat], outputs=[chat, q],
                       show_progress="hidden", api_name="ask_question"
                       ).then(ask_followup, inputs=[chat],
-                             outputs=[chat, src, raw],
+                             outputs=[chat, src, raw, raw_note],
                              show_progress_on=[chat])
             q.submit(prepare_ask, inputs=[q, chat], outputs=[chat, q],
                      show_progress="hidden"
                      ).then(ask_followup, inputs=[chat],
-                            outputs=[chat, src, raw],
+                            outputs=[chat, src, raw, raw_note],
                             show_progress_on=[chat])
         with gr.Tab("٣. عن المشروع"):
             gr.Markdown(ABOUT, rtl=True)

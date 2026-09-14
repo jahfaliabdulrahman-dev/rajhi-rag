@@ -6,6 +6,9 @@ Contract (plan + owner rules):
 - With `rows` supplied, a LangChain agent runs with tools from qa_tools
   (sum/count/extremes/page summary/search) — so "كم مجموع السحوبات؟" gets a
   real computed number, not a refusal.
+- The tools record an execution TRACE (which rows each call selected); the
+  evidence panel is built from that trace — what BUILT the numbers — not from
+  the row refs the answer prose happens to repeat.
 - Without rows (or if the agent path fails), falls back to strict one-shot RAG.
 """
 
@@ -37,6 +40,7 @@ AGENT_SYSTEM_PROMPT = """أنت محاسب مدقق تعمل على كشف حس�
    وللمبلغ المحدد استخدم amount معه (مثال «سحب بـ1000» ⇒ tx_type="سحب صراف آلي", amount=1000)،
    وإن ظهر المبلغ نفسه بأنواع أخرى فاذكر ذلك صراحةً في الجواب."""
 
+
 def build_llm(model_name: str | None = None):
     """ChatOpenAI pointed at OpenRouter (key from env / ~/.hermes/.env)."""
     from langchain_openai import ChatOpenAI
@@ -57,12 +61,14 @@ def build_llm(model_name: str | None = None):
         temperature=0,
     )
 
+
 def format_hits(hits: list[dict]) -> str:
     blocks = []
     for h in hits:
         blocks.append(f"--- القطعة {h['chunk_id']} (صفحة {h['page']}، "
                       f"صفوف {h['row_start']}–{h['row_end']}) ---\n{h['text']}")
     return "\n\n".join(blocks)
+
 
 def _text(content) -> str:
     """LangChain message content -> plain string (handles block lists)."""
@@ -73,6 +79,7 @@ def _text(content) -> str:
             (p.get("text", "") if isinstance(p, dict) else str(p))
             for p in content)
     return str(content)
+
 
 def _run_agent(llm, tools, system_prompt: str, user_content: str) -> str:
     """create_agent (langchain 1.x) with a create_react_agent fallback."""
@@ -90,13 +97,17 @@ def _run_agent(llm, tools, system_prompt: str, user_content: str) -> str:
         return ""
     return _text(msgs[-1].content).strip()
 
-def _answer_with_tools(llm, rows, context: str, question: str) -> str:
+
+def _answer_with_tools(llm, rows, context: str,
+                       question: str) -> tuple[str, list[dict]]:
     from statement_qa.qa_tools import make_qa_tools
 
-    tools = make_qa_tools(rows)
+    trace: list[dict] = []
+    tools = make_qa_tools(rows, trace=trace)
     user = (f"القطع المرفقة:\n{context}\n\n"
             f"إن احتجت حساب أي رقم فاستخدم الأدوات.\n\nالسؤال: {question}")
-    return _run_agent(llm, tools, AGENT_SYSTEM_PROMPT, user)
+    return _run_agent(llm, tools, AGENT_SYSTEM_PROMPT, user), trace
+
 
 def _answer_plain(llm, context: str, question: str) -> str:
     messages = [
@@ -105,15 +116,20 @@ def _answer_plain(llm, context: str, question: str) -> str:
     ]
     return _text(llm.invoke(messages).content).strip()
 
+
 @dataclass
 class QAResult:
     answer: str
     sources: list[dict]
+    # Global statement row numbers the TOOLS actually selected (evidence
+    # backbone). None/[] when the answer came from prose (no tools ran).
+    used_row_nos: list[int] | None = None
 
     def __str__(self) -> str:
         src = "; ".join(f"صفحة {s['page']} ص{s['row_start']}–{s['row_end']}"
                         for s in self.sources)
         return f"{self.answer}\n[المصادر: {src}]"
+
 
 def answer_question(store, question: str, rows=None, llm=None, k: int = 4) -> QAResult:
     """Agent-with-tools answer when rows exist; strict RAG fallback otherwise."""
@@ -121,14 +137,20 @@ def answer_question(store, question: str, rows=None, llm=None, k: int = 4) -> QA
     context = format_hits(hits)
     llm = llm or build_llm()
     answer = ""
+    used: list[int] = []
     if rows:
         try:
-            answer = _answer_with_tools(llm, rows, context, question)
+            answer, trace = _answer_with_tools(llm, rows, context, question)
+            from statement_qa.qa_tools import used_rows_from_trace
+
+            used = used_rows_from_trace(trace)
         except Exception:
             answer = ""
     if not answer:
         answer = _answer_plain(llm, context, question)
+        used = []
     return QAResult(answer=answer,
                     sources=[{k2: h[k2] for k2 in
                               ("chunk_id", "page", "row_start", "row_end")}
-                             for h in hits])
+                             for h in hits],
+                    used_row_nos=used)

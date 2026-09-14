@@ -13,6 +13,11 @@ Filters (all optional, combinable):
   "مشتريات (نقاط بيع)", "فواتير ومدفوعات سداد", …
 - keyword: substring of the description.
 - amount: exact riyal amount after 2dp rounding (accepts 1000 / "1,000.00").
+
+An optional `trace` list (server-side only) records which rows each non-empty
+call selected: {"tool": name, "row_nos": [...]}. The evidence panel is built
+from that trace — what BUILT the numbers — never from the row refs the model
+happens to repeat in prose; and it never enters the text the model reads.
 """
 from __future__ import annotations
 
@@ -60,13 +65,30 @@ def _desc(r: dict) -> str:
     return (r.get("desc") or "").replace("\n", " ").strip()
 
 
-def make_qa_tools(rows: list[dict]):
-    """Bind the verified rows to LangChain tools (import kept lazy)."""
+def used_rows_from_trace(trace: list[dict]) -> list[int]:
+    """Union of the row numbers the tools actually selected — sorted, deduped.
+    The evidence backbone: what BUILT the numbers, not what the prose cited."""
+    return sorted({no for call in trace for no in call.get("row_nos", [])})
+
+
+def make_qa_tools(rows: list[dict], trace: list[dict] | None = None):
+    """Bind the verified rows to LangChain tools (import kept lazy).
+
+    When `trace` is a list, every successful non-empty call appends
+    {"tool": name, "row_nos": [...]} — the raw material for the evidence
+    panel. Pure bookkeeping: it never changes any tool's return text.
+    """
     from langchain_core.tools import tool
 
     numbered = _number_rows(rows)
     movements = [r for r in numbered if r.get("kind") == "txn"
                  and r.get("movement") is not None]
+
+    def _record(name: str, sel: list[dict]) -> None:
+        """Server-side evidence trace — zero tokens, no text markers."""
+        if trace is not None and sel:
+            trace.append({"tool": name,
+                          "row_nos": [r["row_no"] for r in sel]})
 
     def _filtered(side: str = "الكل", keyword: str = "", tx_type: str = "",
                   amount=None) -> list[dict]:
@@ -107,6 +129,7 @@ def make_qa_tools(rows: list[dict]):
         تنبيه: «مدين» تعني أي حركة صادرة وليست «سحب صراف آلي» — للأنواع استخدم tx_type.
         مثال: sum_movements(tx_type="تحويل صادر") أو sum_movements(tx_type="سحب صراف آلي", amount=1000)."""
         sel = _filtered(side, keyword, tx_type, amount)
+        _record("sum_movements", sel)
         if not sel:
             return "لا توجد حركات مطابقة لهذا الفلتر في الكشف."
         total = sum((r["movement"] for r in sel), Decimal("0"))
@@ -123,6 +146,7 @@ def make_qa_tools(rows: list[dict]):
         side (اتجاه) | tx_type (النوع) | keyword (وصف) | amount (مبلغ بالريال).
         مثال: count_movements(tx_type="سحب صراف آلي", amount=1000) = عدد السحوبات بهذا المبلغ."""
         sel = _filtered(side, keyword, tx_type, amount)
+        _record("count_movements", sel)
         return (f"العدد = {len(sel)} حركة "
                 f"(الفلتر: {_filter_note(side, keyword, tx_type, amount)})")
 
@@ -134,6 +158,7 @@ def make_qa_tools(rows: list[dict]):
             return "لا توجد أرصدة في الكشف."
         hi = max(with_bal, key=lambda r: r["balance"])
         lo = min(with_bal, key=lambda r: r["balance"])
+        _record("balance_extremes", [hi, lo])
         return (f"أعلى رصيد = {_MONEY.format(hi['balance'])} {_ref(hi)}"
                 f" | أدنى رصيد = {_MONEY.format(lo['balance'])} {_ref(lo)}")
 
@@ -144,6 +169,7 @@ def make_qa_tools(rows: list[dict]):
         if not with_bal:
             return "لا توجد أرصدة في الكشف."
         last = with_bal[-1]
+        _record("closing_balance", [last])
         return f"آخر رصيد = {_MONEY.format(last['balance'])} {_ref(last)}"
 
     @tool
@@ -153,6 +179,7 @@ def make_qa_tools(rows: list[dict]):
         page_rows = [r for r in numbered if r["page"] == int(page)]
         if not page_rows:
             return f"لا توجد بيانات للصفحة {page} في هذا الكشف."
+        _record("page_summary", page_rows)
         with_bal = [r for r in page_rows if r.get("balance") is not None]
         debits = sum((r["movement"] for r in page_rows
                       if r.get("kind") == "txn" and r.get("side") == "debit"
@@ -179,6 +206,7 @@ def make_qa_tools(rows: list[dict]):
         فلاتر: keyword (وصف) | tx_type (النوع) | amount (مبلغ محدد، مثال 1000).
         مثال: search_rows(amount=1000) = كل الحركات بمبلغ 1000 مع أنواعها الحقيقية."""
         sel = _filtered("الكل", keyword, tx_type, amount)
+        _record("search_rows", sel)
         if not sel:
             return "لا توجد حركات مطابقة."
         shown = sel[:max(1, int(limit))]
