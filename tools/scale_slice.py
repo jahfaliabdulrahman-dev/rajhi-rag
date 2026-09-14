@@ -103,6 +103,8 @@ def main() -> None:
     ap.add_argument("--stop-window", type=int, default=5)
     ap.add_argument("--stop-suspect-ratio", type=float, default=0.2)
     ap.add_argument("--no-resume", action="store_true")
+    ap.add_argument("--retry-errors", action="store_true",
+                    help="إعادة محاولة الصفحات المخزّنة بخطأ — للاستئناف بعد انقطاع مزود/نفاد رصيد")
     args = ap.parse_args()
 
     out = Path(args.out) if args.out else (
@@ -155,6 +157,7 @@ def main() -> None:
     boundaries = {"txn": 0, "carry": 0, "anchor": 0}
     window: list[int] = []       # suspect count per page (stop-gate)
     window_rows: list[int] = []  # read row count per page (stop-gate)
+    fail_streak = 0              # consecutive read failures (provider gate)
     recoveries: list[dict] = []  # boundary anchors resolved by verified reread
     page_rereads: list[dict] = []  # pages re-read and accepted by footer delta
     prev_footer = None
@@ -165,17 +168,26 @@ def main() -> None:
         pg = args.first + i
         cache = results_dir / f"pg-{pg:03d}.json"
         reread_rejected = False
-        if cache.exists() and not args.no_resume:
+        use_cache = cache.exists() and not args.no_resume
+        data = None
+        if use_cache:
             data = json.loads(cache.read_text(encoding="utf-8"))
             if data.get("error"):
-                cum_broken = True
-                window.append(1)
-                window_rows.append(1)
-                per_page.append({"page": pg, "rows": 0, "suspects": None,
-                                 "footer": "unchecked", "error": data["error"],
-                                 "origin": "cache"})
-                print(f"[p{pg}] cached FAILED: {data['error']}", flush=True)
-                continue
+                if args.retry_errors:
+                    print(f"[p{pg}] إعادة محاولة خطأ سابق: {data['error']}",
+                          flush=True)
+                    use_cache = False
+                else:
+                    cum_broken = True
+                    window.append(1)
+                    window_rows.append(1)
+                    per_page.append({"page": pg, "rows": 0, "suspects": None,
+                                     "footer": "unchecked",
+                                     "error": data["error"],
+                                     "origin": "cache"})
+                    print(f"[p{pg}] cached FAILED: {data['error']}", flush=True)
+                    continue
+        if use_cache and data is not None:
             ms_read = data.get("ms_read", 0)
             ms_footer = data.get("ms_footer", 0)
             reread_rejected = bool(data.get("reread_rejected"))
@@ -206,7 +218,13 @@ def main() -> None:
                 per_page.append({"page": pg, "rows": 0, "suspects": None,
                                  "footer": "unchecked", "error": str(e),
                                  "origin": "live"})
+                fail_streak += 1
+                if fail_streak >= 5:
+                    stop_reason = ("5 صفحات متتالية أخفقت قراءتها — "
+                                   "افحص المزود/الرصيد ثم استأنف بـ --retry-errors")
+                    break
                 continue
+            fail_streak = 0
             ms_read = int((time.time() - t0) * 1000)
             t0 = time.time()
             try:
@@ -250,7 +268,7 @@ def main() -> None:
                                          encoding="utf-8")
         # تحكيم الصفحة: الانزياح عن الفوتر يُطلق قراءة جديدة واحدة — تُقبل
         # فقط بلا شكوك + مطابقة دلتا الفوتر (معزولة عن أي تلوث سابق).
-        if (not reread_rejected
+        if (not reread_rejected and pg > args.first
                 and page_diverged(rows, cum, prev_footer, footer, cum_broken)):
             pst: dict = {}
             fresh_raw, accepted, note = try_page_reread(

@@ -220,3 +220,14 @@ def test_try_page_reread_accepts_only_clean_and_reconciled(monkeypatch):
         "x.png", {"debits": Decimal("0"), "credits": Decimal("0")},
         prev_footer, banner, Decimal("0"))
     assert not accepted2 and raw2 is None and "شكوك" in note2
+
+
+def test_try_page_reread_never_raises_on_provider_error(monkeypatch):
+    """A repair attempt must reject, not crash: 402/429/timeout are expected."""
+    def boom(*a, **k):
+        raise RuntimeError("VLM HTTP 402")
+    monkeypatch.setattr(fo, "read_rows_vlm", boom)
+    raw, accepted, note = fo.try_page_reread(
+        "x.png", {"debits": Decimal("0"), "credits": Decimal("0")},
+        None, None, Decimal("0"))
+    assert raw is None and accepted is False and "فشل" in note
