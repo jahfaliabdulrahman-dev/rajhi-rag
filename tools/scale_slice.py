@@ -36,7 +36,8 @@ sys.path.insert(0, str(PROJ / "src"))
 
 from statement_qa.era import fingerprint_pages, summarize_ar as era_ar  # noqa: E402
 from statement_qa.footer_oracle import (  # noqa: E402
-    FooterReading, check_page_footer, read_footer,
+    FooterReading, check_page_footer, page_diverged, read_footer,
+    try_page_reread,
 )
 from statement_qa.ordering import check_order, summarize_ar as order_ar  # noqa: E402
 from statement_qa.vlm_reader import (  # noqa: E402
@@ -155,12 +156,15 @@ def main() -> None:
     window: list[int] = []       # suspect count per page (stop-gate)
     window_rows: list[int] = []  # read row count per page (stop-gate)
     recoveries: list[dict] = []  # boundary anchors resolved by verified reread
+    page_rereads: list[dict] = []  # pages re-read and accepted by footer delta
+    prev_footer = None
     n_rows = n_ok = n_susp = 0
     f_ok = f_bad = f_unchecked = f_absent = 0
 
     for i, png in enumerate(page_pngs):
         pg = args.first + i
         cache = results_dir / f"pg-{pg:03d}.json"
+        reread_rejected = False
         if cache.exists() and not args.no_resume:
             data = json.loads(cache.read_text(encoding="utf-8"))
             if data.get("error"):
@@ -174,6 +178,7 @@ def main() -> None:
                 continue
             ms_read = data.get("ms_read", 0)
             ms_footer = data.get("ms_footer", 0)
+            reread_rejected = bool(data.get("reread_rejected"))
             raw_rows = [row_from_json(r) for r in data["raw_rows"]]
             footer = None
             if data.get("footer"):
@@ -243,6 +248,40 @@ def main() -> None:
                         data["recovered"] = str(recovered)
                         cache.write_text(json.dumps(data, ensure_ascii=False),
                                          encoding="utf-8")
+        # تحكيم الصفحة: الانزياح عن الفوتر يُطلق قراءة جديدة واحدة — تُقبل
+        # فقط بلا شكوك + مطابقة دلتا الفوتر (معزولة عن أي تلوث سابق).
+        if (not reread_rejected
+                and page_diverged(rows, cum, prev_footer, footer, cum_broken)):
+            pst: dict = {}
+            fresh_raw, accepted, note = try_page_reread(
+                str(png), cum, prev_footer, footer, prev_closing, pst)
+            usage_total = _sum_dicts(usage_total, _sum_dicts({"calls": 1}, pst))
+            if accepted and fresh_raw is not None:
+                raw_rows = fresh_raw
+                rows = chain_derive(raw_rows, prev_balance=prev_closing)
+                if (pg > args.first and rows
+                        and rows[0].get("boundary") == "anchor"):
+                    rst2: dict = {}
+                    patched2, rec2 = recover_anchor(
+                        raw_rows, prev_closing, str(png), pg, rst2)
+                    if rst2:
+                        usage_total = _sum_dicts(
+                            usage_total, _sum_dicts({"calls": 1}, rst2))
+                    if rec2 is not None:
+                        raw_rows = patched2
+                        rows = chain_derive(raw_rows, prev_balance=prev_closing)
+                        recoveries.append({"page": pg, "amount": str(rec2)})
+                page_rereads.append({"page": pg, "note": note})
+            if cache.exists():
+                cdata = json.loads(cache.read_text(encoding="utf-8"))
+                if not cdata.get("error"):
+                    if accepted and fresh_raw is not None:
+                        cdata["raw_rows"] = [row_to_json(r) for r in raw_rows]
+                        cdata["reread"] = note
+                    else:
+                        cdata["reread_rejected"] = note
+                    cache.write_text(json.dumps(cdata, ensure_ascii=False),
+                                     encoding="utf-8")
         prev_closing = next((r["balance"] for r in reversed(rows)
                              if r["balance"] is not None), prev_closing)
         if pg > args.first and rows:
@@ -258,6 +297,7 @@ def main() -> None:
         if chk.get("own"):
             cum["debits"] += chk["own"]["debits"]
             cum["credits"] += chk["own"]["credits"]
+        prev_footer = footer
 
         p_rows = [r for r in rows if r["balance"] is not None]
         p_susp = sum(1 for r in p_rows if not r["ok"])
@@ -318,6 +358,7 @@ def main() -> None:
         "order": {"cross": order["cross"], "intra": order["intra"],
                   "coverage": order["coverage"], "boundaries": boundaries},
         "boundary_recoveries": recoveries,
+        "page_rereads": page_rereads,
         "time": {"elapsed_s": elapsed,
                  "avg_page_s": round(elapsed / max(1, len(per_page)), 1)},
         "usage": usage_total,
@@ -348,6 +389,10 @@ def main() -> None:
         md.append("**استُدركت مراسٍ حدّية (reread مُتحقق):** "
                   + "، ".join(f"ص{r['page']} ({r['amount']})" for r in recoveries)
                   + " — القيم المُصححة أغلقَت السلسلة إغلاقاً تاماً.")
+    if page_rereads:
+        md.append("**أُعيدت قراءة صفحات وتحكيمها بدلتا الفوتر:** "
+                  + "، ".join(f"ص{r['page']}" for r in page_rereads)
+                  + " — قُبلت قراءاتٌ بلا شكوك تُطابق دلتا الفوتر إطالةً تامة.")
     if stop_reason:
         md.append(f"⛔ **توقف حاجز:** {stop_reason}")
     else:

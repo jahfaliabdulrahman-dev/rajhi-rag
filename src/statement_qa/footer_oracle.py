@@ -37,7 +37,9 @@ from decimal import Decimal
 
 from PIL import Image
 
-from statement_qa.vlm_reader import _extract_json, _parse_amount, chat_vlm_image
+from statement_qa.vlm_reader import (
+    _extract_json, _parse_amount, chain_derive, chat_vlm_image, read_rows_vlm,
+)
 
 FOOTER_PROMPT = """هذه الحافة السفلية من صفحة كشف حساب مصرفي سعودي (صورة مقصوصة).
 تحتوي - إن وُجدت - صف إجماليات مطبوعاً أسفل الجدول: إجمالي عمود المدين، إجمالي عمود الدائن، والرصيد الختامي للصفحة (ثلاثة أرقام في صف واحد؛ الرصيد في أقصى يسار الصف).
@@ -186,6 +188,89 @@ def check_page_footer(rows: list[dict], footer: FooterReading | None,
         return {"status": "mismatch", "totals": cum, "own": own,
                 "compared": compared, "diffs": diffs, "is_paradox": is_paradox}
     return {"status": "ok", "totals": cum, "own": own, "compared": compared}
+
+
+def delta_ok(rows: list[dict], prev_footer: "FooterReading | None",
+             footer: "FooterReading | None") -> tuple[bool, int]:
+    """Own sums vs footer(pg) − footer(pg−1) — the page ISOLATED from any
+    upstream corruption. Returns (ok, compared_components).
+
+    This is the strongest per-page invariant the document provides: two
+    consecutive printed footers bracket exactly one page's movement, so a
+    page can be arbitrated even when earlier pages are unresolved.
+    """
+    if prev_footer is None or footer is None:
+        return False, 0
+    own = page_totals(rows)
+    compared = ok = 0
+    for fname in ("debits", "credits"):
+        fv, pv = getattr(footer, fname), getattr(prev_footer, fname)
+        if fv is None or pv is None:
+            continue
+        compared += 1
+        ok += own[fname] == fv - pv
+    if footer.balance is not None and own["balance"] is not None:
+        compared += 1
+        ok += own["balance"] == footer.balance
+    return (ok == compared and compared >= 2), compared
+
+
+def delta_checkable(prev_footer: "FooterReading | None",
+                    footer: "FooterReading | None") -> bool:
+    if prev_footer is None or footer is None:
+        return False
+    n = sum(1 for fname in ("debits", "credits")
+            if getattr(footer, fname) is not None
+            and getattr(prev_footer, fname) is not None)
+    return n >= 2
+
+
+def page_diverged(rows: list[dict], prior: dict,
+                  prev_footer: "FooterReading | None",
+                  footer: "FooterReading | None",
+                  cum_broken: bool = False) -> bool:
+    """Should this page trigger a fresh-read attempt?
+
+    Delta-preferred: the page's own sums vs footer(pg) − footer(pg−1) — fires
+    exactly on the page that diverges, even when earlier pages are unresolved
+    (post-divergence pages with clean deltas do NOT re-fire — no cascade).
+    Fallback (a footer unreadable): cumulative check against a clean prior.
+    """
+    if footer is None:
+        return False
+    if delta_checkable(prev_footer, footer):
+        return not delta_ok(rows, prev_footer, footer)[0]
+    quick = check_page_footer(rows, footer, prior=prior, skip=cum_broken)
+    return quick["status"] == "mismatch"
+
+
+def try_page_reread(image_path: str, prior: dict,
+                    prev_footer: "FooterReading | None",
+                    footer: "FooterReading | None",
+                    prev_closing, stats: dict | None = None):
+    """ONE fresh page read — accepted ONLY on strict reconciliation.
+
+    Acceptance (both required):
+      (i)  suspect-free, and
+      (ii) footer-reconciled — delta-preferred (isolating the page), with the
+           cumulative check as fallback when a footer is unreadable.
+    Returns (raw_rows | None, accepted: bool, note: str). One attempt only.
+    """
+    fresh_raw = read_rows_vlm(image_path, stats=stats)
+    fresh = chain_derive(fresh_raw, prev_balance=prev_closing)
+    susp = sum(1 for r in fresh
+               if r.get("balance") is not None and not r.get("ok"))
+    if susp:
+        return None, False, f"القراءة الجديدة غير مستقرة ({susp} شكوك)"
+    ok, compared = delta_ok(fresh, prev_footer, footer)
+    if delta_checkable(prev_footer, footer):
+        if ok:
+            return fresh_raw, True, f"مُطابقة بدلتا الفوتر ({compared} مكونات)"
+        return None, False, "القراءة الجديدة لا تطابق دلتا الفوتر"
+    chk = check_page_footer(fresh, footer, prior=prior)
+    if chk["status"] == "ok":
+        return fresh_raw, True, "مُطابقة تراكمية"
+    return None, False, "القراءة الجديدة لا تُغلق الفوتر"
 
 
 def _main() -> None:

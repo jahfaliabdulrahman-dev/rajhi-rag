@@ -45,7 +45,9 @@ from statement_qa.vlm_reader import (
 )
 from statement_qa.bank_check import probe_bank
 from statement_qa.era import fingerprint_pages, summarize_ar as summarize_era_ar
-from statement_qa.footer_oracle import check_page_footer, read_footer
+from statement_qa.footer_oracle import (
+    check_page_footer, page_diverged, read_footer, try_page_reread,
+)
 from statement_qa.job_lock import JobBusyError, job_lock
 from statement_qa.ordering import check_order, summarize_ar as summarize_order_ar
 
@@ -368,7 +370,9 @@ def _process_pdf_locked(pdf_path: str, progress):
 
     _merge_usage(bank_usage)
     prev_closing = None
+    prev_footer = None
     recoveries: list[dict] = []
+    page_rereads: list[dict] = []
     for pg, img in enumerate(pages, start=1):
         progress((pg - 1) / len(pages), f"قراءة صفحة {pg}/{len(pages)}…")
         st: dict = {}
@@ -392,6 +396,32 @@ def _process_pdf_locked(pdf_path: str, progress):
             if recovered is not None:
                 rows = chain_derive(raw_rows, prev_balance=prev_closing)
                 recoveries.append({"page": pg, "amount": str(recovered)})
+        fst: dict = {}
+        try:
+            footer = read_footer(img, stats=fst)
+        except Exception:
+            footer = None
+        _merge_usage(fst)
+        # تحكيم الصفحة: انزياح عن الفوتر يُطلق قراءة جديدة واحدة، تُقبل فقط
+        # إذا كانت بلا شكوك وتُطابق دلتا الفوتر (معزولة عن أي تلوث سابق).
+        if page_diverged(rows, cum, prev_footer, footer, cum_broken):
+            pst: dict = {}
+            fresh_raw, accepted, note = try_page_reread(
+                img, cum, prev_footer, footer, prev_closing, pst)
+            _merge_usage(pst)
+            if accepted and fresh_raw is not None:
+                raw_rows = fresh_raw
+                rows = chain_derive(raw_rows, prev_balance=prev_closing)
+                if pg > 1 and rows and rows[0].get("boundary") == "anchor":
+                    rst2: dict = {}
+                    raw_rows, rec = recover_anchor(
+                        raw_rows, prev_closing, img, pg, rst2)
+                    _merge_usage(rst2)
+                    if rec is not None:
+                        rows = chain_derive(raw_rows,
+                                            prev_balance=prev_closing)
+                        recoveries.append({"page": pg, "amount": str(rec)})
+                page_rereads.append({"page": pg, "note": note})
         if pg > 1 and rows:
             b = rows[0].get("boundary")
             if b in boundaries:
@@ -400,20 +430,12 @@ def _process_pdf_locked(pdf_path: str, progress):
                          for t in (r.get("raw_movement"), r.get("raw_balance"))
                          if t]
         page_dates[pg] = [r.get("date") for r in rows]
-        # أوراكل الفوتر: إجماليات الصفحة المطبوعة (تراكمية من بداية الكشف)
-        # تُقارَن بمجاميع السلسلة — الحارس الخارجي الوحيد ضد انزياح موحّد
-        # يمرّ «نظيف السلسلة».
-        fst: dict = {}
-        try:
-            footer = read_footer(img, stats=fst)
-        except Exception:
-            footer = None
-        _merge_usage(fst)
         chk = check_page_footer(rows, footer, prior=cum, skip=cum_broken)
         if chk.get("own"):
             cum["debits"] += chk["own"]["debits"]
             cum["credits"] += chk["own"]["credits"]
         footer_checks.append({"page": pg, **chk})
+        prev_footer = footer
         for r in rows:
             if r["balance"] is None:
                 continue
@@ -442,6 +464,7 @@ def _process_pdf_locked(pdf_path: str, progress):
     STATE["footer_checks"] = footer_checks
     STATE["usage"] = usage
     STATE["boundary_recoveries"] = recoveries
+    STATE["page_rereads"] = page_rereads
     era_fp = fingerprint_pages(era_pages)
     order = check_order(page_dates)
     STATE["era"] = era_fp
@@ -489,6 +512,9 @@ def _process_pdf_locked(pdf_path: str, progress):
         segs.append("استُدرك حدّ الصفحة: "
                     + "، ".join(f"ص{r['page']} ({r['amount']})"
                                 for r in recoveries))
+    if page_rereads:
+        segs.append("أُعيدت قراءة صفحة (مُتحقق): "
+                    + "، ".join(f"ص{r['page']}" for r in page_rereads))
     summary = " • ".join(segs)
     return (summary, rows_view,
             _kpi_html(len(all_rows), n_ok, n_susp, last_bal), pages, "")

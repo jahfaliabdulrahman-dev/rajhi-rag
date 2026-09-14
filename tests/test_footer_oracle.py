@@ -145,3 +145,78 @@ def test_read_footer_all_null_is_none(tmp_path, monkeypatch):
     monkeypatch.setattr(vlm_reader.urllib.request, "urlopen",
                         lambda *a, **k: _FakeResp(payload))
     assert fo.read_footer(str(p)) is None
+
+
+# ————— page-level arbitration (footer-delta reread acceptance) —————
+
+def _two_rows():
+    return [
+        {"kind": "txn", "opening": False, "balance": Decimal("100"),
+         "side": "credit", "derived_movement": Decimal("100")},
+        {"kind": "txn", "opening": False, "balance": Decimal("50"),
+         "side": "debit", "derived_movement": Decimal("50")},
+    ]
+
+
+def test_delta_ok_isolates_the_page():
+    prev_footer = FooterReading(debits=Decimal("650"), credits=Decimal("750"),
+                                balance=Decimal("100"))
+    good = FooterReading(debits=Decimal("700"), credits=Decimal("850"),
+                         balance=Decimal("50"))
+    ok, compared = fo.delta_ok(_two_rows(), prev_footer, good)
+    assert ok and compared == 3
+    bad = FooterReading(debits=Decimal("701"), credits=Decimal("850"),
+                        balance=Decimal("50"))
+    ok2, _ = fo.delta_ok(_two_rows(), prev_footer, bad)
+    assert not ok2
+
+
+def test_page_diverged_delta_and_fallback():
+    zero = {"debits": Decimal("0"), "credits": Decimal("0")}
+    prev_footer = FooterReading(debits=Decimal("650"), credits=Decimal("750"),
+                                balance=Decimal("100"))
+    banner = FooterReading(debits=Decimal("700"), credits=Decimal("850"),
+                           balance=Decimal("50"))
+    assert fo.page_diverged(_two_rows(), zero, prev_footer, banner) is False
+    off = FooterReading(debits=Decimal("699"), credits=Decimal("850"),
+                        balance=Decimal("50"))
+    assert fo.page_diverged(_two_rows(), zero, prev_footer, off) is True
+    # fallback (no prev footer): cumulative against a clean prior
+    cum_ok = FooterReading(debits=Decimal("50"), credits=Decimal("100"),
+                           balance=Decimal("50"))
+    assert fo.page_diverged(_two_rows(), zero, None, cum_ok) is False
+    cum_off = FooterReading(debits=Decimal("51"), credits=Decimal("100"),
+                            balance=Decimal("50"))
+    assert fo.page_diverged(_two_rows(), zero, None, cum_off) is True
+
+
+def test_try_page_reread_accepts_only_clean_and_reconciled(monkeypatch):
+    clean = [
+        {"movement": Decimal("100.00"), "balance": Decimal("100.00"),
+         "desc": "ايداع", "date": None,
+         "raw_movement": "١٠٠.٠٠", "raw_balance": "١٠٠.٠٠"},
+        {"movement": Decimal("50.00"), "balance": Decimal("50.00"),
+         "desc": "سحب", "date": None,
+         "raw_movement": "٥٠.٠٠", "raw_balance": "٥٠.٠٠"},
+    ]
+    monkeypatch.setattr(fo, "read_rows_vlm", lambda *a, **k: clean)
+    prev_footer = FooterReading(debits=Decimal("650"), credits=Decimal("750"),
+                                balance=Decimal("100"))
+    banner = FooterReading(debits=Decimal("700"), credits=Decimal("850"),
+                           balance=Decimal("50"))
+    raw, accepted, note = fo.try_page_reread(
+        "x.png", {"debits": Decimal("0"), "credits": Decimal("0")},
+        prev_footer, banner, Decimal("0"))
+    assert accepted and raw is clean and "دلتا" in note
+
+    broken = [
+        {"movement": Decimal("100"), "balance": Decimal("100"),
+         "desc": "a", "date": None, "raw_movement": "١٠٠", "raw_balance": "١٠٠"},
+        {"movement": Decimal("77"), "balance": Decimal("50"),
+         "desc": "b", "date": None, "raw_movement": "٧٧", "raw_balance": "٥٠"},
+    ]
+    monkeypatch.setattr(fo, "read_rows_vlm", lambda *a, **k: broken)
+    raw2, accepted2, note2 = fo.try_page_reread(
+        "x.png", {"debits": Decimal("0"), "credits": Decimal("0")},
+        prev_footer, banner, Decimal("0"))
+    assert not accepted2 and raw2 is None and "شكوك" in note2
