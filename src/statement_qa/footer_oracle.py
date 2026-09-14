@@ -255,8 +255,13 @@ def try_page_reread(image_path: str, prior: dict,
       (ii) footer-reconciled — delta-preferred (isolating the page), with the
            cumulative check as fallback when a footer is unreadable.
     Returns (raw_rows | None, accepted: bool, note: str). One attempt only.
+    NEVER raises: a repair attempt is optional by definition — a provider
+    error (402/429/timeout) must reject it, not crash the run.
     """
-    fresh_raw = read_rows_vlm(image_path, stats=stats)
+    try:
+        fresh_raw = read_rows_vlm(image_path, stats=stats)
+    except Exception as e:  # noqa: BLE001 — repair must never kill a run
+        return None, False, f"فشل محاولة الاستدراك: {e}"
     fresh = chain_derive(fresh_raw, prev_balance=prev_closing)
     susp = sum(1 for r in fresh
                if r.get("balance") is not None and not r.get("ok"))
