@@ -111,3 +111,56 @@ def test_trailing_comma_is_repaired(tmp_path, monkeypatch):
     monkeypatch.setattr(vlm_reader.time, "sleep", lambda s: None)
     rows = vlm_reader.read_rows_vlm(_img(tmp_path))
     assert rows[0]["balance"] == Decimal("0.00")
+
+
+# ————— boundary auto-recovery (the p11 «extra zero» class) —————
+
+def test_reread_boundary_accepts_only_chain_closing_candidate(tmp_path, monkeypatch):
+    from PIL import Image
+
+    p = tmp_path / "pg.png"
+    Image.new("RGB", (60, 400), "white").save(p)
+    content = json.dumps({"rows": [
+        {"movement": "٥٠٠.٠٠", "balance": "١٢٦.٠٠"},   # self-inconsistent → rejected
+        {"movement": "٥٠.٠٠", "balance": "١٢٦.٠٠"},    # |126-176| = 50 ✓
+    ]}, ensure_ascii=False)
+    payload = json.dumps({"choices": [{"message": {"content": content}}]},
+                         ensure_ascii=False).encode()
+    monkeypatch.setattr(vlm_reader.urllib.request, "urlopen",
+                        lambda *a, **k: _FakeResp(payload))
+    got = vlm_reader.reread_boundary(str(p), Decimal("176.00"), page_no=11)
+    assert got == Decimal("50.00")
+
+
+def test_reread_boundary_rejects_when_nothing_closes(tmp_path, monkeypatch):
+    from PIL import Image
+
+    p = tmp_path / "pg.png"
+    Image.new("RGB", (60, 400), "white").save(p)
+    content = json.dumps({"rows": [{"movement": "٥٠٠.٠٠", "balance": "١٢٦.٠٠"}]},
+                         ensure_ascii=False)
+    payload = json.dumps({"choices": [{"message": {"content": content}}]},
+                         ensure_ascii=False).encode()
+    monkeypatch.setattr(vlm_reader.urllib.request, "urlopen",
+                        lambda *a, **k: _FakeResp(payload))
+    assert vlm_reader.reread_boundary(str(p), Decimal("176.00")) is None
+
+
+def test_recover_anchor_patches_only_on_verified_match(tmp_path, monkeypatch):
+    raw = [{"movement": Decimal("500.00"), "balance": Decimal("126.00"),
+            "desc": "سحب", "date": None}]
+    monkeypatch.setattr(vlm_reader, "reread_boundary",
+                        lambda *a, **k: Decimal("50.00"))
+    patched, got = vlm_reader.recover_anchor(raw, Decimal("176.00"),
+                                             str(tmp_path / "x.png"), 11)
+    assert got == Decimal("50.00")
+    assert patched[0]["movement"] == Decimal("50.00")
+    rows = vlm_reader.chain_derive(patched, prev_balance=Decimal("176.00"))
+    assert rows[0]["boundary"] == "txn" and rows[0]["side"] == "debit"
+
+    # non-matching reread -> untouched, anchor stays
+    monkeypatch.setattr(vlm_reader, "reread_boundary",
+                        lambda *a, **k: Decimal("30.00"))
+    kept, got2 = vlm_reader.recover_anchor(raw, Decimal("176.00"),
+                                           str(tmp_path / "x.png"), 11)
+    assert got2 is None and kept[0]["movement"] == Decimal("500.00")

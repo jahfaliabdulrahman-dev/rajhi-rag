@@ -189,6 +189,68 @@ def read_rows_vlm(image_path: str, prompt: str | None = None,
 _OPENING_MARKERS = ("افتتاح", "سابق")
 
 
+def reread_boundary(image_path: str, prev_closing, page_no: int = 1,
+                    stats: dict | None = None):
+    """Targeted top-band re-read for an unverifiable page-start row.
+
+    The workshop's «reread بالجوار» mechanism applied automatically: when the
+    first row of a page cannot be chain-verified (anchor), re-read with the
+    frozen TOP_BAND_PROMPT (Trap-5 boundary recovery — built for exactly
+    this). A candidate is accepted ONLY when its own (amount, balance) pair
+    closes against prev_closing — never a guess. Returns the |movement| as
+    Decimal, or None.
+    """
+    prompt = TOP_BAND_PROMPT.format(page_no=page_no,
+                                    prev_closing=str(prev_closing))
+    b64 = base64.b64encode(open(image_path, "rb").read()).decode()
+
+    def _pairs(content: str) -> list[tuple]:
+        data = _extract_json(content)
+        raw = data.get("rows", []) if isinstance(data, dict) else data
+        pairs = []
+        for r in raw or []:
+            mv = _parse_amount(r.get("movement") or r.get("amount"))
+            bal = _parse_amount(r.get("balance"))
+            if mv is not None and bal is not None:
+                pairs.append((mv, bal))
+        return pairs
+
+    pairs = chat_vlm_image(b64, prompt, max_tokens=1200, stats=stats,
+                           parse=_pairs)
+    for mv, bal in pairs or []:
+        delta = bal - prev_closing
+        if delta != 0 and abs(delta) == mv:
+            return mv
+    return None
+
+
+def recover_anchor(raw_rows: list[dict], prev_closing, image_path: str,
+                   page_no: int, stats: dict | None = None):
+    """Resolve an anchor's missing movement through a verified re-read.
+
+    Acceptance is triple-strict: the re-read must produce a self-consistent
+    (amount, balance) pair AND the amount must equal the ORIGINAL row's
+    balance delta — so a corrected value can never contradict the chain that
+    follows. Returns (rows, recovered|None); rows are patched only on success.
+    """
+    if not raw_rows or prev_closing is None:
+        return raw_rows, None
+    first = raw_rows[0]
+    if first.get("balance") is None:
+        return raw_rows, None
+    delta = first["balance"] - prev_closing
+    if delta == 0:
+        return raw_rows, None  # carry — not an anchor case
+    try:
+        got = reread_boundary(image_path, prev_closing, page_no, stats)
+    except Exception:  # noqa: BLE001 — recovery must never kill a run
+        got = None
+    if got is None or got != abs(delta):
+        return raw_rows, None
+    patched = [dict(first, movement=got)] + list(raw_rows[1:])
+    return patched, got
+
+
 def _looks_opening(r: dict) -> bool:
     """Opening/carry rows print افتتاح/سابق descriptions; anything else with a
     printed amount is a transaction we must not swallow."""

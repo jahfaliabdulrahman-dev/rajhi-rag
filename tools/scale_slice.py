@@ -39,7 +39,9 @@ from statement_qa.footer_oracle import (  # noqa: E402
     FooterReading, check_page_footer, read_footer,
 )
 from statement_qa.ordering import check_order, summarize_ar as order_ar  # noqa: E402
-from statement_qa.vlm_reader import chain_derive, read_rows_vlm  # noqa: E402
+from statement_qa.vlm_reader import (  # noqa: E402
+    chain_derive, read_rows_vlm, recover_anchor,
+)
 
 DEFAULT_SOURCE = None  # resolved at startup: --source, else a LOCAL pointer file
 
@@ -152,6 +154,7 @@ def main() -> None:
     boundaries = {"txn": 0, "carry": 0, "anchor": 0}
     window: list[int] = []       # suspect count per page (stop-gate)
     window_rows: list[int] = []  # read row count per page (stop-gate)
+    recoveries: list[dict] = []  # boundary anchors resolved by verified reread
     n_rows = n_ok = n_susp = 0
     f_ok = f_bad = f_unchecked = f_absent = 0
 
@@ -221,6 +224,25 @@ def main() -> None:
             origin = "live"
 
         rows = chain_derive(raw_rows, prev_balance=prev_closing)
+        # مرساة حدّية غير محسومة؟ استدراك مقيد — يُقبل فقط إذا أغلقت السلسلة.
+        if pg > args.first and rows and rows[0].get("boundary") == "anchor":
+            rst: dict = {}
+            patched, recovered = recover_anchor(
+                raw_rows, prev_closing, str(png), pg, rst)
+            if rst:
+                usage_total = _sum_dicts(
+                    usage_total, _sum_dicts({"calls": 1}, rst))
+            if recovered is not None:
+                raw_rows = patched
+                rows = chain_derive(raw_rows, prev_balance=prev_closing)
+                recoveries.append({"page": pg, "amount": str(recovered)})
+                if cache.exists():  # لا تُعِد القراءة عند الاستئناف القادم
+                    data = json.loads(cache.read_text(encoding="utf-8"))
+                    if not data.get("error"):
+                        data["raw_rows"] = [row_to_json(r) for r in raw_rows]
+                        data["recovered"] = str(recovered)
+                        cache.write_text(json.dumps(data, ensure_ascii=False),
+                                         encoding="utf-8")
         prev_closing = next((r["balance"] for r in reversed(rows)
                              if r["balance"] is not None), prev_closing)
         if pg > args.first and rows:
@@ -295,6 +317,7 @@ def main() -> None:
                 "outliers": era_fp["outliers"]},
         "order": {"cross": order["cross"], "intra": order["intra"],
                   "coverage": order["coverage"], "boundaries": boundaries},
+        "boundary_recoveries": recoveries,
         "time": {"elapsed_s": elapsed,
                  "avg_page_s": round(elapsed / max(1, len(per_page)), 1)},
         "usage": usage_total,
@@ -321,6 +344,10 @@ def main() -> None:
         f"| الترتيب | {order_ar(order, boundaries)} |",
         "",
     ]
+    if recoveries:
+        md.append("**استُدركت مراسٍ حدّية (reread مُتحقق):** "
+                  + "، ".join(f"ص{r['page']} ({r['amount']})" for r in recoveries)
+                  + " — القيم المُصححة أغلقَت السلسلة إغلاقاً تاماً.")
     if stop_reason:
         md.append(f"⛔ **توقف حاجز:** {stop_reason}")
     else:
