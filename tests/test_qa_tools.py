@@ -119,3 +119,48 @@ def test_type_filter_substring_matches_family():
 def test_sum_by_type():
     out = _thousand_tools()["sum_movements"].invoke({"tx_type": "سحب صراف آلي"})
     assert "المجموع = 9001.00" in out
+
+
+def test_trace_records_tool_selections():
+    """Evidence trace: every non-empty call records the rows it selected."""
+    trace = []
+    tools = {t.name: t for t in make_qa_tools(_rows(), trace=trace)}
+    tools["count_movements"].invoke({"side": "مدين"})
+    tools["search_rows"].invoke({"keyword": "سحب"})
+    tools["balance_extremes"].invoke({})
+    tools["closing_balance"].invoke({})
+    tools["page_summary"].invoke({"page": 2})
+    assert [c["tool"] for c in trace] == [
+        "count_movements", "search_rows", "balance_extremes",
+        "closing_balance", "page_summary"]
+    assert trace[0]["row_nos"] == [3, 5]      # the fixture's two debit rows
+    assert trace[2]["row_nos"] == [2, 1]      # hi (300.00) then lo (0.00)
+    assert trace[3]["row_nos"] == [5]         # last balance-bearing row
+    assert trace[4]["row_nos"] == [4, 5]      # page-2 rows
+
+
+def test_trace_skips_empty_selections():
+    trace = []
+    tools = {t.name: t for t in make_qa_tools(_rows(), trace=trace)}
+    tools["sum_movements"].invoke({"side": "مدين", "keyword": "لايوجد"})
+    assert trace == []
+
+
+def test_used_rows_union_sorted_deduped():
+    from statement_qa.qa_tools import used_rows_from_trace
+
+    trace = [{"tool": "a", "row_nos": [5, 3]},
+             {"tool": "b", "row_nos": [3, 9]}]
+    assert used_rows_from_trace(trace) == [3, 5, 9]
+    assert used_rows_from_trace([]) == []
+
+
+def test_thousand_trace_union_covers_all_four():
+    """The owner scenario, trace view: both tools' sets merge for the evidence."""
+    from statement_qa.qa_tools import used_rows_from_trace
+
+    trace = []
+    tools = {t.name: t for t in make_qa_tools(_thousand_rows(), trace=trace)}
+    tools["count_movements"].invoke({"tx_type": "سحب صراف آلي", "amount": 1000})
+    tools["search_rows"].invoke({"amount": 1000})
+    assert used_rows_from_trace(trace) == [1, 2, 3, 4]
