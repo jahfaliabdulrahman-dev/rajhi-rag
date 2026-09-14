@@ -165,6 +165,22 @@ def g_end_to_end() -> str:
     assert num(val(first10, "الرصيد")) == 1676.00, f"p10 row0: {first10}"
     assert val(first10, "النوع") == "تحويل وارد", f"p10 row0 type: {first10}"
 
+    # ———— أوراكل الفوتر (what-if #4 / P1) ————
+    # The printed per-page totals must match the chain-derived page sums on
+    # EVERY comparable page. This is the ONLY external guard against a
+    # uniform ×100 shift that stays "chain-clean" (the accuracy paradox).
+    s = str(summary)
+    m = re.search(r"تحقق الفوتر: (\d+)/(\d+)", s)
+    assert m, f"footer oracle line missing from summary: {s[:220]}"
+    f_ok, f_possible = int(m.group(1)), int(m.group(2))
+    footer_seg = s.split("تحقق الفوتر")[1].split("•")[0]
+    assert "⚠" not in footer_seg, f"footer mismatch on sample: {footer_seg}"
+    assert f_ok == f_possible and f_possible >= 9, \
+        f"footer: {f_ok}/{f_possible} comparable pages matched (want 10/10)"
+
+    # ———— ترتيب الصفحات (what-if delta) ————
+    assert "⚠ الترتيب" not in s, f"page-order flag on sample: {s[:220]}"
+
     # Owner's 1000-question (2026-09): the sample carries FOUR 1000.00 rows
     # of FOUR different REAL types — keep them distinct (the lock against
     # the old "everything is حركة / مدين==سحب" conflation).
@@ -176,7 +192,7 @@ def g_end_to_end() -> str:
     assert got == want, f"1000.00 types: {got}"
 
     return (f"{summary} | p1/p2 starts + p9→p10 continuity "
-            f"+ 4×1000 types locked OK")
+            f"+ 4×1000 types locked + footer {f_ok}/{f_possible} OK")
 
 
 def main() -> None:

@@ -86,28 +86,33 @@ def _extract_json(content: str):
         return json.loads(repaired)
 
 
-def read_rows_vlm(image_path: str, prompt: str | None = None,
-                  max_tokens: int = 4000) -> list[dict]:
-    """One page image -> [{'movement': Decimal|None, 'balance': Decimal|None,
-                           'desc': str|None, 'date': str|None}].
+def chat_vlm_image(image_b64: str | list[str], prompt: str,
+                   max_tokens: int = 4000, stats: dict | None = None,
+                   parse=None):
+    """One prompt + one-or-more images -> parsed answer. THE single transport.
 
-    Uses the FROZEN era-neutral prompt from the 629-page case by default
-    (FRONTIER_PROMPT) — proven copy-exact behavior. Pass
-    prompt=STRUCTURE_AWARE_PROMPT for red-band anatomy reads, or a
-    TOP_BAND_PROMPT.format(...) for boundary recovery.
+    Every vision call (row read, footer oracle, bank probe) goes through here,
+    so retry semantics stay identical everywhere: 4 attempts, 10/20/40s
+    backoff, ConnectionError family + HTTPException caught (the
+    RemoteDisconnected regression), 429 handled separately.
 
-    Raises RuntimeError after retries; caller decides suspect handling.
+    When `parse` is given it runs INSIDE the retry loop: a malformed answer
+    (bad JSON / no JSON at all) re-rolls the call exactly like a network blip
+    — the JSON glitch that once killed whole runs stays dead.
+
+    When `stats` is a dict, the API `usage` object (tokens + cost) is merged
+    into it — the measured cost/time evidence for scale slices.
     """
-    user_prompt = prompt or FRONTIER_PROMPT
-    b64 = base64.b64encode(open(image_path, "rb").read()).decode()
+    images = [image_b64] if isinstance(image_b64, str) else list(image_b64)
     payload = {
         "model": MODEL,
         "temperature": 0,
         "max_tokens": max_tokens,
-        "messages": [{"role": "user", "content": [
-            {"type": "text", "text": user_prompt},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-        ]}],
+        "messages": [{"role": "user", "content":
+                      [{"type": "text", "text": prompt}] +
+                      [{"type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{b}"}}
+                       for b in images]}],
     }
     req = urllib.request.Request(
         "https://openrouter.ai/api/v1/chat/completions",
@@ -118,18 +123,10 @@ def read_rows_vlm(image_path: str, prompt: str | None = None,
     for attempt in range(_ATTEMPTS):
         try:
             out = json.loads(urllib.request.urlopen(req, timeout=180).read().decode())
+            if stats is not None and isinstance(out.get("usage"), dict):
+                stats.update(out["usage"])
             content = out["choices"][0]["message"]["content"]
-            data = _extract_json(content)
-            vlm_rows = data if isinstance(data, list) else data.get("rows", [])
-            rows = []
-            for r in vlm_rows:
-                rows.append({
-                    "movement": _parse_amount(r.get("amount") or r.get("movement")),
-                    "balance": _parse_amount(r.get("balance")),
-                    "desc": r.get("desc") or r.get("desc_main"),
-                    "date": r.get("greg") or r.get("date"),
-                })
-            return rows
+            return parse(content) if parse else content
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < _ATTEMPTS - 1:
                 time.sleep(delay); delay *= 2
@@ -147,6 +144,46 @@ def read_rows_vlm(image_path: str, prompt: str | None = None,
                 continue
             raise RuntimeError(f"VLM JSON: {e}") from e
     raise RuntimeError("VLM retries exhausted")
+
+
+def _rows_from_content(content: str) -> list[dict]:
+    """Raw answer text -> row dicts (runs inside the retry loop)."""
+    data = _extract_json(content)
+    vlm_rows = data if isinstance(data, list) else data.get("rows", [])
+    rows = []
+    for r in vlm_rows:
+        raw_mv = r.get("amount") or r.get("movement")
+        raw_bal = r.get("balance")
+        rows.append({
+            "movement": _parse_amount(raw_mv),
+            "balance": _parse_amount(raw_bal),
+            "desc": r.get("desc") or r.get("desc_main"),
+            "date": r.get("greg") or r.get("date"),
+            # RAW printed tokens kept alongside: the era detector fingerprints
+            # pages from what was ON the paper, before any normalization.
+            "raw_movement": raw_mv,
+            "raw_balance": raw_bal,
+        })
+    return rows
+
+
+def read_rows_vlm(image_path: str, prompt: str | None = None,
+                  max_tokens: int = 4000, stats: dict | None = None) -> list[dict]:
+    """One page image -> [{'movement': Decimal|None, 'balance': Decimal|None,
+                           'desc': str|None, 'date': str|None,
+                           'raw_movement': str|None, 'raw_balance': str|None}].
+
+    Uses the FROZEN era-neutral prompt from the 629-page case by default
+    (FRONTIER_PROMPT) — proven copy-exact behavior. Pass
+    prompt=STRUCTURE_AWARE_PROMPT for red-band anatomy reads, or a
+    TOP_BAND_PROMPT.format(...) for boundary recovery.
+
+    Raises RuntimeError after retries; caller decides suspect handling.
+    """
+    user_prompt = prompt or FRONTIER_PROMPT
+    b64 = base64.b64encode(open(image_path, "rb").read()).decode()
+    return chat_vlm_image(b64, user_prompt, max_tokens, stats,
+                          parse=_rows_from_content)
 
 
 _OPENING_MARKERS = ("افتتاح", "سابق")
@@ -186,7 +223,8 @@ def chain_derive(rows: list[dict], prev_balance: Decimal | None = None) -> list[
         bal = r["balance"]
         if bal is None:
             out.append({**r, "derived_movement": None, "side": "",
-                        "ok": False, "opening": False, "scale_fixed": False})
+                        "ok": False, "opening": False, "scale_fixed": False,
+                        "boundary": None})
             prev = None  # chain broken; next row re-anchors
             boundary_pending = False
             continue
@@ -196,14 +234,17 @@ def chain_derive(rows: list[dict], prev_balance: Decimal | None = None) -> list[
             printed = r["movement"]
             if delta == 0:
                 out.append({**r, "derived_movement": Decimal("0"), "side": "",
-                            "ok": True, "opening": True, "scale_fixed": False})
+                            "ok": True, "opening": True, "scale_fixed": False,
+                            "boundary": "carry"})
             elif printed is not None and printed == abs(delta):
                 side = "credit" if delta > 0 else "debit"
                 out.append({**r, "derived_movement": abs(delta), "side": side,
-                            "ok": True, "opening": False, "scale_fixed": False})
+                            "ok": True, "opening": False, "scale_fixed": False,
+                            "boundary": "txn"})
             else:
                 out.append({**r, "derived_movement": Decimal("0"), "side": "",
-                            "ok": True, "opening": True, "scale_fixed": False})
+                            "ok": True, "opening": True, "scale_fixed": False,
+                            "boundary": "anchor"})
         elif prev is None:
             printed = r["movement"]
             if printed is not None and not _looks_opening(r):
@@ -213,10 +254,12 @@ def chain_derive(rows: list[dict], prev_balance: Decimal | None = None) -> list[
                 # movement visible; side stays undecided (no previous balance
                 # to derive it from — never guess).
                 out.append({**r, "derived_movement": printed, "side": "",
-                            "ok": True, "opening": False, "scale_fixed": False})
+                            "ok": True, "opening": False, "scale_fixed": False,
+                            "boundary": None})
             else:
                 out.append({**r, "derived_movement": Decimal("0"), "side": "",
-                            "ok": True, "opening": True, "scale_fixed": False})
+                            "ok": True, "opening": True, "scale_fixed": False,
+                            "boundary": None})
         else:
             delta = bal - prev
             mv = abs(delta)
@@ -229,7 +272,8 @@ def chain_derive(rows: list[dict], prev_balance: Decimal | None = None) -> list[
                 if printed * 100 == mv or printed == mv * 100:
                     ok, scale_fixed = True, True
             out.append({**r, "derived_movement": mv, "side": side,
-                        "ok": ok, "opening": False, "scale_fixed": scale_fixed})
+                        "ok": ok, "opening": False, "scale_fixed": scale_fixed,
+                        "boundary": None})
         prev = bal
     return out
 
