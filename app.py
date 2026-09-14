@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import re
 import tempfile
+from decimal import Decimal
 from pathlib import Path
 
 import gradio as gr
@@ -40,8 +41,16 @@ from statement_qa.chunking import chunk_rows
 from statement_qa.classify import annotate_types
 from statement_qa.retriever import build_index
 from statement_qa.vlm_reader import chain_derive, read_rows_vlm
+from statement_qa.bank_check import probe_bank
+from statement_qa.era import fingerprint_pages, summarize_ar as summarize_era_ar
+from statement_qa.footer_oracle import check_page_footer, read_footer
+from statement_qa.job_lock import JobBusyError, job_lock
+from statement_qa.ordering import check_order, summarize_ar as summarize_order_ar
 
 STATE = {}
+
+# قفل «مهمة واحدة» — نافذتان متزامنتان كانتا تخلطان النتائج والسجلات.
+LOCK_PATH = Path(__file__).resolve().parent / "data" / ".rajhi-job.lock"
 
 # ————— الهوية اللونية —————
 PAPER = "#F7F2E9"
@@ -298,27 +307,100 @@ def _pages_to_pngs(pdf_path: str, dpi: int = 200):
 
 
 def process_pdf(pdf_path: str, progress=gr.Progress()):
-    """Tab 1 handler: read all pages, chain-audit, build chunks+index.
+    """Tab 1 handler — single-job lock → read all pages → chain-audit →
+    footer oracle + era/order checks → chunks+index.
 
     Cross-page continuity: each page receives the previous page's closing
     balance. A page whose FIRST row is a real transaction (delta == printed
     amount) keeps its movement — scan boundaries never swallow operations.
+
+    Guarded by the single-job lock (what-if delta #3): a second concurrent
+    run gets a clear Arabic message instead of interleaving with this one.
     """
     if not pdf_path:
         raise gr.Error("ارفع ملف PDF أولاً ثم اضغط «قراءة الكشف».")
+    try:
+        with job_lock(LOCK_PATH):
+            return _process_pdf_locked(pdf_path, progress)
+    except JobBusyError:
+        raise gr.Error("يوجد تشغيل جارٍ الآن (نافذة أو طلب آخر) — "
+                       "انتظر انتهاءه ثم أعد المحاولة.")
+
+
+def _process_pdf_locked(pdf_path: str, progress):
     pages = _pages_to_pngs(pdf_path)
+
+    # «بنك غير مدعوم» جملة واضحة بدل فشل غامض — فحص واحد للصفحة الأولى،
+    # ويفشل مفتوحاً: أي التباس يمرّر التشغيل (لا قرار على تخمين).
+    bank_usage: dict = {}
+    try:
+        bank = probe_bank(pages[0], stats=bank_usage)
+    except Exception:
+        bank = {"verdict": "unknown", "bank": None}
+    if bank["verdict"] == "other":
+        raise gr.Error(f"يبدو أن هذا الملف لا يخص مصرف الراجحي "
+                       f"(ظهر: «{bank['bank']}») — الإصدار الحالي يدعم "
+                       f"كشوف الراجحي فقط.")
+
     all_rows = []
     failed_pages: list[int] = []
+    footer_checks: list[dict] = []
+    era_pages: dict[int, list] = {}
+    page_dates: dict[int, list] = {}
+    boundaries = {"txn": 0, "carry": 0, "anchor": 0}
+    usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cost": 0.0}
+    # cumulative debits/credits for the footer oracle (footer totals are
+    # cumulative-to-date — verified against real reads 2026-09-14)
+    cum = {"debits": Decimal("0"), "credits": Decimal("0")}
+    cum_broken = False
+
+    def _merge_usage(stats: dict) -> None:
+        if not stats:
+            return
+        usage["calls"] += 1
+        for k in ("prompt_tokens", "completion_tokens"):
+            usage[k] += int(stats.get(k) or 0)
+        c = stats.get("cost")
+        if isinstance(c, (int, float)):
+            usage["cost"] = round(usage["cost"] + c, 6)
+
+    _merge_usage(bank_usage)
     prev_closing = None
     for pg, img in enumerate(pages, start=1):
         progress((pg - 1) / len(pages), f"قراءة صفحة {pg}/{len(pages)}…")
+        st: dict = {}
         try:
-            rows = chain_derive(read_rows_vlm(img), prev_balance=prev_closing)
+            rows = chain_derive(read_rows_vlm(img, stats=st),
+                                prev_balance=prev_closing)
         except Exception:
             # one flaky page must never kill the whole run (transient VLM /
             # JSON glitches) — record it, keep going, report it honestly
             failed_pages.append(pg)
+            cum_broken = True  # cumulative footer chain is now unverifiable
             continue
+        _merge_usage(st)
+        if pg > 1 and rows:
+            b = rows[0].get("boundary")
+            if b in boundaries:
+                boundaries[b] += 1
+        era_pages[pg] = [t for r in rows
+                         for t in (r.get("raw_movement"), r.get("raw_balance"))
+                         if t]
+        page_dates[pg] = [r.get("date") for r in rows]
+        # أوراكل الفوتر: إجماليات الصفحة المطبوعة (تراكمية من بداية الكشف)
+        # تُقارَن بمجاميع السلسلة — الحارس الخارجي الوحيد ضد انزياح موحّد
+        # يمرّ «نظيف السلسلة».
+        fst: dict = {}
+        try:
+            footer = read_footer(img, stats=fst)
+        except Exception:
+            footer = None
+        _merge_usage(fst)
+        chk = check_page_footer(rows, footer, prior=cum, skip=cum_broken)
+        if chk.get("own"):
+            cum["debits"] += chk["own"]["debits"]
+            cum["credits"] += chk["own"]["credits"]
+        footer_checks.append({"page": pg, **chk})
         for r in rows:
             if r["balance"] is None:
                 continue
@@ -344,6 +426,12 @@ def process_pdf(pdf_path: str, progress=gr.Progress()):
     STATE["chunks"] = chunk_rows(
         [{**r, "row_no": i + 1} for i, r in enumerate(all_rows)])
     STATE["store"] = build_index(STATE["chunks"])
+    STATE["footer_checks"] = footer_checks
+    STATE["usage"] = usage
+    era_fp = fingerprint_pages(era_pages)
+    order = check_order(page_dates)
+    STATE["era"] = era_fp
+    STATE["order"] = order
     n_ok = sum(1 for r in all_rows if r["ok"])
     n_susp = len(all_rows) - n_ok
     last_bal = next((r["balance"] for r in reversed(all_rows)
@@ -360,11 +448,29 @@ def process_pdf(pdf_path: str, progress=gr.Progress()):
     else:
         pages_ar = f"{n_pages} صفحة"
     if failed_pages:
-        summary = (f"⚠ تمّت قراءة {n_pages - len(failed_pages)} من {n_pages} صفحة "
-                   f"(تعذرت: {failed_pages}) — جاهز للسؤال عن المقروء")
+        base = (f"⚠ تمّت قراءة {n_pages - len(failed_pages)} من {n_pages} صفحة "
+                f"(تعذرت: {failed_pages}) — جاهز للسؤال عن المقروء")
     else:
-        summary = (f"✅ تمّت قراءة {pages_ar} وبناء الفهرس — "
-                   f"جاهز للسؤال والجواب")
+        base = (f"✅ تمّت قراءة {pages_ar} وبناء الفهرس — "
+                f"جاهز للسؤال والجواب")
+    f_ok = [c for c in footer_checks if c["status"] == "ok"]
+    f_bad = [c for c in footer_checks if c["status"] == "mismatch"]
+    f_unchecked = [c for c in footer_checks if c["status"] == "unchecked"]
+    f_possible = len(f_ok) + len(f_bad)
+    if f_possible:
+        seg_f = f"تحقق الفوتر: {len(f_ok)}/{f_possible} مطابق"
+        if f_bad:
+            seg_f = ("⚠ " + seg_f + " — صفحات غير مطابقة: "
+                     + "، ".join(str(c["page"]) for c in f_bad))
+            if any(c.get("is_paradox") for c in f_bad):
+                seg_f += " (نمط زيغ ×100)"
+        if f_unchecked:
+            seg_f += (" — غير قابلة للتحقق: "
+                      + "، ".join(str(c["page"]) for c in f_unchecked))
+    else:
+        seg_f = "تحقق الفوتر: تعذرت قراءة الإطارات"
+    summary = " • ".join([base, seg_f, summarize_era_ar(era_fp),
+                          summarize_order_ar(order, boundaries)])
     return (summary, rows_view,
             _kpi_html(len(all_rows), n_ok, n_susp, last_bal), pages, "")
 
@@ -502,7 +608,8 @@ def ask_followup(history):
         return history, "", pd.DataFrame(), _hide_note()
     from statement_qa.qa import answer_question
 
-    res = answer_question(STATE["store"], q, rows=STATE.get("rows"))
+    res = answer_question(STATE["store"], q, rows=STATE.get("rows"),
+                          chunks=STATE.get("chunks"))
     history.append({"role": "assistant", "content": res.answer})
     sources_md = "\n".join(
         f"- {s['chunk_id']} (صفحة {s['page']}، صفوف {s['row_start']}–{s['row_end']})"
@@ -527,11 +634,12 @@ ABOUT = """# عن المشروع
 
 **المعمارية:** ثلاث طبقات —
 1. **قراءة:** مسح ضوئي → نسخ حرفي بالأرقام الهندية (VLM) → تطبيع حتمي للأعداد
-2. **تحقق:** كل حركة مشتقة حسابياً من فرق الأرصدة — **السلسلة الرصيدية هي الحَكَم**، والصفوف الشاذة تُعلَّم لا تُخفى
+2. **تحقق:** كل حركة مشتقة حسابياً من فرق الأرصدة — **السلسلة الرصيدية هي الحَكَم**، والصفوف الشاذة تُعلَّم لا تُخفى — و**أوراكل الفوتر**: إجماليات كل صفحة المطبوعة (مدين/دائن/الرصيد) تُطابَق آلياً مع مجموع السلسلة، فهو الحارس الخارجي ضد انزياح موحّد يمرّ «نظيف السلسلة»
 3. **فهم:** استرجاع عربي (FAISS + e5) + **أدوات حتمية** (LangChain) — النموذج يستدعي ويصوغ، ولا يحسب أبداً
 
-**قاعدة خصوصية:** لا ترفع كشوفاً حقيقية إلا إذا قبلت بمعالجتها على السحابة —
-العرض العام يستخدم كشفاً اصطناعياً.
+**النطاق الحالي — بصدق:** كشوف **مصرف الراجحي** فقط · العيّنة المقيسة 10 صفحات (≈1.6% من ملف 629 صفحة) — التوسع جارٍ على مقياس متدرّج، ولا ادعاء تغطية كاملة قبل اجتياز بواباته.
+
+**قاعدة الخصوصية:** القراءة تعمل عبر خدمة سحابية (VLM) — لا ترفع كشفاً حقيقياً إلا إذا قبلت بمعالجته على السحابة. العرض العام يعمل بفيّكسترة **اصطناعية** فقط: لا تستخدم السطح العام لبياناتك الحقيقية.
 
 **الإصدار:** دفتر الأستاذ — ورق دافئ، حبر زمردي، إبر نحاسية، وختم التدقيق.
 """
@@ -546,6 +654,11 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي") as demo:
                                      file_types=[".pdf"], elem_id="file-panel")
                     btn = gr.Button("قراءة الكشف وبناء الفهرس", variant="primary",
                                     interactive=False)
+                    gr.Markdown(
+                        "*نسخة تجريبية: كشوف الراجحي فقط · العيّنة قيد التوسع. "
+                        "تُقرأ الصفحات عبر خدمة سحابية — لا ترفع كشفاً حقيقياً "
+                        "إلا إن قبلت معالجته سحابياً، ولا ترفعه إلى سطح عام.*",
+                        rtl=True)
                     ticker = gr.Markdown("في انتظار الكشف… ارفع ملفاً ثم ابدأ القراءة.",
                                          rtl=True, elem_classes=["ticker"])
                 with gr.Column(scale=2, min_width=420):

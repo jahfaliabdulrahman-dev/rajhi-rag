@@ -15,9 +15,39 @@ Contract (plan + owner rules):
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 
 from statement_qa.retriever import retrieve
+
+# «آخر رصيد»-style questions: the closing row can legitimately rank below
+# top-k on a long statement (workshop top-12 #7: «آخر رصيد» لا يجيب). For
+# these the LAST page's chunks are appended deterministically — the honest
+# retrieval bridge, no scoring tricks.
+_CLOSING_RE = re.compile(
+    r"آخر\s*رصيد|الرصيد\s*(?:الأخير|الختامي|النهائي|الحالي)"
+    r"|رصيد\s*(?:ختامي|نهائي)|الختامي")
+
+
+def boost_last_page(hits: list[dict], chunks, question: str) -> list[dict]:
+    """Append the final page's chunks for closing-balance questions.
+
+    Pure and deterministic: nothing is re-scored; missing last-page chunks
+    are appended at the end so the tools/answer/sources can see them."""
+    if not chunks or not _CLOSING_RE.search(question or ""):
+        return hits
+    last_page = max(c.page for c in chunks)
+    have = {(h.get("page"), h.get("row_start"), h.get("row_end"))
+            for h in hits}
+    extra = [c for c in chunks
+             if c.page == last_page
+             and (c.page, c.start_row, c.end_row) not in have]
+    if not extra:
+        return hits
+    return hits + [{
+        "chunk_id": c.chunk_id, "page": c.page, "row_start": c.start_row,
+        "row_end": c.end_row, "text": c.text, "score": 0.0,
+    } for c in extra]
 
 SYSTEM_PROMPT = """أنت محاسب مدقق تعمل على كشف حساب بنكي (الراجحي) حُوّل لنص.
 أجب عن السؤال اعتماداً حصرياً على "القطع المرفقة" أدناه.
@@ -131,9 +161,13 @@ class QAResult:
         return f"{self.answer}\n[المصادر: {src}]"
 
 
-def answer_question(store, question: str, rows=None, llm=None, k: int = 4) -> QAResult:
-    """Agent-with-tools answer when rows exist; strict RAG fallback otherwise."""
-    hits = retrieve(store, question, k=k)
+def answer_question(store, question: str, rows=None, chunks=None,
+                    llm=None, k: int = 4) -> QAResult:
+    """Agent-with-tools answer when rows exist; strict RAG fallback otherwise.
+
+    `chunks` (optional): the run's chunks — used ONLY to boost the last page
+    for closing-balance questions (see boost_last_page)."""
+    hits = boost_last_page(retrieve(store, question, k=k), chunks, question)
     context = format_hits(hits)
     llm = llm or build_llm()
     answer = ""
