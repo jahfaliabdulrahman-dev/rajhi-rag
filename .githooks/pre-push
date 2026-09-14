@@ -1,0 +1,6 @@
+#!/bin/sh
+# pre-push hook — the last line of defense (what-if G3).
+# Install once per clone:  git config core.hooksPath .githooks
+# The guard scans exactly what this push would publish (refs arrive on stdin).
+cd "$(dirname "$0")/.." || exit 1
+exec python3 tools/publish_guard.py --pre-push

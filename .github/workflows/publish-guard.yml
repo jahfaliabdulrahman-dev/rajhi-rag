@@ -1,0 +1,24 @@
+name: publish-guard
+
+# What-if workshop G3 — the published surface needs its own guard:
+# any push/PR that would carry personal paths, real account numbers, family
+# names, or real-data files fails BEFORE reaching the public.
+on:
+  push:
+  pull_request:
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history for the forensic scan
+      - name: PII / real-data guard (tree + history)
+        run: python3 tools/publish_guard.py --tree --history --ci
+      - name: Real-data files must never be tracked
+        run: |
+          if git ls-files | grep -q '^data/local_sample/'; then
+            echo "::error::real statement files tracked under data/local_sample/"; exit 1
+          fi
+          echo "no real-data files tracked — OK"
