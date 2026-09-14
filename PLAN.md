@@ -30,12 +30,12 @@
 
 ## المراحل (كل مرحلة: تنفيذ → اختبارات → بوابة → commit)
 
-- [x] **A. footer oracle** — قراءة إطار الصفحة السفلي (مدين/دائن/رصيد) + مقارنة حتمية + تصادم ×100 + دمج + قفل بوابة + اختبارات.
-- [x] **B. حزمة النشر الآمن** — guard + hook + CI + تعقيم (plists→قوالب، fixtures بلا أسماء حقيقية) + فحص تاريخ الريبو + قائمة ممنوعات.
-- [x] **C. الدلتا الأمنية** — era detector + ordering + job lock + bank check + جسر «آخر رصيد» + نصوص About/الادعاء.
-- [x] **D. سلايس 30 صفحة** — أداة + تشغيل حقيقي بأرقام (نظافة/زمن/كلفة) + سياسة توقف.
-- [x] **E. التشغيل والاستئناف** — health_check + monitor + RESUME + OPERATIONS(G2/G3).
-- [x] **F. الإغلاق** — بوابة `--full` خضراء · تحديث state ref · commit · تقرير المالك.
+- [x] **A. footer oracle** — قراءة إطار الصفحة السفلي (مدين/دائن/رصيد **تراكمياً**) + مقارنة حتمية + تصادم ×100 + دمج + قفل بوابة + اختبارات. **الدليل:** `qa_gate --full` 5/5 مع «تحقق الفوتر: 10/10 مطابق».
+- [x] **B. حزمة النشر الآمن** — guard + hook + CI + تعقيم (plists→قوالب، fixtures بلا أسماء/أرقام حقيقية) + **تنظيف تاريخ الريبو** (filter-repo) + قائمة ممنوعات. **الدليل:** `publish_guard --tree --history` = 0 BLOCK/0 WARN، وفحص مستقل عبر كل المراجعات = 0.
+- [x] **C. الدلتا الأمنية** — era detector + ordering + job lock + bank check + جسر «آخر رصيد» + نصوص About/الادعاء. مدمجة في `app.py` ومقفلة باختبارات.
+- [~] **D. سلايس 30 صفحة** — أداة `scale_slice.py` جاهزة وتشغيل حي جارٍ (checkpoint لكل صفحة + حواجز توقف).
+- [x] **E. التشغيل والاستئناف** — health_check + monitor (launchd، كل 10 د) + `docs/RESUME.md` + `docs/OPERATIONS.md` (G2/G3) + سجل الشكوك.
+- [ ] **F. الإغلاق** — بوابة `--full` خضراء · تحديث state ref · commit · تقرير المالك.
 
-**Dليل الإغلاق النهائي:** تشغيل `python tools/qa_gate.py --full` أخضر (يشمل 10/10 footer)
+**دليل الإغلاق النهائي:** تشغيل `python tools/qa_gate.py --full` أخضر (يشمل 10/10 footer)
 + `python tools/publish_guard.py --tree --history` بلا BLOCK + تقرير السلايس بالأرقام.

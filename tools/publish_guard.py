@@ -110,10 +110,13 @@ def _snippet(line: str) -> str:
 
 
 def _is_digit_table(text: str) -> bool:
-    """«٠١٢٣٤٥٦٧٨٩»-style translation tables are ramps, not account numbers."""
+    """«٠١٢٣٤٥٦٧٨٩»-style translation tables are ramps, not account numbers.
+    Rotations count too («۱۲۳۴۵۶۷۸۹۰»): the doubled-string check catches
+    every cyclic shift of 0123456789 / 9876543210."""
     t = text.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹",
                                      "01234567890123456789"))
-    return "0123456789" in t or "9876543210" in t
+    doubled = t + t
+    return "0123456789" in doubled or "9876543210" in doubled
 
 
 def _scan_text(path: str, text: str, where: str, findings, entries) -> None:
