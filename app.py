@@ -40,7 +40,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 from statement_qa.chunking import chunk_rows
 from statement_qa.classify import annotate_types
 from statement_qa.retriever import build_index
-from statement_qa.vlm_reader import chain_derive, read_rows_vlm
+from statement_qa.vlm_reader import (
+    chain_derive, read_rows_vlm, recover_anchor,
+)
 from statement_qa.bank_check import probe_bank
 from statement_qa.era import fingerprint_pages, summarize_ar as summarize_era_ar
 from statement_qa.footer_oracle import check_page_footer, read_footer
@@ -366,12 +368,12 @@ def _process_pdf_locked(pdf_path: str, progress):
 
     _merge_usage(bank_usage)
     prev_closing = None
+    recoveries: list[dict] = []
     for pg, img in enumerate(pages, start=1):
         progress((pg - 1) / len(pages), f"قراءة صفحة {pg}/{len(pages)}…")
         st: dict = {}
         try:
-            rows = chain_derive(read_rows_vlm(img, stats=st),
-                                prev_balance=prev_closing)
+            raw_rows = read_rows_vlm(img, stats=st)
         except Exception:
             # one flaky page must never kill the whole run (transient VLM /
             # JSON glitches) — record it, keep going, report it honestly
@@ -379,6 +381,17 @@ def _process_pdf_locked(pdf_path: str, progress):
             cum_broken = True  # cumulative footer chain is now unverifiable
             continue
         _merge_usage(st)
+        rows = chain_derive(raw_rows, prev_balance=prev_closing)
+        # مرساة حدّية غير محسومة؟ استدراك مقيد: إعادة قراءة موضعية تُقبل
+        # فقط إذا أغلقت السلسلة (ما كشفه ص11 في السلايس).
+        if pg > 1 and rows and rows[0].get("boundary") == "anchor":
+            rst: dict = {}
+            raw_rows, recovered = recover_anchor(
+                raw_rows, prev_closing, img, pg, rst)
+            _merge_usage(rst)
+            if recovered is not None:
+                rows = chain_derive(raw_rows, prev_balance=prev_closing)
+                recoveries.append({"page": pg, "amount": str(recovered)})
         if pg > 1 and rows:
             b = rows[0].get("boundary")
             if b in boundaries:
@@ -428,6 +441,7 @@ def _process_pdf_locked(pdf_path: str, progress):
     STATE["store"] = build_index(STATE["chunks"])
     STATE["footer_checks"] = footer_checks
     STATE["usage"] = usage
+    STATE["boundary_recoveries"] = recoveries
     era_fp = fingerprint_pages(era_pages)
     order = check_order(page_dates)
     STATE["era"] = era_fp
@@ -469,8 +483,13 @@ def _process_pdf_locked(pdf_path: str, progress):
                       + "، ".join(str(c["page"]) for c in f_unchecked))
     else:
         seg_f = "تحقق الفوتر: تعذرت قراءة الإطارات"
-    summary = " • ".join([base, seg_f, summarize_era_ar(era_fp),
-                          summarize_order_ar(order, boundaries)])
+    segs = [base, seg_f, summarize_era_ar(era_fp),
+            summarize_order_ar(order, boundaries)]
+    if recoveries:
+        segs.append("استُدرك حدّ الصفحة: "
+                    + "، ".join(f"ص{r['page']} ({r['amount']})"
+                                for r in recoveries))
+    summary = " • ".join(segs)
     return (summary, rows_view,
             _kpi_html(len(all_rows), n_ok, n_susp, last_bal), pages, "")
 
