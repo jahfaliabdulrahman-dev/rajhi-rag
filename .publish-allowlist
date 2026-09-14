@@ -1,0 +1,9 @@
+# استثناءات publish-guard — كل سطر: <rule_id> :: <path-glob> :: <السبب>
+# القاعدة: لا استثناء بلا سبب مكتوب، ولا استثناء يغطي بيانات كشوف حقيقية.
+name_token :: tools/launchd/* :: وسوم خدمات launchd (معرّف الخدمة العلني com.jahfali.*)
+name_token :: tools/install_services.sh :: وسم الخدمة
+name_token :: tools/redirect_7867.py :: وسم الخدمة
+name_token :: docs/QA_CHECKLIST.md :: وسم الخدمة في إرشادات الفحص
+name_token :: docs/OPERATIONS.md :: وسوم الخدمات في دليل التشغيل
+name_token :: docs/what-if/00-what-if-guide.ar.md :: إسناد الدليل لمكتب المالك (وثيقة علنية أصلاً)
+name_token :: README.md :: الإسناد العلني للمشروع

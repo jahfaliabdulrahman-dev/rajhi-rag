@@ -19,6 +19,7 @@ def test_atm_withdrawals_real_spellings():
 
 
 def test_transfers_direction_split():
+    # Synthetic values only — real account numbers/names never enter the repo.
     d = "تحويل FRACCT/١٠٠٠٥٧٦١FR-محمد احمد IBOUOA۰۲"
     assert classify(d, "credit") == "تحويل وارد"
     assert classify(d, "debit") == "تحويل صادر"
