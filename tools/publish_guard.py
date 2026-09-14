@@ -212,16 +212,21 @@ def scan_tree(findings, entries, seen) -> int:
 
 
 def scan_history(findings, entries, seen) -> int:
+    # Every object ONCE (rev-list dedupes objects); the same path appears
+    # many times across commits with different blob shas — ALL versions must
+    # be scanned, or an older commit that still carries PII slips through.
+    # (An earlier version deduped by path and kept only the newest blob —
+    # caught by running it: older test fixtures with real names were masked.)
     out = _git("rev-list", "--objects", "--all")
-    pairs, paths = [], set()
+    pairs, dedup = [], set()
     for line in out.splitlines():
         parts = line.split(" ", 1)
         if len(parts) != 2:
             continue
         sha, path = parts
-        if path in paths:
+        if (path, sha) in dedup:
             continue
-        paths.add(path)
+        dedup.add((path, sha))
         pairs.append((path, sha))
     _scan_blobs(pairs, "history", findings, entries, seen)
     return len(pairs)
