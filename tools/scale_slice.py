@@ -84,10 +84,27 @@ def row_from_json(d: dict) -> dict:
 
 def _sum_dicts(a: dict, b: dict) -> dict:
     out = dict(a)
-    for k, v in b.items():
+    for k, v in (b or {}).items():
         if isinstance(v, (int, float)):
             out[k] = round(out.get(k, 0) + v, 6)
     return out
+
+
+def _bump_usage(cache: Path, extra: dict) -> None:
+    """Record an OPTIONAL call's usage into the page's cache.
+
+    The printed session counter only sees calls a page's cache carries; failed
+    attempts, boundary recoveries and page re-reads are real charges too.
+    Persisting them keeps a replay's totals honest (cost fidelity > counter).
+    """
+    if not cache.exists() or not extra:
+        return
+    try:
+        d = json.loads(cache.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    d["usage"] = _sum_dicts(d.get("usage") or {}, extra)
+    cache.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
 
 
 def main() -> None:
@@ -208,8 +225,17 @@ def main() -> None:
             try:
                 raw_rows = read_rows_vlm(str(png), stats=st_r)
             except Exception as e:  # page failed — honest, keeps going
+                prev_usage: dict = {}
+                if cache.exists():
+                    try:
+                        prev_usage = (json.loads(
+                            cache.read_text(encoding="utf-8")).get("usage") or {})
+                    except Exception:
+                        prev_usage = {}
                 cache.write_text(json.dumps(
-                    {"pg": pg, "error": f"{type(e).__name__}: {e}"},
+                    {"pg": pg, "error": f"{type(e).__name__}: {e}",
+                     "usage": _sum_dicts(prev_usage,
+                                         _sum_dicts({"calls": 1}, st_r))},
                     ensure_ascii=False), encoding="utf-8")
                 print(f"[p{pg}] READ FAILED: {e}", flush=True)
                 cum_broken = True
@@ -255,6 +281,7 @@ def main() -> None:
             if rst:
                 usage_total = _sum_dicts(
                     usage_total, _sum_dicts({"calls": 1}, rst))
+                _bump_usage(cache, _sum_dicts({"calls": 1}, rst))
             if recovered is not None:
                 raw_rows = patched
                 rows = chain_derive(raw_rows, prev_balance=prev_closing)
@@ -274,6 +301,7 @@ def main() -> None:
             fresh_raw, accepted, note = try_page_reread(
                 str(png), cum, prev_footer, footer, prev_closing, pst)
             usage_total = _sum_dicts(usage_total, _sum_dicts({"calls": 1}, pst))
+            _bump_usage(cache, _sum_dicts({"calls": 1}, pst))
             if accepted and fresh_raw is not None:
                 raw_rows = fresh_raw
                 rows = chain_derive(raw_rows, prev_balance=prev_closing)
@@ -285,6 +313,7 @@ def main() -> None:
                     if rst2:
                         usage_total = _sum_dicts(
                             usage_total, _sum_dicts({"calls": 1}, rst2))
+                        _bump_usage(cache, _sum_dicts({"calls": 1}, rst2))
                     if rec2 is not None:
                         raw_rows = patched2
                         rows = chain_derive(raw_rows, prev_balance=prev_closing)
@@ -369,6 +398,17 @@ def main() -> None:
     order = check_order(page_dates)
     elapsed = round(time.time() - t_start, 1)
     clean_ratio = (n_ok / n_rows) if n_rows else 0.0
+    # ————— دفتر التكلفة الحقيقي —————
+    # مجموع ما سُجّل في كاش كل صفحة (قراءة + فوتر + محاولات + استدراكات + إعادات).
+    # العدّاد المطبوع لكل جلسة وحده يُسقط المحاولات والاستدراكات — الدفتر لا.
+    ledger = {"calls": 0, "cost": 0.0}
+    for f in sorted(results_dir.glob("pg-*.json")):
+        try:
+            u = (json.loads(f.read_text(encoding="utf-8")).get("usage") or {})
+        except Exception:
+            continue
+        ledger = _sum_dicts(ledger, u)
+
     report = {
         "slice": {"first": args.first, "count": args.count,
                   "pages_done": len(per_page)},
@@ -386,6 +426,7 @@ def main() -> None:
         "time": {"elapsed_s": elapsed,
                  "avg_page_s": round(elapsed / max(1, len(per_page)), 1)},
         "usage": usage_total,
+        "usage_ledger": ledger,
         "stop_reason": stop_reason,
         "per_page": per_page,
     }
@@ -397,7 +438,9 @@ def main() -> None:
         "",
         f"**أُنجز:** {len(per_page)} صفحة في {elapsed} ث "
         f"(≈{report['time']['avg_page_s']} ث/صفحة) · "
-        f"**التكلفة الفعلية:** ${usage_total.get('cost', 0):.4f}",
+        f"**التكلفة:** هذه الجلسة ${usage_total.get('cost', 0):.4f} · "
+        f"دفتر الصفحات **${ledger.get('cost', 0):.4f}** "
+        f"({ledger.get('calls', 0)} استدعاء مسجَّل)",
         "",
         "| المقياس | القيمة |",
         "|---|---|",
@@ -425,7 +468,8 @@ def main() -> None:
 
     print(f"\nSLICE DONE: {len(per_page)} pages | clean {n_ok}/{n_rows} "
           f"({clean_ratio:.1%}) | footer {f_ok} ok/{f_bad} bad | "
-          f"${usage_total.get('cost', 0):.4f} | {elapsed}s"
+          f"session ${usage_total.get('cost', 0):.4f} | "
+          f"ledger ${ledger.get('cost', 0):.4f} | {elapsed}s"
           + (f" | STOPPED: {stop_reason}" if stop_reason else ""), flush=True)
     sys.exit(2 if stop_reason else 0)
 
