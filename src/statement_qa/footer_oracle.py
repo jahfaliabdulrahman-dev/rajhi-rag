@@ -225,6 +225,38 @@ def delta_checkable(prev_footer: "FooterReading | None",
     return n >= 2
 
 
+def delta_status(rows: list[dict], prev_footer: "FooterReading | None",
+                 footer: "FooterReading | None") -> dict:
+    """Per-page status when the CUMULATIVE chain is broken (unchecked).
+
+    The page's own sums vs footer(pg) − footer(pg−1) — isolating the page
+    from any upstream corruption or missing page, so verification survives
+    a divergence earlier in the statement. Returns {'status', 'diffs'};
+    'unchecked' when no comparable component remains.
+    """
+    if not delta_checkable(prev_footer, footer):
+        return {"status": "unchecked", "diffs": []}
+    assert footer is not None and prev_footer is not None
+    own = page_totals(rows)
+    diffs: list[dict] = []
+    for fld in ("debits", "credits"):
+        fv, pv = getattr(footer, fld), getattr(prev_footer, fld)
+        if fv is None or pv is None:
+            continue
+        expect = fv - pv
+        got = own[fld]
+        diffs.append({"field": fld, "footer": str(expect), "app": str(got),
+                      "ok": got == expect})
+    if footer.balance is not None and own.get("balance") is not None:
+        diffs.append({"field": "balance", "footer": str(footer.balance),
+                      "app": str(own["balance"]),
+                      "ok": own["balance"] == footer.balance})
+    if not diffs:
+        return {"status": "unchecked", "diffs": []}
+    bad = [d for d in diffs if not d["ok"]]
+    return {"status": "mismatch" if bad else "ok", "diffs": diffs}
+
+
 def page_diverged(rows: list[dict], prior: dict,
                   prev_footer: "FooterReading | None",
                   footer: "FooterReading | None",

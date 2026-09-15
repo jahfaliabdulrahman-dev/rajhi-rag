@@ -231,3 +231,19 @@ def test_try_page_reread_never_raises_on_provider_error(monkeypatch):
         "x.png", {"debits": Decimal("0"), "credits": Decimal("0")},
         None, None, Decimal("0"))
     assert raw is None and accepted is False and "فشل" in note
+
+
+def test_delta_status_works_after_a_broken_cumulative_chain():
+    """After a lost page the cumulative check is dead but the DELTA is not."""
+    rows = _two_rows()  # own: debits 50, credits 100, closing 50
+    prev_footer = FooterReading(debits=Decimal("650"), credits=Decimal("750"),
+                                balance=Decimal("100"))
+    good = FooterReading(debits=Decimal("700"), credits=Decimal("850"),
+                         balance=Decimal("50"))
+    st = fo.delta_status(rows, prev_footer, good)
+    assert st["status"] == "ok" and all(d["ok"] for d in st["diffs"])
+    off = FooterReading(debits=Decimal("701"), credits=Decimal("850"),
+                        balance=Decimal("50"))
+    st2 = fo.delta_status(rows, prev_footer, off)
+    assert st2["status"] == "mismatch" and not st2["diffs"][0]["ok"]
+    assert fo.delta_status(rows, None, good)["status"] == "unchecked"

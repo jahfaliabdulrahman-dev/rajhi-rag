@@ -46,7 +46,8 @@ from statement_qa.vlm_reader import (
 from statement_qa.bank_check import probe_bank
 from statement_qa.era import fingerprint_pages, summarize_ar as summarize_era_ar
 from statement_qa.footer_oracle import (
-    check_page_footer, page_diverged, read_footer, try_page_reread,
+    check_page_footer, delta_checkable, delta_status, page_diverged,
+    read_footer, try_page_reread,
 )
 from statement_qa.job_lock import JobBusyError, job_lock
 from statement_qa.ordering import check_order, summarize_ar as summarize_order_ar
@@ -431,6 +432,11 @@ def _process_pdf_locked(pdf_path: str, progress):
                          if t]
         page_dates[pg] = [r.get("date") for r in rows]
         chk = check_page_footer(rows, footer, prior=cum, skip=cum_broken)
+        # أساس العرض = دلتا الصفحة متى توفّرت (تعزل الصفحة عن أي تلوث سابق).
+        if delta_checkable(prev_footer, footer):
+            dchk = delta_status(rows, prev_footer, footer)
+            if dchk["status"] != "unchecked":
+                chk = {**chk, **dchk, "basis": "delta"}
         if chk.get("own"):
             cum["debits"] += chk["own"]["debits"]
             cum["credits"] += chk["own"]["credits"]

@@ -36,8 +36,8 @@ sys.path.insert(0, str(PROJ / "src"))
 
 from statement_qa.era import fingerprint_pages, summarize_ar as era_ar  # noqa: E402
 from statement_qa.footer_oracle import (  # noqa: E402
-    FooterReading, check_page_footer, page_diverged, read_footer,
-    try_page_reread,
+    FooterReading, check_page_footer, delta_checkable, delta_status,
+    page_diverged, read_footer, try_page_reread,
 )
 from statement_qa.ordering import check_order, summarize_ar as order_ar  # noqa: E402
 from statement_qa.vlm_reader import (  # noqa: E402
@@ -312,6 +312,12 @@ def main() -> None:
         page_dates[pg] = [r.get("date") for r in rows]
 
         chk = check_page_footer(rows, footer, prior=cum, skip=cum_broken)
+        # أساس التقرير = **دلتا الصفحة** متى توفّرت: تعزل الصفحة عن أي تلوث
+        # تراكمي سابق، فتبقى الحقيقة ظاهرة بعد أي انقطاع. التراكمي بديل فقط.
+        if delta_checkable(prev_footer, footer):
+            dchk = delta_status(rows, prev_footer, footer)
+            if dchk["status"] != "unchecked":
+                chk = {**chk, **dchk, "basis": "delta"}
         if chk.get("own"):
             cum["debits"] += chk["own"]["debits"]
             cum["credits"] += chk["own"]["credits"]
