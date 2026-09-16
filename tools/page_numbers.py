@@ -18,6 +18,11 @@ Method (validated on real renders):
      cannot read the dot-matrix font at all (measured).
 
 Output: JSON mapping position -> printed number, plus gaps / duplicates.
+OUTPUT NOTE (measured 2026-09-16): the VLM path reads this field on a MINORITY
+of pages (a 30-page probe: 12 valid, the rest truncated to 1-2 digits or empty;
+tesseract: 0%). The reliable path is the local detector + a tiled montage read
+by a strong vision model (verified 37/37 on the pages the detector found).
+Use `--montage-out DIR` to emit review sheets instead of trusting the VLM.
 """
 from __future__ import annotations
 
@@ -126,6 +131,53 @@ def read_page_no(png: Path, stats: dict | None = None) -> int | None:
     return None
 
 
+def build_montage(pages_dir: Path, indices: list[int], out: Path,
+                  tiles_per_sheet: int = 12) -> list[Path]:
+    """Detector crops tiled with their PDF index — the reliable review path."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    try:
+        font = ImageFont.truetype(
+            "/System/Library/Fonts/Supplemental/Arial.ttf", 26)
+    except Exception:
+        font = ImageFont.load_default()
+    tiles: list[tuple[int, "Image.Image"]] = []
+    for i in indices:
+        png = pages_dir / f"pg-{i:03d}.png"
+        if not png.exists():
+            continue
+        cands = find_number_candidates(png)
+        if not cands:
+            continue
+        x0, y0, x1, y1 = cands[0]
+        cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+        with Image.open(png).convert("L") as im:
+            t = im.crop((max(0, cx - 60), max(0, cy - 25),
+                         min(im.width, cx + 60), min(im.height, cy + 25)))
+        tiles.append((i, t.resize((t.width * 4, t.height * 4),
+                                  Image.Resampling.LANCZOS)))
+    sheets: list[Path] = []
+    for s in range(0, len(tiles), tiles_per_sheet):
+        ch = tiles[s:s + tiles_per_sheet]
+        cols = 4
+        rows = (len(ch) + cols - 1) // cols
+        tw = max(c.width for _, c in ch)
+        th = max(c.height for _, c in ch)
+        canvas = Image.new("L", (cols * (tw + 18) + 18,
+                                 rows * (th + 46) + 18), 255)
+        d = ImageDraw.Draw(canvas)
+        for m, (i, c) in enumerate(ch):
+            r, col = divmod(m, cols)
+            x = 18 + col * (tw + 18)
+            y = 18 + r * (th + 46)
+            d.text((x + 6, y + 3), f"index {i}", fill=0, font=font)
+            canvas.paste(c, (x, y + 40))
+        p = out / f"sheet_{s // tiles_per_sheet:02d}.png"
+        canvas.save(p)
+        sheets.append(p)
+    return sheets
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="read printed page numbers")
     ap.add_argument("--pages-dir", default="data/local_sample/slice_629p/pages")
@@ -133,10 +185,21 @@ def main() -> None:
     ap.add_argument("--count", type=int, default=30)
     ap.add_argument("--out", default="data/local_sample/page_numbers.json")
     ap.add_argument("--max-cost", type=float, default=0.6)
+    ap.add_argument("--montage-out", default=None,
+                    help="أخرج أوراق مونتاج (كاشف + ترويسة الفهرسة) للمراجعة — "
+                         "المسار الموثوق؛ لا يستدعي النموذج")
     args = ap.parse_args()
 
     pages = PROJ / args.pages_dir
     out = PROJ / args.out
+    if args.montage_out:
+        mdir = PROJ / args.montage_out
+        mdir.mkdir(parents=True, exist_ok=True)
+        sheets = build_montage(
+            pages, list(range(args.first, args.first + args.count)), mdir)
+        for p in sheets:
+            print(p)
+        return
     mapping: dict[str, int | None] = {}
     if out.exists():
         mapping = json.loads(out.read_text(encoding="utf-8"))
