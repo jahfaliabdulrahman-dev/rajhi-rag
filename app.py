@@ -50,7 +50,10 @@ from statement_qa.footer_oracle import (
     read_footer, try_page_reread,
 )
 from statement_qa.job_lock import JobBusyError, job_lock
-from statement_qa.ordering import check_order, summarize_ar as summarize_order_ar
+from statement_qa.ordering import (
+    check_order, check_page_numbers, summarize_ar as summarize_order_ar,
+    summarize_page_numbers,
+)
 
 STATE = {}
 
@@ -372,6 +375,8 @@ def _process_pdf_locked(pdf_path: str, progress):
     _merge_usage(bank_usage)
     prev_closing = None
     prev_footer = None
+    page_nos: list[tuple[int, int | None]] = []
+    prev_page_no: int | None = None
     recoveries: list[dict] = []
     page_rereads: list[dict] = []
     for pg, img in enumerate(pages, start=1):
@@ -387,6 +392,14 @@ def _process_pdf_locked(pdf_path: str, progress):
             continue
         _merge_usage(st)
         rows = chain_derive(raw_rows, prev_balance=prev_closing)
+        page_no = st.get("page_no")
+        page_nos.append((pg, page_no))
+        gap_missing: list[int] = []
+        if (isinstance(page_no, int) and isinstance(prev_page_no, int)
+                and page_no > prev_page_no + 1):
+            # قفزة في الترقيم المطبوع ⇒ الأوراق بينهما غائبة من المسح، ودلتا
+            # الإطار التالية تقيس حركاتها لا خطأً في هذه الصفحة.
+            gap_missing = list(range(prev_page_no + 1, page_no))
         # مرساة حدّية غير محسومة؟ استدراك مقيد: إعادة قراءة موضعية تُقبل
         # فقط إذا أغلقت السلسلة (ما كشفه ص11 في السلايس).
         if pg > 1 and rows and rows[0].get("boundary") == "anchor":
@@ -405,7 +418,8 @@ def _process_pdf_locked(pdf_path: str, progress):
         _merge_usage(fst)
         # تحكيم الصفحة: انزياح عن الفوتر يُطلق قراءة جديدة واحدة، تُقبل فقط
         # إذا كانت بلا شكوك وتُطابق دلتا الفوتر (معزولة عن أي تلوث سابق).
-        if page_diverged(rows, cum, prev_footer, footer, cum_broken):
+        if (not gap_missing
+                and page_diverged(rows, cum, prev_footer, footer, cum_broken)):
             pst: dict = {}
             fresh_raw, accepted, note = try_page_reread(
                 img, cum, prev_footer, footer, prev_closing, pst)
@@ -437,11 +451,17 @@ def _process_pdf_locked(pdf_path: str, progress):
             dchk = delta_status(rows, prev_footer, footer)
             if dchk["status"] != "unchecked":
                 chk = {**chk, **dchk, "basis": "delta"}
+        elif cum_broken and chk.get("status") == "mismatch":
+            chk = {**chk, "status": "unchecked", "diffs": []}
+        if gap_missing and delta_checkable(prev_footer, footer):
+            chk = {**chk, "status": "gap", "basis": "delta",
+                   "missing_sheets": gap_missing}
         if chk.get("own"):
             cum["debits"] += chk["own"]["debits"]
             cum["credits"] += chk["own"]["credits"]
         footer_checks.append({"page": pg, **chk})
         prev_footer = footer
+        prev_page_no = page_no
         for r in rows:
             if r["balance"] is None:
                 continue
@@ -471,6 +491,7 @@ def _process_pdf_locked(pdf_path: str, progress):
     STATE["usage"] = usage
     STATE["boundary_recoveries"] = recoveries
     STATE["page_rereads"] = page_rereads
+    STATE["page_numbers"] = check_page_numbers(page_nos)
     era_fp = fingerprint_pages(era_pages)
     order = check_order(page_dates)
     STATE["era"] = era_fp
@@ -513,7 +534,8 @@ def _process_pdf_locked(pdf_path: str, progress):
     else:
         seg_f = "تحقق الفوتر: تعذرت قراءة الإطارات"
     segs = [base, seg_f, summarize_era_ar(era_fp),
-            summarize_order_ar(order, boundaries)]
+            summarize_order_ar(order, boundaries),
+            summarize_page_numbers(check_page_numbers(page_nos))]
     if recoveries:
         segs.append("استُدرك حدّ الصفحة: "
                     + "، ".join(f"ص{r['page']} ({r['amount']})"

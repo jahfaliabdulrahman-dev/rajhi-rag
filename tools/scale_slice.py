@@ -39,7 +39,10 @@ from statement_qa.footer_oracle import (  # noqa: E402
     FooterReading, check_page_footer, delta_checkable, delta_status,
     page_diverged, read_footer, try_page_reread,
 )
-from statement_qa.ordering import check_order, summarize_ar as order_ar  # noqa: E402
+from statement_qa.ordering import (  # noqa: E402
+    check_order, check_page_numbers, summarize_ar as order_ar,
+    summarize_page_numbers,
+)
 from statement_qa.vlm_reader import (  # noqa: E402
     chain_derive, read_rows_vlm, recover_anchor,
 )
@@ -177,9 +180,11 @@ def main() -> None:
     fail_streak = 0              # consecutive read failures (provider gate)
     recoveries: list[dict] = []  # boundary anchors resolved by verified reread
     page_rereads: list[dict] = []  # pages re-read and accepted by footer delta
+    page_nos: list[tuple[int, int | None]] = []  # (scan position, printed page no)
     prev_footer = None
+    prev_page_no: int | None = None
     n_rows = n_ok = n_susp = 0
-    f_ok = f_bad = f_unchecked = f_absent = 0
+    f_ok = f_bad = f_unchecked = f_absent = f_gap = 0
 
     for i, png in enumerate(page_pngs):
         pg = args.first + i
@@ -208,6 +213,7 @@ def main() -> None:
             ms_read = data.get("ms_read", 0)
             ms_footer = data.get("ms_footer", 0)
             reread_rejected = bool(data.get("reread_rejected"))
+            page_no = data.get("page_no")
             raw_rows = [row_from_json(r) for r in data["raw_rows"]]
             footer = None
             if data.get("footer"):
@@ -261,8 +267,10 @@ def main() -> None:
             usage = _sum_dicts({"calls": 1}, st_r)
             usage = _sum_dicts(usage, st_f or {})
             usage_total = _sum_dicts(usage_total, usage)
+            page_no = st_r.get("page_no")
             cache.write_text(json.dumps({
                 "pg": pg, "ms_read": ms_read, "ms_footer": ms_footer,
+                "page_no": page_no,
                 "raw_rows": [row_to_json(r) for r in raw_rows],
                 "footer": ({"debits": str(footer.debits) if footer.debits is not None else None,
                             "credits": str(footer.credits) if footer.credits is not None else None,
@@ -293,9 +301,17 @@ def main() -> None:
                         data["recovered"] = str(recovered)
                         cache.write_text(json.dumps(data, ensure_ascii=False),
                                          encoding="utf-8")
+        page_nos.append((pg, page_no))
+        gap_missing: list[int] = []
+        if (isinstance(page_no, int) and isinstance(prev_page_no, int)
+                and page_no > prev_page_no + 1):
+            # المسح قفز أوراقاً: المطبوع بينهما غائب ⇒ دلتا الإطار التالية
+            # تقيس حركاتها وليست خطأ قراءة في هذه الصفحة.
+            gap_missing = list(range(prev_page_no + 1, page_no))
+
         # تحكيم الصفحة: الانزياح عن الفوتر يُطلق قراءة جديدة واحدة — تُقبل
         # فقط بلا شكوك + مطابقة دلتا الفوتر (معزولة عن أي تلوث سابق).
-        if (not reread_rejected and pg > args.first
+        if (not reread_rejected and pg > args.first and not gap_missing
                 and page_diverged(rows, cum, prev_footer, footer, cum_broken)):
             pst: dict = {}
             fresh_raw, accepted, note = try_page_reread(
@@ -347,10 +363,20 @@ def main() -> None:
             dchk = delta_status(rows, prev_footer, footer)
             if dchk["status"] != "unchecked":
                 chk = {**chk, **dchk, "basis": "delta"}
+        elif cum_broken and chk.get("status") == "mismatch":
+            # لا دلتا (إطار الجار غير مقروء) والتراكمي ملوَّث ⇒ لا يمكن الحكم
+            # على هذه الصفحة أصلاً: «غير قابلة للتحقق» أصدق من «منزاحة».
+            chk = {**chk, "status": "unchecked", "diffs": []}
+        if gap_missing and delta_checkable(prev_footer, footer):
+            # قفزة في الترقيم المطبوع ⇒ الفرق المقيس = حركات الأوراق الغائبة
+            # (كمّها الإطار)، لا خلل في قراءة هذه الصفحة.
+            chk = {**chk, "status": "gap", "basis": "delta",
+                   "missing_sheets": gap_missing}
         if chk.get("own"):
             cum["debits"] += chk["own"]["debits"]
             cum["credits"] += chk["own"]["credits"]
         prev_footer = footer
+        prev_page_no = page_no
 
         p_rows = [r for r in rows if r["balance"] is not None]
         p_susp = sum(1 for r in p_rows if not r["ok"])
@@ -367,11 +393,14 @@ def main() -> None:
         f_bad += st == "mismatch"
         f_unchecked += st == "unchecked"
         f_absent += st == "absent"
+        f_gap += st == "gap"
 
         per_page.append({
             "page": pg, "rows": len(p_rows), "suspects": p_susp,
             "footer": st, "footer_detail": chk.get("diffs"),
             "paradox": bool(chk.get("is_paradox")),
+            "page_no": page_no,
+            "missing_sheets": chk.get("missing_sheets"),
             "ms_read": ms_read, "ms_footer": ms_footer, "origin": origin,
         })
         print(f"[p{pg}] rows={len(p_rows)} suspects={p_susp} "
@@ -415,7 +444,8 @@ def main() -> None:
         "totals": {"rows": n_rows, "clean": n_ok, "suspects": n_susp,
                    "clean_ratio": round(clean_ratio, 4)},
         "footer": {"ok": f_ok, "mismatch": f_bad, "unchecked": f_unchecked,
-                   "absent": f_absent},
+                   "absent": f_absent, "gap": f_gap},
+        "page_numbers": check_page_numbers(page_nos),
         "era": {"overall": era_fp["overall"], "styles": era_fp["styles"],
                 "transitions": era_fp["transitions"],
                 "outliers": era_fp["outliers"]},
@@ -452,6 +482,9 @@ def main() -> None:
         f"| الترتيب | {order_ar(order, boundaries)} |",
         "",
     ]
+    pn_report = report["page_numbers"]
+    md.append(f"**الترقيم المطبوع:** {summarize_page_numbers(pn_report)}")
+    md.append("")
     if recoveries:
         md.append("**استُدركت مراسٍ حدّية (reread مُتحقق):** "
                   + "، ".join(f"ص{r['page']} ({r['amount']})" for r in recoveries)
@@ -467,9 +500,13 @@ def main() -> None:
     (out / "slice_report.md").write_text("\n".join(md), encoding="utf-8")
 
     print(f"\nSLICE DONE: {len(per_page)} pages | clean {n_ok}/{n_rows} "
-          f"({clean_ratio:.1%}) | footer {f_ok} ok/{f_bad} bad | "
+          f"({clean_ratio:.1%}) | footer {f_ok} ok/{f_bad} bad"
+          + (f"/{f_gap} gap" if f_gap else "") + " | "
           f"session ${usage_total.get('cost', 0):.4f} | "
           f"ledger ${ledger.get('cost', 0):.4f} | {elapsed}s"
+          + (f" | الترقيم: {summarize_page_numbers(pn_report)}"
+             if (pn_report["gaps"] or pn_report["duplicates"]
+                 or pn_report["backwards"]) else "")
           + (f" | STOPPED: {stop_reason}" if stop_reason else ""), flush=True)
     sys.exit(2 if stop_reason else 0)
 

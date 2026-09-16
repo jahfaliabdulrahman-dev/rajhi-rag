@@ -163,6 +163,9 @@ def _rows_from_content(content: str) -> list[dict]:
             # pages from what was ON the paper, before any normalization.
             "raw_movement": raw_mv,
             "raw_balance": raw_bal,
+            # The printed page number rides on the first row (FRONTIER rule 5):
+            # position != identity in a scan — this is the scan-order truth.
+            "page_no": r.get("page_no"),
         })
     return rows
 
@@ -182,8 +185,16 @@ def read_rows_vlm(image_path: str, prompt: str | None = None,
     """
     user_prompt = prompt or FRONTIER_PROMPT
     b64 = base64.b64encode(open(image_path, "rb").read()).decode()
-    return chat_vlm_image(b64, user_prompt, max_tokens, stats,
-                          parse=_rows_from_content)
+
+    def _parse(content: str):
+        rows = _rows_from_content(content)
+        if rows and stats is not None:
+            val = _parse_amount(rows[0].get("page_no"))
+            if val is not None and val == int(val):
+                stats["page_no"] = int(val)   # printed number = scan-order truth
+        return rows
+
+    return chat_vlm_image(b64, user_prompt, max_tokens, stats, parse=_parse)
 
 
 _OPENING_MARKERS = ("افتتاح", "سابق")

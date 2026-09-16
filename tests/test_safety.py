@@ -122,3 +122,22 @@ def test_boost_last_page_for_closing_questions():
     # already present -> untouched
     both = boosted
     assert boost_last_page(both, _chunks(), "ما آخر رصيد؟") == both
+
+
+def test_check_page_numbers_detects_a_gap():
+    """Printed page numbers vs scan positions: a jump = missing sheets."""
+    from statement_qa.ordering import check_page_numbers, summarize_page_numbers
+    pn = check_page_numbers([(1, 1), (2, 2), (3, 3), (4, 6), (5, 7)])
+    assert pn["gaps"] == [(3, 3, 4, 6, [4, 5])]
+    assert pn["duplicates"] == {} and pn["backwards"] == []
+    assert pn["checked"] == 5 and pn["unread"] == 0
+    seg = summarize_page_numbers(pn)
+    assert "ينقص" in seg and "4" in seg and "5" in seg
+
+
+def test_check_page_numbers_flags_duplicates_backwards_and_unread():
+    from statement_qa.ordering import check_page_numbers
+    pn = check_page_numbers([(1, 5), (2, 5), (3, 4), (4, None)])
+    assert pn["duplicates"].get(5) == [1, 2]
+    assert pn["backwards"] and pn["backwards"][0] == (2, 5, 3, 4)
+    assert pn["unread"] == 1 and pn["checked"] == 3
