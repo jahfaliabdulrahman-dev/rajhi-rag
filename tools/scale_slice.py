@@ -363,10 +363,11 @@ def main() -> None:
             dchk = delta_status(rows, prev_footer, footer)
             if dchk["status"] != "unchecked":
                 chk = {**chk, **dchk, "basis": "delta"}
-        elif cum_broken and chk.get("status") == "mismatch":
-            # لا دلتا (إطار الجار غير مقروء) والتراكمي ملوَّث ⇒ لا يمكن الحكم
-            # على هذه الصفحة أصلاً: «غير قابلة للتحقق» أصدق من «منزاحة».
-            chk = {**chk, "status": "unchecked", "diffs": []}
+        elif chk.get("status") == "mismatch":
+            # لا دلتا (إطار الجار غير مقروء) ⇒ الانحراف قد يأتي من جارنا لا منا،
+            # ولا سبيل لعزل هذه الصفحة: «غير قابلة للتحقق» أصدق من «منزاحة».
+            # تُحفظ الفروق كدليل للعين لكن لا تُحتسب إزاحةً على هذه الصفحة.
+            chk = {**chk, "status": "unchecked"}
         if gap_missing and delta_checkable(prev_footer, footer):
             # قفزة في الترقيم المطبوع ⇒ الفرق المقيس = حركات الأوراق الغائبة
             # (كمّها الإطار)، لا خلل في قراءة هذه الصفحة.

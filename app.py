@@ -451,8 +451,8 @@ def _process_pdf_locked(pdf_path: str, progress):
             dchk = delta_status(rows, prev_footer, footer)
             if dchk["status"] != "unchecked":
                 chk = {**chk, **dchk, "basis": "delta"}
-        elif cum_broken and chk.get("status") == "mismatch":
-            chk = {**chk, "status": "unchecked", "diffs": []}
+        elif chk.get("status") == "mismatch":
+            chk = {**chk, "status": "unchecked"}
         if gap_missing and delta_checkable(prev_footer, footer):
             chk = {**chk, "status": "gap", "basis": "delta",
                    "missing_sheets": gap_missing}
