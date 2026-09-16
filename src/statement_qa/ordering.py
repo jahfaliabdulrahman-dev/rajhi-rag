@@ -86,6 +86,8 @@ def check_page_numbers(pairs: list[tuple[int, int | None]]) -> dict:
     for pos, pn in seq:
         positions.setdefault(pn, []).append(pos)
     for (p1, n1), (p2, n2) in zip(seq, seq[1:]):
+        if p2 != p1 + 1:
+            continue          # موقعان غير متجاورين = تغطية ناقصة، ليست فجوة
         if n2 == n1 + 1:
             continue
         if n2 == n1:
