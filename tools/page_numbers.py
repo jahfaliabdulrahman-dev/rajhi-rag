@@ -138,7 +138,7 @@ def build_montage(pages_dir: Path, indices: list[int], out: Path,
 
     try:
         font = ImageFont.truetype(
-            "/System/Library/Fonts/Supplemental/Arial.ttf", 26)
+            "/System/Library/Fonts/Supplemental/Arial.ttf", 22)
     except Exception:
         font = ImageFont.load_default()
     tiles: list[tuple[int, "Image.Image"]] = []
@@ -154,7 +154,7 @@ def build_montage(pages_dir: Path, indices: list[int], out: Path,
         with Image.open(png).convert("L") as im:
             t = im.crop((max(0, cx - 60), max(0, cy - 25),
                          min(im.width, cx + 60), min(im.height, cy + 25)))
-        tiles.append((i, t.resize((t.width * 4, t.height * 4),
+        tiles.append((i, t.resize((t.width * 3, t.height * 3),
                                   Image.Resampling.LANCZOS)))
     sheets: list[Path] = []
     for s in range(0, len(tiles), tiles_per_sheet):
@@ -163,15 +163,15 @@ def build_montage(pages_dir: Path, indices: list[int], out: Path,
         rows = (len(ch) + cols - 1) // cols
         tw = max(c.width for _, c in ch)
         th = max(c.height for _, c in ch)
-        canvas = Image.new("L", (cols * (tw + 18) + 18,
-                                 rows * (th + 46) + 18), 255)
+        canvas = Image.new("L", (cols * (tw + 16) + 16,
+                                 rows * (th + 34) + 16), 255)
         d = ImageDraw.Draw(canvas)
         for m, (i, c) in enumerate(ch):
             r, col = divmod(m, cols)
-            x = 18 + col * (tw + 18)
-            y = 18 + r * (th + 46)
-            d.text((x + 6, y + 3), f"index {i}", fill=0, font=font)
-            canvas.paste(c, (x, y + 40))
+            x = 16 + col * (tw + 16)
+            y = 16 + r * (th + 34)
+            d.text((x + 4, y + 2), f"i{i}", fill=0, font=font)
+            canvas.paste(c, (x, y + 30))
         p = out / f"sheet_{s // tiles_per_sheet:02d}.png"
         canvas.save(p)
         sheets.append(p)
@@ -188,6 +188,8 @@ def main() -> None:
     ap.add_argument("--montage-out", default=None,
                     help="أخرج أوراق مونتاج (كاشف + ترويسة الفهرسة) للمراجعة — "
                          "المسار الموثوق؛ لا يستدعي النموذج")
+    ap.add_argument("--tiles-per-sheet", type=int, default=12,
+                    help="عدد القصاصات في ورقة المونتاج (12 افتراضياً، 24 للمسح الكامل)")
     args = ap.parse_args()
 
     pages = PROJ / args.pages_dir
@@ -196,7 +198,8 @@ def main() -> None:
         mdir = PROJ / args.montage_out
         mdir.mkdir(parents=True, exist_ok=True)
         sheets = build_montage(
-            pages, list(range(args.first, args.first + args.count)), mdir)
+            pages, list(range(args.first, args.first + args.count)), mdir,
+            tiles_per_sheet=args.tiles_per_sheet)
         for p in sheets:
             print(p)
         return
