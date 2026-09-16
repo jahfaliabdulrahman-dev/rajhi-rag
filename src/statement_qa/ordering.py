@@ -66,6 +66,63 @@ def check_order(per_page_dates: dict[int, list]) -> dict:
     return {"cross": cross, "intra": intra, "coverage": (with_date, total)}
 
 
+def check_page_numbers(pairs: list[tuple[int, int | None]]) -> dict:
+    """Printed page numbers vs scan positions — the scan-order truth.
+
+    `pairs` = (scan_position, printed_number|None) in scan order. Position is
+    NOT identity: a scan that skips or duplicates a sheet makes the printed
+    sequence jump, and a footer delta across such a pair then spans the
+    missing sheets' movements (proven on this statement: index 427 -> printed
+    ٤٢٨ with ٤٢٦/٤٢٧ absent, deficit == their movements exactly).
+
+    Returns: gaps [(pos_before, n_before, pos_after, n_after, missing[...])],
+    duplicates {printed: [positions]}, backwards [(pos, n, pos2, n2)],
+    checked/unread counts. Nothing here blocks a run — it NAMES what it saw.
+    """
+    seq = [(pos, pn) for pos, pn in pairs if isinstance(pn, int)]
+    gaps: list[tuple] = []
+    backwards: list[tuple] = []
+    positions: dict[int, list[int]] = {}
+    for pos, pn in seq:
+        positions.setdefault(pn, []).append(pos)
+    for (p1, n1), (p2, n2) in zip(seq, seq[1:]):
+        if n2 == n1 + 1:
+            continue
+        if n2 == n1:
+            continue          # a repeat — already captured in `duplicates`
+        if n2 > n1 + 1:
+            gaps.append((p1, n1, p2, n2, list(range(n1 + 1, n2))))
+        else:
+            backwards.append((p1, n1, p2, n2))
+    return {
+        "gaps": gaps,
+        "duplicates": {n: ps for n, ps in positions.items() if len(ps) > 1},
+        "backwards": backwards,
+        "checked": len(seq),
+        "unread": len(pairs) - len(seq),
+    }
+
+
+def summarize_page_numbers(pn: dict) -> str:
+    """Run-level one-liner for the ticker: is the scan order sound or not?"""
+    if not pn["checked"]:
+        return "الترقيم المطبوع: لم يُقرأ"
+    seg = f"الترقيم المطبوع: ✓ متسلسل ({pn['checked']} صفحة)"
+    if pn["gaps"]:
+        miss = []
+        for _p1, _n1, p2, _n2, missing in pn["gaps"]:
+            miss.append(f"ص{p2} ينقص قبلها {'، '.join(str(m) for m in missing)}")
+        seg = "⚠ الترقيم المطبوع: " + " · ".join(miss)
+    if pn["duplicates"]:
+        dups = "، ".join(f"{n} (مواقع {'/'.join(str(p) for p in ps)})"
+                        for n, ps in list(pn["duplicates"].items())[:3])
+        seg += f" — أرقام مكررة: {dups}"
+    if pn["backwards"]:
+        p1, n1, p2, n2 = pn["backwards"][0]
+        seg += f" — رجوع ترقيم: موقع {p1} (#{n1}) → {p2} (#{n2})"
+    return seg
+
+
 def summarize_ar(order: dict, boundaries: dict | None = None) -> str:
     """Run-level one-liner for the app ticker."""
     seg = "الترتيب: تواريخ تصاعدية ✓"
