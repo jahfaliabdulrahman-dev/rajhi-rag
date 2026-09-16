@@ -131,6 +131,84 @@ def read_page_no(png: Path, stats: dict | None = None) -> int | None:
     return None
 
 
+def _ink_crop(png: Path, size: tuple[int, int] = (140, 52)):
+    """Detector box -> normalized ink-only crop (bright pixels = ink)."""
+    from PIL import Image
+
+    cands = find_number_candidates(png)
+    if not cands:
+        return None
+    x0, y0, x1, y1 = cands[0]
+    cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+    with Image.open(png).convert("L") as im:
+        t = im.crop((max(0, cx - 60), max(0, cy - 25),
+                     min(im.width, cx + 60), min(im.height, cy + 25)))
+    a = 255.0 - np.asarray(t.resize(size, Image.Resampling.LANCZOS),
+                           dtype=np.float32)
+    return np.clip(a - np.percentile(a, 80), 0, None)
+
+
+def scan_duplicates(pages_dir: Path, first: int, count: int,
+                    max_candidates: int = 12) -> dict:
+    """Mechanical duplicate hunt — a repeated printed number means repeated ink.
+
+    Two sheets that carry the SAME printed number produce near-identical crops
+    (distance ≈ 0); consecutive sheets differ by one digit and sit far higher.
+    This is the deterministic test for "a sheet was duplicated/inserted", and
+    it needs no VLM call. Distance = mean |A−B| over the union ink mask,
+    minimized over ±2px shifts, normalized by the ink mean.
+
+    Returns {'n', 'adjacent': [(d, a, b)...] lowest first, 'candidates': [...]}.
+    """
+    crops = {}
+    for i in range(first, first + count):
+        png = pages_dir / f"pg-{i:03d}.png"
+        if not png.exists():
+            continue
+        c = _ink_crop(png)
+        if c is not None:
+            crops[i] = c
+    idx = sorted(crops)
+    if len(idx) < 2:
+        return {"n": len(idx), "adjacent": [], "candidates": []}
+    from PIL import Image
+
+    mask = np.stack([crops[i] for i in idx]).max(axis=0) > 0
+
+    def dist(a: int, b: int) -> float:
+        A, B = crops[a], crops[b]
+        best = float("inf")
+        for dy in (-2, -1, 0, 1, 2):
+            for dx in (-2, -1, 0, 1, 2):
+                Bb = np.roll(np.roll(B, dy, axis=0), dx, axis=1)
+                v = float(np.abs(A - Bb)[mask].mean() / (A[mask].mean() + 1e-6))
+                best = min(best, v)
+        return best
+
+    adjacent = sorted((dist(a, b), a, b) for a, b in zip(idx, idx[1:]))
+    # coarse pre-filter on a small version, then refine the best candidates
+    small = np.stack([np.asarray(
+        Image.fromarray(crops[i].astype(np.uint8)).resize((36, 14)),
+        dtype=np.float32) for i in idx])
+    rough = []
+    for s in range(len(idx)):
+        d = np.abs(small[s][None, :, :] - small).mean(axis=(1, 2))
+        for m in range(s + 1, len(idx)):
+            rough.append((float(d[m]), idx[s], idx[m]))
+    rough.sort()
+    out, seen = [], set()
+    for _, a, b in rough:
+        if b == a + 1 or (a, b) in seen:
+            continue
+        seen.add((a, b))
+        out.append((dist(a, b), a, b))
+        if len(out) >= max_candidates * 4:
+            break
+    out.sort()
+    return {"n": len(idx), "adjacent": adjacent[:max_candidates],
+            "candidates": out[:max_candidates]}
+
+
 def build_montage(pages_dir: Path, indices: list[int], out: Path,
                   tiles_per_sheet: int = 12) -> list[Path]:
     """Detector crops tiled with their PDF index — the reliable review path."""
@@ -190,10 +268,28 @@ def main() -> None:
                          "المسار الموثوق؛ لا يستدعي النموذج")
     ap.add_argument("--tiles-per-sheet", type=int, default=12,
                     help="عدد القصاصات في ورقة المونتاج (12 افتراضياً، 24 للمسح الكامل)")
+    ap.add_argument("--dup-scan", action="store_true",
+                    help="مسح ميكانيكي للبحث عن ورقة مكررة (تشابه الحبر) — بلا API")
     args = ap.parse_args()
 
     pages = PROJ / args.pages_dir
     out = PROJ / args.out
+    if args.dup_scan:
+        res = scan_duplicates(pages, args.first, args.count)
+        print(f"قصاصات مقروءة ميكانيكياً: {res['n']}")
+        print("أدنى 6 فروق بين متجاورين (التطابق التام ≈ صفر):")
+        for d, a, b in res["adjacent"][:6]:
+            print(f"  {a}→{b}: {d:.3f}")
+        print("أدنى 8 مرشحين للتكرار عن بُعد:")
+        for d, a, b in res["candidates"][:8]:
+            print(f"  {a} ↔ {b}: {d:.3f}  (بُعد {b - a})")
+        verdict = ("لا ورقة مكررة" if not res["candidates"]
+                   or res["candidates"][0][0] > 0.15 else "مرشح تكرار — تحقق بصرياً")
+        print(f"الحكم الميكانيكي: {verdict} "
+              f"(أدنى مسافة {res['candidates'][0][0]:.3f} vs عتبة 0.150)")
+        Path(PROJ / "data/local_sample/page_numbers_dup_scan.json").write_text(
+            json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+        return
     if args.montage_out:
         mdir = PROJ / args.montage_out
         mdir.mkdir(parents=True, exist_ok=True)
