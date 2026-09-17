@@ -78,6 +78,40 @@ def test_noqa_does_not_swallow_a_real_error(tmp_path):
     assert "suppressed: 1" in done.stdout
 
 
+def test_noqa_inside_a_string_is_not_a_suppression(tmp_path):
+    """A real hole an external audit drove through: the marker must be a comment.
+
+    `x = "# noqa"  # os-unused` — the string looked like a waiver to a raw regex,
+    so a genuine finding on that line disappeared. Read the tokenizer instead.
+    """
+    p = tmp_path / "string_noqa.py"
+    p.write_text('# a line nobody waives\nimport os\nx = "# noqa"\n',
+                 encoding="utf-8")
+    done = run_gate(tmp_path)
+    assert done.returncode == 1, done.stdout
+    assert "imported but unused" in done.stdout
+    assert "suppressed: 0" in done.stdout
+
+
+def test_noqa_on_the_same_line_as_a_string_still_works_as_a_comment(tmp_path):
+    """The named legitimate case must keep working: a waiver is a comment."""
+    (tmp_path / "waived.py").write_text(
+        'import os  # noqa: F401 — مطلوب لجانبه\n', encoding="utf-8")
+    done = run_gate(tmp_path)
+    assert done.returncode == 0, done.stdout
+    assert "suppressed: 1" in done.stdout
+
+
+def test_dot_directories_are_scanned_too(tmp_path):
+    """`.github/` is where a CI helper script lives — the gate must see it."""
+    (tmp_path / ".github" / "scripts").mkdir(parents=True)
+    (tmp_path / ".github" / "scripts" / "helper.py").write_text(
+        "def f():\n    return never_defined\n", encoding="utf-8")
+    done = run_gate(tmp_path)
+    assert done.returncode == 1, done.stdout
+    assert "helper.py" in done.stdout and "never_defined" in done.stdout
+
+
 def test_syntax_error_blocks(tmp_path):
     (tmp_path / "bad_syntax.py").write_text("def f(:\n    pass\n",
                                             encoding="utf-8")

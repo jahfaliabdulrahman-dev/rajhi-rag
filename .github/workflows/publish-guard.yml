@@ -29,6 +29,12 @@ jobs:
         run: |
           python3 -m pip install --quiet pyflakes==3.4.0
           python3 tools/static_gate.py
+      # The derived claims snapshot is only useful if something FAILS when the
+      # documents drift from it: a snapshot with no automatic caller rots
+      # silently (external audit, 2026-09-18). No local cache in CI — this reads
+      # docs/claims.json and asserts the public documents still match it.
+      - name: Public claims must match their derived snapshot
+        run: python3 tools/render_claims.py --check
       - name: Lightweight suite (no ML deps — compile, lock, public claims)
         run: |
           python3 -m pip install --quiet pytest
