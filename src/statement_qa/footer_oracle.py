@@ -48,9 +48,32 @@ FOOTER_PROMPT = """هذه الحافة السفلية من صفحة كشف حس�
 null لأي رقم غير مقروء أو غير موجود. JSON فقط بلا أي تعليق."""
 
 CROP_TOP = 0.75  # bottom band containing the printed totals row
+CROP_MARGIN = 40  # px kept above the detected band, when its position is known
 # The three printed totals, one name for them everywhere (the reader fills
 # them, the oracle checks them, the provenance auditors walk them).
 FIELDS = ("debits", "credits", "balance")
+
+
+def crop_top_px(height: int, referee_y: int | None = None,
+                *, margin: int = CROP_MARGIN) -> int:
+    """Where the footer band starts — measured when possible, guessed otherwise.
+
+    The fixed fraction assumes the totals row always sits in the bottom quarter.
+    It does not: a statement's last page is shorter, so its block sits higher.
+    Measured on the reference corpus: one page's band sits at y=1662 while the
+    crop started at 1753 ⇒ the oracle never looked at it (an external audit found
+    this by comparing the page gate's `referee_y` against `0.75·height`).
+
+    Two properties make this safe to switch on:
+      · the result is NEVER below the old fraction, so the new crop always
+        contains the old one — no page loses evidence it used to have;
+      · with no measured position (page gate off, or band not detected) the
+        answer is exactly the old fraction, so behaviour is unchanged.
+    """
+    fallback = int(height * CROP_TOP)
+    if referee_y and referee_y > 0:
+        return max(0, min(int(referee_y) - margin, fallback))
+    return fallback
 
 
 @dataclass
@@ -66,10 +89,11 @@ class FooterReading:
         return any(v is not None for v in (self.debits, self.credits, self.balance))
 
 
-def _footer_crop_png(image_path: str) -> bytes:
+def _footer_crop_png(image_path: str, crop_top: int | None = None) -> bytes:
     im = Image.open(image_path)
     w, h = im.size
-    band = im.crop((0, int(h * CROP_TOP), w, h))
+    top = crop_top if crop_top is not None else int(h * CROP_TOP)
+    band = im.crop((0, max(0, min(top, h - 1)), w, h))
     buf = io.BytesIO()
     band.save(buf, format="PNG")
     return buf.getvalue()
@@ -92,9 +116,17 @@ def _reading_from_content(content: str) -> FooterReading | None:
     return reading if reading.any_value else None
 
 
-def read_footer(image_path: str, stats: dict | None = None) -> FooterReading | None:
-    """Bottom band of the page -> FooterReading (None = nothing readable)."""
-    b64 = base64.b64encode(_footer_crop_png(image_path)).decode()
+def read_footer(image_path: str, stats: dict | None = None,
+                referee_y: int | None = None) -> FooterReading | None:
+    """Bottom band of the page -> FooterReading (None = nothing readable).
+
+    `referee_y` = the page gate's measured position of the printed band, when it
+    measured one: the crop then starts just above it instead of at the fixed
+    fraction (see `crop_top_px` for why that is safe)."""
+    im = Image.open(image_path)
+    top = crop_top_px(im.size[1], referee_y)
+    im.close()
+    b64 = base64.b64encode(_footer_crop_png(image_path, top)).decode()
     return chat_vlm_image(b64, FOOTER_PROMPT, max_tokens=1600, stats=stats,
                           parse=_reading_from_content)
 
