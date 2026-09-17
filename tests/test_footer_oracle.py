@@ -182,6 +182,21 @@ class _FakeResp:
         return self._body
 
 
+def test_empty_provider_content_is_a_named_retryable_error(monkeypatch):
+    """A provider can return empty content; that must not surface as a TypeError
+    from deep inside the parser (measured: 2 of 10 pages in a calibration)."""
+    import pytest
+
+    from statement_qa import vlm_reader
+
+    body = json.dumps({"choices": [{"message": {"content": None}}]}).encode()
+    monkeypatch.setattr(vlm_reader.urllib.request, "urlopen",
+                        lambda *a, **k: _FakeResp(body))
+    monkeypatch.setattr(vlm_reader.time, "sleep", lambda *_: None)
+    with pytest.raises(RuntimeError, match="empty content|retries exhausted"):
+        vlm_reader.chat_vlm_image("Zm9v", "prompt")
+
+
 def test_read_footer_parses_and_marks_raw(tmp_path, monkeypatch):
     from PIL import Image
     from statement_qa import vlm_reader

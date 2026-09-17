@@ -116,6 +116,7 @@ def chat_vlm_image(image_b64: str | list[str], prompt: str,
         headers={"Authorization": f"Bearer {_api_key()}",
                  "Content-Type": "application/json"})
     delay = 10
+    last_error: Exception | None = None
     for attempt in range(_ATTEMPTS):
         if stats is not None:
             # Every attempt IS one HTTP request. The ledger's `calls` counts
@@ -126,7 +127,16 @@ def chat_vlm_image(image_b64: str | list[str], prompt: str,
             out = json.loads(urllib.request.urlopen(req, timeout=180).read().decode())
             if stats is not None and isinstance(out.get("usage"), dict):
                 stats.update(out["usage"])
-            content = out["choices"][0]["message"]["content"]
+            # A provider can answer with EMPTY content (a length cap, or a
+            # model that emitted only reasoning). That surfaced as
+            # «TypeError: expected string or bytes-like object, got NoneType»
+            # from deep inside the parser — opaque AND not retried, whereas it
+            # is exactly the transient blip the retry loop exists for.
+            # Measured: 2 of 10 pages in a calibration run returned empty.
+            choices = out.get("choices") or [{}]
+            content = (choices[0].get("message") or {}).get("content")
+            if not content or not str(content).strip():
+                raise ValueError("VLM empty content (المزوّد أعاد محتوى فارغاً)")
             return parse(content) if parse else content
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < _ATTEMPTS - 1:
@@ -140,11 +150,15 @@ def chat_vlm_image(image_b64: str | list[str], prompt: str,
                 continue
             raise RuntimeError(f"VLM network: {e}") from e
         except (json.JSONDecodeError, ValueError) as e:
+            last_error = e      # empty content lands here too: it is retryable
             if attempt < _ATTEMPTS - 1:
                 time.sleep(delay); delay *= 2
                 continue
             raise RuntimeError(f"VLM JSON: {e}") from e
-    raise RuntimeError("VLM retries exhausted")
+    # The cause is named, not swallowed: «retries exhausted» alone told nobody
+    # whether the provider was down, the JSON was malformed, or the answer came
+    # back empty (each needs a different response).
+    raise RuntimeError(f"VLM retries exhausted — آخر سبب: {last_error}")
 
 
 def _rows_from_content(content: str) -> list[dict]:

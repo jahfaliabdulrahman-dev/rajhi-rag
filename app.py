@@ -56,6 +56,7 @@ from statement_qa.render import (
 from statement_qa.verification import (
     caution as verification_caution,
     coverage_line as verification_coverage,
+    format_effects,
     verdicts_from_checks,
 )
 from statement_qa.footer_oracle import (
@@ -596,7 +597,11 @@ def _process_pdf_locked(pdf_path: str, progress):
                           + "، ".join(str(c["page"]) for c in group))
     else:
         seg_f = "تقرير الفوتر: تعذرت قراءة الإطارات — لا حكم على أي صفحة"
-    segs = [base, seg_f, summarize_era_ar(era_fp),
+    _verdicts = STATE.get("verdicts") or {}
+    _suspect_pages = sorted({r["page"] for r in all_rows if not r.get("ok")})
+    segs = [base, seg_f,
+            summarize_era_ar(era_fp,
+                             format_effects(_verdicts, _suspect_pages)),
             summarize_order_ar(order, boundaries),
             summarize_page_numbers(check_page_numbers(page_nos))]
     if abort_reason:

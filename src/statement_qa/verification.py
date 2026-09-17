@@ -64,6 +64,22 @@ def coverage_line(verdicts: dict[int, str]) -> str:
             f"({proven / total:.1%}) — والباقي مسمّى بالاسم")
 
 
+def format_effects(footer_status: dict[int, str], suspect_pages=()) -> dict[int, str]:
+    """Why a page deserves attention — for the format detector to consult.
+
+    A style change is worth a warning only when something was measured on that
+    page: a verdict that is not ok, or a row the chain could not confirm. This
+    turns the format line from an 11%-of-pages fog into a pointer (audit P3-5).
+    """
+    out: dict[int, str] = {}
+    for page, status in (footer_status or {}).items():
+        if not is_proven(status):
+            out[page] = verdict_label(status)
+    for page in suspect_pages or ():
+        out.setdefault(page, "شكوك سلسلة")
+    return out
+
+
 def caution(used_pages, verdicts: dict[int, str]) -> str:
     """The line attached to an answer built from pages that are not proven.
 

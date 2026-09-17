@@ -110,6 +110,29 @@ def test_evidence_mode_empties_the_panel_when_tools_failed():
     assert render.evidence_mode(_Res()) == "fallback"
 
 
+def test_format_warning_requires_a_measured_effect():
+    """P3-5: ~11% of pages trip the style detector. Warning on all of them makes
+    the one that matters indistinguishable from the seventy that do not."""
+    from statement_qa import era
+
+    fp = {"styles": {1: "old", 2: "new", 3: "new", 4: "none"},
+          "transitions": [(1, 2, "old", "new")], "outliers": [3],
+          "overall": "mixed", "majority": "new"}
+    quiet = era.summarize_ar(fp, {})
+    assert "⚠" not in quiet and "بلا أثر مقيس" in quiet
+    loud = era.summarize_ar(fp, {2: "⚠ فجوة مسح"})
+    assert "⚠" in loud and "ص2" in loud and "فجوة" in loud
+    assert "بلا أثر مقيس" not in loud
+
+
+def test_format_effects_only_names_pages_where_something_happened():
+    v = verification.verdicts_from_checks(CHECKS)
+    eff = verification.format_effects(v, suspect_pages=[9])
+    assert eff[427] == "⚠ فجوة مسح" and eff[9] == "شكوك سلسلة"
+    assert 1 not in eff and 2 not in eff          # proven pages stay silent
+    assert verification.format_effects({}, []) == {}
+
+
 def test_date_cell_shows_gregorian_marks_inheritance_and_keeps_raw():
     assert render.date_cell({"date": "١٤٣٤١٢٢٦ ٢٠١٣١٠٣١"}) == "2013/10/31"
     assert render.date_cell({"date": "2013/10/31",
