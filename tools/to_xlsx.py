@@ -40,7 +40,48 @@ ARABIC_VERDICT = {
     "gap": "فجوة إطارات (ورق غائب من المسح)",
     "absent": "لا سطر إجماليات مطبوع",
     "unchecked": "غير قابل للتحقق (جارُه بلا إطار)",
+    "gate_rejected": "لم تُقرأ (رفضتها بوابة جودة المسح)",
 }
+
+# ————— التواريخ: ثلاثة أصناف لا واحد —————
+# The reader returned the printed date as it found it, and the paper (and the
+# model) mixed digit sets: Arabic-Indic ٠-٩ (U+0660), **Extended** Arabic-Indic
+# ۰-۹ (U+06F0 — a different block, not a variant of the first), Latin, and even
+# both inside one value (`۲۰۱۳۱۲۰٥`). Measured across the 629 pages: 2949 / 1368
+# / 492 / 425 rows plus 504 with no usable date. An export that leaves that
+# column alone hands the defect to the buyer, so it is normalised here — with
+# the original kept beside it and the failures counted, never silently dropped.
+_DIGIT_MAP = {chr(0x0660 + i): str(i) for i in range(10)}
+_DIGIT_MAP.update({chr(0x06F0 + i): str(i) for i in range(10)})
+_DATE_STATUS_AR = {
+    "ok": "تاريخ كامل",
+    "incomplete": "تاريخ غير مكتمل (أقل من ٨ خانات)",
+    "implausible": "تاريخ غير معقول (خارج 1900–2100)",
+    "missing": "بلا تاريخ مطبوع",
+}
+
+
+def to_ascii_digits(raw: str) -> str:
+    """كل مجموعات الأرقام → لاتينية. الصيغة المختلطة تُطبَّع بلا استثناء."""
+    return "".join(_DIGIT_MAP.get(ch, ch) for ch in raw)
+
+
+def normalize_date(raw: str | None) -> tuple[str, str, int | None]:
+    """(ISO date | '', status, year) — YYYYMMDD كما طُبع، بمجموعة أرقام أيّاً كانت.
+
+    Returns `iso=''` when the value cannot honestly be called a date; the status
+    says which kind of failure it is, so the summary can count them instead of
+    hiding them behind an empty cell.
+    """
+    if raw is None or not str(raw).strip():
+        return "", "missing", None
+    digits = "".join(ch for ch in to_ascii_digits(str(raw)) if ch.isdigit())
+    if len(digits) != 8:
+        return "", "incomplete", None
+    year, month, day = int(digits[:4]), int(digits[4:6]), int(digits[6:8])
+    if not (1900 <= year <= 2100) or not (1 <= month <= 12) or not (1 <= day <= 31):
+        return "", "implausible", None
+    return f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}", "ok", year
 
 HEAD_FILL = PatternFill("solid", fgColor="1F3864")
 HEAD_FONT = Font(color="FFFFFF", bold=True, size=11)
@@ -67,13 +108,18 @@ def load(run: Path) -> tuple[list[dict], dict, dict, dict]:
             "recovered": bool(data.get("recovered")),
             "reread": bool(data.get("reread")),
             "error": bool(data.get("error")),
+            "arbitrated": bool(data.get("arbitrated_by")),
         }
         for i, row in enumerate(data.get("raw_rows") or [], start=1):
+            iso, status, year = normalize_date(row.get("date"))
             rows.append({
                 "page": page,
                 "row_no": i,
                 "printed_page": data.get("page_no"),
                 "date": row.get("date"),
+                "date_iso": iso,
+                "date_status": status,
+                "year": year,
                 "desc": row.get("desc"),
                 "printed_movement": row.get("raw_movement") or row.get("movement"),
                 "printed_balance": row.get("raw_balance") or row.get("balance"),
@@ -83,6 +129,219 @@ def load(run: Path) -> tuple[list[dict], dict, dict, dict]:
                 "counted": verdict.get("rows"),
             })
     return rows, report, per_page, flags
+
+
+def _num(value) -> float | None:
+    """القيمة كما فُهمت رقماً — أو None. تُستعمل للفرز والجمع فقط."""
+    if value is None:
+        return None
+    text = to_ascii_digits(str(value)).replace(",", "").replace("٫", ".").strip()
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2
+
+
+def summary_facts(rows: list[dict], report: dict, per_page: dict) -> dict:
+    """كل أرقام الملخص، محسوبة مرة واحدة ومُعلَنة الطريقة في الورقة نفسها."""
+    by_status: dict[str, int] = {}
+    for r in rows:
+        by_status[r["date_status"]] = by_status.get(r["date_status"], 0) + 1
+    dates = sorted(r["date_iso"] for r in rows if r["date_iso"])
+    years = sorted({r["year"] for r in rows if r["year"]})
+    ok_pages = [e for e in per_page.values() if e.get("footer") == "ok"]
+    last_ok = max(ok_pages, key=lambda e: e["page"]) if ok_pages else None
+
+    # الإجماليات المطبوعة **لكل صفحة** لا تراكمية (قِيست: صفحة 1 = 650.00 وصفحة
+    # 628 = 300.00) ⇒ جمعها عبر الصفحات المطابقة مشروع، وهو أقوى رقم في الملف
+    # لأنه من الورق لا من حسابنا.
+    printed = {"debits": 0.0, "credits": 0.0}
+    pages_in_total = 0
+    for entry in ok_pages:
+        values = {i.get("field"): _num(i.get("footer"))
+                  for i in (entry.get("footer_detail") or [])}
+        deb = values.get("debits")
+        cred = values.get("credits")
+        if deb is None or cred is None:
+            continue
+        printed["debits"] += deb
+        printed["credits"] += cred
+        pages_in_total += 1
+    last_balance = None
+    if last_ok:
+        for item in last_ok.get("footer_detail") or []:
+            if item.get("field") == "balance":
+                last_balance = item.get("footer")
+
+    # الترتيب على الصفحات المطابقة فقط: الصفحة الختامية تحمل سطور ملخّص
+    # («إجمالي الإيداعات») ولو دخلت لصار «أكبر حركة» رقماً ليس حركة.
+    ranked = [(abs(v), r) for r in rows
+              if r["footer"] == "ok" and (v := _num(r["movement"])) is not None and v != 0]
+    biggest = max(ranked, key=lambda p: p[0]) if ranked else None
+    smallest = min(ranked, key=lambda p: p[0]) if ranked else None
+    read_ms = [e["ms_read"] for e in per_page.values() if e.get("ms_read")]
+    return {
+        "rows": len(rows),
+        "counted": sum(int(e.get("rows") or 0) for e in per_page.values()),
+        "pages": len(per_page),
+        "date_status": by_status,
+        "dates_ok": by_status.get("ok", 0),
+        "first_date": dates[0] if dates else "",
+        "last_date": dates[-1] if dates else "",
+        "years": years,
+        "ok_pages": len(ok_pages),
+        "pages_in_total": pages_in_total,
+        "last_ok_page": (last_ok or {}).get("page"),
+        "printed_debits": f"{printed['debits']:,.2f}",
+        "printed_credits": f"{printed['credits']:,.2f}",
+        "printed_balance": last_balance,
+        "biggest": biggest,
+        "smallest": smallest,
+        "median_page_s": round(_median(read_ms) / 1000, 2) if read_ms else None,
+        "verdicts": report.get("footer") or {},
+        "cost": (report.get("usage") or {}).get("cost"),
+    }
+
+
+def summary_sheet(facts: dict, rows: list[dict], report: dict) -> list[list]:
+    ds = facts["date_status"]
+    return [
+        ["نظرة عامة", "", ""],
+        ["الصفوف المقروءة من الكشوف", facts["rows"], "كل سطر عاد به القارئ من الورق"],
+        ["الصفوف المحتسبة معاملات في التقرير", facts["counted"],
+         "الفرق سطور ملخّص في الصفحة الختامية (لا معاملات)"],
+        ["الصفحات", facts["pages"], "صفحة ممسوحة"],
+        ["الصفحات المطابقة لإجمالياتها المطبوعة", facts["ok_pages"],
+         "حكم المحكَّم: مجموع الصفوف == الإجمالي المطبوع أسفل الصفحة"],
+        ["", "", ""],
+        ["التواريخ", "", ""],
+        ["تاريخ كامل (٨ خانات)", ds.get("ok", 0), "شمل كل مجموعات الأرقام المطبوعة"],
+        ["تاريخ غير مكتمل", ds.get("incomplete", 0),
+         "أقل من ٨ خانات كما طُبع — لم يُخمَّن ولم يُصحَّح"],
+        ["تاريخ غير معقول", ds.get("implausible", 0), "خارج 1900–2100"],
+        ["بلا تاريخ مطبوع", ds.get("missing", 0), "سطور افتتاحية/ترحيل بلا تاريخ على الورق"],
+        ["أول تاريخ", facts["first_date"], "من التواريخ المكتملة فقط"],
+        ["آخر تاريخ", facts["last_date"], "من التواريخ المكتملة فقط"],
+        ["السنوات المشمولة", " · ".join(str(y) for y in facts["years"]),
+         f"عددها {len(facts['years'])}"],
+        ["", "", ""],
+        ["الإجماليات المطبوعة (لكل صفحة — تُجمع)", "", ""],
+        ["إجمالي المدين المطبوع", facts["printed_debits"],
+         f"جمع سطر الإجماليات المطبوع في {facts['pages_in_total']} صفحة مطابقة — "
+         f"الرقم من الورق لا من حسابنا"],
+        ["إجمالي الدائن المطبوع", facts["printed_credits"],
+         "نفس المصدر: سطور الإجماليات المطبوعة"],
+        ["الرصيد الختامي المطبوع", facts["printed_balance"],
+         f"من سطر الإجماليات في آخر صفحة مطابقة (صفحة {facts['last_ok_page']})"],
+        ["", "", ""],
+        ["الحركات", "", ""],
+        ["أكبر حركة", f"{facts['biggest'][0]:,.2f}" if facts["biggest"] else "",
+         f"صفحة {facts['biggest'][1]['page']} · صفّ {facts['biggest'][1]['row_no']}"
+         if facts["biggest"] else ""],
+        ["أصغر حركة (غير صفرية)", f"{facts['smallest'][0]:,.2f}" if facts["smallest"] else "",
+         f"صفحة {facts['smallest'][1]['page']} · صفّ {facts['smallest'][1]['row_no']}"
+         if facts["smallest"] else ""],
+        ["", "", ""],
+        ["حالة الإثبات", "", ""],
+        ["صفحات لا سطر إجماليات لها", facts["verdicts"].get("absent", 0), "منها أوراق بيضاء فعلاً"],
+        ["صفحات غير قابلة للتحقق", facts["verdicts"].get("unchecked", 0), "جوارها بلا إطار"],
+        ["فجوات إطارات", facts["verdicts"].get("gap", 0), "أوراق غائبة من المسح نفسه"],
+        ["", "", ""],
+        ["التشغيل", "", ""],
+        ["الكلفة المدفوعة", f"${facts['cost']:.4f}" if isinstance(facts["cost"], (int, float)) else "",
+         "مجموع usage.cost في الكاش"],
+        ["وسيط زمن الصفحة (ث)", facts["median_page_s"], "المقيس، لا المقدَّر"],
+        ["طريقة كل رقم أعلاه", "من أدلة التشغيل أو من الإجماليات المطبوعة",
+         "لا رقم في هذه الورقة أُعيد اشتقاقه يدوياً"],
+    ]
+
+
+def question_set(rows: list[dict], facts: dict, per_page: dict,
+                 flags: dict) -> tuple[list[list], list[list]]:
+    """(الأسئلة, الصفوف الداعمة) — حساب حتمي بلا نموذج لغوي.
+
+    Every answer here is a filter or a sum over the run's own evidence, so the
+    same command returns the same number tomorrow. Questions that need a model
+    (interpretation, legal meaning) are deliberately absent — an export that
+    answers those would be guessing with a confident tone.
+    """
+    questions: list[list] = []
+    evidence: list[list] = []
+    ds = facts["date_status"]
+
+    def add(qid: int, question: str, answer, method: str, basis: str) -> None:
+        questions.append([qid, question, answer, method, basis])
+
+    add(1, "كم عدد الحركات المقروءة؟", facts["rows"],
+        "عدّ الصفوف في كاش القراءة", "كل صفوف الورق (منها سطور ملخّص)")
+    add(2, "كم عدد الصفحات ولم تُقبل منها كم صفحة؟",
+        f"{facts['pages']} صفحة · {facts['ok_pages']} مطابقة · "
+        f"{facts['verdicts'].get('absent', 0)} بلا سطر إجماليات · "
+        f"{facts['verdicts'].get('unchecked', 0)} غير قابلة للتحقق",
+        "حكم المحكَّم لكل صفحة", "ورقة «التحقق لكل صفحة»")
+    add(3, "ما إجمالي المدين المطبوع في الكشوف؟", facts["printed_debits"],
+        f"جمع سطور الإجماليات المطبوعة في {facts['pages_in_total']} صفحة مطابقة "
+        f"(الإجماليات لكل صفحة، فجمعها مشروع) — المصدر هو الورق",
+        f"الصفحات المطابقة ({facts['ok_pages']} من {facts['pages']})")
+    add(4, "ما إجمالي الدائن المطبوع في الكشوف؟", facts["printed_credits"],
+        "نفس المصدر: سطور الإجماليات المطبوعة",
+        f"الصفحات المطابقة ({facts['pages_in_total']} صفحة دخلت في المجموع)")
+    add(5, "ما الرصيد الختامي المطبوع؟", facts["printed_balance"] or "-",
+        "من سطر الإجماليات في آخر صفحة مطابقة", f"الصفحة {facts['last_ok_page']}")
+    add(6, "ما مدى التواريخ؟",
+        f"{facts['first_date']} → {facts['last_date']} "
+        f"({len(facts['years'])} سنة)",
+        "تصنيف ٨ خانات بعد توحيد مجموعات الأرقام الثلاث",
+        f"مكتملة: {ds.get('ok', 0)} · غير مكتملة: {ds.get('incomplete', 0)} "
+        f"· بلا تاريخ: {ds.get('missing', 0)}")
+    if facts["biggest"]:
+        amount, rec = facts["biggest"]
+        add(7, "ما أكبر حركة؟", f"{amount:,.2f}",
+            "فرز القيم المطلقة على الصفحات المطابقة (سطور الملخّص مستثناة)",
+            f"صفحة {rec['page']} · صفّ {rec['row_no']}")
+        evidence.append([7, rec["page"], rec["row_no"], rec["date_iso"], rec["desc"],
+                         rec["movement"], rec["balance"], "أكبر حركة"])
+    if facts["smallest"]:
+        amount, rec = facts["smallest"]
+        add(8, "ما أصغر حركة غير صفرية؟", f"{amount:,.2f}",
+            "فرز القيم المطلقة للمقروء", f"صفحة {rec['page']} · صفّ {rec['row_no']}")
+        evidence.append([8, rec["page"], rec["row_no"], rec["date_iso"], rec["desc"],
+                         rec["movement"], rec["balance"], "أصغر حركة"])
+    odd = [r for r in rows if r["date_status"] != "ok"]
+    add(9, "كم حركة بلا تاريخ صالح؟", len(odd),
+        "تصنيف كل صفّ: مكتمل/غير مكتمل/بلا تاريخ",
+        f"غير مكتملة {ds.get('incomplete', 0)} · بلا تاريخ {ds.get('missing', 0)} "
+        f"· غير معقولة {ds.get('implausible', 0)}")
+    for r in odd:
+        evidence.append([9, r["page"], r["row_no"], r["date_iso"], r["desc"],
+                         r["movement"], r["balance"], _DATE_STATUS_AR[r["date_status"]]])
+    arb = sorted(p for p, f in flags.items() if f.get("arbitrated"))
+    add(10, "كم صفحة احتاجت تحكيماً بشرياً؟", len(arb),
+        "وسم arbitrated_by في كاش التشغيل", " · ".join(str(p) for p in arb) or "-")
+    for r in rows:
+        if r["page"] in arb:
+            evidence.append([10, r["page"], r["row_no"], r["date_iso"], r["desc"],
+                             r["movement"], r["balance"], "صفّ في صفحة محكَّمة"])
+    repaired = sorted(p for p, f in flags.items() if f.get("recovered") or f.get("reread"))
+    add(11, "كم صفحة أُصلحت آلياً (استدراك/إعادة قراءة)؟", len(repaired),
+        "وسوم recovered/reread في كاش التشغيل",
+        " · ".join(str(p) for p in repaired) or "-")
+    add(12, "ما الكلفة المدفوعة ووسيط زمن الصفحة؟",
+        f"${facts['cost']:.4f} · {facts['median_page_s']} ث" if isinstance(
+            facts["cost"], (int, float)) else "-",
+        "مجموع usage.cost ووسيط ms_read", "كاش التشغيل")
+    return questions, evidence
+
 
 
 def write_sheet(ws, header: list[str], rows: list[list], widths: list[int],
@@ -104,20 +363,50 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
     if not rows:
         raise SystemExit(f"لا صفوف في {run}/results — هل المسار صحيح؟")
 
+    facts = summary_facts(rows, report, per_page)
     wb = Workbook()
-    ws = wb.active
-    assert ws is not None                      # openpyxl always creates one sheet
-    ws.title = "الحركات"
+
+    ws0 = wb.active
+    assert ws0 is not None                     # openpyxl always creates one sheet
+    ws0.title = "الملخص"
+    ws0.append(["البند", "القيمة", "الطريقة / الملاحظة"])
+    for cell in ws0[1]:
+        cell.fill, cell.font = HEAD_FILL, HEAD_FONT
+    section_font = Font(bold=True, color="1F3864", size=11)
+    for label, value, note in summary_sheet(facts, rows, report):
+        ws0.append([label, value, note])
+        if label and not value and not note:   # a section heading row
+            ws0.cell(row=ws0.max_row, column=1).font = section_font
+    ws0.column_dimensions["A"].width = 40
+    ws0.column_dimensions["B"].width = 26
+    ws0.column_dimensions["C"].width = 70
+    for row in ws0.iter_rows(min_row=2, min_col=3, max_col=3):
+        row[0].alignment = Alignment(wrap_text=True, vertical="top")
+
+    ws = wb.create_sheet("الحركات")
     write_sheet(
         ws,
         ["الصفحة (ملف)", "رقم الصفّ", "رقم الصفحة المطبوع", "التاريخ (كما طُبع)",
-         "الوصف", "الحركة كما طُبعت", "الرصيد كما طُبع", "الحركة (رقمي)",
+         "التاريخ (ميلادي)", "حالة التاريخ", "السنة", "الوصف",
+         "الحركة كما طُبعت", "الرصيد كما طُبع", "الحركة (رقمي)",
          "الرصيد (رقمي)", "حالة إجماليات الصفحة"],
-        [[r["page"], r["row_no"], r["printed_page"], r["date"], r["desc"],
+        [[r["page"], r["row_no"], r["printed_page"], r["date"], r["date_iso"],
+          _DATE_STATUS_AR[r["date_status"]], r["year"], r["desc"],
           r["printed_movement"], r["printed_balance"], r["movement"],
           r["balance"], ARABIC_VERDICT.get(r["footer"], r["footer"])]
          for r in rows],
-        [12, 9, 16, 18, 46, 16, 16, 14, 14, 30])
+        [12, 9, 16, 18, 14, 26, 8, 46, 16, 16, 14, 14, 30])
+
+    # الأسئلة: حساب حتمي على أدلة التشغيل — بلا نموذج لغوي وبلا كلفة، فالجواب
+    # نفسه يُعاد إنتاجه بنفس الأمر غداً. ما يحتاج تفسيراً لا يُخمَّن هنا.
+    questions, evidence = question_set(rows, facts, per_page, flags)
+    ws_q = wb.create_sheet("الأسئلة")
+    write_sheet(ws_q, ["#", "السؤال", "الجواب", "الطريقة (كيف حُسب)", "الأساس / الدليل"],
+                questions, [5, 44, 40, 44, 38])
+    ws_e = wb.create_sheet("صفوف الأسئلة")
+    write_sheet(ws_e, ["# السؤال", "الصفحة", "رقم الصفّ", "التاريخ (ميلادي)", "الوصف",
+                       "الحركة", "الرصيد", "سبب الدعم"],
+                evidence, [10, 10, 10, 14, 46, 14, 14, 30])
 
     ws2 = wb.create_sheet("التحقق لكل صفحة")
     write_sheet(
@@ -185,6 +474,15 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
         ("القيم المطبوعة", "«كما طُبع» = نص الورقة حرفياً (أرقام عربية-هندية كما في الورقة) — "
                            "مُبقاة كما هي لأن التحويل قيمة مضافة لا تُفرض على المصدر."),
         ("القيم الرقمية", "«رقمي» = تحويل النظام للأرقام (نقطة عشرية لاتينية) للمقارنة والفرز."),
+        ("التواريخ", "الورق والقارئ خلطا ثلاث مجموعات أرقام: عربية-هندية (٠-٩) وفارسية (۰-۹) "
+                     "ولاتينية — وبعض القيم تخلط مجموعتين داخلها. عمود «التاريخ (ميلادي)» "
+                     "يُنتج صيغة YYYY-MM-DD موحّدة، وعمود «حالة التاريخ» يسمّي كل ما لم يكتمل "
+                     "بدل تركه فارغاً."),
+        ("ورقة الأسئلة", "الأسئلة في ورقة «الأسئلة» تُجاب بحساب حتمي من أدلة التشغيل نفسها "
+                         "(عدّ · فرز · قراءة الإجماليات المطبوعة) — **بلا نموذج لغوي وبلا كلفة**، "
+                         "فالجواب نفسه يُعاد إنتاجه بنفس الأمر. وورقة «صفوف الأسئلة» تحمل الصفوف "
+                         "الداعمة لكل جواب (أكبر حركة · أصغر حركة · الصفوف بلا تاريخ · صفوف "
+                         "الصفحات المحكَّمة) مع سبب الدعم."),
         ("التحكيم البشري", "الصفوف التي حُكِّمت بعين بشرية موثّقة في المستودع بـ`arbitrated_by` "
                            "(من · لماذا · القيمة الأصلية) ويمكن إعادة اشتقاقها بأمر واحد."),
     ]
@@ -198,7 +496,6 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
     ws4.column_dimensions["B"].width = 105
     for row in ws4.iter_rows(min_row=2, min_col=2, max_col=2):
         row[0].alignment = Alignment(wrap_text=True, vertical="top")
-    ws4["B11"].font = NOTE_FONT
 
     out.parent.mkdir(parents=True, exist_ok=True)
     wb.save(out)
@@ -206,6 +503,10 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
         "rows": len(rows),
         "pages": len(per_page),
         "unproven": len(unproven),
+        "questions": len(questions),
+        "evidence": len(evidence),
+        "dates_ok": facts["dates_ok"],
+        "date_status": facts["date_status"],
         "rejected_by_gate": len(gate_verdict.get("rejected_pages") or []),
         "out": str(out),
     }
@@ -222,6 +523,8 @@ def main() -> None:
     print(f"[to-xlsx] {info['out']}")
     print(f"  صفوف: {info['rows']} · صفحات: {info['pages']} · بلا إثبات: {info['unproven']}"
           f" · مرفوضة من البوابة: {info['rejected_by_gate']}")
+    print(f"  أسئلة: {info['questions']} · صفوف داعمة: {info['evidence']}"
+          f" · تواريخ مكتملة: {info['dates_ok']} (الحالة: {info['date_status']})")
 
 
 if __name__ == "__main__":
