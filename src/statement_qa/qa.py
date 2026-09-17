@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
+from decimal import Decimal
 
 from statement_qa.retriever import retrieve
 
@@ -167,11 +168,42 @@ class QAResult:
     # backbone). None/[] when the answer came from prose (no tools ran).
     used_row_nos: list[int] | None = None
     tools_failed: bool = False
+    refused: bool = False
+    scope: str = "in_scope"
 
     def __str__(self) -> str:
         src = "; ".join(f"صفحة {s['page']} ص{s['row_start']}–{s['row_end']}"
                         for s in self.sources)
         return f"{self.answer}\n[المصادر: {src}]"
+
+
+def _data_facts(rows) -> tuple[set, int | None, frozenset]:
+    """What the statement itself proves: its years, its last page, its amounts.
+
+    Computed once per question from the rows the caller passes. Empty input
+    returns empties, and the gate then stays open — it may only refuse what it
+    can prove.
+    """
+    years: set[int] = set()
+    max_page: int | None = None
+    amounts: set[Decimal] = set()
+    from statement_qa.ordering import parse_gregorian
+
+    for r in rows or ():
+        g = parse_gregorian(r.get("date"))
+        if g:
+            years.add(int(g[:4]))
+        page = r.get("page")
+        if isinstance(page, int):
+            max_page = page if max_page is None else max(max_page, page)
+        for value in (r.get("movement"), r.get("balance")):
+            if value is None:
+                continue
+            try:
+                amounts.add(Decimal(str(value)).quantize(Decimal("0.01")))
+            except Exception:  # noqa: BLE001
+                continue
+    return years, max_page, frozenset(amounts)
 
 
 def answer_question(store, question: str, rows=None, chunks=None,
@@ -180,6 +212,20 @@ def answer_question(store, question: str, rows=None, chunks=None,
 
     `chunks` (optional): the run's chunks — used ONLY to boost the last page
     for closing-balance questions (see boost_last_page)."""
+    # THE GATE RUNS BEFORE THE MODEL. Three measured defects (Gate 4) came from
+    # handing a model with tools a question whose premise sits outside the
+    # document: it refused once and answered the same question the next time.
+    # Determinism here is not a stronger prompt, it is not asking at all.
+    from statement_qa.scope import classify
+
+    if rows:
+        _years, _max_page, _amounts = _data_facts(rows)
+        gate = classify(question, _years, _max_page, _amounts)
+        if gate.kind != "in_scope":
+            return QAResult(answer=gate.answer, sources=[], used_row_nos=[],
+                            refused=gate.kind == "out_of_scope",
+                            scope=gate.kind)
+
     hits = boost_last_page(retrieve(store, question, k=k), chunks, question)
     context = format_hits(hits)
     llm = llm or build_llm()
