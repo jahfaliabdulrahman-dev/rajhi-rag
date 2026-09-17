@@ -29,18 +29,23 @@ DESIGN RULES
   2. STRICT: zero findings is the bar; any finding blocks. The tree is clean, so
      the gate can afford to be absolute — and a strict gate on a clean tree is
      the only kind that stays switched on. There is deliberately no bypass flag.
-  3. SUPPRESSION IS VISIBLE: `# noqa` on a finding's line suppresses it, and
-     every suppressed finding is still printed with its file:line + reason text,
-     so the count is part of the verdict and never a hiding place.
+  3. SUPPRESSION IS VISIBLE: `# noqa` **in a real comment** on a finding's line
+     suppresses it, and every suppressed finding is still printed with its
+     file:line + reason text, so the count is part of the verdict and never a
+     hiding place. The marker is read from tokenized COMMENT tokens, never from
+     the raw line — a `# noqa` sitting inside a *string literal* must not silence
+     anything (an external audit drove a finding through exactly that hole).
      (`# noqa: CODE` is accepted with the code ignored — pyflakes emits no codes;
      the flake8/ruff spelling is kept so the markers stay portable if the engine
      is ever swapped. pyflakes itself does NOT honour noqa — verified with a
      probe file, not assumed.)
   4. NO SILENT PASS: a missing engine (exit 2) or a syntax/read error (exit 1) is
      a FAILURE. An unrunnable gate must never look green.
-  5. WHOLE TREE BY DEFAULT: every `*.py` under the repo root except hidden dirs
-     and build/venv dirs. A gate that must be updated whenever a directory is
-     added is a gate that eventually leaks.
+  5. WHOLE TREE BY DEFAULT: every `*.py` under the repo root except build/venv
+     dirs — hidden directories are **not** skipped wholesale, because a dot
+     directory is where a CI helper script would live (`.github/`), and a gate
+     that cannot see a future script is a gate with a habit of leaking. A gate
+     that must be updated whenever a directory is added leaks too.
 
 CI installs the engine pinned (`pyflakes==3.4.0`) so the verdict cannot drift
 with a version bump; it stays a dev tool and is intentionally not a runtime
@@ -52,8 +57,10 @@ Exit:   0 = clean · 1 = findings / syntax error · 2 = engine missing
 
 from __future__ import annotations
 
+import io
 import re
 import sys
+import tokenize
 from pathlib import Path
 
 try:
@@ -71,13 +78,33 @@ except ImportError:  # the gate must never pass just because it could not run
 ENGINE = f"pyflakes {getattr(pyflakes, '__version__', '?')} " \
          f"(Python {sys.version.split()[0]})"
 
-# Skipped wherever they appear in a path. Hidden dirs (`.venv`, `.git`,
-# `.claude`, …) are covered by the `startswith('.')` rule; the rest are explicit.
+# Skipped wherever they appear in a path. This is an explicit list and NOT
+# "every hidden directory": skipping all dot-dirs would silently exclude
+# `.github/` — the one place a future CI helper script would live.
 SKIP_DIRS = {
     "__pycache__", "venv", "env", "build", "dist", "node_modules",
     ".venv", ".git", ".claude", ".mypy_cache", ".pytest_cache", ".ruff_cache",
 }
 NOQA_RE = re.compile(r"#\s*noqa\b")
+
+
+def _noqa_lines(source: str) -> set[int]:
+    """Line numbers carrying a `noqa` marker **in a real comment**.
+
+    Read through the tokenizer, never by matching the raw line: a line such as
+    `x = "# noqa"  # dead_thing` used to silence the finding on that line, which
+    is a suppression nobody wrote as one. Verified by an external audit driving a
+    real finding through a string literal — so the fix is a proof, not a hunch.
+    On a tokenizer failure the set is empty, i.e. the gate suppresses less.
+    """
+    marked: set[int] = set()
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(source).readline):
+            if token.type == tokenize.COMMENT and NOQA_RE.search(token.string):
+                marked.add(token.start[0])
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        pass
+    return marked
 
 
 class _Collector(flake_reporter.Reporter):
@@ -104,11 +131,11 @@ class _Collector(flake_reporter.Reporter):
 
 
 def python_files(root: Path) -> list[Path]:
-    """Every `*.py` under `root`, skipping hidden/build dirs. Deterministic order."""
+    """Every `*.py` under `root`, skipping build/venv dirs. Deterministic order."""
     found = []
     for path in sorted(root.rglob("*.py")):
         parts = path.relative_to(root).parts[:-1]      # the directories only
-        if any(part.startswith(".") or part in SKIP_DIRS for part in parts):
+        if any(part in SKIP_DIRS for part in parts):
             continue
         found.append(path)
     return found
@@ -136,13 +163,12 @@ def main(argv: list[str]) -> int:
         except (OSError, UnicodeDecodeError) as exc:
             fatal.append((str(path), 0, f"cannot read: {exc}"))
             continue
-        lines = source.splitlines()
+        marked = _noqa_lines(source)
         collector = _Collector()
         flake_api.check(source, str(path), collector)
         fatal.extend(collector.fatal)
         for name, lineno, col, text in collector.findings:
-            current = lines[lineno - 1] if 0 < lineno <= len(lines) else ""
-            if NOQA_RE.search(current):
+            if lineno in marked:
                 suppressed.append((name, lineno, text))
             else:
                 findings.append((name, lineno, col, text))
