@@ -77,6 +77,10 @@ def claims(d: dict) -> list[tuple[str, str, str]]:
         ("PLAN.md", f"{d['recoveries']} مرساة", "عدد المراسي المُستدركة"),
         ("PLAN.md", f"{d['rereads']} إعادة قراءة", "عدد إعادات القراءة"),
         ("docs/QA_CHECKLIST.md", f"حالياً {d['tests']}", "عدد الاختبارات"),
+        # The ABOUT screen said «about 1.6% of 629 pages» long after the project
+        # accounted for every page: the number a stranger reads first had no
+        # guard at all (external audit).
+        ("app.py", f"{d['ok']} صفحة", "الصفحات المطابقة بإطارها (شاشة ABOUT)"),
     ]
 
 

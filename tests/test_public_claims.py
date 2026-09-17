@@ -6,6 +6,7 @@ has no statement cache), which is stated plainly rather than hidden.
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -19,7 +20,16 @@ def test_public_documents_match_the_measured_report():
     import render_claims as rc
 
     if not rc.REPORT.exists():
-        pytest.skip("لا تقرير مقيس على هذه الآلة (الكاش محلي — CI بلا بيانات)")
+        # CI has no statement cache. Instead of skipping — a gate that guards
+        # nothing — it reads the DERIVED snapshot committed with the repo:
+        # written by tools/render_claims.py from the measured report, so the
+        # numbers stay a product of the run and not of anyone's memory.
+        snapshot = ROOT / "docs" / "claims.json"
+        if not snapshot.exists():
+            pytest.skip("لا تقرير ولا لقطة مشتقّة — لا شيء يُحرَس")
+        derived = json.loads(snapshot.read_text(encoding="utf-8"))
+        assert rc.check(derived) == [], "الوثيقة تخالف لقطتها المشتقّة"
+        return
     derived = rc.derive()
     assert derived is not None
     drifts = rc.check(derived)
