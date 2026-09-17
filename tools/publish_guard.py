@@ -13,11 +13,22 @@ on CI, and manually:
 
 Severity model (practical by design — a guard that cries wolf gets disabled):
 - BLOCK: personal home paths · the original statement filename · real family
-  names appearing in the document · ≥10-digit runs (account/card numbers) ·
-  real-data paths (data/local_sample/*) · .env files · media binaries that
-  are not explicitly allowed. Any BLOCK failing exit code 1.
-- WARN: the owner's name/handle tokens in prose/docs (usually attribution —
-  review, don't panic). WARN does not fail the run.
+  names appearing in the document · ≥10-digit runs (account/card numbers),
+  **including runs split by separators** (spaces, dots, hyphens)
+  **and runs rebuilt by string concatenation** (two literals added together) · real-data
+  paths (data/local_sample/*) · .env files · media binaries that are not
+  explicitly allowed · unscannable binaries (archives/databases/fonts) with no
+  allowlist line of their own · any tracked blob that cannot be decoded as
+  text and is not in the media lists. Any BLOCK fails the run (exit 1).
+- WARN: the owner's name/handle tokens in prose, docs and commit messages
+  (usually attribution — review, don't panic). WARN does NOT fail the run by
+  default; `--strict-warn` makes it fail, and the output always prints an
+  explicit advisory block so a WARN can never pass unnoticed.
+
+WHAT THIS GUARD CANNOT SEE (documented, not hidden): the bytes inside media
+binaries and allowlisted archives are skipped, never read. An allowlist line
+is therefore a *claim by a human*, not a scan — which is exactly why every
+line in `.publish-allowlist` carries a written reason.
 
 ALLOWLIST: `.publish-allowlist` — one entry per line:
     <rule_id> :: <path-glob> :: <why>
@@ -38,6 +49,27 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 _AR = "0-9\u0660-\u0669\u06f0-\u06f9"  # western + arabic-indic + persian
 
+LONG_DIGITS_RX = re.compile("[" + _AR + "]{10,}")
+LONG_DIGITS_DESC = "سلسلة ارقام طويلة (رقم حساب/بطاقة؟)"
+
+# A long run can be written in uniform groups — the IBAN/card/cheque idiom
+# ("SA03 8000 0000 6080", "1234-5678-9012", "1.234.567.890"). The signature
+# used here is groups of EQUAL width, 3 or 4 digits, joined by one separator:
+#   · equal width  → two unrelated amounts on one line are never welded;
+#   · width 3 or 4 → "١٤٣٩٠٧٢٢ ٢٠١٨٠٤٠٨" (two 8-digit dates) and
+#                    "20260917-172327" (a timestamp) stay two numbers.
+# Both of those were FALSE POSITIVES produced by the first draft of this
+# rule — found by running it against the repository itself, which is why the
+# width test exists at all.
+# Commas are deliberately not grouping separators: "1000,2000,3000,4000" is a
+# CSV row of four amounts, not one number. Stated consequence (honest limit):
+# "1,234,567,890" — non-uniform groups — is NOT caught by this rule.
+_GROUP_SEP = " \t._-"
+_GROUPED_RUN = re.compile("[" + _AR + "]{3,}(?:[" + _GROUP_SEP + "]"
+                          "[" + _AR + "]{3,})+")
+# The two-literal trick: 'aaaa' + 'bbbb' → one run the plain rule never sees.
+_STRING_CONCAT = re.compile("""["']\\s*\\+\\s*["']""")
+
 TEXT_RULES = [
     ("home_path", "BLOCK", re.compile(r"/Users/[A-Za-z0-9_.-]+"),
      "مسار منزل مطلق (اسم مستخدم حقيقي)"),
@@ -45,12 +77,14 @@ TEXT_RULES = [
      "اسم ملف الكشف الاصلي"),
     ("name_full", "BLOCK", re.compile(r"عبده\s*جحفلي"),
      "اسم عائلي من الكشف الحقيقي"),
-    ("long_digits", "BLOCK", re.compile("[" + _AR + "]{10,}"),
-     "سلسلة ارقام طويلة (رقم حساب/بطاقة؟)"),
+    ("long_digits", "BLOCK", LONG_DIGITS_RX, LONG_DIGITS_DESC),
     ("name_token", "WARN",
      re.compile(r"عبد\s*الرحمن|جحفلي|jahfali|abdurrahman", re.IGNORECASE),
      "اسم/معرف المالك — راجعه"),
 ]
+# rule id recorded when the run only appears AFTER joining string literals
+CONCAT_RULE = ("concat_digits", "BLOCK",
+               "رقم مبني بتجميع شطرين نصيّين (يتخطى فحص السلاسل)")
 
 BINARY_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".tif",
                ".tiff", ".bmp", ".pdf", ".ttf", ".otf", ".woff", ".woff2",
@@ -58,6 +92,11 @@ BINARY_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".tif",
                ".pyc", ".so", ".dylib", ".sqlite", ".db"}
 MEDIA_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".tif",
               ".tiff", ".bmp", ".pdf", ".mp4", ".mov"}
+# Binaries the guard cannot read as text: archives, exports, databases, fonts.
+# They are not "safe" — they are *opaque*. Each one needs an allowlist line.
+OPAQUE_EXTS = {".zip", ".xlsx", ".xlsm", ".xls", ".docx", ".doc", ".pptx",
+               ".ppt", ".sqlite", ".db", ".tar", ".gz", ".tgz", ".7z", ".rar",
+               ".pickle", ".pkl", ".bin", ".ttf", ".otf", ".woff", ".woff2"}
 
 PATH_RULES = [
     ("local_data", "BLOCK",
@@ -68,6 +107,12 @@ PATH_RULES = [
      lambda p: Path(p).suffix.lower() in MEDIA_EXTS
      and not fnmatch.fnmatch(p, "data/sample/*.pdf"),
      "وسائط/مستند ثنائي غير مسموح — راجع قائمة المسموح"),
+    ("opaque_binary", "BLOCK",
+     lambda p: Path(p).suffix.lower() in OPAQUE_EXTS,
+     "ثنائي لا يمكن فحصه كنص (ارشيف/قاعدة/خط) — لا يُدفع بلا سطر استثناء مبرَّر"),
+    ("undecodable", "BLOCK",
+     lambda p: False,  # decided in _scan_blobs, where the bytes are known
+     "ملف لا يُفك كنص ولم يُدرج في قوائم الوسائط — لا يُدفع بصمت"),
 ]
 
 SKIP_PATHS = {"tools/publish_guard.py", ".publish-allowlist"}
@@ -78,9 +123,28 @@ def _git(*args: str) -> str:
     return out.stdout.decode("utf-8", "replace")
 
 
-def _git_bytes(*args: str) -> bytes:
-    return subprocess.run(["git", *args], cwd=ROOT,
-                          capture_output=True).stdout
+def _read_blobs(shas: list[str]) -> dict[str, bytes]:
+    """Batch-read blobs in ONE git process (fast even for history mode)."""
+    if not shas:
+        return {}
+    proc = subprocess.run(["git", "cat-file", "--batch"],
+                          input="\n".join(shas).encode(),
+                          cwd=ROOT, capture_output=True)
+    out = proc.stdout
+    result: dict[str, bytes] = {}
+    i = 0
+    while i < len(out):
+        nl = out.find(b"\n", i)
+        if nl < 0:
+            break
+        header = out[i:nl].decode("utf-8", "replace").split()
+        if len(header) == 3 and header[1] == "blob":
+            size = int(header[2])
+            result[header[0]] = out[nl + 1: nl + 1 + size]
+            i = nl + 1 + size + 1
+        else:  # missing / unusual object
+            i = nl + 1
+    return result
 
 
 def load_allowlist() -> list[tuple[str, str]]:
@@ -119,18 +183,77 @@ def _is_digit_table(text: str) -> bool:
     return "0123456789" in doubled or "9876543210" in doubled
 
 
+def _digit_variants(line: str) -> list[str]:
+    """The line plus every way a grouped run can hide inside it.
+
+    A number a human reads as one value is often printed in uniform groups
+    (IBANs, cards, cheques). Joining is allowed only when every group has the
+    SAME width and that width is 3 or 4 — the two conditions that keep a pair
+    of adjacent dates, a hyphenated timestamp and a row of equal-width
+    amounts from being welded into a false account number.
+    """
+    out = [line]
+    for m in _GROUPED_RUN.finditer(line):
+        groups = re.split("[" + _GROUP_SEP + "]", m.group(0))
+        if len(groups) < 2 or len(groups[0]) not in (3, 4):
+            continue
+        if len({len(g) for g in groups}) != 1:
+            continue
+        joined = line[:m.start()] + "".join(groups) + line[m.end():]
+        if joined not in out:
+            out.append(joined)
+    return out
+
+
+def _join_string_concat(line: str) -> str:
+    """'aaaa' + 'bbbb' → 'aaaabbbb' (the trick that hid a real account)."""
+    return _STRING_CONCAT.sub("", line)
+
+
 def _scan_text(path: str, text: str, where: str, findings, entries) -> None:
+    def record(sev, rid, lineno, src_line, desc):
+        if _allowed(entries, rid, path):
+            return
+        findings.append((sev, rid, path, where, lineno, _snippet(src_line), desc))
+
     for lineno, line in enumerate(text.splitlines(), 1):
         for rid, sev, rx, desc in TEXT_RULES:
-            m = rx.search(line)
-            if not m:
-                continue
-            if rid == "long_digits" and _is_digit_table(m.group(0)):
-                continue
-            if _allowed(entries, rid, path):
-                continue
-            findings.append((sev, rid, path, where, lineno,
-                             _snippet(line), desc))
+            if rid == "long_digits":
+                continue  # handled below over the digit-joined variants
+            for _m in rx.finditer(line):  # every match, not just the first
+                record(sev, rid, lineno, line, desc)
+        for src in _digit_variants(line):
+            matches = [m for m in LONG_DIGITS_RX.finditer(src)
+                       if not _is_digit_table(m.group(0))]
+            if matches:
+                for _m in matches:  # every occurrence, not just the first
+                    record("BLOCK", "long_digits", lineno, line,
+                           LONG_DIGITS_DESC)
+                break  # the joined variant already reported this line
+        joined = _join_string_concat(line)
+        if joined != line:
+            for m in LONG_DIGITS_RX.finditer(joined):
+                if _is_digit_table(m.group(0)):
+                    continue
+                record(CONCAT_RULE[1], CONCAT_RULE[0], lineno, line,
+                       CONCAT_RULE[2])
+                break
+
+
+def _binary_verdict(path: str, entries) -> tuple | None:
+    """Decision for a tracked blob whose bytes are not decodable text.
+
+    Pure and testable: media are handled by PATH_RULES, opaque binaries are
+    handled by PATH_RULES too, so anything left here is an unknown binary —
+    and silence is the one answer that is never acceptable.
+    """
+    ext = Path(path).suffix.lower()
+    if ext in MEDIA_EXTS or ext in OPAQUE_EXTS:
+        return None
+    if _allowed(entries, "undecodable", path):
+        return None
+    return ("BLOCK", "undecodable", path, "", 0, "",
+            "ملف لا يُفك كنص ولم يُدرج في قوائم الوسائط — لا يُدفع بصمت")
 
 
 def _check_path(path: str, where: str, findings, entries) -> None:
@@ -143,31 +266,6 @@ def _check_path(path: str, where: str, findings, entries) -> None:
             hit = False
         if hit and not _allowed(entries, rid, path):
             findings.append((sev, rid, path, where, 0, "", desc))
-
-
-def _read_blobs(shas: list[str]) -> dict[str, bytes]:
-    """Batch-read blobs in ONE git process (fast even for history mode)."""
-    if not shas:
-        return {}
-    proc = subprocess.run(["git", "cat-file", "--batch"],
-                          input="\n".join(shas).encode(),
-                          cwd=ROOT, capture_output=True)
-    out = proc.stdout
-    result: dict[str, bytes] = {}
-    i = 0
-    while i < len(out):
-        nl = out.find(b"\n", i)
-        if nl < 0:
-            break
-        header = out[i:nl].decode("utf-8", "replace").split()
-        if len(header) == 3 and header[1] == "blob":
-            size = int(header[2])
-            content = out[nl + 1: nl + 1 + size]
-            result[header[0]] = content
-            i = nl + 1 + size + 1
-        else:  # missing / unusual object
-            i = nl + 1
-    return result
 
 
 def _tree_entries(rev: str) -> list[tuple[str, str]]:
@@ -191,8 +289,8 @@ def _scan_blobs(pairs: list[tuple[str, str]], where: str,
         _check_path(path, where, findings, entries)
         if path in SKIP_PATHS or path.startswith(".githooks/"):
             continue
-        if Path(path).suffix.lower() in BINARY_EXTS:
-            continue
+        if Path(path).suffix.lower() in (BINARY_EXTS | OPAQUE_EXTS):
+            continue  # unreadable by design; their verdict comes from PATH_RULES
         blob_of.setdefault(sha, path)
     fresh = [sha for sha in blob_of if sha not in seen]
     blobs = _read_blobs(fresh)
@@ -204,6 +302,9 @@ def _scan_blobs(pairs: list[tuple[str, str]], where: str,
         try:
             text = data.decode("utf-8")
         except UnicodeDecodeError:
+            verdict = _binary_verdict(blob_of[sha], entries)
+            if verdict:
+                findings.append(verdict[:-1] + (where,) + verdict[-1:])
             continue
         _scan_text(blob_of[sha], text, where, findings, entries)
 
@@ -235,6 +336,46 @@ def scan_history(findings, entries, seen) -> int:
     return len(pairs)
 
 
+def scan_messages(findings, entries, revs: list[str] | None = None) -> int:
+    """Commit messages carry text too — an account number pasted into a
+    message body is exactly as public as one pasted into a file, and until
+    now messages were never scanned at all. The public repo URL already
+    carries the owner's handle, so `name_token` findings here are WARN at
+    worst (attribution), never a block. Author/committer identities are NOT
+    scanned for the same reason: they are already public on the remote."""
+    args = ["log", "--format=%H%x09%B%x1e"]
+    if revs:
+        args += list(revs)
+    else:
+        args.append("--all")
+    out = _git(*args)
+    n = 0
+    for chunk in out.split("\x1e"):
+        sha, _, body = chunk.partition("\t")
+        sha = sha.strip()
+        if not sha or not body.strip():
+            continue
+        n += 1
+        pseudo = f"git-msg/{sha[:10]}"
+        for rid, sev, rx, desc in TEXT_RULES:
+            for m in rx.finditer(body):
+                if rid == "long_digits" and _is_digit_table(m.group(0)):
+                    continue
+                if _allowed(entries, rid, pseudo):
+                    continue
+                findings.append((sev, rid, pseudo, "message", 0,
+                                 _snippet(m.group(0)), desc))
+        joined = _join_string_concat(body)
+        if joined != body:
+            for m in LONG_DIGITS_RX.finditer(joined):
+                if _is_digit_table(m.group(0)):
+                    continue
+                findings.append(("BLOCK", CONCAT_RULE[0], pseudo, "message",
+                                 0, _snippet(body), CONCAT_RULE[2]))
+                break
+    return n
+
+
 def scan_pre_push(findings, entries, seen) -> int:
     refs = [l.split() for l in sys.stdin.read().splitlines() if l.strip()]
     revs: set[str] = set()
@@ -248,15 +389,16 @@ def scan_pre_push(findings, entries, seen) -> int:
             revs.update(_git("rev-list", local_sha).split())
         else:
             revs.update(_git("rev-list", f"{remote_sha}..{local_sha}").split())
-    if len(revs) > 200:
-        print(f"[publish-guard] pushed history is large ({len(revs)} commits) "
-              f"— scanning the tip tree + first 200 commits")
-        revs = set(sorted(revs)[:200])
+    # No sampling: a commit that carried PII and was later rewritten is
+    # exactly the case this mode exists for, and picking "the first 200 by
+    # SHA text" is a random sample dressed up as coverage. Blob dedup (`seen`)
+    # keeps the cost linear in NEW blobs, not in commits.
     pairs = []
     for rev in sorted(revs):
         pairs.extend(_tree_entries(rev))
     _scan_blobs(pairs, "push", findings, entries, seen)
     n = len(pairs)
+    n += scan_messages(findings, entries, sorted(revs))
     n += scan_tree(findings, entries, seen)
     return n
 
@@ -269,12 +411,17 @@ def main() -> None:
     ap.add_argument("--pre-push", action="store_true", dest="pre_push",
                     help="read refs from stdin (git hook) and scan them")
     ap.add_argument("--ci", action="store_true",
-                    help="tree + history (CI mode)")
+                    help="tree + history + commit messages (CI mode)")
+    ap.add_argument("--messages", action="store_true",
+                    help="scan every commit message body")
+    ap.add_argument("--strict-warn", action="store_true", dest="strict_warn",
+                    help="treat WARN as blocking (opt-in; default is advisory)")
     ap.add_argument("--report-only", action="store_true",
                     help="print findings but always exit 0")
     args = ap.parse_args()
 
-    if not (args.tree or args.history or args.pre_push or args.ci):
+    if not (args.tree or args.history or args.pre_push or args.ci
+            or args.messages):
         args.tree = True
 
     entries = load_allowlist()
@@ -288,13 +435,24 @@ def main() -> None:
         scanned.append(("tree", scan_tree(findings, entries, seen)))
     if args.history or args.ci:
         scanned.append(("history", scan_history(findings, entries, seen)))
+        scanned.append(("messages", scan_messages(findings, entries)))
+    if args.messages and not (args.history or args.ci):
+        scanned.append(("messages", scan_messages(findings, entries)))
 
     blocks = [f for f in findings if f[0] == "BLOCK"]
     warns = [f for f in findings if f[0] == "WARN"]
     print(f"[publish-guard] " +
           " · ".join(f"{label}: {n}" for label, n in scanned) +
           f" — {len(blocks)} BLOCK / {len(warns)} WARN")
-    for sev, rid, path, where, lineno, snip, desc in findings:
+    if warns:
+        print("[publish-guard] تنبيه معلن (لا يوقف الدفع):")
+        for sev, rid, path, where, lineno, snip, desc in warns:
+            loc = f"{path}:{lineno}" if lineno else path
+            print(f"  WARN  {rid:<12} [{where}] {loc}"
+                  + (f"  | {snip}" if snip else "") + f"  — {desc}")
+        print("  → للمنع الصارم: أضف --strict-warn، أو استثناءً مبرَّراً "
+              "في .publish-allowlist (كل سطر بسبب مكتوب).")
+    for sev, rid, path, where, lineno, snip, desc in blocks:
         loc = f"{path}:{lineno}" if lineno else path
         print(f"  {sev:<5} {rid:<12} [{where}] {loc}"
               + (f"  | {snip}" if snip else "") + f"  — {desc}")
@@ -302,8 +460,8 @@ def main() -> None:
         print("\nالحكم: BLOCK — لا تدفع حتى تُعالج هذه البنود "
               "(أو أضف استثناءً مبرَّراً في .publish-allowlist).")
     else:
-        print("\nالحكم: آمن للدفع (تحذيرات فقط تحتاج نظراً).")
-    if blocks and not args.report_only:
+        print("\nالحكم: آمن للدفع.")
+    if (blocks or (warns and args.strict_warn)) and not args.report_only:
         sys.exit(1)
 
 
