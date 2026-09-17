@@ -269,6 +269,32 @@ def _looks_opening(r: dict) -> bool:
     return any(m in d for m in _OPENING_MARKERS)
 
 
+def fill_missing_dates(rows: list[dict]) -> int:
+    """Statements print the date ONCE per group; siblings ship a blank cell.
+
+    Carry the last printed date forward onto real transaction rows so an
+    Excel/PDF export is complete, and MARK the origin (`date_source`) — an
+    inherited date must never look printed. Opening/carry/boundary rows keep
+    an empty date: their line is not a transaction and nothing may be invented.
+
+    Returns the number of rows filled.
+    """
+    last: str | None = None
+    filled = 0
+    for r in rows:
+        d = str(r.get("date") or "").strip()
+        if d:
+            last = d
+            r.setdefault("date_source", "printed")
+            continue
+        if (last and r.get("kind") != "opening" and not r.get("boundary")
+                and (r.get("side") or r.get("movement") is not None)):
+            r["date"] = last
+            r["date_source"] = "inherited"
+            filled += 1
+    return filled
+
+
 def chain_derive(rows: list[dict], prev_balance: Decimal | None = None) -> list[dict]:
     """Balance chain is the arbiter: movement/side derived; VLM mv cross-checks.
 
