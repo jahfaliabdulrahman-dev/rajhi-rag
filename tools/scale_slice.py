@@ -418,7 +418,10 @@ def main() -> None:
             ms_read = int((time.time() - t0) * 1000)
             t0 = time.time()
             try:
-                footer = read_footer(str(png), stats=st_f)
+                # بوابة الصفحة تعرف موضع الإطار المقيس ⇒ تُمرَّر للقصاصة، فلا
+                # يبقى الفاصل الثابت 0.75 أعمى عن صفحة جدولها أقصر (الصفحة الختامية).
+                footer = read_footer(str(png), stats=st_f,
+                                     referee_y=(gate or {}).get("referee_y"))
             except Exception:
                 footer = None
             ms_footer = int((time.time() - t0) * 1000)
