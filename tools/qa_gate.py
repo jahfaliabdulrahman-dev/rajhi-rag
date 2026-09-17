@@ -26,6 +26,13 @@ from decimal import Decimal
 from pathlib import Path
 
 PROJ = Path(__file__).resolve().parent.parent
+
+# The two thresholds a NEW statement must clear before calibration is complete.
+# They used to be bare numbers inside assertions, so a less dense sample failed
+# the gate with no explanation of what to change (audit P3-11). Calibration
+# steps for a new file are listed in docs/ONBOARDING_NEW_FILE.md §3.
+MIN_ROWS = 95                 # rows the 10-page sample must yield (≈100–104)
+MIN_FOOTER_COMPARABLE = 9     # pages whose printed totals could be compared
 sys.path.insert(0, str(PROJ / "src"))
 
 RESULTS: list[tuple[str, bool, str]] = []
@@ -109,7 +116,9 @@ def g_end_to_end() -> str:
     susp = int(nums[2].replace(",", ""))
     assert susp == 0, f"{susp} suspects in the full run"
     assert clean == total, f"{clean}/{total} clean"
-    assert total >= 95, f"only {total} rows (expected ≈100-104)"
+    assert total >= MIN_ROWS, \
+        f"only {total} rows — العتبة {MIN_ROWS}: صفحات أقل غزارة من المتوقع، '
+        f'راجع خطوات المعايرة في docs/ONBOARDING_NEW_FILE.md §3"
 
     assert isinstance(table, dict), "table shape changed"
     headers, data = table.get("headers") or [], table.get("data") or []
@@ -175,8 +184,9 @@ def g_end_to_end() -> str:
     f_ok, f_possible = int(m.group(1)), int(m.group(2))
     footer_seg = s.split("تحقق الفوتر")[1].split("•")[0]
     assert "⚠" not in footer_seg, f"footer mismatch on sample: {footer_seg}"
-    assert f_ok == f_possible and f_possible >= 9, \
-        f"footer: {f_ok}/{f_possible} comparable pages matched (want 10/10)"
+    assert f_ok == f_possible and f_possible >= MIN_FOOTER_COMPARABLE, \
+        f"footer: {f_ok}/{f_possible} comparable pages matched — "
+        f"العتبة {MIN_FOOTER_COMPARABLE} (راجع §3 في دليل المعايرة)"
 
     # ———— ترتيب الصفحات (what-if delta) ————
     assert "⚠ الترتيب" not in s, f"page-order flag on sample: {s[:220]}"
