@@ -316,7 +316,12 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int) -> QAResult:
                 if used2:
                     answer, used = answer2, used2
                 else:
+                    # «رفض لا وسم» (المدقّق، جوابه ١): رقم لم يُحسَب لا يُعرض
+                    # كجواب أصلاً — الوسم يضيع في ملف يُمرَّر كـPDF.
                     ungrounded = True
+                    answer = ("لم أستطع حساب هذا الرقم من الكشف: لا استدعاء "
+                              "لأي أداة حسابية. ولن أعرض رقماً لم يُحسَب — "
+                              "أعد صياغة السؤال بصيغةٍ تُسمّي ما تريده.")
         except Exception:
             # The SILENT part was the problem, not the fallback itself: a
             # provider timeout used to hand back a prose answer with an empty

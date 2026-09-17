@@ -180,6 +180,27 @@ def _snippet(line: str) -> str:
     return s[:90]
 
 
+_JOIN_RX = re.compile(r"""(['"])(.*?)\1\s*\.join\s*\(\s*[\[\(]([^\]\)]*)[\]\)]""")
+_LIT_RX = re.compile(r"""(['"])(.*?)\1""")
+
+
+def _joined_literals(line: str) -> str:
+    """«"".join([...])» of string literals — the idiom `concat_digits` cannot see.
+
+    The rule was born from a split account number (`"a" + "b"`), and the very
+    file it caught later moved to `"".join(_PARTS)`, which walked straight past
+    it. Detecting a rule's blind spot is part of the rule (external audit, S1).
+    """
+    built: list[str] = []
+    for m in _JOIN_RX.finditer(line):
+        sep, body = m.group(2), m.group(3)
+        # The real value uses the separator: `" ".join(("١٤٣٩٠٧٢٢", "٢٠١٨٠٤٠٨"))`
+        # is two dates, not a sixteen-digit run — welding them would be the same
+        # false positive the first draft of the digit rule produced.
+        built.append(sep.join(lit for _q, lit in _LIT_RX.findall(body)))
+    return "".join(built)
+
+
 def _is_digit_table(text: str) -> bool:
     """«٠١٢٣٤٥٦٧٨٩»-style translation tables are ramps, not account numbers.
     Rotations count too («۱۲۳۴۵۶۷۸۹۰»): the doubled-string check catches
@@ -237,6 +258,10 @@ def _scan_text(path: str, text: str, where: str, findings, entries) -> None:
                     record("BLOCK", "long_digits", lineno, line,
                            LONG_DIGITS_DESC)
                 break  # the joined variant already reported this line
+        built = _joined_literals(line)
+        if built and LONG_DIGITS_RX.search(built) and not _is_digit_table(built):
+            record("BLOCK", "joined_digits", lineno, line,
+                   "رقم مبني بـ join على شظائف نصية")
         joined = _join_string_concat(line)
         if joined != line:
             for m in LONG_DIGITS_RX.finditer(joined):
