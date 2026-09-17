@@ -47,7 +47,14 @@ DEFAULT_QUESTIONS = [
     # ground is not a rude answer, it is an INVENTED NUMBER. For these the
     # verdict is mechanical: any riyal figure in the answer means the model
     # filled a gap the statement does not have.
-    {"id": "E", "kind": "سنة خارج مدى الكشف", "expect": "لا بيانات",
+    # CORRECTION, recorded: this case was written as «a year outside the
+    # statement» and 2019 turned out to be INSIDE it (342 rows, the statement
+    # spans 2013–2024). The old expectation called a correct answer a defect.
+    # The outside-year case is now 2005, and the inside-year case below asserts
+    # the opposite thing: the gate must NOT swallow it.
+    {"id": "E", "kind": "سنة خارج مدى الكشف (٢٠٠٥)", "expect": "لا بيانات",
+     "q": "كم مجموع الحركات في عام ٢٠٠٥؟"},
+    {"id": "I", "kind": "سنة داخل المدى — يجب ألا تُبتلع", "expect": "أداة",
      "q": "كم مجموع الحركات في عام ٢٠١٩؟"},
     {"id": "F", "kind": "سؤال مركّب نصفه موجود", "expect": "أداة",
      "q": "كم مجموع الحوالات الواردة من شركة أ، وكم عدد الحوالات من مؤسسة "
@@ -156,7 +163,8 @@ def main() -> int:
         else:
             print("الأدلة: لا أداة استُدعيت (مسار نصي/بحث)")
         print(f"المصادر: {len(res.sources)} قطعة")
-        refused = REFUSAL in ans
+        refused = bool(getattr(res, "refused", False)) or REFUSAL in ans
+        gated = getattr(res, "scope", "in_scope") != "in_scope"
         used_tool = bool(res.used_row_nos)
         if item["expect"] == "رفض":
             ok = refused
@@ -165,9 +173,13 @@ def main() -> int:
             ok = used_tool
             why = "استدعى أداة ✓" if used_tool else "لم يستدعِ أداة ✗"
         elif item["expect"] == "لا بيانات":
-            invented = _has_amount(ans)
-            ok = not invented
-            why = ("لم يخترع مبلغاً ✓" if ok
+            # The DETERMINISTIC verdict: did the gate decide this before the
+            # model saw it? A regex over prose cannot tell an invented figure
+            # from a refusal that quotes the figure it just rejected — which is
+            # exactly how this check reported a false failure.
+            ok = gated or not _has_amount(ans)
+            why = ("منعتها البوابة قبل النموذج ✓" if gated
+                   else "لم يخترع مبلغاً ✓" if ok
                    else "أجاب بمبلغ لا سند له في الكشف ✗")
         else:
             ok = True
