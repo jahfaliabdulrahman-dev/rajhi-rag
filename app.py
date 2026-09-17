@@ -576,7 +576,23 @@ def _process_pdf_locked(pdf_path: str, progress):
     f_gap = [c for c in footer_checks if c["status"] == "gap"]
     f_absent = [c for c in footer_checks if c["status"] == "absent"]
     f_unchecked = [c for c in footer_checks if c["status"] == "unchecked"]
-    f_possible = len(f_ok) + len(f_bad)
+    # صفحات لا يمكن الحكم عليها وحدها: مجموعها بين إطارين مقروءين هو الدليل.
+    # (الدليل تراكمي من بداية الكشف — انظر statement_qa.group_check)
+    f_group: list[int] = []
+    if f_absent or f_unchecked:
+        try:
+            from statement_qa.group_check import from_checks
+
+            ok_pages = {c["page"] for c in f_ok}
+            f_group = [p for p in from_checks(footer_checks, all_rows)
+                       if p not in ok_pages]   # a page is counted once
+            STATE["group_verified"] = f_group
+            won = set(f_group)
+            f_absent = [c for c in f_absent if c["page"] not in won]
+            f_unchecked = [c for c in f_unchecked if c["page"] not in won]
+        except Exception:  # noqa: BLE001 — a report must never break the read
+            f_group = []
+    f_possible = len(f_ok) + len(f_bad) + len(f_group)
     # Two numbers, because one number hid the truth (audit P1-2): the
     # denominator used to be ok+mismatch alone, so a file with four frameless
     # pages and two scan gaps still read «621/621 مطابق» and never named them.
@@ -590,6 +606,9 @@ def _process_pdf_locked(pdf_path: str, progress):
                      + "، ".join(str(c["page"]) for c in f_bad))
             if any(c.get("is_paradox") for c in f_bad):
                 seg_f += " (نمط زيغ ×100)"
+        if f_group:
+            seg_f += (" — مُوثّق بالمجموع بين إطارين مقروءين: "
+                      + "، ".join(str(p) for p in f_group))
         for label, group in (("فجوة مسح", f_gap), ("بلا إطار مطبوع", f_absent),
                              ("غير قابلة للتحقق", f_unchecked)):
             if group:

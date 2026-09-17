@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from statement_qa import scope  # noqa: E402
+from statement_qa import render, scope  # noqa: E402
 
 YEARS = {2025, 2026}
 AMOUNTS = frozenset({Decimal("9001.00"), Decimal("250.00"), Decimal("100.00")})
@@ -95,6 +95,51 @@ def test_thresholds_are_not_existence_questions():
     for q in ("كم الحركات التي تتجاوز 500؟", "هل يوجد تحويل بأكثر من 50000؟",
               "ما الحركات بين 100 و 900؟"):
         assert _kind(q) == "in_scope", q
+
+
+# ── routing a compound question (measured case F) ────────────────────────
+
+def test_a_compound_question_splits_into_its_two_asks():
+    from statement_qa.qa import split_compound
+
+    parts = split_compound("كم مجموع الحوالات الواردة من شركة أ، وكم عدد "
+                           "الحوالات من مؤسسة غير مذكورة في الكشف؟")
+    assert len(parts) == 2
+    assert parts[0].startswith("كم مجموع")
+    assert parts[1].startswith("كم عدد")      # the conjunction is not carried
+
+
+def test_a_conjunction_inside_a_phrase_is_not_a_split_point():
+    """«المدين والدائن» is one thing; splitting it would invent a question."""
+    from statement_qa.qa import split_compound
+
+    for q in ("ما مجموع المدين والدائن؟", "هل يوجد أثر مقاصة في الكشف؟",
+              "كم عدد الحركات في الصفحة 12؟"):
+        assert split_compound(q) == [q], q
+
+
+def test_numeric_questions_require_a_tool_and_others_do_not():
+    from statement_qa.qa import needs_tools
+
+    assert needs_tools("كم مجموع السحوبات من الصراف الآلي؟")
+    assert needs_tools("ما إجمالي مدين الصفحة 5؟")
+    assert not needs_tools("هل يوجد أثر مقاصة في الكشف؟")
+    assert not needs_tools("اشرح لي شكل الكشف")
+
+
+def test_an_ungrounded_numeric_answer_is_labelled_and_unpanelled():
+    """A number recalled from the chunks is not a number computed from the
+    statement — the reader must see which one they are reading."""
+    class _Res:
+        answer = "المجموع 12,345.00"
+        used_row_nos = []
+        tools_failed = False
+        ungrounded = True
+
+    text = render.answer_text(_Res(), {}, {})
+    assert text.startswith("⚠ سؤال رقمي بلا أي استدعاء أداة")
+    assert "12,345.00" in text                      # kept, labelled
+    assert render.evidence_mode(_Res()) == "none"   # and no evidence shown
 
 
 # ── the gate stays open when it cannot prove anything ────────────────────
