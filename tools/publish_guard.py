@@ -201,6 +201,26 @@ def _joined_literals(line: str) -> str:
     return "".join(built)
 
 
+HEX_CHARS = "0123456789abcdefABCDEF"
+
+
+def _in_hex_token(src: str, match, min_len: int = 24) -> bool:
+    """A ten-digit run inside a long hexadecimal token is a hash, not an account.
+
+    Both auditors hit this: a commit sha blocked the message that documented it,
+    and a guard that teaches its own team to omit evidence works against itself.
+    Length is the discriminator: sixteen hexadecimal characters around the run
+    are still scanned; a full hash is not.
+    """
+    a = match.start()
+    while a > 0 and src[a - 1] in HEX_CHARS:
+        a -= 1
+    b = match.end()
+    while b < len(src) and src[b] in HEX_CHARS:
+        b += 1
+    return (b - a) >= min_len
+
+
 def _is_digit_table(text: str) -> bool:
     """«٠١٢٣٤٥٦٧٨٩»-style translation tables are ramps, not account numbers.
     Rotations count too («۱۲۳۴۵۶۷۸۹۰»): the doubled-string check catches
@@ -252,7 +272,8 @@ def _scan_text(path: str, text: str, where: str, findings, entries) -> None:
                 record(sev, rid, lineno, line, desc)
         for src in _digit_variants(line):
             matches = [m for m in LONG_DIGITS_RX.finditer(src)
-                       if not _is_digit_table(m.group(0))]
+                       if not _is_digit_table(m.group(0))
+                       and not _in_hex_token(src, m)]
             if matches:
                 for _m in matches:  # every occurrence, not just the first
                     record("BLOCK", "long_digits", lineno, line,

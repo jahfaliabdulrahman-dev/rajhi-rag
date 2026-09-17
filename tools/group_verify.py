@@ -127,10 +127,15 @@ def main() -> None:
     gained = sum(1 for g in groups
                  if g["status"] == "verified" and g.get("covers_unreadable")
                  for n in g["pages"] if n in no_frame)
-    gaps = [g for g in groups if g["status"] == "mismatch"
-            and g.get("covers_unreadable")]
-    print(f"\nالحكم: {gained} صفحة كانت «غير قابلة للتحقق» صارت موثّقة بالمجموع؛ "
-          f"{len(gaps)} نطاق بنقص مقيس (أوراق غائبة من المسح)؛ "
+    # Every mismatch span is named — an earlier version counted only spans that
+    # hid a frameless page, so the summary said «0 نطاق بنقص مقيس» directly
+    # under two printed «✗ نقص مقيس» lines (external audit).
+    gaps = [g for g in groups if g["status"] == "mismatch"]
+    verified_pages = [n for g in groups if g["status"] == "verified"
+                      and g.get("covers_unreadable") for n in g["pages"]]
+    print(f"\nالحكم: {len(verified_pages)} صفحة داخل نطاقات موثّقة بالمجموع "
+          f"({gained} منها بلا إطار خاص بها)؛ {len(gaps)} نطاق بنقص مقيس "
+          f"(أوراق غائبة من المسح)؛ "
           f"{sum(1 for g in groups if g['status'] == 'undecidable')} نطاق غير محسوم. "
           f"الملف: {out}")
 
