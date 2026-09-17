@@ -5,7 +5,9 @@
 والمقابل مُختبَر أيضاً: **صفحة سليمة يجب ألّا تُرفض** (حارس يرفض الصحيح أسوأ من غيابه).
 
 الجزء الأخير (إن وُجدت المسحة المحلية) يعيد إنتاج النتيجة المقيسة على 629 صفحة:
-هذه الصفحات الأربع بلا إطار مطبوع ⇒ تُرفض، والبقية تُقبل.
+ثلاث صفحات **فارغة فعلاً** (172 · 484 · 602) ⇒ تُرفض، وصفحة **رقيقة** واحدة
+(`pg-628.png` = المطبوعة ٦٢٩: صفّان وإطار مطبوع مقروء) ⇒ **لا تُرفض**.
+الرقيقة ليست فارغة، ورفضها كان يُسقط من الدفع صفحةً قابلة للإثبات.
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ for _p in (str(PROJ), str(PROJ / "src")):
 
 from tools.page_gate import (  # noqa: E402
     R_BLANK, R_BLUR, R_LANDSCAPE, R_NO_REFEREE, R_SIZE_VARIANCE, R_SKEW,
-    R_SMALL_TEXT, TH, check_page, modal_page_size, verdict,
+    R_SMALL_TEXT, R_SPARSE, TH, check_page, modal_page_size, verdict,
 )
 
 W, H = TH.ref_w, TH.ref_h
@@ -115,6 +117,32 @@ def test_downscaled_page_triggers_small_text(tmp_path):
     assert R_SMALL_TEXT in r["reasons"]
 
 
+def test_sparse_page_is_not_blank_and_is_payable(tmp_path):
+    """صفّان أو ثلاثة على ورقة مشروعة: الحبر قليل، لكن الصفحة **ليست فارغة**.
+
+    الفرق ليس تجميلاً: الفارغة تُرفض فتُسقط من الدفع (وهذا غرضها)، والرقيقة
+    تُدفع فتُقرأ. الخلط بينهما يدفن صفوفاً مدفوعةً لا تُقرأ أبداً.
+    القياس الفاصل: ورقة بيضاء = 0.0001 · صفحة حقيقية بصفّين (pg-628) = 0.0082.
+    """
+    def sparse_marks(ticks: int = 16):
+        img = Image.new("L", (W, H), 255)
+        d = ImageDraw.Draw(img)
+        x, y = 120, H - 220
+        for _ in range(ticks):
+            d.rectangle([x, y, x + 25, y + 30], fill=30)
+            x += 60
+        return img
+
+    r = check_page(saved(tmp_path, "sparse", sparse_marks()))
+    assert TH.empty_ink_max < r["ink_ratio"] < TH.ink_ratio_min, r["ink_ratio"]
+    assert R_BLANK not in r["reasons"], r["reasons"]   # ليست فارغة
+    assert R_SPARSE in r["reasons"], r["reasons"]      # لكنها رقيقة ⇒ تُعلَّم
+
+    blank = check_page(saved(tmp_path, "white", Image.new("L", (W, H), 255)))
+    assert blank["verdict"] == "reject" and blank["reasons"] == [R_BLANK]
+    assert r["ink_ratio"] > blank["ink_ratio"]
+
+
 def test_blank_page_reports_only_blankness(tmp_path):
     """الصفحة الفارغة تُحسم أولاً: حدّة وميل لوح أبيض **ضجيج** لا عيوب.
     الاختبار يقفل السلوك: سبب واحد، لا ثلاثة."""
@@ -171,17 +199,28 @@ def test_real_reference_pages_are_never_rejected():
 
 
 @needs_corpus
-def test_the_four_footerless_pages_are_found_mechanically():
-    """النتيجة المقيسة: 625 مقبول · 0 منبَّه · 4 مرفوضة — والصفحات الأربع هي
-    بالضبط ما وثّقه `docs/suspects_log.md` بأنه «بلا إطار مطبوع»: 172 · 484 ·
-    602 · 629 بأرقام الطباعة = المواقع 172 · 484 · 602 · 628 على القرص
-    (خريطة القراءة: 626→627 · 627→628 · **628→629**)."""
-    expected = {"pg-172.png", "pg-484.png", "pg-602.png", "pg-628.png"}
-    found = set()
-    for name in expected | {"pg-001.png", "pg-300.png"}:
+def test_blanks_are_rejected_mechanically_and_a_sparse_real_page_is_not():
+    """النتيجة المقيسة: 625 مقبول · 1 منبَّه (رقيقة) · 3 مرفوضة (فارغة).
+
+    المرفوضة الثلاث (172 · 484 · 602) **صور بيضاء قياساً**: حبر 0.0000 ولا إطار
+    مكشوف، وفي تقرير التشغيل لها صفر صفوف و`footer: absent` ⇒ الرفض صدق.
+
+    و`pg-628.png` (= المطبوعة ٦٢٩) ليست منهنّ: كاش التشغيل المقبوض يثبت لها
+    **صفّين** و`footer: ok` (مدين 300.00 = مجموع الصفّين) وكلفة مقبوضة 0.0077$.
+    كانت تُرفض قبل الإصلاح بسبب حبر 0.0082 < 0.010 ⇒ صفحة مدفوعة تسقط من الدفع.
+    """
+    expected_blank = {"pg-172.png", "pg-484.png", "pg-602.png"}
+    blank, sparse = set(), set()
+    for name in expected_blank | {"pg-628.png", "pg-001.png", "pg-300.png"}:
         p = CORPUS_PAGES / name
         if not p.exists():
             continue
-        if check_page(p)["verdict"] == "reject":
-            found.add(name)
-    assert found == expected, f"متوقع {expected} ووجدنا {found}"
+        r = check_page(p)
+        if r["verdict"] == "reject":
+            assert r["reasons"] == [R_BLANK], (p.name, r["reasons"])
+            blank.add(name)
+        if R_SPARSE in r["reasons"]:
+            sparse.add(name)
+    assert blank == expected_blank, f"مرفوض: {blank}"
+    assert "pg-628.png" not in blank, "صفحة رقيقة مدفوعة لا تُرفض"
+    assert sparse == {"pg-628.png"}, f"رقيق: {sparse}"

@@ -111,7 +111,12 @@ class Thresholds:
     skew_max_deg: float = 2.0            # الحدّ: المقيس p99=0.0° (المرجع مستقيم تماماً)
     glyph_w_min: int = 6                 # عرض أضيق مجموعة أرقام في الإطار: p1=9 · p50=13
     body_h_min: int = 12                 # ارتفاع كتلة سطر في المتن: المقيس p1=17.6 · p50=20
-    ink_ratio_min: float = 0.010         # الحدّ: المقيس p1=0.0171 · p50=0.0219
+    ink_ratio_min: float = 0.010         # «رقيقة»: المقيس p1=0.0171 · p50=0.0219
+    # «فارغة» ليست «رقيقة». ورقة بيضاء قِيست 0.0001 (ضجيج أربع بكسلات)، وصفحة
+    # حقيقية بصفّين قِيست 0.0082 وإطارها مطبوع ومقروء ⇒ الخلط بين الاثنين يرفض
+    # ورقاً سليماً ويدفن صفوفه (أثبته قياس الكاش: pg-628 = الصفحة المطبوعة ٦٢٩،
+    # صفّان · فوتر ok · كلفتها المقبوضة 0.0077$).
+    empty_ink_max: float = 0.001
     body_band_h_min: int = 6             # أدنى ارتفاع لكتلة سطر في متن الصفحة
 
 
@@ -122,18 +127,20 @@ R_LANDSCAPE = "landscape"
 R_BLUR = "blur"
 R_SKEW = "skew"
 R_BLANK = "blank"
+R_SPARSE = "sparse"
 R_NO_REFEREE = "no_referee"
 R_SMALL_TEXT = "small_text"
 R_SIZE_VARIANCE = "size_variance"
 
 _REJECT = (R_LANDSCAPE, R_BLUR, R_SKEW, R_BLANK)
-_WARN = (R_NO_REFEREE, R_SMALL_TEXT, R_SIZE_VARIANCE)
+_WARN = (R_NO_REFEREE, R_SMALL_TEXT, R_SIZE_VARIANCE, R_SPARSE)
 
 _AR_REASON = {
     R_LANDSCAPE: "الصفحة أفقية (العرض أكبر من الطول) — التصوير/التدوير يحتاج إصلاحاً",
     R_BLUR: "الصورة غير حادة (اهتزاز/ضبابية) — الأرقام المتقاربة قابلة للتبادل",
     R_SKEW: "ميل زائد عن الحدّ — الصفوف تنزلق ويختلط آخر صف بأول الصف التالي",
-    R_BLANK: "الصفحة شبه فارغة — لا حبر كافٍ ليُقرأ منها شيء",
+    R_BLANK: "الصفحة فارغة — لا حبر فيها أصلاً (ورقة بيضاء في المسح)",
+    R_SPARSE: "صفحة رقيقة الحبر (صفوف قليلة) — **تُدفع وتُعلَّم**: ليست فارغة، وأرقامها تُقرأ",
     R_NO_REFEREE: "سطر الإطار غير مكشوف ⇒ أرقام الصفحة **لا يمكن إثباتها** (تُقرأ ولا تُصدَّق)",
     R_SMALL_TEXT: "أرقام الإطار صغيرة الحجم — تحت حدّ القراءة الموثوق",
     R_SIZE_VARIANCE: "مقاس الصفحة شاذ داخل الملف (خلط أدوات تصوير/صور مدمجة؟)",
@@ -232,15 +239,20 @@ def check_page(png: Path, th: Thresholds = TH,
     reasons: list[str] = []
     if w > h:
         reasons.append(R_LANDSCAPE)
-    if res["ink_ratio"] < th.ink_ratio_min:
-        # الصفحة الفارغة تُحسم أولاً: قياس الحدّة والميل عليها يقيس **ضجيجاً** لا
-        # عيباً (لوح أبيض «مائل ٦ درجات» ليس مائلاً). الكتمان هنا صدق لا تفويت:
-        # السبب الوحيد الصادق لصفحة فارغة هو أنها فارغة.
+    if res["ink_ratio"] < th.empty_ink_max:
+        # الفارغة تُحسم أولاً: قياس الحدّة والميل عليها يقيس **ضجيجاً** لا عيباً
+        # (لوح أبيض «مائل ٦ درجات» ليس مائلاً). الكتمان هنا صدق لا تفويت: السبب
+        # الوحيد الصادق لصفحة فارغة هو أنها فارغة.
         reasons.append(R_BLANK)
         res["reasons"] = reasons
         res["reasons_ar"] = [_AR_REASON[r] for r in reasons]
         res["verdict"] = "reject"
         return res
+    if res["ink_ratio"] < th.ink_ratio_min:
+        # رقيقة لا فارغة: صفحة بصفّين أو ثلاثة مشروعة تماماً، وإطارها المطبوع
+        # يجعلها قابلة للإثبات. رفضها كان يُسقطها من الدفع ⇒ صفوف مدفوعة لا
+        # تُقرأ. تُعلَّم لتُرى، وتُدفع لتُقرأ.
+        reasons.append(R_SPARSE)
     if res["sharpness"] < th.lapvar_min:
         reasons.append(R_BLUR)
     if abs(res["skew_deg"]) > th.skew_max_deg:
