@@ -143,6 +143,37 @@ def _guard_source() -> str:
         encoding="utf-8")
 
 
+# ── self-exclusion and worktree coverage ─────────────────────────────────
+
+def test_guard_source_passes_its_own_rules():
+    """`tools/publish_guard.py` is in SKIP_PATHS — it is never scanned by
+    itself. That self-exclusion is a HOLE: a real account number once sat in
+    its own docstring, written as two added literals and therefore invisible
+    to everything. The source is scanned here instead."""
+    blocks = [f for f in _scan(_guard_source()) if f[0] == "BLOCK"]
+    assert blocks == [], blocks
+
+
+def test_every_tracked_text_file_is_clean():
+    """Working-tree twin of `publish_guard --tree`: the tree scan reads HEAD
+    blobs, so a bad edit is caught at push time; this one reads the files on
+    disk (including the guard's own source) and fails before the commit."""
+    import subprocess
+
+    root = Path(pg.ROOT)
+    tracked = subprocess.run(["git", "ls-files"], cwd=root, capture_output=True,
+                             text=True).stdout.split()
+    findings: list[tuple] = []
+    for rel in tracked:
+        if Path(rel).suffix.lower() in (pg.BINARY_EXTS | pg.OPAQUE_EXTS):
+            continue
+        here: list[tuple] = []
+        pg._scan_text(rel, (root / rel).read_text(encoding="utf-8"),
+                      "worktree", here, pg.load_allowlist())
+        findings += [f for f in here if f[0] == "BLOCK"]
+    assert findings == [], findings
+
+
 def test_pre_push_scans_every_pushed_commit():
     """A commit that carried PII and was later rewritten lives exactly in the
     commits an SHA-ordered sample would drop, so there is no sampling."""
