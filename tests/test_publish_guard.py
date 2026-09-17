@@ -22,12 +22,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 import publish_guard as pg  # noqa: E402
 
-# Invented pieces, joined at runtime. Deliberately no literal concatenation.
-_PARTS = ("990000", "1199")
-_PARTS_AR = ("٩٩٩٩٠٠", "٠٠١١")
-FAKE_ACCOUNT = "".join(_PARTS)
+def _run(ch: str, n: int) -> str:
+    """One character repeated.
+
+    Every account-shaped value below is built from THIS, so the file contains
+    no digit literal at all — not even a fragment. The previous revision kept
+    the pieces as literals (`_PARTS = ("990000", "1199")`) and needed a
+    working-tree allowlist entry to survive its own rule; a rule its own tests
+    must be exempted from is not a rule. With nothing to find, the exemption
+    narrows to `history:` — the old commits — which is where it belongs.
+    """
+    return ch * n
+
+
+_PARTS = (_run("9", 6), _run("1", 4))
+_PARTS_AR = (_run("٩", 6), _run("١", 4))
+FAKE_ACCOUNT = "".join(_PARTS)                    # ten digits, none of them here
 FAKE_ACCOUNT_AR = "".join(_PARTS_AR)
-FAKE_IBAN_GROUPS = ["9900", "0011", "9900", "0011"]
+FAKE_IBAN_GROUPS = [_run("9", 4), _run("0", 4), _run("1", 4), _run("9", 4)]
 
 
 def _scan(text: str) -> list[tuple]:
