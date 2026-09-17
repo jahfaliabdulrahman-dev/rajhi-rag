@@ -1,8 +1,6 @@
 """Tests for the what-if deltas: era detector · ordering · job lock · bank
 guard · last-balance retrieval bridge. No network."""
 
-from decimal import Decimal
-
 import pytest
 
 from statement_qa.bank_check import verdict_from_name

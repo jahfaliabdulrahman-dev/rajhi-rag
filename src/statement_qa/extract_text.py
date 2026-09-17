@@ -8,10 +8,7 @@ parser can rebuild movement rows by y-clustering + x-column classification
 
 from __future__ import annotations
 
-import csv
-import io
 from dataclasses import dataclass
-from pathlib import Path
 
 import pdfplumber
 import pytesseract

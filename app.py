@@ -54,8 +54,6 @@ from statement_qa.render import (
     rows_for_refs as render_rows_for_refs,
 )
 from statement_qa.verification import (
-    caution as verification_caution,
-    coverage_line as verification_coverage,
     format_effects,
     verdicts_from_checks,
 )

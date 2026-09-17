@@ -86,7 +86,7 @@ def main() -> None:
     df = pl.read_parquet(target)
     print(f"[to-parquet] {target} — {df.height} صفاً × {df.width} عموداً")
     print(df.select(["page", "row_no", "movement_raw", "balance_raw"]).head(3))
-    print(f"\nمثال استعلام: صفحات فيها إعادة قراءة أو استدراك ⇒")
+    print("\nمثال استعلام: صفحات فيها إعادة قراءة أو استدراك ⇒")
     print(df.filter(pl.col("page_recovered") | pl.col("page_reread"))
             .select(pl.col("page").unique()).sort("page"))
 

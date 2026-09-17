@@ -580,7 +580,7 @@ def main() -> None:
 
     blocks = [f for f in findings if f[0] == "BLOCK"]
     warns = [f for f in findings if f[0] == "WARN"]
-    print(f"[publish-guard] " +
+    print("[publish-guard] " +
           " · ".join(f"{label}: {n}" for label, n in scanned) +
           f" — {len(blocks)} BLOCK / {len(warns)} WARN")
     if warns:

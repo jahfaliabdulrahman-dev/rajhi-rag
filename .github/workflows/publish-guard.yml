@@ -22,6 +22,13 @@ jobs:
           fetch-depth: 0   # full history for the forensic scan
       - name: PII / real-data guard (tree + history + commit messages)
         run: python3 tools/publish_guard.py --tree --history --ci
+      # Static gate: undefined names / dead bindings. Pinned engine so the
+      # verdict cannot drift with a version bump; a dev tool, never a runtime
+      # dependency.
+      - name: Static gate (names that never resolve, bindings never read)
+        run: |
+          python3 -m pip install --quiet pyflakes==3.4.0
+          python3 tools/static_gate.py
       - name: Lightweight suite (no ML deps — compile, lock, public claims)
         run: |
           python3 -m pip install --quiet pytest

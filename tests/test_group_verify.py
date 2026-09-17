@@ -14,7 +14,7 @@ from pathlib import Path
 PROJ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJ / "tools"))
 
-from statement_qa.group_check import gained_pages, verify_groups  # noqa: E402
+from statement_qa.group_check import verify_groups  # noqa: E402
 
 
 def _page(n, own_d, own_c, frame_d=None, frame_c=None, balance=None):

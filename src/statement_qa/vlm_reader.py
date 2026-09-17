@@ -26,10 +26,9 @@ import time
 import urllib.error
 import urllib.request
 from decimal import Decimal
-from pathlib import Path
 
 from statement_qa.legacy.prompts import (
-    FRONTIER_PROMPT, STRUCTURE_AWARE_PROMPT, TOP_BAND_PROMPT, HARD_RULES,
+    FRONTIER_PROMPT, TOP_BAND_PROMPT,
 )
 from statement_qa.legacy.arabic_digit_parser import norm_num as _legacy_norm_num
 from statement_qa.api_key import get_api_key

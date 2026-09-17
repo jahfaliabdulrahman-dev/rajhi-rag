@@ -2,8 +2,6 @@
 
 from decimal import Decimal
 
-import pytest
-
 from statement_qa.parser import _to_decimal, normalize_digits, parse_text
 from statement_qa.verifier import verify_statement
 

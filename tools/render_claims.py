@@ -13,6 +13,9 @@ test count) and asserts the documents contain them. Local, no API, no cost.
 
     python3 tools/render_claims.py            # show what it derives and checks
     python3 tools/render_claims.py --check    # exit 1 on any drift
+    python3 tools/render_claims.py --write    # refresh docs/claims.json (the
+                                              # snapshot CI checks against when
+                                              # the local cache is absent)
 """
 from __future__ import annotations
 
@@ -25,6 +28,10 @@ from pathlib import Path
 PROJ = Path(__file__).resolve().parent.parent
 REPORT = PROJ / "data" / "local_sample" / "slice_629p" / "slice_report.json"
 RESULTS = PROJ / "data" / "local_sample" / "slice_629p" / "results"
+# The CI-visible snapshot. It MUST have a writer: a snapshot nobody regenerates
+# drifts silently, and then CI compares a fresh document against a stale copy
+# and calls the fresh document the drift (this happened with the test count).
+SNAPSHOT = PROJ / "docs" / "claims.json"
 
 
 def _test_count() -> int | None:
@@ -99,6 +106,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--check", action="store_true",
                     help="exit 1 if any public document drifts from the report")
+    ap.add_argument("--write", action="store_true",
+                    help="refresh docs/claims.json from this derivation")
     args = ap.parse_args()
     d = derive()
     if d is None:
@@ -108,6 +117,11 @@ def main() -> None:
     print("[claims] الأرقام المشتقّة من تقرير التشغيل:")
     for k, v in d.items():
         print(f"  {k}: {v}")
+    if args.write:
+        SNAPSHOT.write_text(json.dumps(d, ensure_ascii=False, indent=1) + "\n",
+                            encoding="utf-8")
+        print(f"\nكُتبت اللقطة: {SNAPSHOT.relative_to(PROJ)} "
+              f"(مشتقّة من التقرير، لا مكتوبة بيد).")
     drifts = check(d)
     if not drifts:
         print("\nالحكم: كل رقم معلن يطابق مصدره.")

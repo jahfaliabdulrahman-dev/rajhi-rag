@@ -79,7 +79,6 @@ def main() -> None:
         raise SystemExit(f"source not found: {src}")
 
     text_pages, scanned_pages, char_counts = classify_pdf(str(src))
-    n_total = len(char_counts)
     picked = pick_sample(text_pages, scanned_pages, args.pages)
 
     reader = PdfReader(str(src))
