@@ -99,6 +99,38 @@ def test_thresholds_are_not_existence_questions():
 
 # ── routing a compound question (measured case F) ────────────────────────
 
+def test_the_account_question_is_never_read_as_sabb_bank():
+    """The auditor's six sentences, verbatim. «ساب» sits inside «حِساب», and
+    containment matching refused the question this project exists to answer."""
+    from statement_qa.scope import classify
+
+    for q in ("ما رصيد الحساب؟", "متى فُتح الحساب؟",
+              "كم عدد حركات هذا الحساب؟", "كم رصيد حسابي في بنك الراجحي؟",
+              "هل توجد فاتورة جوال؟", "كم مجموع السحوبات من هذا الحساب؟"):
+        assert classify(q, (), None, frozenset()).kind == "in_scope", q
+
+
+def test_a_real_other_bank_still_refuses():
+    """…without weakening the rule it was built for: widen nothing."""
+    from statement_qa.scope import classify
+
+    for q in ("كم رصيد حسابي في بنك الرياض؟", "هل عندي حساب في ساب؟",
+              "رصيد حسابي في الأهلي", "ما رصيد حسابي في بنك البلاد؟"):
+        sc = classify(q, (), None, frozenset())
+        assert sc.kind == "out_of_scope", q
+        assert "لا يحتوي أي بيانات" not in sc.answer   # the old claim was a lie
+
+
+def test_a_city_name_is_not_a_bank_without_the_word_bank():
+    """«الرياض» in an ATM description is a place, not a rival branch."""
+    from statement_qa.scope import classify
+
+    assert classify("كم سحب من الصراف في الرياض؟", (), None,
+                    frozenset()).kind == "in_scope"
+    assert classify("كم سحب من الصراف في بنك الرياض؟", (), None,
+                    frozenset()).kind == "out_of_scope"
+
+
 def test_a_compound_question_splits_into_its_two_asks():
     from statement_qa.qa import split_compound
 

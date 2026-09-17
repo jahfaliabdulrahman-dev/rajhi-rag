@@ -104,7 +104,10 @@ def from_checks(footer_checks: list[dict], all_rows: list[dict]) -> list[int]:
         pg, status = c["page"], c["status"]
         own = c.get("own") or own_by_page.get(pg) or {}
         cum = c.get("totals") or {}
-        readable = status == "ok"
+        # A scan-gap page still has a READABLE frame — its own delta is what
+        # exposed the gap. Excluding it as a bracket would shrink the coverage
+        # the group arithmetic can prove (auditor's answer to Q2).
+        readable = status in ("ok", "gap")
         pages.append({"page": pg,
                       "own_debits": own.get("debits"),
                       "own_credits": own.get("credits"),

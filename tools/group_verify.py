@@ -107,7 +107,8 @@ def main() -> None:
                               ensure_ascii=False, indent=2), encoding="utf-8")
 
     interesting = [g for g in groups
-                   if g.get("covers_unreadable") or g["status"] == "undecidable"]
+                   if g.get("covers_unreadable")
+                   or g["status"] in ("mismatch", "undecidable")]
     print(f"[group-verify] صفحات: {len(pages)} · أزواج إطارات: {len(groups)} · "
           f"نطاقات تستحق العرض: {len(interesting)}")
     for g in interesting:
@@ -120,8 +121,12 @@ def main() -> None:
                   f"دائن {g['diff_credits']} (رصيد مطابق: {g['balance_ok']})")
         else:
             print(f"  ◍ غير محسومة: {pages_ar} — {g['why']}")
-    gained = sum(len(g["pages"]) for g in groups
-                 if g["status"] == "verified" and g.get("covers_unreadable"))
+    # Only pages that had NO readable frame of their own are a gain: a page the
+    # oracle already certified must not be counted twice (auditor: «يعدّ 6 بدل 5»).
+    no_frame = {p["page"] for p in pages if not p["usable"]}
+    gained = sum(1 for g in groups
+                 if g["status"] == "verified" and g.get("covers_unreadable")
+                 for n in g["pages"] if n in no_frame)
     gaps = [g for g in groups if g["status"] == "mismatch"
             and g.get("covers_unreadable")]
     print(f"\nالحكم: {gained} صفحة كانت «غير قابلة للتحقق» صارت موثّقة بالمجموع؛ "

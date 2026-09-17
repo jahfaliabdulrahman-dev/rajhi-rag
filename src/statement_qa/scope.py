@@ -33,15 +33,39 @@ from decimal import Decimal, InvalidOperation
 OUR_BANK = ("الراجحي", "rajhi", "alrajhi")
 
 # Banks that are NOT the one this project reads. Kept as data, not prose.
-OTHER_BANKS = (
-    "الرياض", "الأهلي", "الاهلي", "سامبا", "البلاد", "الإنماء", "الانماء",
-    "ساب", "الجزيرة", "العربي", "الاستثمار", "الخليج", "الفرنسي", "الرياض",
-    "stc bank", "بنك الرياض",
+# TWO lists, because Arabic glues its words together. «ساب» (SABB) lives inside
+# «حِساب» (account), and «الرياض» is a city in an ATM description long before it
+# is a bank — containment matching refused «ما رصيد الحساب؟», the one question
+# this project exists to answer. (Measured, not feared: four of six sentences.)
+OTHER_BANKS_STRONG = (
+    "الأهلي", "الاهلي", "سامبا", "البلاد", "الإنماء", "الانماء", "ساب",
+    "stc bank", "بنك الرياض", "بنك الأهلي", "الرياض",
 )
+# Real words on their own: they gate only when the question says «بنك».
+OTHER_BANKS_WEAK = ("الرياض", "الخليج", "الجزيرة", "العربي", "الاستثمار",
+                    "الفرنسي")
+_STRONG_ONLY = tuple(b for b in OTHER_BANKS_STRONG if b not in OTHER_BANKS_WEAK)
+_AR_CHARS = "\u0621-\u064A\u0660-\u0669"
+
+
+def _mentions(text: str, token: str) -> bool:
+    """Whole-token match, Arabic-aware.
+
+    Arabic writes its words unspaced, so `token in text` matches inside longer
+    words — the defect an external audit found by running it. A token is only a
+    mention when no Arabic letter touches it on either side.
+    """
+    t = re.escape(token.strip())
+    left = r"(?<![A-Za-z])" if token[0].isascii() else f"(?<![{_AR_CHARS}])"
+    right = r"(?![A-Za-z])" if token[-1].isascii() else f"(?![{_AR_CHARS}])"
+    return re.search(left + t + right, text) is not None
 
 # Data a statement does not carry, whatever else it says.
+# «الجوال» alone is NOT here on purpose: «فاتورة الجوال» is a real row in this
+# statement, and a marker that refuses a real question is worse than none.
 PERSONAL_MARKERS = (
-    "رقم الجوال", "الجوال", "الهوية", "رقم الهوية", "العنوان", "الإيميل",
+    "رقم الجوال", "رقم جوال", "رقم هاتف", "الهوية", "رقم الهوية", "العنوان",
+    "عنوان صاحب", "الإيميل", "إيميل",
     "الايميل", "البريد الإلكتروني", "تاريخ الميلاد", "رقم البطاقة",
     "الرقم السري", "كلمة المرور",
 )
@@ -115,13 +139,14 @@ def classify(question: str, years=(), max_page: int | None = None,
 
     # 1) another bank named — unless the owner's bank is the one named
     if not _has_our_bank(q):
-        for bank in OTHER_BANKS:
-            if bank and bank.lower() in low:
-                return Scope(
-                    "out_of_scope", f"سؤال عن {bank.strip()}",
-                    f"{REFUSAL} — هذا الكشف يخص مصرف الراجحي فقط، ولا يحتوي "
-                    f"أي بيانات عن {bank.strip()}. لا يمكنني الجواب عن حساب "
-                    f"في مصرف آخر.")
+        bank = next((b for b in _STRONG_ONLY if _mentions(q, b)), None)
+        if bank is None and "بنك" in q:
+            bank = next((b for b in OTHER_BANKS_WEAK if _mentions(q, b)), None)
+        if bank:
+            return Scope(
+                "out_of_scope", f"سؤال عن {bank}",
+                f"{REFUSAL} — هذا الكشف يخصّ مصرف الراجحي، وسؤالك عن {bank} "
+                f"(مصرف آخر). لا أستطيع الجواب عنه من كشف الراجحي، ولا أُخمّن.")
 
     # 2) personal data a statement never carries
     for marker in PERSONAL_MARKERS:
