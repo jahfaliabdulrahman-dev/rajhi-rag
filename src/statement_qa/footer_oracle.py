@@ -48,6 +48,9 @@ FOOTER_PROMPT = """هذه الحافة السفلية من صفحة كشف حس�
 null لأي رقم غير مقروء أو غير موجود. JSON فقط بلا أي تعليق."""
 
 CROP_TOP = 0.75  # bottom band containing the printed totals row
+# The three printed totals, one name for them everywhere (the reader fills
+# them, the oracle checks them, the provenance auditors walk them).
+FIELDS = ("debits", "credits", "balance")
 
 
 @dataclass
@@ -84,7 +87,7 @@ def _reading_from_content(content: str) -> FooterReading | None:
         debits=_parse_amount(data.get("debits")),
         credits=_parse_amount(data.get("credits")),
         balance=_parse_amount(data.get("balance")),
-        raw={k: data.get(k) for k in ("debits", "credits", "balance")},
+        raw={k: data.get(k) for k in FIELDS},
     )
     return reading if reading.any_value else None
 

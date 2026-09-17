@@ -117,6 +117,11 @@ def chat_vlm_image(image_b64: str | list[str], prompt: str,
                  "Content-Type": "application/json"})
     delay = 10
     for attempt in range(_ATTEMPTS):
+        if stats is not None:
+            # Every attempt IS one HTTP request. The ledger's `calls` counts
+            # pages (one read), so it under-reported the real request count by
+            # ~2x — and that wrong number reached a handoff message (audit P2-2).
+            stats["request_calls"] = int(stats.get("request_calls") or 0) + 1
         try:
             out = json.loads(urllib.request.urlopen(req, timeout=180).read().decode())
             if stats is not None and isinstance(out.get("usage"), dict):

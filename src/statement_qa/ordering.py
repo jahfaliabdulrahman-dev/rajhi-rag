@@ -96,20 +96,47 @@ def check_page_numbers(pairs: list[tuple[int, int | None]]) -> dict:
             gaps.append((p1, n1, p2, n2, list(range(n1 + 1, n2))))
         else:
             backwards.append((p1, n1, p2, n2))
+    breaks = [(p1, p2) for (p1, _), (p2, _) in zip(seq, seq[1:])
+              if p2 != p1 + 1]
     return {
         "gaps": gaps,
         "duplicates": {n: ps for n, ps in positions.items() if len(ps) > 1},
         "backwards": backwards,
         "checked": len(seq),
         "unread": len(pairs) - len(seq),
+        # read positions that do NOT sit next to each other: the sheets
+        # between them were never read, so a jump across them is undecidable
+        # rather than absent (audit P1-3).
+        "position_breaks": breaks,
     }
 
 
+MIN_PAGE_COVERAGE = 0.5   # below this the evidence cannot carry a verdict
+
+
 def summarize_page_numbers(pn: dict) -> str:
-    """Run-level one-liner for the ticker: is the scan order sound or not?"""
-    if not pn["checked"]:
-        return "الترقيم المطبوع: لم يُقرأ"
-    seg = f"الترقيم المطبوع: ✓ متسلسل ({pn['checked']} صفحة)"
+    """Run-level one-liner for the ticker: is the scan order sound or not?
+
+    Coverage decides whether a verdict is allowed at all (audit P1-3). The
+    first version printed «✓ متسلسل» after reading the printed number on 17 of
+    629 sheets, and printed the same ✓ for a 1→50 jump between two positions
+    that were not neighbours. Both are over-claims: a green check must be
+    something the evidence can carry, and «لا حكم» is a legitimate answer.
+    """
+    checked, unread = pn["checked"], pn["unread"]
+    total = checked + unread
+    if not checked:
+        return f"الترقيم المطبوع: لم يُقرأ (0/{total})"
+    coverage = checked / total if total else 0.0
+    if coverage < MIN_PAGE_COVERAGE:
+        # a low-coverage ✓ is exactly the false comfort this rule removes
+        seg = (f"⚠ الترقيم المطبوع: تغطية ناقصة ({checked}/{total} مقروءة) — "
+               f"لا حكم على التسلسل")
+    elif unread or pn.get("position_breaks"):
+        seg = (f"الترقيم المطبوع: متسلسل في المقروء ({checked}/{total}) — "
+               f"التسلسل بين الصفحات غير المقروءة غير محسوم")
+    else:
+        seg = f"الترقيم المطبوع: ✓ متسلسل ({checked}/{total})"
     if pn["gaps"]:
         miss = []
         for _p1, _n1, p2, _n2, missing in pn["gaps"]:
@@ -136,7 +163,12 @@ def summarize_ar(order: dict, boundaries: dict | None = None) -> str:
         seg = f"⚠ الترتيب: انعكاس داخل صفحات {pages}"
     cov_w, cov_t = order["coverage"]
     if cov_t and cov_w < cov_t:
-        seg += f" [تواريخ مقروءة {cov_w}/{cov_t}]"
+        if cov_w / cov_t < MIN_PAGE_COVERAGE:
+            # same rule as the page numbers: a green ✓ needs the evidence to
+            # carry it, otherwise the honest answer is «لا حكم».
+            seg = f"⚠ الترتيب: تغطية تواريخ ناقصة ({cov_w}/{cov_t}) — لا حكم"
+        else:
+            seg += f" [تواريخ مقروءة {cov_w}/{cov_t}]"
     if boundaries:
         anchors = boundaries.get("anchor", 0)
         okb = boundaries.get("txn", 0) + boundaries.get("carry", 0)

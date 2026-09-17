@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from decimal import Decimal
@@ -85,12 +86,79 @@ def row_from_json(d: dict) -> dict:
             "balance": dec(d.get("balance"))}
 
 
+# A ledger holds cost and tokens — nothing else. The old version summed ANY
+# numeric key, so a stray `page_no` from the reader's stats landed in the cost
+# ledger as a field called «page_no = 3422» (audit P2-2).
+_USAGE_KEYS = ("calls", "request_calls", "cost", "prompt_tokens",
+               "completion_tokens", "cached_tokens")
+
+
 def _sum_dicts(a: dict, b: dict) -> dict:
     out = dict(a)
     for k, v in (b or {}).items():
-        if isinstance(v, (int, float)):
+        if k in _USAGE_KEYS and isinstance(v, (int, float)):
             out[k] = round(out.get(k, 0) + v, 6)
     return out
+
+
+def partial_first_status(pg: int, first: int) -> dict | None:
+    """The verdict for the FIRST page of a partial run: none — and say so (P2-6).
+
+    A window that starts at page 424 has no previous page, so the cumulative
+    comparison measures that single page against the whole statement and
+    reports «mismatch» — a false alarm that opened every investigation window
+    and made a clean window look dirty in the notes.
+    """
+    if pg == first and first > 1:
+        return {"status": "unchecked", "compared": 0,
+                "reason": "أول صفحة في تشغيل جزئي — لا جار سابق للدلتا"}
+    return None
+
+
+def _read_cache(cache: Path) -> dict | None:
+    """Checkpoint read that treats a damaged file as «unreadable», not a crash.
+
+    An unguarded json.loads turned one interrupted write into a dead run whose
+    only recovery was deleting a paid-for page (audit P2-4).
+    """
+    try:
+        return json.loads(cache.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _write_json_atomic(path: Path, obj) -> None:
+    """temp file + os.replace: a half-written checkpoint can never be read."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _cache_facts(results_dir: Path) -> dict:
+    """Durable facts from the page checkpoints, not from this process (P2-1).
+
+    A replay costs no money and no VLM seconds, so building the report from
+    session state made a previously measured run claim «0.0 s/page» and «no
+    recoveries» — three fields erased by the very operation advertised as free.
+    Recoveries, re-reads and per-page milliseconds live in the checkpoints;
+    session elapsed time is reported separately and never mixed in.
+    """
+    recs, rds, times, arbs = [], [], [], []
+    for f in sorted(results_dir.glob("pg-*.json")):
+        d = _read_cache(f) or {}
+        if d.get("recovered"):
+            recs.append({"page": d.get("pg"), "amount": str(d["recovered"])})
+        if d.get("reread"):
+            rds.append({"page": d.get("pg")})
+        for a in (d.get("arbitrated_by") or []):
+            arbs.append({"page": d.get("pg"), "field": a.get("field"),
+                         "by": a.get("by"), "why": a.get("why")})
+        if d.get("ms_read"):
+            times.append(int(d["ms_read"]) + int(d.get("ms_footer") or 0))
+    times.sort()
+    median = (times[len(times) // 2] / 1000) if times else 0.0
+    return {"recoveries": recs, "rereads": rds, "arbitrations": arbs,
+            "median_page_s": round(median, 2), "timed_pages": len(times)}
 
 
 def _bump_usage(cache: Path, extra: dict) -> None:
@@ -102,12 +170,11 @@ def _bump_usage(cache: Path, extra: dict) -> None:
     """
     if not cache.exists() or not extra:
         return
-    try:
-        d = json.loads(cache.read_text(encoding="utf-8"))
-    except Exception:
+    d = _read_cache(cache)
+    if d is None:
         return
     d["usage"] = _sum_dicts(d.get("usage") or {}, extra)
-    cache.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    _write_json_atomic(cache, d)
 
 
 def main() -> None:
@@ -190,11 +257,15 @@ def main() -> None:
         pg = args.first + i
         cache = results_dir / f"pg-{pg:03d}.json"
         reread_rejected = False
+        anchor_rejected = False
         use_cache = cache.exists() and not args.no_resume
         data = None
         if use_cache:
-            data = json.loads(cache.read_text(encoding="utf-8"))
-            if data.get("error"):
+            data = _read_cache(cache)
+            if data is None:   # damaged checkpoint ≠ dead run (audit P2-4)
+                print(f"[p{pg}] كاش غير مقروء — إعادة قراءة نظيفة", flush=True)
+                use_cache = False
+            elif data.get("error"):
                 if args.retry_errors:
                     print(f"[p{pg}] إعادة محاولة خطأ سابق: {data['error']}",
                           flush=True)
@@ -213,6 +284,7 @@ def main() -> None:
             ms_read = data.get("ms_read", 0)
             ms_footer = data.get("ms_footer", 0)
             reread_rejected = bool(data.get("reread_rejected"))
+            anchor_rejected = bool(data.get("anchor_rejected"))
             page_no = data.get("page_no")
             raw_rows = [row_from_json(r) for r in data["raw_rows"]]
             footer = None
@@ -231,18 +303,11 @@ def main() -> None:
             try:
                 raw_rows = read_rows_vlm(str(png), stats=st_r)
             except Exception as e:  # page failed — honest, keeps going
-                prev_usage: dict = {}
-                if cache.exists():
-                    try:
-                        prev_usage = (json.loads(
-                            cache.read_text(encoding="utf-8")).get("usage") or {})
-                    except Exception:
-                        prev_usage = {}
-                cache.write_text(json.dumps(
-                    {"pg": pg, "error": f"{type(e).__name__}: {e}",
-                     "usage": _sum_dicts(prev_usage,
-                                         _sum_dicts({"calls": 1}, st_r))},
-                    ensure_ascii=False), encoding="utf-8")
+                prev_usage = ((_read_cache(cache) or {}).get("usage") or {})
+                _write_json_atomic(cache, {
+                    "pg": pg, "error": f"{type(e).__name__}: {e}",
+                    "usage": _sum_dicts(prev_usage,
+                                        _sum_dicts({"calls": 1}, st_r))})
                 print(f"[p{pg}] READ FAILED: {e}", flush=True)
                 cum_broken = True
                 window.append(1)       # a missing page weighs like a suspect
@@ -268,7 +333,7 @@ def main() -> None:
             usage = _sum_dicts(usage, st_f or {})
             usage_total = _sum_dicts(usage_total, usage)
             page_no = st_r.get("page_no")
-            cache.write_text(json.dumps({
+            _write_json_atomic(cache, {
                 "pg": pg, "ms_read": ms_read, "ms_footer": ms_footer,
                 "page_no": page_no,
                 "raw_rows": [row_to_json(r) for r in raw_rows],
@@ -277,12 +342,13 @@ def main() -> None:
                             "balance": str(footer.balance) if footer.balance is not None else None,
                             "raw": footer.raw} if footer else None),
                 "usage": usage,
-            }, ensure_ascii=False), encoding="utf-8")
+            })
             origin = "live"
 
         rows = chain_derive(raw_rows, prev_balance=prev_closing)
         # مرساة حدّية غير محسومة؟ استدراك مقيد — يُقبل فقط إذا أغلقت السلسلة.
-        if pg > args.first and rows and rows[0].get("boundary") == "anchor":
+        if (pg > args.first and rows and rows[0].get("boundary") == "anchor"
+                and not anchor_rejected):
             rst: dict = {}
             patched, recovered = recover_anchor(
                 raw_rows, prev_closing, str(png), pg, rst)
@@ -290,17 +356,20 @@ def main() -> None:
                 usage_total = _sum_dicts(
                     usage_total, _sum_dicts({"calls": 1}, rst))
                 _bump_usage(cache, _sum_dicts({"calls": 1}, rst))
+            cdata = _read_cache(cache) or {}
             if recovered is not None:
                 raw_rows = patched
                 rows = chain_derive(raw_rows, prev_balance=prev_closing)
                 recoveries.append({"page": pg, "amount": str(recovered)})
-                if cache.exists():  # لا تُعِد القراءة عند الاستئناف القادم
-                    data = json.loads(cache.read_text(encoding="utf-8"))
-                    if not data.get("error"):
-                        data["raw_rows"] = [row_to_json(r) for r in raw_rows]
-                        data["recovered"] = str(recovered)
-                        cache.write_text(json.dumps(data, ensure_ascii=False),
-                                         encoding="utf-8")
+                if cache.exists() and not cdata.get("error"):
+                    cdata["raw_rows"] = [row_to_json(r) for r in raw_rows]
+                    cdata["recovered"] = str(recovered)
+                    _write_json_atomic(cache, cdata)
+            elif rst and cache.exists() and not cdata.get("error"):
+                # attempted and REFUSED: without this, EVERY replay of the
+                # slice pays for the same two calls again (audit P2-2).
+                cdata["anchor_rejected"] = True
+                _write_json_atomic(cache, cdata)
         page_nos.append((pg, page_no))
         gap_missing: list[int] = []
         if (isinstance(page_no, int) and isinstance(prev_page_no, int)
@@ -336,15 +405,14 @@ def main() -> None:
                         recoveries.append({"page": pg, "amount": str(rec2)})
                 page_rereads.append({"page": pg, "note": note})
             if cache.exists():
-                cdata = json.loads(cache.read_text(encoding="utf-8"))
+                cdata = _read_cache(cache) or {}
                 if not cdata.get("error"):
                     if accepted and fresh_raw is not None:
                         cdata["raw_rows"] = [row_to_json(r) for r in raw_rows]
                         cdata["reread"] = note
                     else:
                         cdata["reread_rejected"] = note
-                    cache.write_text(json.dumps(cdata, ensure_ascii=False),
-                                     encoding="utf-8")
+                    _write_json_atomic(cache, cdata)
         prev_closing = next((r["balance"] for r in reversed(rows)
                              if r["balance"] is not None), prev_closing)
         if pg > args.first and rows:
@@ -357,6 +425,9 @@ def main() -> None:
         page_dates[pg] = [r.get("date") for r in rows]
 
         chk = check_page_footer(rows, footer, prior=cum, skip=cum_broken)
+        _partial = partial_first_status(pg, args.first)
+        if _partial:
+            chk = _partial
         # أساس التقرير = **دلتا الصفحة** متى توفّرت: تعزل الصفحة عن أي تلوث
         # تراكمي سابق، فتبقى الحقيقة ظاهرة بعد أي انقطاع. التراكمي بديل فقط.
         if delta_checkable(prev_footer, footer):
@@ -439,6 +510,7 @@ def main() -> None:
             continue
         ledger = _sum_dicts(ledger, u)
 
+    facts = _cache_facts(results_dir)
     report = {
         "slice": {"first": args.first, "count": args.count,
                   "pages_done": len(per_page)},
@@ -452,9 +524,15 @@ def main() -> None:
                 "outliers": era_fp["outliers"]},
         "order": {"cross": order["cross"], "intra": order["intra"],
                   "coverage": order["coverage"], "boundaries": boundaries},
-        "boundary_recoveries": recoveries,
-        "page_rereads": page_rereads,
+        "boundary_recoveries": facts["recoveries"],
+        "page_rereads": facts["rereads"],
+        "arbitrations": facts["arbitrations"],
+        "session": {"recoveries": recoveries, "page_rereads": page_rereads,
+                    "elapsed_s": elapsed},
         "time": {"elapsed_s": elapsed,
+                 "session_elapsed_s": elapsed,
+                 "median_page_s": facts["median_page_s"],
+                 "timed_pages": facts["timed_pages"],
                  "avg_page_s": round(elapsed / max(1, len(per_page)), 1)},
         "usage": usage_total,
         "usage_ledger": ledger,
@@ -478,7 +556,9 @@ def main() -> None:
         f"| الصفوف | {n_rows} |",
         f"| نظيف السلسلة | {n_ok}  ({clean_ratio:.1%}) |",
         f"| مشبوه | {n_susp} |",
-        f"| أوراكل الفوتر | {f_ok} مطابق · {f_bad} غير مطابق · {f_unchecked} غير قابل للتحقق · {f_absent} غير مقروء |",
+        f"| أوراكل الفوتر | {f_ok} مطابق · {f_bad} غير مطابق · {f_gap} فجوة مسح · {f_absent} بلا إطار · {f_unchecked} غير قابل للتحقق |",
+        f"| تغطية التحقق | {f_ok + f_bad} من {len(per_page)} صفحة حُكِمت مقابل إطارها |",
+        f"| زمن الصفحة (وسيط مُخزَّن) | {report['time']['median_page_s']} ث على {report['time']['timed_pages']} صفحة |",
         f"| الصيغ | {era_ar(era_fp)} |",
         f"| الترتيب | {order_ar(order, boundaries)} |",
         "",
@@ -486,14 +566,25 @@ def main() -> None:
     pn_report = report["page_numbers"]
     md.append(f"**الترقيم المطبوع:** {summarize_page_numbers(pn_report)}")
     md.append("")
-    if recoveries:
+    if report["boundary_recoveries"]:
         md.append("**استُدركت مراسٍ حدّية (reread مُتحقق):** "
-                  + "، ".join(f"ص{r['page']} ({r['amount']})" for r in recoveries)
+                  + "، ".join(f"ص{r['page']} ({r['amount']})"
+                              for r in report["boundary_recoveries"])
                   + " — القيم المُصححة أغلقَت السلسلة إغلاقاً تاماً.")
-    if page_rereads:
+    if report["page_rereads"]:
         md.append("**أُعيدت قراءة صفحات وتحكيمها بدلتا الفوتر:** "
-                  + "، ".join(f"ص{r['page']}" for r in page_rereads)
+                  + "، ".join(f"ص{r['page']}" for r in report["page_rereads"])
                   + " — قُبلت قراءاتٌ بلا شكوك تُطابق دلتا الفوتر إطالةً تامة.")
+    if report["session"]["recoveries"] or report["session"]["page_rereads"]:
+        md.append(f"(هذه الجلسة: {len(report['session']['recoveries'])} استدراك · "
+                  f"{len(report['session']['page_rereads'])} إعادة قراءة — "
+                  f"الأرقام أعلاه من الكاش وتبقى بعد أي replay.)")
+    if report["arbitrations"]:
+        md.append("**تحكيم بشري موثَّق (كل رقم يُعاد اشتقاقه من دليله):** "
+                  + "، ".join(f"ص{a['page']}/{a['field']}"
+                              for a in report["arbitrations"])
+                  + " — التفاصيل في `arbitrated_by` داخل كاش الصفحة "
+                  + "(by · why · at · old/new).")
     if stop_reason:
         md.append(f"⛔ **توقف حاجز:** {stop_reason}")
     else:
