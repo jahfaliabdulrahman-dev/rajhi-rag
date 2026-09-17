@@ -169,9 +169,29 @@ def load_allowlist() -> list[tuple[str, str]]:
     return entries
 
 
-def _allowed(entries, rule_id: str, path: str) -> bool:
-    return any(rid == rule_id and fnmatch.fnmatch(path, glob)
-               for rid, glob in entries)
+_SCOPES = {"tree", "history", "push", "message", "worktree"}
+
+
+def _allowed(entries, rule_id: str, path: str, where: str = "") -> bool:
+    """Is this rule waived for this path — and, when scoped, in this pass?
+
+    A glob may carry a scope prefix (`history:tests/x.py`). An exemption that
+    only exists because OLD commits carry the value must not also blind the
+    working tree: the tree is what a future edit lands in, and that is exactly
+    where the account number slipped through the first time (audit S1).
+    An unprefixed glob keeps the old meaning — every pass.
+    """
+    for rid, glob in entries:
+        if rid != rule_id:
+            continue
+        scope, _, rest = glob.partition(":")
+        if rest and scope in _SCOPES:
+            if where and where != scope:
+                continue
+            glob = rest
+        if fnmatch.fnmatch(path, glob):
+            return True
+    return False
 
 
 def _snippet(line: str) -> str:
@@ -201,7 +221,52 @@ def _joined_literals(line: str) -> str:
     return "".join(built)
 
 
+# The pieces need not sit inside the join(): `_PARTS = ("a", "b")` on one line
+# and `"".join(_PARTS)` on the next is the shape THIS repository adopted after
+# the first rule caught `"a" + "b"` — so the file the rule was born from walked
+# past it a second time (audit, round 3). A registry of name -> literal pieces
+# closes it without needing a full parser.
+_ASSIGN_SEQ_RX = re.compile(
+    r"""^\s*([A-Za-z_][A-Za-z_0-9]*)\s*=\s*[\[\(]([^\]\)]*)[\]\)]""", re.M)
+_JOIN_NAME_RX = re.compile(
+    r"""(['"])(.*?)\1\s*\.join\s*\(\s*([A-Za-z_][A-Za-z_0-9]*)\s*\)""")
+# Python welds adjacent string literals at PARSE time: `"a" "b"` is one string
+# and no operator appears between them, so `concat_digits` never sees it.
+_ADJACENT_LIT_RX = re.compile(r"""(['"])([^'"]*)\1[ \t]+(['"])([^'"]*)\3""")
+
+
+def _literal_registry(text: str) -> dict[str, list[str]]:
+    """`NAME = ("a", "b")` / `["a", "b"]` -> the pieces a later join() welds."""
+    reg: dict[str, list[str]] = {}
+    for m in _ASSIGN_SEQ_RX.finditer(text):
+        lits = [lit for _q, lit in _LIT_RX.findall(m.group(2))]
+        if lits:
+            reg[m.group(1)] = lits
+    return reg
+
+
+def _joined_names(line: str, registry: dict[str, list[str]]) -> str:
+    """`sep.join(NAME)` -> the string it builds, using the registered pieces."""
+    built: list[str] = []
+    for m in _JOIN_NAME_RX.finditer(line):
+        sep, name = m.group(2), m.group(3)
+        if name in registry:
+            built.append(sep.join(registry[name]))
+    return "".join(built)
+
+
+def _weld_adjacent_literals(line: str) -> str:
+    """`"a" "b"` -> `"ab"`, repeatedly (three or more pieces weld too)."""
+    prev = None
+    while prev != line:
+        prev = line
+        line = _ADJACENT_LIT_RX.sub(
+            lambda m: m.group(1) + m.group(2) + m.group(4) + m.group(1), line)
+    return line
+
+
 HEX_CHARS = "0123456789abcdefABCDEF"
+HEX_LETTERS = "abcdefABCDEF"
 
 
 def _in_hex_token(src: str, match, min_len: int = 24) -> bool:
@@ -209,8 +274,15 @@ def _in_hex_token(src: str, match, min_len: int = 24) -> bool:
 
     Both auditors hit this: a commit sha blocked the message that documented it,
     and a guard that teaches its own team to omit evidence works against itself.
-    Length is the discriminator: sixteen hexadecimal characters around the run
-    are still scanned; a full hash is not.
+
+    TWO conditions, and the second one is the whole point. Length alone is not a
+    discriminator, because DIGITS ARE HEXADECIMAL CHARACTERS: with length only,
+    any digit run of `min_len` or more became "a hash" and walked out — measured
+    at 30 of the 31 real statement descriptions that carry a ≥24-digit run
+    (audit, 2026-09-17). A hash also carries at least one a–f letter; an account
+    number, a card, an IBAN's digits and a padded reference never do. Requiring
+    a letter keeps the sha exemption and closes the hole, and it fails SAFE: an
+    all-digit token is scanned, not waived.
     """
     a = match.start()
     while a > 0 and src[a - 1] in HEX_CHARS:
@@ -218,7 +290,8 @@ def _in_hex_token(src: str, match, min_len: int = 24) -> bool:
     b = match.end()
     while b < len(src) and src[b] in HEX_CHARS:
         b += 1
-    return (b - a) >= min_len
+    token = src[a:b]
+    return len(token) >= min_len and any(c in HEX_LETTERS for c in token)
 
 
 def _is_digit_table(text: str) -> bool:
@@ -260,16 +333,29 @@ def _join_string_concat(line: str) -> str:
 
 def _scan_text(path: str, text: str, where: str, findings, entries) -> None:
     def record(sev, rid, lineno, src_line, desc):
-        if _allowed(entries, rid, path):
+        if _allowed(entries, rid, path, where):
             return
         findings.append((sev, rid, path, where, lineno, _snippet(src_line), desc))
 
+    # Python-only welds: a registry of `NAME = (pieces…)` for a later join(),
+    # and parse-time concatenation of adjacent literals. Restricted to .py
+    # because both are Python semantics — applying them to prose would invent
+    # numbers out of two quoted words that merely sit side by side.
+    is_py = path.endswith(".py")
+    registry = _literal_registry(text) if is_py else {}
+
     for lineno, line in enumerate(text.splitlines(), 1):
+        if is_py:
+            line = _weld_adjacent_literals(line)
         for rid, sev, rx, desc in TEXT_RULES:
             if rid == "long_digits":
                 continue  # handled below over the digit-joined variants
             for _m in rx.finditer(line):  # every match, not just the first
                 record(sev, rid, lineno, line, desc)
+        named = _joined_names(line, registry) if registry else ""
+        if named and LONG_DIGITS_RX.search(named) and not _is_digit_table(named):
+            record("BLOCK", "joined_digits", lineno, line,
+                   "رقم مبني بـ join على شظائف مُسمّاة")
         for src in _digit_variants(line):
             matches = [m for m in LONG_DIGITS_RX.finditer(src)
                        if not _is_digit_table(m.group(0))
@@ -317,7 +403,7 @@ def _check_path(path: str, where: str, findings, entries) -> None:
             hit = pred(path)
         except Exception:
             hit = False
-        if hit and not _allowed(entries, rid, path):
+        if hit and not _allowed(entries, rid, path, where):
             findings.append((sev, rid, path, where, 0, "", desc))
 
 
