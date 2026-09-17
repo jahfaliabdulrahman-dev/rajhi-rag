@@ -13,13 +13,14 @@ on CI, and manually:
 
 Severity model (practical by design — a guard that cries wolf gets disabled):
 - BLOCK: personal home paths · the original statement filename · real family
-  names appearing in the document · ≥10-digit runs (account/card numbers),
-  **including runs split by separators** (spaces, dots, hyphens)
-  **and runs rebuilt by string concatenation** (two literals added together) · real-data
-  paths (data/local_sample/*) · .env files · media binaries that are not
-  explicitly allowed · unscannable binaries (archives/databases/fonts) with no
-  allowlist line of their own · any tracked blob that cannot be decoded as
-  text and is not in the media lists. Any BLOCK fails the run (exit 1).
+  names appearing in the document · ≥10-digit runs (account/card numbers) —
+  **including runs a plain scan cannot see**: runs broken by a grouping
+  separator (uniform groups of 3 or 4 wide, joined by space/dot/hyphen/
+  underscore) and runs rebuilt by adding two string literals together ·
+  real-data paths (data/local_sample/*) · .env files · media binaries that
+  are not explicitly allowed · unscannable binaries (archives/databases/
+  fonts) with no allowlist line of their own · any tracked blob that cannot
+  be decoded as text. Any BLOCK fails the run (exit 1).
 - WARN: the owner's name/handle tokens in prose, docs and commit messages
   (usually attribution — review, don't panic). WARN does NOT fail the run by
   default; `--strict-warn` makes it fail, and the output always prints an
@@ -28,7 +29,12 @@ Severity model (practical by design — a guard that cries wolf gets disabled):
 WHAT THIS GUARD CANNOT SEE (documented, not hidden): the bytes inside media
 binaries and allowlisted archives are skipped, never read. An allowlist line
 is therefore a *claim by a human*, not a scan — which is exactly why every
-line in `.publish-allowlist` carries a written reason.
+line in `.publish-allowlist` carries a written reason. Nor does it see the
+outside world (a value already indexed elsewhere), and its self-exclusion is
+a HOLE, not a feature: this file is never scanned by itself, so its text is
+policed by `test_guard_source_passes_its_own_rules` in the suite instead —
+the rule exists because a real account number once sat in this very docstring
+as two added literals, invisible to the guard that excluded itself.
 
 ALLOWLIST: `.publish-allowlist` — one entry per line:
     <rule_id> :: <path-glob> :: <why>
@@ -53,8 +59,9 @@ LONG_DIGITS_RX = re.compile("[" + _AR + "]{10,}")
 LONG_DIGITS_DESC = "سلسلة ارقام طويلة (رقم حساب/بطاقة؟)"
 
 # A long run can be written in uniform groups — the IBAN/card/cheque idiom
-# ("SA03 8000 0000 6080", "1234-5678-9012", "1.234.567.890"). The signature
-# used here is groups of EQUAL width, 3 or 4 digits, joined by one separator:
+# (four-wide groups for IBANs and cards, three-wide for some cheque formats).
+# The signature used here is groups of EQUAL width, 3 or 4 digits, joined by
+# one separator:
 #   · equal width  → two unrelated amounts on one line are never welded;
 #   · width 3 or 4 → "١٤٣٩٠٧٢٢ ٢٠١٨٠٤٠٨" (two 8-digit dates) and
 #                    "20260917-172327" (a timestamp) stay two numbers.
