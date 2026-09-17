@@ -116,9 +116,9 @@ def g_end_to_end() -> str:
     susp = int(nums[2].replace(",", ""))
     assert susp == 0, f"{susp} suspects in the full run"
     assert clean == total, f"{clean}/{total} clean"
-    assert total >= MIN_ROWS, \
-        f"only {total} rows — العتبة {MIN_ROWS}: صفحات أقل غزارة من المتوقع، '
-        f'راجع خطوات المعايرة في docs/ONBOARDING_NEW_FILE.md §3"
+    assert total >= MIN_ROWS, (
+        f"only {total} rows — العتبة {MIN_ROWS}: صفحات أقل غزارة من المتوقع، "
+        f"راجع خطوات المعايرة في docs/ONBOARDING_NEW_FILE.md §3")
 
     assert isinstance(table, dict), "table shape changed"
     headers, data = table.get("headers") or [], table.get("data") or []
@@ -184,9 +184,9 @@ def g_end_to_end() -> str:
     f_ok, f_possible = int(m.group(1)), int(m.group(2))
     footer_seg = s.split("تحقق الفوتر")[1].split("•")[0]
     assert "⚠" not in footer_seg, f"footer mismatch on sample: {footer_seg}"
-    assert f_ok == f_possible and f_possible >= MIN_FOOTER_COMPARABLE, \
+    assert f_ok == f_possible and f_possible >= MIN_FOOTER_COMPARABLE, (
         f"footer: {f_ok}/{f_possible} comparable pages matched — "
-        f"العتبة {MIN_FOOTER_COMPARABLE} (راجع §3 في دليل المعايرة)"
+        f"العتبة {MIN_FOOTER_COMPARABLE} (راجع §3 في دليل المعايرة)")
 
     # ———— ترتيب الصفحات (what-if delta) ————
     assert "⚠ الترتيب" not in s, f"page-order flag on sample: {s[:220]}"
