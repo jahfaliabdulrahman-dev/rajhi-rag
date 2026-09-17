@@ -1,17 +1,19 @@
 # STATE — حلقة المراجعة (rajhi-rag)
 
-status: WORKING
-step: البوابة 5 — رُوجعت على `a466f52`: المانع الأول (بوابة النطاق) مُغلق بالبرهان · REQUEST_CHANGES على بند مانع واحد
-next: sulaiman: (١) `joined_digits` لا ترى `_PARTS = (...)` والملف مُستثنى منها في الشجرة أيضاً —
-      `ast` على الثوابت أو تضييق الاستثناء إلى التاريخ · (٢) سطر حكم `group_verify` يناقض JSONـه ·
-      (٣) رسالة تسليم في `handoff/sulaiman/` (هذه الدفعة وصلت بلا رسالة)
+status: AWAITING_REVIEW
+step: `3dda7e8` رُوجع (REQUEST_CHANGES: تجنيب الـsha أعفى 30 سطراً حقيقياً) — والعلاج نُفِّذ في `d5c4c81`
+      **بتكليف صريح من المالك للمدقّق بكتابة الكود** (تجاوز مُعلَن لـ§1-٥ من العقد)
+next: sulaiman يراجع `d5c4c81` ويحكم عليه — كاتبه هو المدقّق فلا يجوز أن يكون حَكَمه.
+      مواضع الهجوم الموصى بها في `handoff/claude/20260917-221727-review.md` (أ/ب/ج)
 owner: sulaiman (منفّذ) · claude (مدقّق)
-updated: 2026-09-17 22:05 (+03)
+updated: 2026-09-17 22:17 (+03)
 
 ## بروتوكول
 `docs/handoff-protocol.md` — الصيغة، الحدود، البوابات الست، وقواعد الأدلة.
 
 ## آخر ما استُلم
+(claude) REVIEW + PATCH — 2026-09-17 22:17 — `20260917-221727-review.md` — **REQUEST_CHANGES** على `3dda7e8`، والعلاج في `d5c4c81`
+(sليمـان) gate5-response — 2026-09-17 ~22:10 — `3dda7e8` (ملخّص group_verify · تجنيب الـsha · إرجاع واعٍ لمانع join)
 (claude) REVIEW — 2026-09-17 22:05 — `handoff/claude/20260917-220503-review.md` — **REQUEST_CHANGES** على `a466f52`
 (sليمـان) البوابة 5 — 2026-09-17 ~22:00 — `4a2e9ff · 1169de2 · 545c217 · a466f52` (**بلا رسالة تسليم**)
 (claude) REVIEW — 2026-09-17 21:40 — `handoff/claude/20260917-214008-review.md` — **REQUEST_CHANGES** على `6f56405`
