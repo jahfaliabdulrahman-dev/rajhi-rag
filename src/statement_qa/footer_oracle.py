@@ -145,6 +145,24 @@ def _x100(a: Decimal | None, b: Decimal | None) -> bool:
     return a * 100 == b or a == b * 100
 
 
+def _paradox(own: dict, target: dict, fields: list[str]) -> bool:
+    """The accuracy-paradox signature, measured where it actually lives.
+
+    True when EVERY mismatched component of THIS page's own sums is off by
+    exactly ×100/÷100 from that page's INCREMENTAL target (footer − prior for
+    the cumulative totals, the printed balance for the balance). Measuring it
+    against `prior + own` instead makes any non-zero prior break the ratio, so
+    the flag could only ever fire on the first page — it was dead for 628 of
+    the 629 pages it exists to protect (audit P1-1).
+    """
+    usable = [f for f in fields
+              if own.get(f) is not None and target.get(f) is not None]
+    if not usable:
+        return False
+    return all(_x100(Decimal(str(own[f])), Decimal(str(target[f])))
+               for f in usable)
+
+
 def check_page_footer(rows: list[dict], footer: FooterReading | None,
                       prior: dict | None = None, skip: bool = False) -> dict:
     """Deterministic comparison — the heart of the oracle.
@@ -165,32 +183,45 @@ def check_page_footer(rows: list[dict], footer: FooterReading | None,
       unchecked  — a prior page failed; the cumulative chain is broken.
     """
     if skip:
-        return {"status": "unchecked", "compared": 0}
+        # the key always exists: a consumer asking `chk.get("is_paradox")`
+        # must never be answered with None by accident (audit P1-1)
+        return {"status": "unchecked", "compared": 0, "is_paradox": False}
     own = page_totals(rows)
     prior = prior or {"debits": Decimal("0"), "credits": Decimal("0")}
     cum = {"debits": prior["debits"] + own["debits"],
            "credits": prior["credits"] + own["credits"],
            "balance": own["balance"]}
     if footer is None:
-        return {"status": "absent", "totals": cum, "own": own, "compared": 0}
+        return {"status": "absent", "totals": cum, "own": own, "compared": 0,
+                "is_paradox": False}
+    target = {"debits": (footer.debits - prior["debits"]
+                         if footer.debits is not None else None),
+              "credits": (footer.credits - prior["credits"]
+                          if footer.credits is not None else None),
+              "balance": footer.balance}
     diffs = []
     compared = 0
-    for fname in ("debits", "credits", "balance"):
+    for fname in FIELDS:
         fv = getattr(footer, fname)
         av = cum.get(fname)
         if fv is None or av is None:
             continue
         compared += 1
         if av != fv:
-            diffs.append({"field": fname, "app": str(av), "footer": str(fv)})
+            diffs.append({"field": fname, "app": str(av), "footer": str(fv),
+                          "own": str(own.get(fname)),
+                          "expected": (str(target[fname])
+                                       if target[fname] is not None else None)})
     if not compared:
-        return {"status": "absent", "totals": cum, "own": own, "compared": 0}
+        return {"status": "absent", "totals": cum, "own": own, "compared": 0,
+                "is_paradox": False}
     if diffs:
-        is_paradox = all(_x100(Decimal(d["app"]), Decimal(d["footer"]))
-                         for d in diffs)
         return {"status": "mismatch", "totals": cum, "own": own,
-                "compared": compared, "diffs": diffs, "is_paradox": is_paradox}
-    return {"status": "ok", "totals": cum, "own": own, "compared": compared}
+                "compared": compared, "diffs": diffs, "basis": "cumulative",
+                "is_paradox": _paradox(own, target,
+                                       [d["field"] for d in diffs])}
+    return {"status": "ok", "totals": cum, "own": own, "compared": compared,
+            "is_paradox": False}
 
 
 def delta_ok(rows: list[dict], prev_footer: "FooterReading | None",
@@ -238,7 +269,8 @@ def delta_status(rows: list[dict], prev_footer: "FooterReading | None",
     'unchecked' when no comparable component remains.
     """
     if not delta_checkable(prev_footer, footer):
-        return {"status": "unchecked", "diffs": []}
+        return {"status": "unchecked", "diffs": [], "is_paradox": False,
+                "basis": "delta"}
     assert footer is not None and prev_footer is not None
     own = page_totals(rows)
     diffs: list[dict] = []
@@ -255,9 +287,16 @@ def delta_status(rows: list[dict], prev_footer: "FooterReading | None",
                       "app": str(own["balance"]),
                       "ok": own["balance"] == footer.balance})
     if not diffs:
-        return {"status": "unchecked", "diffs": []}
+        return {"status": "unchecked", "diffs": [], "is_paradox": False,
+                "basis": "delta"}
     bad = [d for d in diffs if not d["ok"]]
-    return {"status": "mismatch" if bad else "ok", "diffs": diffs}
+    # The delta basis IS the paradox's natural home: `footer` here already
+    # holds the incremental target, so the ratio needs no correction.
+    for d in bad:
+        d["is_paradox"] = _x100(Decimal(d["app"]), Decimal(d["footer"]))
+    return {"status": "mismatch" if bad else "ok", "diffs": diffs,
+            "basis": "delta",
+            "is_paradox": bool(bad) and all(d["is_paradox"] for d in bad)}
 
 
 def page_diverged(rows: list[dict], prior: dict,

@@ -166,6 +166,7 @@ class QAResult:
     # Global statement row numbers the TOOLS actually selected (evidence
     # backbone). None/[] when the answer came from prose (no tools ran).
     used_row_nos: list[int] | None = None
+    tools_failed: bool = False
 
     def __str__(self) -> str:
         src = "; ".join(f"صفحة {s['page']} ص{s['row_start']}–{s['row_end']}"
@@ -184,6 +185,7 @@ def answer_question(store, question: str, rows=None, chunks=None,
     llm = llm or build_llm()
     answer = ""
     used: list[int] = []
+    tools_failed = False
     if rows:
         try:
             answer, trace = _answer_with_tools(llm, rows, context, question)
@@ -191,7 +193,13 @@ def answer_question(store, question: str, rows=None, chunks=None,
 
             used = used_rows_from_trace(trace)
         except Exception:
+            # The SILENT part was the problem, not the fallback itself: a
+            # provider timeout used to hand back a prose answer with an empty
+            # trace and no hint that nothing had been computed, while the
+            # evidence panel then filled itself from the model's own citations
+            # (audit P2-10).
             answer = ""
+            tools_failed = True
     if not answer:
         answer = _answer_plain(llm, context, question)
         used = []
@@ -199,4 +207,5 @@ def answer_question(store, question: str, rows=None, chunks=None,
                     sources=[{k2: h[k2] for k2 in
                               ("chunk_id", "page", "row_start", "row_end")}
                              for h in hits],
-                    used_row_nos=used)
+                    used_row_nos=used,
+                    tools_failed=tools_failed)
