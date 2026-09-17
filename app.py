@@ -45,6 +45,19 @@ from statement_qa.vlm_reader import (
 )
 from statement_qa.bank_check import probe_bank
 from statement_qa.era import fingerprint_pages, summarize_ar as summarize_era_ar
+from statement_qa.render import (
+    answer_refs as render_answer_refs,
+    answer_text as render_answer_text,
+    date_cell as render_date_cell,
+    evidence_mode as render_evidence_mode,
+    row_record as render_row_record,
+    rows_for_refs as render_rows_for_refs,
+)
+from statement_qa.verification import (
+    caution as verification_caution,
+    coverage_line as verification_coverage,
+    verdicts_from_checks,
+)
 from statement_qa.footer_oracle import (
     check_page_footer, delta_checkable, delta_status, page_diverged,
     read_footer, try_page_reread,
@@ -260,40 +273,17 @@ def _date_cell(r: dict) -> str:
     The printed cell may carry both calendars (hijri first) — parse_gregorian
     picks the gregorian run; unparseable cells show as printed (never dropped).
     """
-    from statement_qa.ordering import parse_gregorian
-
-    d = str(r.get("date") or "").strip()
-    if not d:
-        return "—"
-    g = parse_gregorian(d)
-    shown = f"{g[:4]}/{g[4:6]}/{g[6:]}" if g else d
-    return shown + ("*" if r.get("date_source") == "inherited" else "")
+    return render_date_cell(r)
 
 
 def _row_record(no: int, r: dict) -> dict:
-    """Excel-style display record: real النوع + مدين/دائن split.
+    """Delegates to the tested pure implementation (statement_qa.render).
 
-    Global row numbers (#) stay stable across filtering — the same numbers
-    the tools cite («صف 94»). Direction lives ONLY in which of the two amount
-    columns carries the value; it is not a type claim.
+    Callers keep the same shape; the logic that decides the columns — including
+    the new «التحقق» column, which is the page's oracle verdict — lives in the
+    module the tests can reach (audit P1-5, P3-4).
     """
-    mv = _money(r["movement"])
-    status = "✓" if r["ok"] else "⚠ مشبوه"
-    if (r["ok"] and r.get("kind") == "txn" and mv
-            and not (r.get("side") or "")):
-        # amount is real but its DIRECTION could not be derived (page-start
-        # edge when the opening row was missed) — never guess a side column
-        status = "◌ اتجاه غير محسوم"
-    return {"#": no,
-            "الصفحة": r["page"],
-            "التاريخ": _date_cell(r),
-            "الوصف": (r.get("desc") or "—"),
-            "النوع": r.get("type") or
-                    ("رصيد افتتاحي" if r.get("kind") == "opening" else "حركة"),
-            "مدين": mv if r["side"] == "debit" else "",
-            "دائن": mv if r["side"] == "credit" else "",
-            "الرصيد": _money(r["balance"]),
-            "الحالة": status}
+    return render_row_record(no, r, STATE.get("verdicts") or {})
 
 
 def _rows_df(rows: list[dict]) -> pd.DataFrame:
@@ -549,6 +539,8 @@ def _process_pdf_locked(pdf_path: str, progress):
         [{**r, "row_no": i + 1} for i, r in enumerate(all_rows)])
     STATE["store"] = build_index(STATE["chunks"])
     STATE["footer_checks"] = footer_checks
+    # أحكام الصفحة بلغة واحدة تُقرأ في كل سطح: الجدول والتصدير والأسئلة
+    STATE["verdicts"] = verdicts_from_checks(footer_checks)
     STATE["usage"] = usage
     STATE["boundary_recoveries"] = recoveries
     STATE["page_rereads"] = page_rereads
@@ -647,39 +639,13 @@ _BARE_REF_RE = re.compile(
 
 def _answer_refs(answer: str) -> list[tuple[int | None, int, int]]:
     """Citations inside the answer text: (page|None, first_row, last_row)."""
-    refs: list[tuple[int | None, int, int]] = []
-    for m in _REF_RE.finditer(answer or ""):
-        try:
-            pg = int(m.group(1).translate(_ARG_DIGITS))
-            a = int(m.group(2).translate(_ARG_DIGITS))
-            b = int(m.group(3).translate(_ARG_DIGITS)) if m.group(3) else a
-        except ValueError:
-            continue
-        if b < a:
-            a, b = b, a
-        refs.append((pg, a, b))
-    if not refs:
-        for m in _BARE_REF_RE.finditer(answer or ""):
-            try:
-                a = int(m.group(1).translate(_ARG_DIGITS))
-                b = int(m.group(2).translate(_ARG_DIGITS)) if m.group(2) else a
-            except ValueError:
-                continue
-            if b < a:
-                a, b = b, a
-            refs.append((None, a, b))
-    return refs
+    return render_answer_refs(answer)
 
 
 def _rows_for_refs(refs, cap: int = 60) -> pd.DataFrame:
     rows = STATE.get("rows") or []
-    picked: list[tuple[int, dict]] = []
-    for i, r in enumerate(rows, start=1):
-        for pg, a, b in refs:
-            if (pg is None or r["page"] == pg) and a <= i <= b:
-                picked.append((i, r))
-                break
-    return pd.DataFrame([_row_record(i, r) for i, r in picked[:cap]])
+    return pd.DataFrame(render_rows_for_refs(
+        rows, refs, cap, STATE.get("verdicts") or {}))
 
 
 def _evidence_rows(answer: str, sources) -> pd.DataFrame:
@@ -759,11 +725,23 @@ def ask_followup(history):
 
     res = answer_question(STATE["store"], q, rows=STATE.get("rows"),
                           chunks=STATE.get("chunks"))
-    history.append({"role": "assistant", "content": res.answer})
+    rows_now = STATE.get("rows") or []
+    page_of = {i + 1: r.get("page") for i, r in enumerate(rows_now)}
+    verdicts = STATE.get("verdicts") or {}
+    history.append({"role": "assistant",
+                    "content": render_answer_text(res, page_of, verdicts)})
     sources_md = "\n".join(
         f"- {s['chunk_id']} (صفحة {s['page']}، صفوف {s['row_start']}–{s['row_end']})"
         for s in res.sources)
-    if res.used_row_nos:
+    mode = render_evidence_mode(res)
+    if mode == "none":
+        # Tools failed: the panel is emptied ON PURPOSE. Filling it from the
+        # model's own citations puts confident evidence under an answer that
+        # was never computed (audit P2-10).
+        return (history, sources_md, pd.DataFrame(),
+                _note_update("⛔ لا أدلة: تعذّرت الأدوات — هذا الجواب لم "
+                             "يُحسَب من الكشف (أُفرغت اللوحة عمداً)."))
+    if mode == "tools":
         df, note = _evidence_from_numbers(res.used_row_nos)
         return history, sources_md, df, _note_update(note)
     return (history, sources_md,

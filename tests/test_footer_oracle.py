@@ -4,7 +4,8 @@ import json
 from decimal import Decimal
 
 from statement_qa import footer_oracle as fo
-from statement_qa.footer_oracle import FooterReading, check_page_footer, page_totals
+from statement_qa.footer_oracle import (FooterReading, check_page_footer,
+                                       delta_status, page_totals)
 
 
 def _chain_rows():
@@ -74,13 +75,85 @@ def test_check_skip_is_unchecked():
 
 
 def test_check_x100_is_paradox():
-    # The accuracy-paradox signature: EVERY component off by exactly ×100.
+    # The signature on the FIRST page (prior = 0) — the only case the old
+    # code could ever see (see the two tests below).
     f = FooterReading(debits=Decimal("2"), credits=Decimal("3"),
                       balance=Decimal("1"))
     res = check_page_footer(_chain_rows(), f)
     assert res["status"] == "mismatch"
     assert res["is_paradox"] is True
     assert len(res["diffs"]) == 3
+
+
+def _x100_page_rows():
+    """A page whose own sums were misread ×100 (the real signature's shape)."""
+    return [
+        {"kind": "txn", "opening": False, "balance": Decimal("100"),
+         "side": "debit", "derived_movement": Decimal("20000")},
+        {"kind": "txn", "opening": False, "balance": Decimal("100"),
+         "side": "credit", "derived_movement": Decimal("30000")},
+    ]
+
+
+def test_x100_paradox_is_visible_after_the_first_page():
+    """AUDIT P1-1: with a non-zero prior the flag could never fire.
+
+    The comparison was `prior + own` versus `footer`, and adding a prior breaks
+    the ×100 ratio arithmetically — so on 628 of 629 pages the one signature
+    that must never pass silently was unreachable, while BOTH consumers (the
+    paid-run stop gate and the ticker) consulted it.
+    """
+    prior = {"debits": Decimal("650"), "credits": Decimal("750")}
+    f = FooterReading(debits=Decimal("850"), credits=Decimal("1050"),
+                      balance=Decimal("100"))   # = prior + 200 / prior + 300
+    res = check_page_footer(_x100_page_rows(), f, prior=prior)
+    assert res["status"] == "mismatch"
+    assert res["is_paradox"] is True
+    assert {d["field"] for d in res["diffs"]} == {"debits", "credits"}
+    assert [d["own"] for d in res["diffs"]] == ["20000", "30000"]
+    assert [d["expected"] for d in res["diffs"]] == ["200", "300"]
+
+
+def test_delta_basis_carries_the_paradox_flag():
+    """The delta basis is where the report lives now — so it must carry it."""
+    prev = FooterReading(debits=Decimal("650"), credits=Decimal("750"),
+                         balance=Decimal("50"))
+    f = FooterReading(debits=Decimal("850"), credits=Decimal("1050"),
+                      balance=Decimal("100"))
+    res = delta_status(_x100_page_rows(), prev, f)
+    assert res["status"] == "mismatch" and res["basis"] == "delta"
+    assert res["is_paradox"] is True
+    assert all(d["is_paradox"] for d in res["diffs"] if not d["ok"])
+
+
+def test_a_x10_drift_is_not_dressed_up_as_the_x100_signature():
+    """The other internally-consistent misread class must stay distinguishable."""
+    prev = FooterReading(debits=Decimal("650"), credits=Decimal("750"),
+                         balance=Decimal("50"))
+    f = FooterReading(debits=Decimal("850"), credits=Decimal("1050"),
+                      balance=Decimal("100"))
+    rows = [
+        {"kind": "txn", "opening": False, "balance": Decimal("100"),
+         "side": "debit", "derived_movement": Decimal("2000")},
+        {"kind": "txn", "opening": False, "balance": Decimal("100"),
+         "side": "credit", "derived_movement": Decimal("3000")},
+    ]
+    res = delta_status(rows, prev, f)
+    assert res["status"] == "mismatch" and res["is_paradox"] is False
+
+
+def test_the_paradox_key_always_exists():
+    """Consumers call .get('is_paradox'): None silently reads as False, so the
+    key must be present in every status, not just in mismatch."""
+    for res in (
+            check_page_footer(_chain_rows(), None),
+            check_page_footer(_chain_rows(), FooterReading(), skip=True),
+            check_page_footer(_chain_rows(), FooterReading()),
+            check_page_footer(_chain_rows(), FooterReading(
+                debits=Decimal("200"), credits=Decimal("300"),
+                balance=Decimal("100"))),
+            delta_status(_chain_rows(), None, None)):
+        assert "is_paradox" in res and res["is_paradox"] is False
 
 
 def test_check_single_component_mismatch_not_paradox():
