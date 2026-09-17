@@ -521,18 +521,24 @@ def main() -> None:
     md_text = md_path.read_text(encoding="utf-8")
     body, headings = render_body(md_text)
     work = Path(tempfile.mkdtemp(prefix="md-pdf-"))
+    # الكتابة ذرّية: يُبنى في ملف مؤقّت **بجوار الهدف** (نفس نظام الملفات)، ولا
+    # يُستبدل الهدف إلا بعد اجتياز كل الفحوص. تشغيل متأخّر أو منهار لا يطمس ملفاً
+    # سليماً سُلِّم قبله — وقد كاد يحدث فعلاً حين بقي تشغيل قديم في الخلفية.
+    staging = out.with_name(out.name + ".partial.pdf")
 
     if not args.house:
         html_path = work / f"{md_path.stem}.html"
         html_path.write_text(render(md_text, title), encoding="utf-8")
-        done = print_pdf(html_path, out)
-        data = out.read_bytes() if out.exists() else b""
+        done = print_pdf(html_path, staging)
+        data = staging.read_bytes() if staging.exists() else b""
         pages = data.count(b"/Type /Page") - data.count(b"/Type /Pages")
         print(f"[to-pdf] {out}\n  صفحات: {pages} · حجم: {len(data) / 1024:.0f}KB"
               f" · exit: {done.returncode}")
         if done.returncode or not data or pages < 1:
             print(done.stderr[-800:], file=sys.stderr)
+            staging.unlink(missing_ok=True)
             raise SystemExit(1)
+        staging.replace(out)
         return
 
     meta = ("مُعدّ من قياس منشور في المستودع — كل رقم في هذا الملف قابل لإعادة "
@@ -563,36 +569,44 @@ def main() -> None:
     info: dict = {}
     for attempt in range(3):
         tag = f"v{attempt + 2}"
-        done = print_pdf(build(entries, tag), out)
-        data = out.read_bytes() if out.exists() else b""
+        done = print_pdf(build(entries, tag), staging)
+        data = staging.read_bytes() if staging.exists() else b""
         if done.returncode or not data:
             print(done.stderr[-800:], file=sys.stderr)
+            staging.unlink(missing_ok=True)
             raise SystemExit(1)
-        info = house_finish(out, headings, contents_page=(1 if want_toc else 0))
+        info = house_finish(staging, headings, contents_page=(1 if want_toc else 0))
         if not entries or (not info["contents_mismatch"]
                            and not info["contents_unreadable"]):
             break
         entries = [(text, page) for (text, _), page in
                    zip(entries, info["outline_pages"])]
 
-    data = out.read_bytes()
+    data = staging.read_bytes()
     print(f"[to-pdf] {out}")
     print(f"  صفحات: {info['pages']} · حجم: {len(data) / 1024:.0f}KB"
           f" · فهرس: {info['toc']} مدخلاً · روابط: {info['links']}"
           f" · روابط على الذات: {info['self_links']}")
     print(f"  خطوط مدمجة: {', '.join(info['fonts'])}")
     print(f"  روابط لكل صفحة: {info['per_page_links']}")
+    failures = []
     if not info["embedded_plex"]:
-        raise SystemExit("الخط المنزلي غير مدمج — التصميم لن يُطبع كما رُسم")
+        failures.append("الخط المنزلي غير مدمج — التصميم لن يُطبع كما رُسم")
     if info["self_links"]:
-        raise SystemExit(f"{info['self_links']} رابطاً يشير إلى صفحته — زر لا يعمل")
+        failures.append(f"{info['self_links']} رابطاً يشير إلى صفحته — زر لا يعمل")
     if info["contents_mismatch"]:
-        raise SystemExit(f"فهرس المحتويات يخالف الفهرس الجانبي: {info['contents_mismatch']}")
+        failures.append(f"فهرس المحتويات يخالف الفهرس الجانبي: {info['contents_mismatch']}")
     if info["contents_unreadable"]:
         got, want = info["contents_unreadable"]
-        raise SystemExit(f"تعذّر التحقق من أرقام المحتويات: قُرئ {got} من {want}")
+        failures.append(f"تعذّر التحقق من أرقام المحتويات: قُرئ {got} من {want}")
     if info["blank_pages"]:
-        raise SystemExit(f"صفحات فارغة (فيض تخطيط): {info['blank_pages']}")
+        failures.append(f"صفحات فارغة (فيض تخطيط): {info['blank_pages']}")
+    if failures:
+        staging.unlink(missing_ok=True)
+        raise SystemExit(" | ".join(failures))
+    # آخر خطوة بعد نجاح كل الفحوص: الملف المؤقّت يحلّ محلّ الهدف. فشلٌ في أي فحص
+    # أعلاه يُبقي الملف السابق سليماً، وملفٌ ناقص لا يُسلَّم أبداً.
+    staging.replace(out)
 
 
 if __name__ == "__main__":
