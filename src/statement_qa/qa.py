@@ -75,14 +75,9 @@ def build_llm(model_name: str | None = None):
     """ChatOpenAI pointed at OpenRouter (key from env / ~/.hermes/.env)."""
     from langchain_openai import ChatOpenAI
 
-    key = os.environ.get("OPENROUTER_API_KEY")
-    if not key:
-        from pathlib import Path
+    from statement_qa.api_key import get_api_key
 
-        for line in open(Path.home() / ".hermes" / ".env"):
-            if line.strip().startswith("OPENROUTER_API_KEY="):
-                key = line.strip().split("=", 1)[1].strip("\"'")
-                break
+    key = get_api_key()
     model = model_name or os.environ.get("OPENROUTER_MODEL", "z-ai/glm-5.3-flash")
     return ChatOpenAI(
         model=model,

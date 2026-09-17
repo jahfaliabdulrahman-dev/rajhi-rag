@@ -1,0 +1,15 @@
+Copyright (c) 2026 jahfaliabdulrahman-dev. All rights reserved.
+
+This repository is published for viewing, review and evaluation only.
+
+No licence, express or implied, is granted to use, copy, modify, merge,
+publish, distribute, sublicense or sell any part of it — including its source
+code, its documentation, its assets and any output it produces. All rights
+are reserved by the copyright holder.
+
+Why this rather than a permissive licence: the project reads real financial
+documents for legal and estate purposes. Until that is a deliberate business
+decision, nobody should be able to build a product on it by accident.
+
+For any other use — including commercial use, redistribution, or academic
+reproduction — open an issue in this repository and ask.

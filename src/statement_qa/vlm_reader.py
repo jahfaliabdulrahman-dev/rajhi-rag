@@ -32,6 +32,7 @@ from statement_qa.legacy.prompts import (
     FRONTIER_PROMPT, STRUCTURE_AWARE_PROMPT, TOP_BAND_PROMPT, HARD_RULES,
 )
 from statement_qa.legacy.arabic_digit_parser import norm_num as _legacy_norm_num
+from statement_qa.api_key import get_api_key
 
 MODEL = os.environ.get("OPENROUTER_MODEL_VLM", "google/gemini-3.7-flash")
 # Response-level blips (RemoteDisconnected et al.) once killed whole runs —
@@ -40,13 +41,8 @@ _ATTEMPTS = 4
 
 
 def _api_key() -> str:
-    key = os.environ.get("OPENROUTER_API_KEY")
-    if key:
-        return key
-    for line in open(Path.home() / ".hermes" / ".env"):
-        if line.strip().startswith("OPENROUTER_API_KEY="):
-            return line.strip().split("=", 1)[1].strip("\"'")
-    raise RuntimeError("OPENROUTER_API_KEY not found")
+    """Resolution lives in one place — statement_qa.api_key."""
+    return get_api_key()
 
 
 def _parse_amount(tok: str | None) -> Decimal | None:
