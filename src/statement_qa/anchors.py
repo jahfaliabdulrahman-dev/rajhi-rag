@@ -27,7 +27,6 @@ def verify_anchors(pages_rows: dict[int, list[dict]]) -> dict:
     """
     report: dict = {"ok": [], "gaps": []}
     prev_last: Decimal | None = None
-    prev_page: int | None = None
     for pg in sorted(pages_rows):
         txns = [r for r in pages_rows[pg] if not r.get("opening")
                 and r.get("balance") is not None]
@@ -39,7 +38,6 @@ def verify_anchors(pages_rows: dict[int, list[dict]]) -> dict:
         else:
             report["ok"].append(pg)
         prev_last = txns[-1]["balance"]
-        prev_page = pg
     return report
 
 

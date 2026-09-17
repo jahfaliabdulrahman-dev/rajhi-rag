@@ -135,7 +135,6 @@ def classify(question: str, years=(), max_page: int | None = None,
     is the honest default: it can only refuse what it can prove.
     """
     q = question or ""
-    low = q.lower()
 
     # 1) another bank named — unless the owner's bank is the one named
     if not _has_our_bank(q):

@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from decimal import Decimal
-from pathlib import Path
 
 _ROWS_PER_CHUNK = 12  # keep chunks small: dense numeric Arabic context
 

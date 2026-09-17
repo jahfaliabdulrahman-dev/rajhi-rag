@@ -1,6 +1,20 @@
 #!/bin/sh
 # pre-push hook — the last line of defense (what-if G3).
 # Install once per clone:  git config core.hooksPath .githooks
-# The guard scans exactly what this push would publish (refs arrive on stdin).
+#
+# 1) static gate  — names that never resolve / bindings never read. This is the
+#    class that killed a PAID run: pytest cannot see a branch no test executes,
+#    a linter reads the code and sees it for free.
+# 2) publish guard — scans exactly what this push would publish (refs arrive on
+#    stdin, so the guard runs last and its stdin stays untouched).
 cd "$(dirname "$0")/.." || exit 1
+
+# The gate needs an interpreter with pyflakes; prefer the project venv. If none
+# has it the gate refuses loudly (exit 2) — a gate that cannot run never passes.
+PY=python3
+if [ -x ".venv/bin/python" ] && .venv/bin/python -c "import pyflakes" 2>/dev/null; then
+  PY=.venv/bin/python
+fi
+"$PY" tools/static_gate.py || exit 1
+
 exec python3 tools/publish_guard.py --pre-push
