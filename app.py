@@ -31,7 +31,7 @@ from pathlib import Path
 
 import gradio as gr
 import pandas as pd
-from pdf2image import convert_from_path
+from pdf2image import convert_from_path, pdfinfo_from_path
 
 import sys
 
@@ -320,7 +320,33 @@ def filter_rows(query: str) -> pd.DataFrame:
     return pd.DataFrame(df.loc[mask]).reset_index(drop=True)
 
 
+# Hard limits on the browser path (what-if delta #7, audit P2-3). The
+# interface has no checkpoint and no resume, so one long upload is hours of
+# paid calls inside a single request that dies with the tab and takes every
+# paid page with it. The cap is a ROUTING decision, not a limit of the
+# engine: the full reader is tools/scale_slice.py (page checkpoints, cost
+# ledger, fail-streak and budget gates). Numbers here are the measured ones:
+# 100 pages ≈ 50 minutes ≈ $1.4; the fail streak of 5 is what stopped the
+# real 402 outage instead of spinning for ~12 hours.
+MAX_UI_PAGES = 100
+MAX_UI_COST_USD = 3.0
+FAIL_STREAK_LIMIT = 5
+
+
 def _pages_to_pngs(pdf_path: str, dpi: int = 200):
+    try:
+        n_pages = int(pdfinfo_from_path(pdf_path).get("Pages") or 0)
+    except Exception:
+        n_pages = 0        # fail open: a broken pdfinfo never blocks a run
+    if n_pages > MAX_UI_PAGES:
+        raise gr.Error(
+            f"الملف {n_pages} صفحة — والحد على هذا المسار {MAX_UI_PAGES} صفحة "
+            f"لكل تشغيل من المتصفح: لا نقاط حفظ ولا استئناف هنا، وانقطاع "
+            f"الطلب يُهدر كل ما دُفع. للملفات الكبيرة استخدم أداة سطر الأوامر "
+            f"(نقاط حفظ + دفتر كلفة + حواجز توقف):\n"
+            f"python3 tools/scale_slice.py --first 1 --count {n_pages} "
+            f"--out data/local_sample/slice_{n_pages}p --max-cost 12"
+        )
     outdir = tempfile.mkdtemp(prefix="rajhi_pages_")
     paths = convert_from_path(pdf_path, dpi=dpi)
     out = []
@@ -396,17 +422,34 @@ def _process_pdf_locked(pdf_path: str, progress):
     prev_page_no: int | None = None
     recoveries: list[dict] = []
     page_rereads: list[dict] = []
+    fail_streak = 0
+    abort_reason = ""
     for pg, img in enumerate(pages, start=1):
         progress((pg - 1) / len(pages), f"قراءة صفحة {pg}/{len(pages)}…")
+        if usage["cost"] > MAX_UI_COST_USD:
+            abort_reason = (f"أُوقف التشغيل عند الصفحة {pg}: تجاوز سقف الكلفة "
+                            f"(${MAX_UI_COST_USD:.2f} لهذا المسار).")
+            break
         st: dict = {}
         try:
             raw_rows = read_rows_vlm(img, stats=st)
         except Exception:
             # one flaky page must never kill the whole run (transient VLM /
-            # JSON glitches) — record it, keep going, report it honestly
+            # JSON glitches) — record it, keep going, report it honestly.
+            # But EVERY page failing is a provider outage, not bad luck: four
+            # attempts with 10/20/40s backoff ≈ 70s per page, so 629 pages
+            # would spin ~12 hours and produce nothing. Five in a row stops it.
             failed_pages.append(pg)
             cum_broken = True  # cumulative footer chain is now unverifiable
+            fail_streak += 1
+            if fail_streak >= FAIL_STREAK_LIMIT:
+                abort_reason = (f"أُوقف التشغيل عند الصفحة {pg}: "
+                                f"{fail_streak} إخفاقات قراءة متتالية "
+                                f"(انقطاع المزوّد؟) — والصفحات المقروءة محفوظة "
+                                f"في هذه النتيجة.")
+                break
             continue
+        fail_streak = 0
         _merge_usage(st)
         rows = chain_derive(raw_rows, prev_balance=prev_closing)
         page_no = st.get("page_no")
@@ -554,6 +597,8 @@ def _process_pdf_locked(pdf_path: str, progress):
     segs = [base, seg_f, summarize_era_ar(era_fp),
             summarize_order_ar(order, boundaries),
             summarize_page_numbers(check_page_numbers(page_nos))]
+    if abort_reason:
+        segs.insert(0, "⛔ " + abort_reason)
     if filled_dates:
         segs.append(f"تواريخ مُستكملة: {filled_dates}* "
                     f"(لا تاريخ مطبوع في سطرها — سُدّت من الصف السابق)")
