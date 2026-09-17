@@ -41,7 +41,7 @@ from statement_qa.chunking import chunk_rows
 from statement_qa.classify import annotate_types
 from statement_qa.retriever import build_index
 from statement_qa.vlm_reader import (
-    chain_derive, read_rows_vlm, recover_anchor,
+    chain_derive, fill_missing_dates, read_rows_vlm, recover_anchor,
 )
 from statement_qa.bank_check import probe_bank
 from statement_qa.era import fingerprint_pages, summarize_ar as summarize_era_ar
@@ -254,6 +254,22 @@ def _kpi_html(n_rows: int, n_clean: int, n_susp: int, last_bal) -> str:
     return f'<div class="ledger-kpi">{inner}</div>'
 
 
+def _date_cell(r: dict) -> str:
+    """Date for the table/export: Gregorian `YYYY/MM/DD`; `*` = inherited.
+
+    The printed cell may carry both calendars (hijri first) — parse_gregorian
+    picks the gregorian run; unparseable cells show as printed (never dropped).
+    """
+    from statement_qa.ordering import parse_gregorian
+
+    d = str(r.get("date") or "").strip()
+    if not d:
+        return "—"
+    g = parse_gregorian(d)
+    shown = f"{g[:4]}/{g[4:6]}/{g[6:]}" if g else d
+    return shown + ("*" if r.get("date_source") == "inherited" else "")
+
+
 def _row_record(no: int, r: dict) -> dict:
     """Excel-style display record: real النوع + مدين/دائن split.
 
@@ -270,6 +286,7 @@ def _row_record(no: int, r: dict) -> dict:
         status = "◌ اتجاه غير محسوم"
     return {"#": no,
             "الصفحة": r["page"],
+            "التاريخ": _date_cell(r),
             "الوصف": (r.get("desc") or "—"),
             "النوع": r.get("type") or
                     ("رصيد افتتاحي" if r.get("kind") == "opening" else "حركة"),
@@ -480,6 +497,7 @@ def _process_pdf_locked(pdf_path: str, progress):
             prev_closing = r["balance"]
 
     annotate_types(all_rows)
+    filled_dates = fill_missing_dates(all_rows)
     rows_view = _rows_df(all_rows)
 
     progress(0.95, "بناء الفهرس…")
@@ -536,6 +554,9 @@ def _process_pdf_locked(pdf_path: str, progress):
     segs = [base, seg_f, summarize_era_ar(era_fp),
             summarize_order_ar(order, boundaries),
             summarize_page_numbers(check_page_numbers(page_nos))]
+    if filled_dates:
+        segs.append(f"تواريخ مُستكملة: {filled_dates}* "
+                    f"(لا تاريخ مطبوع في سطرها — سُدّت من الصف السابق)")
     if recoveries:
         segs.append("استُدرك حدّ الصفحة: "
                     + "، ".join(f"ص{r['page']} ({r['amount']})"
