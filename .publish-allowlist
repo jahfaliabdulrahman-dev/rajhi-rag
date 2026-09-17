@@ -8,3 +8,7 @@ name_token :: docs/QA_CHECKLIST.md :: وسم الخدمة في إرشادات ا
 name_token :: docs/OPERATIONS.md :: وسوم الخدمات في دليل التشغيل
 name_token :: docs/what-if/00-what-if-guide.ar.md :: إسناد الدليل لمكتب المالك (وثيقة علنية أصلاً)
 name_token :: README.md :: الإسناد العلني للمشروع
+
+# ثنائيات غير قابلة للفحص كنص (opaque). القاعدة: لا ثنائي يُدفع بلا سطر هنا.
+# الحارس لا يستطيع قراءة بايتاتها — فالسطر إقرار بشري معلن، لا مسح.
+opaque_binary :: assets/fonts/* :: خط Noto Naskh Arabic لعربية تقارير PDF — ملف خط لا يحمل أي بيانات
