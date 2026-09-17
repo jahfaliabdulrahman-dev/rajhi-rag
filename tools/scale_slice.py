@@ -116,6 +116,21 @@ def partial_first_status(pg: int, first: int) -> dict | None:
     return None
 
 
+def _gate_summary(per_page: list[dict], mode: str) -> dict:
+    """ملخّص بوابة الجودة: كم صفحة لم تُدفع كلفتها، وكم أُنبِّه عليها."""
+    counts: dict[str, int] = {"accept": 0, "warn": 0, "reject": 0, "unknown": 0}
+    skipped: list[int] = []
+    for p in per_page:
+        g = p.get("gate") or {}
+        verdict = g.get("verdict") or "unknown"
+        counts[verdict] = counts.get(verdict, 0) + 1
+        if g.get("skipped"):
+            skipped.append(p["page"])
+    return {"mode": mode, "counts": counts, "skipped_pages": skipped,
+            "reasons": sorted({r for p in per_page
+                               for r in ((p.get("gate") or {}).get("reasons") or [])})}
+
+
 def _read_cache(cache: Path) -> dict | None:
     """Checkpoint read that treats a damaged file as «unreadable», not a crash.
 
@@ -191,6 +206,12 @@ def main() -> None:
     ap.add_argument("--stop-window", type=int, default=5)
     ap.add_argument("--stop-suspect-ratio", type=float, default=0.2)
     ap.add_argument("--no-resume", action="store_true")
+    ap.add_argument("--page-gate", choices=("off", "warn", "skip", "strict"),
+                    default="warn",
+                    help="بوابة جودة المسح لكل صفحة (tools/page_gate.py): "
+                         "off=لا شيء · warn=قياس وتسجيل بلا منع (الافتراضي) · "
+                         "skip=لا تدفع كلفة صفحة مرفوضة · "
+                         "strict=skip + الصفحات التي لا يمكن إثباتها (بلا إطار)")
     ap.add_argument("--retry-errors", action="store_true",
                     help="إعادة محاولة الصفحات المخزّنة بخطأ — للاستئناف بعد انقطاع مزود/نفاد رصيد")
     args = ap.parse_args()
@@ -236,6 +257,25 @@ def main() -> None:
                    "cost": 0.0}
     stop_reason = None
     per_page = []
+    # حُكّام الفوتر لكل صفحة (يستهلكه `format_effects` في التقرير). كان الاسم
+    # مستعملاً بلا تعريف ⇒ كل تشغيل **مدفوع** يموت بـNameError **بعد** إنفاق
+    # كامل الكلفة وقبل كتابة `slice_report.json`: عمل مدفوع بلا مُخرَج.
+    footer_checks: list[dict] = []
+
+    # البوابة تُحمَّل **مرة واحدة** قبل الحلقة: فشل استيرادها يجب أن يُصرَخ به
+    # مرةً واحدة، لا أن يُبتلع في كل صفحة — «خطأ صامت في بوابة» يعني تشغيلاً
+    # بلا بوابة (وهو ما حدث فعلاً في أول اختبار: الاستيراد أخفق فمرّت صفحة
+    # فارغة إلى استدعاء مدفوع).
+    gate_check = None
+    if args.page_gate != "off":
+        try:
+            if str(PROJ) not in sys.path:
+                sys.path.insert(0, str(PROJ))   # لتحميل حزمة tools
+            from tools.page_gate import check_page as gate_check  # noqa: PLC0415
+        except Exception as e:  # noqa: BLE001
+            print(f"[gate] تعذّر تحميل البوابة ({type(e).__name__}: {e}) "
+                  f"— التكملة بلا بوابة", flush=True)
+            gate_check = None
 
     prev_closing = None
     cum = {"debits": Decimal("0"), "credits": Decimal("0")}
@@ -259,6 +299,7 @@ def main() -> None:
         cache = results_dir / f"pg-{pg:03d}.json"
         reread_rejected = False
         anchor_rejected = False
+        gate: dict | None = None
         use_cache = cache.exists() and not args.no_resume
         data = None
         if use_cache:
@@ -266,6 +307,20 @@ def main() -> None:
             if data is None:   # damaged checkpoint ≠ dead run (audit P2-4)
                 print(f"[p{pg}] كاش غير مقروء — إعادة قراءة نظيفة", flush=True)
                 use_cache = False
+            elif data.get("gate_skipped"):
+                # صفحة تخطّاها تشغيل سابق ببوابة الجودة: تُعاد مجاناً بلا استدعاء.
+                # (بلا هذه الحالة كان سجلّها بلا `raw_rows` فيسقط كـKeyError أو
+                # يُقرأ كـ«كاش غير مقروء» فيُدفع ثمنها مرتين.)
+                if args.page_gate in ("skip", "strict"):
+                    gate = data.get("gate")
+                    cum_broken = True
+                    prev_footer = None
+                    per_page.append({"page": pg, "rows": 0, "suspects": None,
+                                     "gate": gate, "footer": "gate_rejected",
+                                     "origin": "gate-cache"})
+                    print(f"[p{pg}] GATE-SKIP (cached) — بلا استدعاء", flush=True)
+                    continue
+                use_cache = False   # تغيّر الوضع إلى warn/off ⇒ تُقرأ الآن فعلاً
             elif data.get("error"):
                 if args.retry_errors:
                     print(f"[p{pg}] إعادة محاولة خطأ سابق: {data['error']}",
@@ -287,6 +342,7 @@ def main() -> None:
             reread_rejected = bool(data.get("reread_rejected"))
             anchor_rejected = bool(data.get("anchor_rejected"))
             page_no = data.get("page_no")
+            gate = data.get("gate")
             raw_rows = [row_from_json(r) for r in data["raw_rows"]]
             footer = None
             if data.get("footer"):
@@ -300,6 +356,41 @@ def main() -> None:
             origin = "cache"
         else:
             st_r, st_f = {}, {}
+            # ————— بوابة الجودة: تُقاس **قبل** أي إنفاق على هذه الصفحة —————
+            # البوابة لا تقتل تشغيلاً أبداً: أي خطأ داخلها = «unknown» ونكمل.
+            if gate_check is not None:
+                try:
+                    gate = gate_check(png)
+                except Exception as e:  # noqa: BLE001
+                    # خطأ في صفحة واحدة لا يقتل تشغيلاً: نُسمّيه ونتابع.
+                    gate = {"verdict": "unknown", "reasons": [],
+                            "error": f"{type(e).__name__}: {e}"}
+                _reasons = gate.get("reasons") or []
+                _skip = (
+                    gate.get("verdict") == "reject"
+                    and args.page_gate in ("skip", "strict")
+                ) or (
+                    args.page_gate == "strict" and "no_referee" in _reasons
+                )
+                if _skip:
+                    gate = {**gate, "skipped": True, "mode": args.page_gate}
+                    _write_json_atomic(cache, {"pg": pg, "gate": gate,
+                                               "gate_skipped": True,
+                                               "usage": {"calls": 0, "cost": 0.0}})
+                    # الصفحة المتخطّاة = صفحة **لم تُقرأ**: المجموع التراكمي لا
+                    # يُعاد بناؤه عبر فجوة، ودلتا الإطار تفقد أساسها ⇒ تُصنَّف
+                    # «غير قابلة للتحقق» لا «منزاحة» (وهو ما يمنع نسبة انزياح
+                    # إلى صفحة لا يمكن عزلها، ومنع إعادة قراءة مدفوعة بلا سبب).
+                    cum_broken = True
+                    prev_footer = None
+                    # تُسجَّل الصفحة المتخطّاة في التقرير: قرار «لم ندفع كلفتها»
+                    # يجب أن يظهر للمالك، لا أن يسقط بصمت.
+                    per_page.append({"page": pg, "rows": 0, "suspects": None,
+                                     "gate": gate, "footer": "gate_rejected",
+                                     "origin": "gate"})
+                    print(f"[p{pg}] GATE-SKIP ({','.join(_reasons) or 'reject'}) "
+                          f"— بلا استدعاء", flush=True)
+                    continue
             t0 = time.time()
             try:
                 raw_rows = read_rows_vlm(str(png), stats=st_r)
@@ -314,6 +405,7 @@ def main() -> None:
                 window.append(1)       # a missing page weighs like a suspect
                 window_rows.append(1)
                 per_page.append({"page": pg, "rows": 0, "suspects": None,
+                                 "gate": gate,
                                  "footer": "unchecked", "error": str(e),
                                  "origin": "live"})
                 fail_streak += 1
@@ -468,8 +560,10 @@ def main() -> None:
         f_absent += st == "absent"
         f_gap += st == "gap"
 
+        footer_checks.append({**chk, "page": pg})
         per_page.append({
             "page": pg, "rows": len(p_rows), "suspects": p_susp,
+            "gate": gate,
             "footer": st, "footer_detail": chk.get("diffs"),
             "paradox": bool(chk.get("is_paradox")),
             "page_no": page_no,
@@ -523,6 +617,7 @@ def main() -> None:
                    "clean_ratio": round(clean_ratio, 4)},
         "footer": {"ok": f_ok, "mismatch": f_bad, "unchecked": f_unchecked,
                    "absent": f_absent, "gap": f_gap},
+        "page_gate": _gate_summary(per_page, args.page_gate),
         "page_numbers": check_page_numbers(page_nos),
         "era": {"overall": era_fp["overall"], "styles": era_fp["styles"],
                 "transitions": era_fp["transitions"],
