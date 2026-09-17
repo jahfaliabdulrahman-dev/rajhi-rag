@@ -100,6 +100,7 @@ pydantic-settings==2.15.0
 pydantic==2.13.5
 pydantic_core==2.46.5
 pydub==0.25.1
+pymupdf==1.28.2
 pypdf==6.18.1
 pypdfium2==5.13.0
 pytesseract==0.3.13

@@ -21,5 +21,5 @@ joined_digits :: push:tests/test_publish_guard.py :: نسخ تاريخية دا�
 
 # ثنائيات غير قابلة للفحص كنص (opaque). القاعدة: لا ثنائي يُدفع بلا سطر هنا.
 # الحارس لا يستطيع قراءة بايتاتها — فالسطر إقرار بشري معلن، لا مسح.
-opaque_binary :: assets/fonts/* :: خط Noto Naskh Arabic لعربية تقارير PDF — ملف خط لا يحمل أي بيانات
+opaque_binary :: assets/fonts/* :: خطوط عربية لتقارير PDF (Noto Naskh + IBM Plex Sans Arabic بخمسة أوزان) — ملفات خطوط لا تحمل بيانات
 name_token :: LICENSE :: اسم صاحب الحقوق (معرّف علني موجود أصلاً في عنوان المستودع)
