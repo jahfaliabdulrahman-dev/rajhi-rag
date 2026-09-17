@@ -580,20 +580,30 @@ def _process_pdf_locked(pdf_path: str, progress):
                 f"جاهز للسؤال والجواب")
     f_ok = [c for c in footer_checks if c["status"] == "ok"]
     f_bad = [c for c in footer_checks if c["status"] == "mismatch"]
+    f_gap = [c for c in footer_checks if c["status"] == "gap"]
+    f_absent = [c for c in footer_checks if c["status"] == "absent"]
     f_unchecked = [c for c in footer_checks if c["status"] == "unchecked"]
     f_possible = len(f_ok) + len(f_bad)
+    # Two numbers, because one number hid the truth (audit P1-2): the
+    # denominator used to be ok+mismatch alone, so a file with four frameless
+    # pages and two scan gaps still read «621/621 مطابق» and never named them.
+    # ACCURACY says how the checked pages did; COVERAGE says how much of the
+    # file was checked — and every remaining class is named in Arabic.
     if f_possible:
-        seg_f = f"تحقق الفوتر: {len(f_ok)}/{f_possible} مطابق"
+        seg_f = (f"تحقق الفوتر: {len(f_ok)}/{f_possible} مطابق (دقة)، "
+                 f"وتغطية {f_possible}/{n_pages}")
         if f_bad:
             seg_f = ("⚠ " + seg_f + " — صفحات غير مطابقة: "
                      + "، ".join(str(c["page"]) for c in f_bad))
             if any(c.get("is_paradox") for c in f_bad):
                 seg_f += " (نمط زيغ ×100)"
-        if f_unchecked:
-            seg_f += (" — غير قابلة للتحقق: "
-                      + "، ".join(str(c["page"]) for c in f_unchecked))
+        for label, group in (("فجوة مسح", f_gap), ("بلا إطار مطبوع", f_absent),
+                             ("غير قابلة للتحقق", f_unchecked)):
+            if group:
+                seg_f += (f" — {label}: "
+                          + "، ".join(str(c["page"]) for c in group))
     else:
-        seg_f = "تحقق الفوتر: تعذرت قراءة الإطارات"
+        seg_f = "تقرير الفوتر: تعذرت قراءة الإطارات — لا حكم على أي صفحة"
     segs = [base, seg_f, summarize_era_ar(era_fp),
             summarize_order_ar(order, boundaries),
             summarize_page_numbers(check_page_numbers(page_nos))]

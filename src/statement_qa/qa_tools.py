@@ -36,7 +36,12 @@ def _side_match(row_side: str, want: str) -> bool:
         return row_side == "debit"
     if w in ("دائن", "credit", "الدائن"):
         return row_side == "credit"
-    return True  # unknown filter: don't over-filter
+    # «Match everything» used to be the answer to an unknown filter, so a
+    # garbled «مجموع السحوبات» quietly returned the sum of ALL movements in a
+    # sentence that looked filtered (audit P3-3). Refusing loudly lets the
+    # model correct itself instead of trusting a wrong number.
+    raise ValueError(
+        f"فلتر اتجاه غير معروف: {w!r} — القيم الصحيحة: مدين / دائن / الكل")
 
 
 def _parse_amount_arg(amount) -> Decimal | None:
@@ -187,17 +192,29 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None):
         credits = sum((r["movement"] for r in page_rows
                        if r.get("kind") == "txn" and r.get("side") == "credit"
                        and r.get("movement") is not None), Decimal("0"))
+        # Rows whose direction the chain could not decide are NOT in either
+        # total. Staying silent about them made a page total look complete
+        # while a real movement was missing from it (audit P3-2).
+        undecided = [r for r in page_rows
+                     if r.get("kind") == "txn"
+                     and r.get("side") not in ("debit", "credit")
+                     and r.get("movement") is not None]
+        note = ""
+        if undecided:
+            tot = sum((r["movement"] for r in undecided), Decimal("0"))
+            note = (f" | تحفّظ: {len(undecided)} صف غير محسوم الاتجاه "
+                    f"بإجمالي {_MONEY.format(tot)} — غير مشمول في المجاميع")
         if not with_bal:
             return (f"صفحة {page}: لا توجد أرصدة مقروءة"
                     f" | إجمالي مدين = {_MONEY.format(debits)}"
                     f" | إجمالي دائن = {_MONEY.format(credits)}"
-                    f" | عدد الصفوف = {len(page_rows)}")
+                    f" | عدد الصفوف = {len(page_rows)}" + note)
         first, last = with_bal[0], with_bal[-1]
         return (f"صفحة {page}: أول رصيد = {_MONEY.format(first['balance'])} {_ref(first)}"
                 f" | آخر رصيد = {_MONEY.format(last['balance'])} {_ref(last)}"
                 f" | إجمالي مدين = {_MONEY.format(debits)}"
                 f" | إجمالي دائن = {_MONEY.format(credits)}"
-                f" | عدد الصفوف = {len(page_rows)}")
+                f" | عدد الصفوف = {len(page_rows)}" + note)
 
     @tool
     def search_rows(keyword: str = "", tx_type: str = "", amount: float | None = None,

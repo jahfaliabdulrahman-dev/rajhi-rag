@@ -24,9 +24,26 @@ from statement_qa.retriever import retrieve
 # top-k on a long statement (workshop top-12 #7: «آخر رصيد» لا يجيب). For
 # these the LAST page's chunks are appended deterministically — the honest
 # retrieval bridge, no scoring tricks.
+def _normalize_ar(text: str) -> str:
+    """Drop hamza/diacritic variants before matching (audit P2-9).
+
+    «اخر رصيد» — the way this is normally typed, without a hamza — did not
+    match a pattern written «آخر رصيد», so the deterministic bridge to the last
+    page silently did not fire for 9 of the 15 phrasings tested, including the
+    commonest one. Normalising the question is cheaper and more honest than an
+    ever-longer alternation.
+    """
+    out = str(text or "")
+    for a, b in (("أ", "ا"), ("إ", "ا"), ("آ", "ا"), ("ى", "ي"), ("ة", "ه")):
+        out = out.replace(a, b)
+    return re.sub(r"[\u064b-\u0652\u0640]", "", out)   # diacritics + tatweel
+
+
 _CLOSING_RE = re.compile(
-    r"آخر\s*رصيد|الرصيد\s*(?:الأخير|الختامي|النهائي|الحالي)"
-    r"|رصيد\s*(?:ختامي|نهائي)|الختامي")
+    r"اخر\s*رصيد|الرصيد\s*(?:الاخير|الختامي|النهائي|الحالي|المتبقي)"
+    r"|رصيد\s*(?:ختامي|نهائي|متبقي)|الختامي|نهايه\s*الكشف|اقفل\s*الحساب"
+    r"|بكم\s*اقفل|كم\s*(?:تبقي|باقي)|closing\s*balance|balance\s*at\s*end",
+    re.IGNORECASE)
 
 
 def boost_last_page(hits: list[dict], chunks, question: str) -> list[dict]:
@@ -34,7 +51,7 @@ def boost_last_page(hits: list[dict], chunks, question: str) -> list[dict]:
 
     Pure and deterministic: nothing is re-scored; missing last-page chunks
     are appended at the end so the tools/answer/sources can see them."""
-    if not chunks or not _CLOSING_RE.search(question or ""):
+    if not chunks or not _CLOSING_RE.search(_normalize_ar(question or "")):
         return hits
     last_page = max(c.page for c in chunks)
     have = {(h.get("page"), h.get("row_start"), h.get("row_end"))

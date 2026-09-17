@@ -28,7 +28,13 @@ def norm_num(s):
     if s is None:
         return None
     raw = str(s).translate(DIGITS).replace("٫", ".").replace("٬", ",").replace("،", ",")
-    if re.fullmatch(r"[\s.,]+", raw):          # صفر مطبوع كنقط
+    if re.fullmatch(r"[\s.,]+", raw):
+        # The old prints write a printed zero as «.,..» — several marks. A
+        # SINGLE '.' or ',' is a blank/garbled cell, and promoting it to a hard
+        # 0.00 injects a fake balance into the chain (audit P3-1: measured zero
+        # live cases, latent by construction). Two-plus marks = printed zero.
+        if len(raw.strip()) < 2:
+            return None
         return 0.0
     neg = raw.strip().startswith("-") or raw.strip().endswith("-")
     t = re.sub(r"[^0-9.,]", "", raw)
