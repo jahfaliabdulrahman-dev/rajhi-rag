@@ -7,11 +7,17 @@ on:
   push:
   pull_request:
 
+# Read-only token: a guard that only reads must not be handed write scopes,
+# and the action is pinned to a commit SHA — a moving tag on the workflow that
+# enforces privacy is a supply-chain hole in the one place it hurts most.
+permissions:
+  contents: read
+
 jobs:
   guard:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
         with:
           fetch-depth: 0   # full history for the forensic scan
       - name: PII / real-data guard (tree + history)
