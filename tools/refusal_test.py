@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import json
 import sys
 import time
@@ -41,7 +42,30 @@ DEFAULT_QUESTIONS = [
      "q": "كم مجموع السحوبات من الصراف الآلي؟"},
     {"id": "D", "kind": "وصفي داخلي — بحث دلالي", "expect": "بحث",
      "q": "هل يوجد أثر مقاصة في الكشف؟"},
+    # Four cases added after an external audit noted the set held only two real
+    # refusal verdicts (P3-9): the failure that matters outside the covered
+    # ground is not a rude answer, it is an INVENTED NUMBER. For these the
+    # verdict is mechanical: any riyal figure in the answer means the model
+    # filled a gap the statement does not have.
+    {"id": "E", "kind": "سنة خارج مدى الكشف", "expect": "لا بيانات",
+     "q": "كم مجموع الحركات في عام ٢٠١٩؟"},
+    {"id": "F", "kind": "سؤال مركّب نصفه موجود", "expect": "أداة",
+     "q": "كم مجموع الحوالات الواردة من شركة أ، وكم عدد الحوالات من مؤسسة "
+          "غير مذكورة في الكشف؟"},
+    {"id": "G", "kind": "مبلغ غير موجود", "expect": "لا بيانات",
+     "q": "هل يوجد تحويل بمبلغ 987,654.32 ريال؟"},
+    {"id": "H", "kind": "صفحة تتجاوز الملف", "expect": "لا بيانات",
+     "q": "ماذا يوجد في الصفحة ٧٠٠؟"},
 ]
+
+# A riyal figure stated in the answer, western or Arabic-Indic. The AUDIT
+# question is «did it invent a number?», not «did it sound polite?».
+_AMOUNT_RE = re.compile(
+    r"\d[\d,]*\.\d\d|[\u0660-\u0669]{1,3}[,.:\u066b\u066c][\u0660-\u0669]{2}")
+
+
+def _has_amount(text: str) -> bool:
+    return bool(_AMOUNT_RE.search(text or ""))
 
 
 def build_rows(slice_dir: Path) -> tuple[list[dict], int]:
@@ -140,6 +164,11 @@ def main() -> int:
         elif item["expect"] == "أداة":
             ok = used_tool
             why = "استدعى أداة ✓" if used_tool else "لم يستدعِ أداة ✗"
+        elif item["expect"] == "لا بيانات":
+            invented = _has_amount(ans)
+            ok = not invented
+            why = ("لم يخترع مبلغاً ✓" if ok
+                   else "أجاب بمبلغ لا سند له في الكشف ✗")
         else:
             ok = True
             why = f"{'رفض' if refused else 'أجاب'} (لا حكم قاطع)"

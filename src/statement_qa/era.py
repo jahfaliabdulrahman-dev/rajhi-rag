@@ -121,17 +121,43 @@ def fingerprint_pages(pages_raw: dict[int, list]) -> dict:
             "outliers": outliers, "overall": overall, "majority": majority}
 
 
-def summarize_ar(fp: dict) -> str:
-    """Run-level one-liner for the app ticker."""
+def summarize_ar(fp: dict, effects: dict | None = None) -> str:
+    """Run-level one-liner — and it only WARNS where something happened.
+
+    The detector finds a style change on ~11% of pages, which is normal
+    typography: raising the same ⚠ for all of it makes the one transition that
+    coincides with real damage indistinguishable from the seventy that do not
+    — a warning nobody can act on is a warning nobody reads (audit P3-5).
+
+    `effects` = {page: reason} for pages where something WAS measured (a footer
+    verdict that is not ok, a chain suspect). Only transitions and outliers that
+    touch an affected page carry the ⚠ and the reason; the rest are reported
+    with the explicit note that nothing was measured against them.
+    """
+    effects = effects or {}
     styles = {p: s for p, s in fp["styles"].items() if s != "none"}
     if not styles:
         return "الصيغة: —"
     if fp["overall"] != "mixed" and not fp["transitions"] and not fp["outliers"]:
         return f"الصيغة: {STYLE_NAMES.get(fp['majority'], fp['majority'])} — كل الصفحات"
-    bits = []
+
+    def _mark(pages: list[int]) -> tuple[str, list[str]]:
+        reasons = [f"ص{p}: {effects[p]}" for p in pages if p in effects]
+        return ("⚠ " if reasons else ""), reasons
+
+    bits, flagged = [], []
     for p, q, a, b in fp["transitions"]:
-        bits.append(f"تحوّل ص{p}→ص{q} ({STYLE_NAMES.get(a, a)}→{STYLE_NAMES.get(b, b)})")
+        mark, reasons = _mark([p, q])
+        bits.append(f"{mark}تحوّل ص{p}→ص{q} "
+                    f"({STYLE_NAMES.get(a, a)}→{STYLE_NAMES.get(b, b)})"
+                    + (f" [{'، '.join(reasons)}]" if reasons else ""))
+        flagged += reasons
     if fp["outliers"]:
-        bits.append(f"⚠ صفحات شاذة عن جيرانها: {fp['outliers']}")
-    seg = "· ".join(bits) if bits else "صيغة غير موحّدة"
+        mark, reasons = _mark(list(fp["outliers"]))
+        bits.append(f"{mark}صفحات شاذة عن جيرانها: {fp['outliers']}"
+                    + (f" [{'، '.join(reasons)}]" if reasons else ""))
+        flagged += reasons
+    seg = "·".join(bits) if bits else "صيغة غير موحّدة"
+    if not flagged:
+        seg += " — بلا أثر مقيس على الشكوك أو حكم الفوتر (تغيّر طباعة عادي)"
     return f"الصيغة: متغيرة — {seg}"

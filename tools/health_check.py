@@ -24,6 +24,8 @@ from pathlib import Path
 WANTED_JOBS = ("com.jahfali.rajhi-rag", "com.jahfali.rajhi-redirect",
                "com.jahfali.rajhi-healthcheck")
 LOG = Path.home() / "Library" / "Logs" / "rajhi-rag.log"
+MONITOR_LOG = Path.home() / "Library" / "Logs" / "rajhi-health.log"
+MONITOR_MAX_AGE_MIN = 30     # the monitor runs every 10 minutes
 
 
 def _http(port: int):
@@ -44,6 +46,28 @@ def _jobs() -> dict[str, str]:
         if len(parts) == 3 and "jahfali.rajhi" in parts[2]:
             jobs[parts[2]] = parts[0]
     return jobs
+
+
+def monitor_age_minutes(log_text: str, now=None) -> float | None:
+    """Minutes since the monitor's last line, or None if it never wrote one.
+
+    Without this, «the monitor died» and «everything is fine» look identical:
+    the log simply stops growing and nobody is watching the watcher (P3-8).
+    """
+    import datetime as _dt
+
+    last = None
+    for line in reversed((log_text or "").splitlines()):
+        stamp = " ".join(line.split()[:2])
+        try:
+            last = _dt.datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S")
+            break
+        except ValueError:
+            continue
+    if last is None:
+        return None
+    now = now or _dt.datetime.now()
+    return (now - last).total_seconds() / 60
 
 
 def main() -> None:
@@ -84,6 +108,17 @@ def main() -> None:
             print(f"[{mark}] {label} — غير محمّل"
                   + (" (اختياري)" if optional else ""))
             failures += 0 if optional else 1
+
+    age = (monitor_age_minutes(MONITOR_LOG.read_text(errors="replace"))
+           if MONITOR_LOG.exists() else None)
+    if age is None:
+        print("[⚠ ] المراقب — لا سجل بعد (لم يعمل قط؟)")
+    elif age > MONITOR_MAX_AGE_MIN:
+        print(f"[⚠ ] المراقب — آخر سطر قبل {age:.0f} دقيقة "
+              f"(يتوقع كل 10 دقائق) ⇒ المراقب نفسه متوقف؟")
+        failures += 1
+    else:
+        print(f"[✅] المراقب — نبض قبل {age:.0f} دقيقة")
 
     if LOG.exists():
         lines = LOG.read_text(errors="replace").splitlines()

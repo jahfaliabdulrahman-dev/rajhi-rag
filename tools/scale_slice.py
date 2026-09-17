@@ -40,6 +40,7 @@ from statement_qa.footer_oracle import (  # noqa: E402
     FooterReading, check_page_footer, delta_checkable, delta_status,
     page_diverged, read_footer, try_page_reread,
 )
+from statement_qa.verification import format_effects  # noqa: E402
 from statement_qa.ordering import (  # noqa: E402
     check_order, check_page_numbers, summarize_ar as order_ar,
     summarize_page_numbers,
@@ -510,6 +511,10 @@ def main() -> None:
             continue
         ledger = _sum_dicts(ledger, u)
 
+    _verdict_pages = {c["page"]: c["status"] for c in footer_checks}
+    _era_effects = format_effects(
+        _verdict_pages,
+        sorted({p["page"] for p in per_page if p.get("suspects")}))
     facts = _cache_facts(results_dir)
     report = {
         "slice": {"first": args.first, "count": args.count,
@@ -559,7 +564,7 @@ def main() -> None:
         f"| أوراكل الفوتر | {f_ok} مطابق · {f_bad} غير مطابق · {f_gap} فجوة مسح · {f_absent} بلا إطار · {f_unchecked} غير قابل للتحقق |",
         f"| تغطية التحقق | {f_ok + f_bad} من {len(per_page)} صفحة حُكِمت مقابل إطارها |",
         f"| زمن الصفحة (وسيط مُخزَّن) | {report['time']['median_page_s']} ث على {report['time']['timed_pages']} صفحة |",
-        f"| الصيغ | {era_ar(era_fp)} |",
+        f"| الصيغ | {era_ar(era_fp, _era_effects)} |",
         f"| الترتيب | {order_ar(order, boundaries)} |",
         "",
     ]
