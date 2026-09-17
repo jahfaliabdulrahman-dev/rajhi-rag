@@ -1,0 +1,18 @@
+{
+ "pages": 629,
+ "rows": 5793,
+ "clean": 5770,
+ "clean_pct": "99.6%",
+ "ok": 621,
+ "mismatch": 0,
+ "gap": 2,
+ "absent": 4,
+ "unchecked": 2,
+ "documented_ratio": "621/629",
+ "clean_ratio": "5770/5793",
+ "recoveries": 23,
+ "rereads": 15,
+ "arbitrations": 3,
+ "median_page_s": 22.18,
+ "tests": 172
+}
