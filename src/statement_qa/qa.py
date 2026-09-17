@@ -170,11 +170,51 @@ class QAResult:
     tools_failed: bool = False
     refused: bool = False
     scope: str = "in_scope"
+    # A NUMERIC question answered without a single tool call. Not a failure —
+    # a recollection, and it must be labelled as one (Gate 4, case F).
+    ungrounded: bool = False
 
     def __str__(self) -> str:
         src = "; ".join(f"صفحة {s['page']} ص{s['row_start']}–{s['row_end']}"
                         for s in self.sources)
         return f"{self.answer}\n[المصادر: {src}]"
+
+
+_INTERROGATIVE = ("كم", "هل", "ما ", "ماذا", "أي ", "ما هي", "ما هو")
+_NUMERIC_HINT = ("كم", "مجموع", "إجمالي", "اجمالي", "عدد", "نسبة", "متوسط")
+
+
+def split_compound(question: str) -> list[str]:
+    """Split a two-part question — but only where splitting is safe.
+
+    Splitting on every «و» would cut «المدين والدائن» in half; requiring an
+    interrogative word on BOTH sides of a separator keeps the split honest.
+    Measured case F: one half existed in the statement and one did not, and the
+    compound question was answered from prose without a single tool call.
+    """
+    q = (question or "").strip()
+    if not q:
+        return []
+    def _clean(part: str) -> str:
+        p = part.strip(" ؟?.")
+        for pref in ("وكم", "وهل", "وما", "وماذا"):   # the conjunction, not a word
+            if p.startswith(pref):
+                return p[1:]
+        return p
+
+    for sep in ("،", " و", "؟"):
+        parts = [_clean(p) for p in q.split(sep)]
+        parts = [p for p in parts if p]
+        if len(parts) < 2:
+            continue
+        if all(any(m in p for m in _INTERROGATIVE) for p in parts):
+            return parts
+    return [q]
+
+
+def needs_tools(question: str) -> bool:
+    """Does the question ask for a NUMBER? Then prose is not an answer."""
+    return any(m in (question or "") for m in _NUMERIC_HINT)
 
 
 def _data_facts(rows) -> tuple[set, int | None, frozenset]:
@@ -226,18 +266,57 @@ def answer_question(store, question: str, rows=None, chunks=None,
                             refused=gate.kind == "out_of_scope",
                             scope=gate.kind)
 
+    llm = llm or build_llm()
+
+    # A compound question is TWO questions, and the second half is where the
+    # routing went wrong: measured case F asked for a sum that exists and a
+    # count that does not, and got prose for both. Each half is answered — and
+    # grounded — on its own.
+    parts = split_compound(question)
+    if len(parts) > 1:
+        results = [_answer_one(store, part, rows, chunks, llm, k)
+                   for part in parts]
+        merged_used = [n for r in results for n in (r.used_row_nos or [])]
+        hits = boost_last_page(retrieve(store, question, k=k), chunks, question)
+        body = "\n\n".join(f"• {r.answer}" for r in results)
+        return QAResult(
+            answer=body,
+            sources=[{k2: h[k2] for k2 in
+                      ("chunk_id", "page", "row_start", "row_end")} for h in hits],
+            used_row_nos=merged_used or None,
+            tools_failed=all(r.tools_failed for r in results),
+            ungrounded=any(r.ungrounded for r in results))
+
+    return _answer_one(store, question, rows, chunks, llm, k)
+
+
+def _answer_one(store, question: str, rows, chunks, llm, k: int) -> QAResult:
+    """One question, one answer, with its own tool trace and its own honesty."""
     hits = boost_last_page(retrieve(store, question, k=k), chunks, question)
     context = format_hits(hits)
-    llm = llm or build_llm()
     answer = ""
     used: list[int] = []
     tools_failed = False
+    ungrounded = False
     if rows:
         try:
             answer, trace = _answer_with_tools(llm, rows, context, question)
             from statement_qa.qa_tools import used_rows_from_trace
 
             used = used_rows_from_trace(trace)
+            if not used and needs_tools(question):
+                # One nudge, aimed: «use a tool» is a directive the agent
+                # follows far more often than the softer wording above — and if
+                # it still does not, the answer is labelled rather than trusted.
+                answer2, trace2 = _answer_with_tools(
+                    llm, rows, context,
+                    question + "\n\n(استخدم أداة حسابية واحدة على الأقل قبل "
+                               "الجواب، ولا تحسب بنفسك.)")
+                used2 = used_rows_from_trace(trace2)
+                if used2:
+                    answer, used = answer2, used2
+                else:
+                    ungrounded = True
         except Exception:
             # The SILENT part was the problem, not the fallback itself: a
             # provider timeout used to hand back a prose answer with an empty
@@ -254,4 +333,5 @@ def answer_question(store, question: str, rows=None, chunks=None,
                               ("chunk_id", "page", "row_start", "row_end")}
                              for h in hits],
                     used_row_nos=used,
-                    tools_failed=tools_failed)
+                    tools_failed=tools_failed,
+                    ungrounded=ungrounded)

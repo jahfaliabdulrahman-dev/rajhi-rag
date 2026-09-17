@@ -125,6 +125,9 @@ def answer_text(res, page_of: dict, verdicts: dict) -> str:
     if getattr(res, "tools_failed", False):
         return ("⚠ تعذّرت الأدوات — هذا الجواب وصفي ولم يُحسَب من الكشف، "
                 "فلا تعتمد أي رقم فيه.\n\n" + text)
+    if getattr(res, "ungrounded", False):
+        return ("⚠ سؤال رقمي بلا أي استدعاء أداة — الأرقام أدناه من نص القطع "
+                "لا من حساب على الكشف، فلا تعتمدها.\n\n" + text)
     pages = [page_of.get(n) for n in (getattr(res, "used_row_nos", None) or [])]
     warn = caution([p for p in pages if p is not None], verdicts)
     return text + (("\n\n" + warn) if warn else "")
@@ -139,8 +142,8 @@ def evidence_mode(res) -> str:
     'tools'    — rows a tool actually touched (the strong case);
     'fallback' — a descriptive answer: citations, else retrieval pages.
     """
-    if getattr(res, "tools_failed", False):
-        return "none"
+    if getattr(res, "tools_failed", False) or getattr(res, "ungrounded", False):
+        return "none"      # no computed evidence exists to show
     if getattr(res, "used_row_nos", None):
         return "tools"
     return "fallback"
