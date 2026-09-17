@@ -104,6 +104,24 @@ def test_index_answers_a_question_in_one_filter(tmp_path):
     assert df.filter(pl.col("footer_arbitrated"))["page"].unique().to_list() == [2]
 
 
+def test_calibration_window_bounds_what_is_paid_for():
+    """`--first`/`--count` were declared and ignored: calibrating «10 pages»
+    against the full file would have cost ~$8 instead of ~$0.15."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "calibrate_reader", ROOT / "tools" / "calibrate_reader.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    pages = list(range(629))
+    assert mod.select_pages(pages, 1, 10) == list(range(10))
+    assert mod.select_pages(pages, 5, 3) == [4, 5, 6]
+    assert mod.select_pages(pages, 628, 10) == [627, 628]
+    assert mod.select_pages(pages, 1, 0) == []
+    assert mod.select_pages(pages, 700, 3) == []
+
+
 def test_index_deliberately_omits_chain_derived_columns(tmp_path):
     """`side`/`ok` come from the arbiter. Re-deriving them here is the trap that
     once produced two wrong conclusions — the index must not invite it."""

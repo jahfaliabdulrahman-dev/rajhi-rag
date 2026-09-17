@@ -55,6 +55,18 @@ def _pair(rows: list[dict]) -> list[tuple[str | None, str | None]]:
     return [(_norm(r.get("movement")), _norm(r.get("balance"))) for r in rows]
 
 
+def select_pages(images: list, first: int, count: int) -> list:
+    """The page window this run is allowed to read — and to PAY for.
+
+    `--first`/`--count` were declared and then ignored: the tool read every page
+    of the source, so calibrating «10 pages» against the full 629-page statement
+    would have cost ~$8 instead of ~$0.15. A cost control that does not control
+    cost is worse than none, because it is trusted.
+    """
+    start = max(0, first - 1)
+    return images[start:start + max(0, count)]
+
+
 def _score(got: list[tuple], want: list[tuple]) -> tuple[int, int, int]:
     """(ordered hits, multiset hits, expected).
 
@@ -95,11 +107,16 @@ def main() -> int:
     from statement_qa import vlm_reader
 
     vlm_reader.MODEL = args.model          # same transport, different brain
-    images = convert_from_path(str(source), dpi=args.dpi)
+    images = select_pages(convert_from_path(str(source), dpi=args.dpi),
+                          args.first, args.count)
+    if not images:
+        print(f"لا صفحات في النافذة المطلوبة ({args.first}+{args.count})")
+        return 2
     # read_rows_vlm takes a path (the reader opens the PNG itself)
     tmpdir = Path(tempfile.mkdtemp(prefix="calib_"))
-    print(f"[calibrate] model={args.model} · pages={len(images)} · "
-          f"المقارنة مع الكوربوس المعتمد\n")
+    print(f"[calibrate] model={args.model} · "
+          f"pages {args.first}..{args.first + len(images) - 1} "
+          f"({len(images)} صفحة، بحد أقصى) · المقارنة مع الكوربوس المعتمد\n")
 
     total_hits = total_rows = 0
     per_page = []
