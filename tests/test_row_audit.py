@@ -11,7 +11,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from statement_qa.row_audit import (
-    clash_resolved, desc_direction_clash, nonzero_row_count,
+    clash_resolved, column_vs_chain, desc_direction_clash, nonzero_row_count,
     repair_balance_by_amount,
 )
 
@@ -125,3 +125,25 @@ def test_a_reread_that_keeps_the_clash_is_rejected():
 def test_no_clash_means_nothing_to_accept():
     """بلا تناقض أصلاً لا تُقبل «إصلاحات»: الشرط كان موجوداً ثم زال."""
     assert clash_resolved([], []) is False
+
+
+def test_the_printed_column_is_a_second_witness_not_a_judge():
+    """عمود مطبوع يوافق السلسلة ⇒ شاهدان؛ ويخالفها ⇒ إشارة عيب لا ترجيح."""
+    rows = [{"desc": "مدفوعات نقاط البيع", "side": "debit", "printed_col": "debit",
+             "derived_movement": Decimal("22.00")},
+            {"desc": "تحويل", "side": "credit", "printed_col": "credit",
+             "derived_movement": Decimal("100.00")},
+            {"desc": "مدفوعات نقاط البيع", "side": "credit", "printed_col": "debit",
+             "derived_movement": Decimal("100.00")}]
+    clashes = column_vs_chain(rows)
+    assert len(clashes) == 1
+    assert clashes[0]["row"] == 3
+    assert clashes[0]["printed_col"] == "debit" and clashes[0]["chain_side"] == "credit"
+
+
+def test_a_row_without_a_readable_column_is_never_accused():
+    """غياب الشاهد ليس دليلاً: صفّ بلا عمود مقروء لا يدخل قائمة الخلاف."""
+    assert column_vs_chain([{"desc": "س", "side": "debit", "printed_col": None,
+                             "derived_movement": Decimal("5")}]) == []
+    assert column_vs_chain([{"desc": "س", "side": "", "printed_col": "debit",
+                             "derived_movement": None}]) == []

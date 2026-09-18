@@ -56,6 +56,28 @@ def _hit(desc: str, needles: tuple[str, ...]) -> str | None:
     return next((n for n in needles if n in desc), None)
 
 
+def column_vs_chain(rows: list[dict]) -> list[dict]:
+    """صفوف يخالف فيها العمودُ المطبوع اتجاهَ السلسلة.
+
+    شاهدان مستقلان لكل صفّ: **ما طبعه البنك** (العمود: مدين/دائن) و**ما تفرضه
+    الرياضيات** (فرق الرصيد). اختلافهما ليس حكماً لأحدهم على الآخر، بل إشارة
+    عيب: إمّا رقم قُرئ خطأً أو عمود أُزيح — والعلاج إعادة قراءة الصفحة لا الترجيح.
+    صفّ بلا عمود مقروء لا يُتَّهم (غياب الشاهد ليس دليلاً).
+    """
+    out: list[dict] = []
+    for i, r in enumerate(rows, start=1):
+        col = str(r.get("printed_col") or "").strip()
+        side = str(r.get("side") or "").strip()
+        if not col or not side or col == side:
+            continue
+        mv = r.get("derived_movement") if r.get("derived_movement") is not None \
+            else r.get("movement")
+        out.append({"row": i, "printed_col": col, "chain_side": side,
+                    "movement": str(mv) if mv is not None else None,
+                    "desc": str(r.get("desc") or "")[:80]})
+    return out
+
+
 def clash_resolved(before: list[dict], after: list[dict]) -> bool:
     """هل أزالت إعادةُ القراءة تناقضَ الوصف؟
 

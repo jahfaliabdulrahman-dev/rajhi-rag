@@ -23,6 +23,25 @@ FRONTIER_PROMPT = """أنت ناسخ أرقام دقيق لمستند مصرفي
 (5) في **أول صف فقط** أضف مفتاحاً إضافياً "page_no": رقم الصفحة المطبوع في أعلى الصفحة
 (أرقام عربية-هندية كما هي، وهو على نفس سطر مربع «بداية ونهاية معاملات الصفحة») — أو null إن لم يظهر."""
 
+# --- Frontier pass v2: the printed COLUMN as an independent witness ------------
+# [PROJECT-SPECIFIC change, 2026-09-18] The owner's contract rule (4.1/4.3): the
+# bank prints two POSITIVE columns (مدين/دائن), so the direction is READ, not
+# inferred. With the chain also deriving direction, every row then has two
+# independent witnesses — and a disagreement is a defect signal, not a guess.
+# V1 above stays untouched for comparison runs.
+FRONTIER_PROMPT_V2 = """أنت ناسخ أرقام دقيق لمستند مصرفي سعودي قديم. الصورة صفحة كشف حساب.
+المطلوب: استخرج كل صف حركة. أعد JSON مصفوفة فقط بلا أي تعليق. لكل صف:
+{"greg": "التاريخ الميلادي إن ظهر وإلا null", "desc": "البيان",
+ "col": "debit" أو "credit" أو null — العمود المطبوع الذي فيه المبلغ، لا تخمّنه من الإشارة",
+ "amount": "المبلغ تماماً كما هو مطبوع — انسخ أرقامه حرفياً بلا أي تحويل ولا حذف أصفار ولا إضافة فواصل",
+ "balance": "الرصيد تماماً كما هو مطبوع إن وُجد وإلا null"}.
+قواعد صارمة: (1) انسخ سلاسل الأرقام حرفياً مهما بدت غريبة، (2) لا تختلق أي رقم — null للباهت،
+(3) لا تكتب التاريخ في خانة المبلغ أبداً، (4) JSON فقط،
+(5) في **أول صف فقط** أضف مفتاحاً إضافياً "page_no": رقم الصفحة المطبوع في أعلى الصفحة
+(أرقام عربية-هندية كما هي، وهو على نفس سطر مربع «بداية ونهاية معاملات الصفحة») — أو null إن لم يظهر،
+(6) العمود: إن كان المبلغ في عمود المدين فـ"debit"، وإن كان في عمود الدائن فـ"credit" — وإن لم تستطع
+البتّ فـnull (لا تخمين، فالشاهد الكاذب أسوأ من غيابه)."""
+
 # --- Structure-aware re-read: owner's red-band anatomy ------------------------
 # Reads ONLY transaction bands; ignores noise lines (W-/TOACCT..., branch names);
 # captures the BLUE footer (cumulative totals + closing) as a per-page oracle.

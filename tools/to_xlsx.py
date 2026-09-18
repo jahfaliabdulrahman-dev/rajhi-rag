@@ -40,6 +40,9 @@ from openpyxl.utils import get_column_letter
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from statement_qa.row_audit import DEBIT_ONLY_DESCRIPTIONS  # noqa: E402
+from statement_qa.gap_ledger import (  # noqa: E402
+    PageFacts, build_gap_entries, debit_credit, identity,
+)
 from statement_qa.vlm_reader import chain_derive  # noqa: E402
 
 # الأوصاف التي لا تكون **دائنة** أبداً في هذا الكشف: مدفوعات نقاط البيع وسحوب
@@ -162,7 +165,11 @@ def derive_pages(raw_by_page: list[tuple[int, list[dict]]]) -> list[list[dict]]:
         out.append(derived)
         last = next((r["balance"] for r in reversed(derived)
                      if r.get("balance") is not None), None)
-        prev = last if last is not None else None
+        # **الاستمرارية**: صفحة بلا رصيد مقروء (بيضاء/فارغة) لا تُصفّر الرصيد
+        # العابر — وإلا صار أول صفّ في الصفحة التالية "مرساة" وسقط مبلغه من
+        # الحساب. خط الأنابيب يحمله (`prev_closing` يبقى)، وهذا يطابقه.
+        if last is not None:
+            prev = last
     return out
 
 
@@ -222,6 +229,16 @@ def load(run: Path) -> tuple[list[dict], dict, dict, dict]:
                 "counted": verdict.get("rows"),
             })
     return rows, report, per_page, flags
+
+
+def _num0(value) -> Decimal | None:
+    """القيمة كـDecimal للجمع والمقارنة (لا للعرض)."""
+    if value is None:
+        return None
+    try:
+        return Decimal(str(to_ascii_digits(str(value)).replace(",", "")))
+    except (ArithmeticError, ValueError):
+        return None
 
 
 def _num(value) -> float | None:
@@ -489,6 +506,34 @@ def write_sheet(ws, header: list[str], rows: list[list], widths: list[int],
     ws.auto_filter.ref = ws.dimensions
 
 
+def gap_facts(rows: list[dict], per_page: dict, flags: dict) -> list:
+    """يجمع ما يحتاجه محرّك الفجوات من الأدلة الموجودة أصلاً — بلا حساب جديد."""
+    by_page: dict[int, list[dict]] = {}
+    for r in rows:
+        by_page.setdefault(r["page"], []).append(r)
+    facts = []
+    for page in sorted(by_page):
+        entries = by_page[page]
+        own = {"debits": Decimal("0"), "credits": Decimal("0")}
+        for r in entries:
+            field = {"debit": "debits", "credit": "credits"}.get(r["side"])
+            mv = r["derived_movement"]
+            if field and mv is not None and not r["opening"]:
+                own[field] += Decimal(str(mv))
+        balances = [r["balance"] for r in entries if r.get("balance") is not None]
+        facts.append(PageFacts(
+            page=page,
+            printed={k: Decimal(str(v).replace(",", ""))/1
+                     for k, v in (flags.get(page, {}).get("printed") or {}).items()
+                     if k in ("debits", "credits") and v not in (None, "")},
+            own=own,
+            first_balance=Decimal(str(balances[0])) if balances else None,
+            last_balance=Decimal(str(balances[-1])) if balances else None,
+            missing_sheets=tuple(per_page.get(page, {}).get("missing_sheets") or ()),
+        ))
+    return facts
+
+
 def verify_derivation(rows: list[dict], per_page: dict) -> tuple[list[str], int]:
     """يقارن اشتقاقَنا بأرقام المحكَّم المسجَّلة في تقريره — صفحةً صفحة.
 
@@ -543,6 +588,39 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
                          + (f" (+{len(problems) - 5})" if len(problems) > 5 else ""))
 
     facts = summary_facts(rows, report, per_page, flags)
+    # قيود الفجوة: الأوراق الغائبة تُحسَب بمقدارها المقيس (زيادة التذييل المطبوع)
+    # ويُثبتها شاهد مستقل (عبور الرصيد). تُدرج صفوفاً في «الحركات» ليقفل مجموع
+    # الملف على ملخص البنك المطبوع — وعلى الهوية الحسابية.
+    gaps = build_gap_entries(gap_facts(rows, per_page, flags))
+    sum_debits = sum((Decimal(str(r["derived_movement"])) for r in rows
+                      if r["derived_movement"] is not None and not r["opening"]
+                      and r["side"] == "debit"), Decimal("0"))
+    sum_credits = sum((Decimal(str(r["derived_movement"])) for r in rows
+                       if r["derived_movement"] is not None and not r["opening"]
+                       and r["side"] == "credit"), Decimal("0"))
+    gap_debits = sum((g["debits"] or Decimal("0") for g in gaps), Decimal("0"))
+    gap_credits = sum((g["credits"] or Decimal("0") for g in gaps), Decimal("0"))
+    totals = {"debits": sum_debits + gap_debits, "credits": sum_credits + gap_credits}
+    first_open = next((r["balance"] for r in rows if r.get("opening")
+                       and r.get("balance") is not None), None)
+    opening = Decimal(str(first_open)) if first_open is not None else Decimal("0")
+    walk = identity(opening, totals["debits"], totals["credits"])
+    closing = _num0(facts["printed_balance"])
+    identity_ok = closing is not None and abs(walk - closing) <= Decimal("0.005")
+    _fmt = lambda v: f"{v:,.2f}"  # noqa: E731 — صيغة عرض واحدة في هذا القسم
+    gap_rows = [
+        [g["before_page"], None, None, None, None, None, None,
+         (f"قيد فجوة مسح — الأوراق الغائبة {g['missing_sheets']} "
+          f"(بين الصفحتين {g['after_page']} و{g['before_page']}): "
+          f"مقداراه من زيادة التذييل المطبوع، وعبور الرصيد "
+          f"{g['crossing']} يثبت صافيه"
+          if g["status"] == "proven" else
+          f"قيد فجوة مسح غير مُثبت — {g['note']}"),
+         None, None, g["debits"], g["credits"], None, None,
+         "قيد فجوة مسح (ورق غائب من المسح)"
+         + (" — الشاهدان متفقان" if g["witnesses_agree"] else " — غير مُثبت"),
+         "", ""]
+        for g in gaps]
     wb = Workbook()
 
     ws0 = wb.active
@@ -554,7 +632,33 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
     section_font = Font(bold=True, color="1F3864", size=11)
     for label, value, note in summary_sheet(facts, rows, report):
         ws0.append([label, value, note])
-        if label and not value and not note:   # a section heading row
+        if label and not value and not note:
+            ws0.cell(row=ws0.max_row, column=1).font = section_font
+
+    # الإقفال الحسابي: الهوية التي تجعل الملف غير قابل للطعن. تُحسب **بعد** قيود
+    # الفجوة، ويُقارن ناتجها بالرصيد الختامي المطبوع على الورق.
+    for label, value, note in (
+        ["", "", ""],
+        ["الإقفال الحسابي (الهوية)", "", ""],
+        ["رصيد الافتتاح", _fmt(opening), "من الورق: أول رصيد مطبوع في الكشف"],
+        ["Σ المدين (بعد قيود الفجوة)", _fmt(totals["debits"]),
+         f"حركات مثبتة بالسلسلة {_fmt(sum_debits)}"
+         + (f" + قيود فجوة {_fmt(gap_debits)}" if gap_debits else "")],
+        ["Σ الدائن (بعد قيود الفجوة)", _fmt(totals["credits"]),
+         f"حركات مثبتة بالسلسلة {_fmt(sum_credits)}"
+         + (f" + قيود فجوة {_fmt(gap_credits)}" if gap_credits else "")],
+        ["الافتتاح + Σ دائن − Σ مدين", _fmt(walk),
+         "هذه هي الهوية: يجب أن تساوي الرصيد الختامي المطبوع"],
+        ["الرصيد الختامي المطبوع", facts["printed_balance"],
+         f"من سطر الإجماليات في الصفحة {facts['last_ok_page']} — رقم الورق"],
+        ["حكم الهوية", "مطابق ✓" if identity_ok else "غير مطابق ✗",
+         f"بتسامح ≤ 0.005 — الفرق {_fmt(walk - closing) if closing is not None else '?'}"],
+        ["قيود الفجوة", f"{len(gaps)} قيداً · صافيها "
+         f"{_fmt(gap_credits - gap_debits)}",
+         "أوراق غائبة من المسح: مقداراها من زيادة التذييل المطبوع، وعبور الرصيد شاهد ثانٍ"],
+    ):
+        ws0.append([label, value, note])
+        if label and not value and not note:
             ws0.cell(row=ws0.max_row, column=1).font = section_font
     ws0.column_dimensions["A"].width = 40
     ws0.column_dimensions["B"].width = 26
@@ -567,17 +671,22 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
         ws,
         ["الصفحة (ملف)", "رقم الصفّ", "رقم الصفحة المطبوع", "التاريخ (كما طُبع)",
          "التاريخ (ميلادي)", "حالة التاريخ", "السنة", "الوصف",
-         "الحركة كما طُبعت", "الحركة المثبتة بالسلسلة", "الاتجاه",
+         "الحركة كما طُبعت", "الحركة المثبتة بالسلسلة", "مدين", "دائن",
          "الرصيد كما طُبع", "الرصيد (رقمي)", "حكم السلسلة على الصفّ",
          "تنبيه", "حالة إجماليات الصفحة"],
         [[r["page"], r["row_no"], r["printed_page"], r["date"], r["date_iso"],
           _DATE_STATUS_AR[r["date_status"]], r["year"], r["desc"],
           r["printed_movement"], r["derived_movement"],
-          SIDE_AR.get(r["side"], r["side"]), r["printed_balance"], r["balance"],
+          (debit_credit(r["derived_movement"], r["side"])[0]
+           if not r["opening"] else None),
+          (debit_credit(r["derived_movement"], r["side"])[1]
+           if not r["opening"] else None),
+          r["printed_balance"], r["balance"],
           r["row_state"], r["shift"],
           ARABIC_VERDICT.get(r["footer"], r["footer"])]
-         for r in rows],
-        [12, 9, 16, 18, 14, 26, 8, 46, 16, 18, 10, 16, 14, 34, 40, 30])
+         for r in rows]
+        + gap_rows,
+        [12, 9, 16, 18, 14, 26, 8, 46, 16, 18, 12, 12, 16, 14, 34, 40, 30])
 
     # الأسئلة: حساب حتمي على أدلة التشغيل — بلا نموذج لغوي وبلا كلفة، فالجواب
     # نفسه يُعاد إنتاجه بنفس الأمر غداً. ما يحتاج تفسيراً لا يُخمَّن هنا.

@@ -102,7 +102,8 @@ def test_xlsx_keeps_both_the_printed_and_the_parsed_number(tmp_path):
     header = [c.value for c in ws[1]]
     row = [c.value for c in ws[2]]
     assert "الحركة كما طُبعت" in header and "الحركة المثبتة بالسلسلة" in header
-    assert "الاتجاه" in header and "حكم السلسلة على الصفّ" in header
+    assert "مدين" in header and "دائن" in header        # عمودا البنك الموجبان
+    assert "حكم السلسلة على الصفّ" in header
     assert row[header.index("الحركة كما طُبعت")] == "٣٠٠,٠٠"     # ما على الورقة (نصّ)
     # المثبت رقم لا نصّ: يُفرَّز ويُجمع. القيمة 300.00 تُخزَّن 300.
     assert float(str(row[header.index("الحركة المثبتة بالسلسلة")])) == 300.0
