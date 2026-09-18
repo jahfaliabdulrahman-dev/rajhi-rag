@@ -40,6 +40,9 @@ from statement_qa.footer_oracle import (  # noqa: E402
     FooterReading, check_page_footer, delta_checkable, delta_status,
     page_diverged, read_footer, try_page_reread,
 )
+from statement_qa.row_audit import (  # noqa: E402
+    clash_resolved, desc_direction_clash,
+)
 from statement_qa.verification import format_effects  # noqa: E402
 from statement_qa.ordering import (  # noqa: E402
     check_order, check_page_numbers, summarize_ar as order_ar,
@@ -287,6 +290,7 @@ def main() -> None:
     window_rows: list[int] = []  # read row count per page (stop-gate)
     fail_streak = 0              # consecutive read failures (provider gate)
     recoveries: list[dict] = []  # boundary anchors resolved by verified reread
+    desc_clashes: list[dict] = []  # صفحات وُصفها يناقض اتجاه حركتها (كاشف حتمي)
     page_rereads: list[dict] = []  # pages re-read and accepted by footer delta
     page_nos: list[tuple[int, int | None]] = []  # (scan position, printed page no)
     prev_footer = None
@@ -476,13 +480,26 @@ def main() -> None:
 
         # تحكيم الصفحة: الانزياح عن الفوتر يُطلق قراءة جديدة واحدة — تُقبل
         # فقط بلا شكوك + مطابقة دلتا الفوتر (معزولة عن أي تلوث سابق).
+        # تناقض الوصف مع الاتجاه الذي أثبتته السلسلة = انزلاق عابر في قراءة
+        # الوصف (قِيس: 3/3 قراءات طازجة سليمة بينما الكاش حمل انزلاقاً واحداً).
+        # يُعالج بمسار إعادة القراءة نفسه الذي تعالَج به الأرقام، وبمعيار قبول
+        # صريح: القراءة الجديدة تُقبل إذا **زال** التناقض.
+        clash = desc_direction_clash(rows)
         if (not reread_rejected and pg > args.first and not gap_missing
-                and page_diverged(rows, cum, prev_footer, footer, cum_broken)):
+                and (page_diverged(rows, cum, prev_footer, footer, cum_broken)
+                     or clash)):
             pst: dict = {}
             fresh_raw, accepted, note = try_page_reread(
                 str(png), cum, prev_footer, footer, prev_closing, pst)
             usage_total = _sum_dicts(usage_total, _sum_dicts({"calls": 1}, pst))
             _bump_usage(cache, _sum_dicts({"calls": 1}, pst))
+            if clash and accepted and fresh_raw is not None:
+                fresh_clash = desc_direction_clash(
+                    chain_derive(fresh_raw, prev_balance=prev_closing))
+                if not clash_resolved(clash, fresh_clash):
+                    accepted = False
+                    note = (f"{note} — الوصف ما زال يناقض الاتجاه بعد إعادة "
+                            f"القراءة ({len(fresh_clash)} صفّاً)")
             if accepted and fresh_raw is not None:
                 raw_rows = fresh_raw
                 rows = chain_derive(raw_rows, prev_balance=prev_closing)
@@ -548,6 +565,10 @@ def main() -> None:
 
         p_rows = [r for r in rows if r["balance"] is not None]
         p_susp = sum(1 for r in p_rows if not r["ok"])
+        # تناقض الوصف يُعاد حسابه بعد أي إعادة قراءة: هذا ما بقي في الملف، لا
+        # ما كان قبله — التقرير يصف النتيجة النهائية.
+        clash = desc_direction_clash(rows)
+        desc_clashes.append({"page": pg, "clash": clash})
         n_rows += len(p_rows)
         n_ok += len(p_rows) - p_susp
         n_susp += p_susp
@@ -566,6 +587,7 @@ def main() -> None:
         footer_checks.append({**chk, "page": pg})
         per_page.append({
             "page": pg, "rows": len(p_rows), "suspects": p_susp,
+            "desc_clash": len(clash),
             "gate": gate,
             "footer": st, "footer_detail": chk.get("diffs"),
             "paradox": bool(chk.get("is_paradox")),
@@ -628,6 +650,7 @@ def main() -> None:
         "order": {"cross": order["cross"], "intra": order["intra"],
                   "coverage": order["coverage"], "boundaries": boundaries},
         "boundary_recoveries": facts["recoveries"],
+        "desc_clashes": [d for d in desc_clashes if d["clash"]],
         "page_rereads": facts["rereads"],
         "arbitrations": facts["arbitrations"],
         "session": {"recoveries": recoveries, "page_rereads": page_rereads,
