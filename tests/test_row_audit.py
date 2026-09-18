@@ -12,6 +12,7 @@ from decimal import Decimal
 
 from statement_qa.row_audit import (
     clash_resolved, desc_direction_clash, nonzero_row_count,
+    repair_balance_by_amount,
 )
 
 
@@ -68,6 +69,38 @@ def test_nonzero_row_count_skips_openings_and_blank_rows():
             {"desc": "لا حركة", "side": "", "derived_movement": Decimal("0")},
             {"desc": "بلا رصيد", "side": "", "derived_movement": None}]
     assert nonzero_row_count(rows) == 1
+
+
+def test_balance_repair_needs_two_witnesses():
+    """رقم واحد قُرئ خطأً: المبلغ المطبوع ورصيد السطر التالي يثبتان الصواب.
+
+    حالة ص219 بالحرف: 55.62 ثم المطبوع 5.00 والرصيد المقروء 51.62 (الصواب 50.62)،
+    ثم السطر التالي مطبوعه 22.00 ورصيده 28.62: 50.62 − 22.00 = 28.62 ✓
+    """
+    rows = [{"movement": None, "balance": Decimal("55.62"), "desc": "سابق"},
+            {"movement": Decimal("5.00"), "balance": Decimal("51.62"), "desc": "نقاط بيع"},
+            {"movement": Decimal("22.00"), "balance": Decimal("28.62"), "desc": "نقاط بيع"}]
+    fixed = repair_balance_by_amount(rows)
+    assert fixed[1]["balance"] == Decimal("50.62")
+    assert "repaired" in fixed[1]
+    assert fixed[0]["balance"] == Decimal("55.62")     # لا لمس لغير الخطأ
+    assert fixed[2]["balance"] == Decimal("28.62")
+
+
+def test_balance_repair_refuses_without_the_second_witness():
+    """بلا شاهد ثانٍ لا إصلاح: قد يكون الخطأ في المبلغ لا في الرصيد."""
+    rows = [{"movement": None, "balance": Decimal("55.62"), "desc": "سابق"},
+            {"movement": Decimal("5.00"), "balance": Decimal("51.62"), "desc": "نقاط بيع"},
+            {"movement": Decimal("900.00"), "balance": Decimal("28.62"), "desc": "لاحق"}]
+    assert repair_balance_by_amount(rows)[1]["balance"] == Decimal("51.62")
+
+
+def test_balance_repair_refuses_when_more_than_one_digit_differs():
+    """خطأ محرف واحد فقط: فرق أكبر ليس خطأ قراءة رقمية."""
+    rows = [{"movement": None, "balance": Decimal("9001.00"), "desc": "سابق"},
+            {"movement": Decimal("5.00"), "balance": Decimal("900.00"), "desc": "نقاط بيع"},
+            {"movement": Decimal("22.00"), "balance": Decimal("878.00"), "desc": "نقاط بيع"}]
+    assert repair_balance_by_amount(rows)[1]["balance"] == Decimal("900.00")
 
 
 def test_a_reread_is_accepted_only_when_the_clash_is_gone():

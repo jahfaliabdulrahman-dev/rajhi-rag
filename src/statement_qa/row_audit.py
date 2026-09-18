@@ -65,6 +65,67 @@ def clash_resolved(before: list[dict], after: list[dict]) -> bool:
     return bool(before) and not after
 
 
+def repair_balance_by_amount(rows: list[dict], max_rounds: int = 3) -> list[dict]:
+    """يُصلح رصيداً مقروءاً خطأً حين يُثبته **المبلغ المطبوع** والسطرُ التالي معاً.
+
+    الحالة المقيسة (ص219): المطبوع ٥.٠٠ والرصيد المطبوع التالي ٢٨.٦٢، لكن القارئ
+    قرأ الرصيد ٥١.٦٢ (٠↔١). عملية حسابية واحدة تكشفها: ٥٥.٦٢ − ٥.٠٠ = ٥٠.٦٢، ثم
+    ٥٠.٦٢ − ٢٢.٠٠ = ٢٨.٦٢ = الرصيد المطبوع للسطر التالي. أي أن الرصيد المُصلَح
+    يُثبته **دليلان مستقلان**: مبلغ السطر، ورصيد السطر الذي يليه.
+
+    الشرط مشدَّد عمداً: لا يُصلح إلا إذا كان **رقم واحد فقط** مختلفاً في الرصيد
+    المقروء (خطأ محرف واحد)، وكان الرصيد المُصلَح يُغلق السطر التالي بالمبلغ
+    المطبوع له. غير ذلك: لا لمس — يبقى الصفّ مُعلَماً.
+    """
+    out = [dict(r) for r in rows]
+    for _ in range(max_rounds):
+        changed = False
+        for i in range(1, len(out) - 1):
+            prev_b = _dec(out[i - 1].get("balance"))
+            cur, nxt = out[i], out[i + 1]
+            bal, mv = _dec(cur.get("balance")), _dec(cur.get("movement"))
+            nb, nmv = _dec(nxt.get("balance")), _dec(nxt.get("movement"))
+            if None in (prev_b, bal, mv, nb, nmv):
+                continue
+            # الرصيد المتوقّع = رصيد السطر السابق ± المبلغ المطبوع لهذا السطر
+            for cand in (prev_b - mv, prev_b + mv):
+                if _dec_str(cand) == _dec_str(bal):
+                    continue                     # لا اختلاف أصلاً
+                if not _one_digit_apart(bal, cand):
+                    continue                     # الفرق ليس خطأ محرف واحد
+                if abs(nb - cand) == nmv and nb != cand:
+                    cur["balance"] = cand
+                    cur["repaired"] = (
+                        "الرصيد قُرئ خطأً: مبلغ السطر المطبوع ورصيد السطر التالي "
+                        "يثبتان القيمة المصحَّحة (الدليلان مستقلان)")
+                    changed = True
+                    break
+        if not changed:
+            break
+    return out
+
+
+def _dec_str(v) -> str:
+    return f"{Decimal(str(v)):.2f}"
+
+
+def _one_digit_apart(a, b) -> bool:
+    """هل يختلف الرقمان في موضع واحد فقط (نفس الطول بعد التطبيع)؟"""
+    x, y = _dec_str(a), _dec_str(b)
+    if len(x) != len(y):
+        return False
+    return sum(1 for p, q in zip(x, y) if p != q) == 1
+
+
+def _dec(value) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value).replace(",", ""))
+    except (ArithmeticError, ValueError):
+        return None
+
+
 def nonzero_row_count(rows: list[dict]):
     """عدد الصفوف التي فيها حركة فعلية (لا سطور إجماليات ولا أرصدة مرحّلة)."""
     n = 0

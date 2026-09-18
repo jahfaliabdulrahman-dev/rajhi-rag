@@ -164,3 +164,37 @@ def test_recover_anchor_patches_only_on_verified_match(tmp_path, monkeypatch):
     kept, got2 = vlm_reader.recover_anchor(raw, Decimal("176.00"),
                                            str(tmp_path / "x.png"), 11)
     assert got2 is None and kept[0]["movement"] == Decimal("500.00")
+
+
+# --- التواريخ: «None» ليست تاريخاً، والوصف يحمل تاريخين -------------------------
+
+def test_a_literal_none_date_is_not_a_date():
+    """الحالة المقيسة: النموذج كتب «None» نصّاً، فورثها كل صفّ بعدها وضاعت
+    تواريخ صفحتين (10 و9 صفوف) في جولة إعادة قراءة."""
+    assert vlm_reader._clean_date("None") is None
+    assert vlm_reader._clean_date("null") is None
+    assert vlm_reader._clean_date("") is None
+    assert vlm_reader._clean_date("٢٠٢٤٠٤١٤") == "٢٠٢٤٠٤١٤"
+
+
+def test_the_gregorian_date_wins_over_the_hijri_one_in_the_description():
+    """الورق يطبع تاريخين في الوصف (هجري ثم ميلادي): يُختار المعقول ميلادياً."""
+    desc = "١٤٤٥١٠٠٥ ٢٠٢٤٠٤١٤ حوالة"
+    assert vlm_reader._clean_date(None, desc) == "٢٠٢٤٠٤١٤"
+    assert vlm_reader._clean_date("None", desc) == "٢٠٢٤٠٤١٤"
+
+
+def test_a_hijri_only_description_still_yields_its_digits():
+    """بلا ميلادي نُعيد ما على الورق ولا نختلق: العلامة تُترك للمصنِّف."""
+    assert vlm_reader._clean_date(None, "١٤٤٥١٠٠٥ حوالة") == "١٤٤٥١٠٠٥"
+
+
+def test_missing_dates_never_inherit_a_junk_value():
+    """الوراثة تعمل للتاريخ الحقيقي فقط — لا للفراغ المسمّى «None»."""
+    rows = [{"date": "None", "desc": "بلا تاريخ", "movement": Decimal("5.00")},
+            {"date": "٢٠٢٤٠٤١٤", "desc": "بلا تاريخ", "movement": Decimal("6.00")},
+            {"date": "None", "desc": "يرث", "movement": Decimal("7.00")}]
+    filled = vlm_reader.fill_missing_dates(rows)
+    assert rows[0].get("date") in (None, "")      # لا توريث لـ«None»
+    assert rows[2]["date"] == "٢٠٢٤٠٤١٤"          # يورث التاريخ الحقيقي
+    assert filled == 1
