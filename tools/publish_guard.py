@@ -475,6 +475,25 @@ def scan_history(findings, entries, seen) -> int:
     return len(pairs)
 
 
+_GIT_GENERATED_MESSAGES = (
+    re.compile(r"^Merge [0-9a-f]{7,40} into [0-9a-f]{7,40}"),
+    re.compile(r"^Merge (pull request|remote-tracking branch|branch) "),
+    re.compile(r"^Revert "),
+)
+
+
+def _is_git_generated(body: str) -> bool:
+    """رسالة كتبها git/GitHub لا بشر: تجزئاتها الطويلة تُشبه رقم حساب.
+
+    قاعدة `joined_digits` تجمع الأرقام عبر الفواصل، فالتزام الدمج الذي يولّده
+    GitHub («Merge <sha> into <sha>») يُنتج سلسلة ٣٦ رقماً ويُرفض ظلماً ⇒ كل طلب
+    دمج يسقط على رسالة لا كتبها إنسان ولا تحمل بيانات. والتخطّي **معلن** ويُطبع
+    عدده، فلا يصير ثقباً صامتاً: كل رسالة يكتبها بشر تبقى مفحوصة كما هي.
+    """
+    first = body.strip().splitlines()[0] if body.strip() else ""
+    return any(rx.match(first) for rx in _GIT_GENERATED_MESSAGES)
+
+
 def scan_messages(findings, entries, revs: list[str] | None = None) -> int:
     """Commit messages carry text too — an account number pasted into a
     message body is exactly as public as one pasted into a file, and until
@@ -489,12 +508,16 @@ def scan_messages(findings, entries, revs: list[str] | None = None) -> int:
         args.append("--all")
     out = _git(*args)
     n = 0
+    synthetic = 0
     for chunk in out.split("\x1e"):
         sha, _, body = chunk.partition("\t")
         sha = sha.strip()
         if not sha or not body.strip():
             continue
         n += 1
+        if _is_git_generated(body):
+            synthetic += 1
+            continue
         pseudo = f"git-msg/{sha[:10]}"
         for rid, sev, rx, desc in TEXT_RULES:
             for m in rx.finditer(body):
@@ -512,6 +535,9 @@ def scan_messages(findings, entries, revs: list[str] | None = None) -> int:
                 findings.append(("BLOCK", CONCAT_RULE[0], pseudo, "message",
                                  0, _snippet(body), CONCAT_RULE[2]))
                 break
+    if synthetic:
+        print(f"[publish-guard] تخطّي {synthetic} رسالة دمج/استرجاع ولّدها git أو "
+              f"GitHub (تجزئاتها الطويلة تُشبه رقم حساب، ولا يكتبها بشر)")
     return n
 
 

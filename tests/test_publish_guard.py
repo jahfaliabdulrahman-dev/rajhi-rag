@@ -48,6 +48,22 @@ def _scan(text: str) -> list[tuple]:
     return findings
 
 
+def _merge_message() -> str:
+    return ("Merge 88e4ed953b2c1c28697b0ec5613e7f3082f4ce99 into "
+            "c83f197c4f0adaf64a362541821574ede9eb90a0")
+
+
+def test_git_generated_merge_message_is_skipped_not_blocked():
+    """GitHub writes the merge commit, not a human: its two hex SHAs weld into a
+    36-digit run and the guard blocked every pull request on it. The skip is
+    declared (counted and printed), and a human message is still scanned."""
+    assert pg._is_git_generated(_merge_message())
+    assert pg._is_git_generated("Merge pull request #5 from owner/branch")
+    assert pg._is_git_generated('Revert "feat: something"')
+    assert not pg._is_git_generated("Merge the two designs into one")
+    assert not pg._is_git_generated(f"حساب {FAKE_ACCOUNT_AR} مرحّل")
+
+
 def test_digit_table_ramp_is_exempt_from_long_digits():
     assert pg._is_digit_table("٠١٢٣٤٥٦٧٨٩")
     assert pg._is_digit_table("01234567890123456789")
