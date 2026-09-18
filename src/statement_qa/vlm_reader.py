@@ -27,13 +27,18 @@ import urllib.error
 import urllib.request
 from decimal import Decimal
 
-from statement_qa.legacy.prompts import (
-    FRONTIER_PROMPT, TOP_BAND_PROMPT,
+from statement_qa.legacy.prompts import (  # noqa: E402
+    FRONTIER_PROMPT, FRONTIER_PROMPT_V2, TOP_BAND_PROMPT,
 )
 from statement_qa.legacy.arabic_digit_parser import norm_num as _legacy_norm_num
 from statement_qa.api_key import get_api_key
 
 MODEL = os.environ.get("OPENROUTER_MODEL_VLM", "google/gemini-3.7-flash")
+
+# Prompts available to callers: v2 (default) reads the printed column as a second
+# witness; v1 is the frozen 629-page prompt, kept for comparison runs
+# (`read_rows_vlm(path, prompt=PROMPTS["v1"])`).
+PROMPTS = {"v2": FRONTIER_PROMPT_V2, "v1": FRONTIER_PROMPT}
 # Response-level blips (RemoteDisconnected et al.) once killed whole runs —
 # they now retry like any network error. 4 attempts: 10s/20s/40s backoff.
 _ATTEMPTS = 4
@@ -174,6 +179,9 @@ def _rows_from_content(content: str) -> list[dict]:
             "balance": _parse_amount(raw_bal),
             "desc": desc,
             "date": _clean_date(r.get("greg") or r.get("date"), desc),
+            # الشاهد الثاني: العمود المطبوع كما رآه القارئ (يجوز أن يكون None —
+            # حينها لا شاهد، ولا يُخترع). السلسلة تبقى الحَكَم؛ العمود يقابلها.
+            "printed_col": _norm_col(r.get("col")),
             # RAW printed tokens kept alongside: the era detector fingerprints
             # pages from what was ON the paper, before any normalization.
             "raw_movement": raw_mv,
@@ -198,7 +206,7 @@ def read_rows_vlm(image_path: str, prompt: str | None = None,
 
     Raises RuntimeError after retries; caller decides suspect handling.
     """
-    user_prompt = prompt or FRONTIER_PROMPT
+    user_prompt = prompt or FRONTIER_PROMPT_V2
     b64 = base64.b64encode(open(image_path, "rb").read()).decode()
 
     def _parse(content: str):
@@ -308,6 +316,19 @@ def _is_gregorian(candidate: str) -> bool:
         return False
     year, month, day = int(d[:4]), int(d[4:6]), int(d[6:8])
     return 1900 <= year <= 2100 and 1 <= month <= 12 and 1 <= day <= 31
+
+
+def _norm_col(value) -> str | None:
+    """العمود المطبوع → debit/credit. لا تخمين: ما لا يُفهم يعود None."""
+    t = str(value or "").strip().lower()
+    if not t:
+        return None
+    if t in {"debit", "dr", "d", "مدين"} or "مدين" in t or "سحب" in t:
+        return "debit"
+    if (t in {"credit", "cr", "c", "دائن"} or "دائن" in t
+            or "ايداع" in t or "إيداع" in t):
+        return "credit"
+    return None
 
 
 def _clean_date(value, desc=None) -> str | None:
