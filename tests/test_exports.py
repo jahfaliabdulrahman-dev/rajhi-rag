@@ -93,14 +93,19 @@ def test_dates_are_normalised_across_all_three_digit_sets():
 
 
 def test_xlsx_keeps_both_the_printed_and_the_parsed_number(tmp_path):
+    """A column a human must trust (exactly what the paper printed) beside one a
+    filter can use (parsed). The parsed column now carries the value the balance
+    chain proved, not the raw read — both stay visible."""
     out = tmp_path / "export.xlsx"
     build(_synthetic_run(tmp_path), out, None)
     ws = load_workbook(out)["الحركات"]
     header = [c.value for c in ws[1]]
     row = [c.value for c in ws[2]]
-    assert "الحركة كما طُبعت" in header and "الحركة (رقمي)" in header
-    assert row[header.index("الحركة كما طُبعت")] == "٣٠٠,٠٠"     # ما على الورقة
-    assert row[header.index("الحركة (رقمي)")] == "300.00"        # ما فُهم منها
+    assert "الحركة كما طُبعت" in header and "الحركة المثبتة بالسلسلة" in header
+    assert "الاتجاه" in header and "حكم السلسلة على الصفّ" in header
+    assert row[header.index("الحركة كما طُبعت")] == "٣٠٠,٠٠"     # ما على الورقة (نصّ)
+    # المثبت رقم لا نصّ: يُفرَّز ويُجمع. القيمة 300.00 تُخزَّن 300.
+    assert float(str(row[header.index("الحركة المثبتة بالسلسلة")])) == 300.0
     assert row[header.index("التاريخ (ميلادي)")] == "2024-01-01"
     assert row[header.index("حالة التاريخ")] == "تاريخ كامل"
 
