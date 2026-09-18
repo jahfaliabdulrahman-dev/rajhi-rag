@@ -168,11 +168,12 @@ def _rows_from_content(content: str) -> list[dict]:
     for r in vlm_rows:
         raw_mv = r.get("amount") or r.get("movement")
         raw_bal = r.get("balance")
+        desc = r.get("desc") or r.get("desc_main")
         rows.append({
             "movement": _parse_amount(raw_mv),
             "balance": _parse_amount(raw_bal),
-            "desc": r.get("desc") or r.get("desc_main"),
-            "date": r.get("greg") or r.get("date"),
+            "desc": desc,
+            "date": _clean_date(r.get("greg") or r.get("date"), desc),
             # RAW printed tokens kept alongside: the era detector fingerprints
             # pages from what was ON the paper, before any normalization.
             "raw_movement": raw_mv,
@@ -283,6 +284,58 @@ def _looks_opening(r: dict) -> bool:
     return any(m in d for m in _OPENING_MARKERS)
 
 
+_JUNK_DATES = {"none", "null", "nan", "nil", "غير مقروء", "غير واضح", "-", "--", "?"}
+_DATE_IN_TEXT = re.compile(r"[0-9٠-٩۰-۹]{8}")
+
+
+def _ascii_digits(text: str) -> str:
+    out = []
+    for ch in text:
+        o = ord(ch)
+        if 0x0660 <= o <= 0x0669:
+            out.append(chr(ord("0") + o - 0x0660))
+        elif 0x06F0 <= o <= 0x06F9:
+            out.append(chr(ord("0") + o - 0x06F0))
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _is_gregorian(candidate: str) -> bool:
+    """8 خانات تُقرأ سنة-شهر-يوم في نطاق معقول (1900–2100)."""
+    d = _ascii_digits(candidate)
+    if len(d) != 8 or not d.isdigit():
+        return False
+    year, month, day = int(d[:4]), int(d[4:6]), int(d[6:8])
+    return 1900 <= year <= 2100 and 1 <= month <= 12 and 1 <= day <= 31
+
+
+def _clean_date(value, desc=None) -> str | None:
+    """تاريخ نظيف: «None» النصّية ليست تاريخاً، ونصّها يُقرأ من الوصف عند غيابها.
+
+    الحالة المقيسة: النموذج أعاد التاريخ **داخل الوصف** وترك خانته، فكتب القارئ
+    «None» نصّاً. تلك الكلمة مرّت تاريخاً مطبوعاً، ثم **ورثها كل صفّ بعدها** حتى
+    ضاعت تواريخ صفحتين كاملتين (10 و9 صفوف) في جولة إعادة القراءة.
+
+    والورق يطبع **تاريخين** في الوصف (هجري ثم ميلادي)، فيُختار الأول الذي يُقرأ
+    ميلادياً في نطاق معقول — لا أول ثماني خانات، لأنها الهجرية (١٤٤٥…) فتُرفض
+    لاحقاً وتُحتسب الصفحة بلا تواريخ.
+    """
+    text = str(value or "").strip()
+    if text.lower() in _JUNK_DATES:
+        text = ""
+    if not text and desc:
+        for hit in _DATE_IN_TEXT.finditer(str(desc)):
+            cand = hit.group(0)
+            if _is_gregorian(cand):
+                text = cand
+                break
+        else:
+            hit = _DATE_IN_TEXT.search(str(desc))
+            text = hit.group(0) if hit else ""
+    return text or None
+
+
 def fill_missing_dates(rows: list[dict]) -> int:
     """Statements print the date ONCE per group; siblings ship a blank cell.
 
@@ -296,11 +349,17 @@ def fill_missing_dates(rows: list[dict]) -> int:
     last: str | None = None
     filled = 0
     for r in rows:
-        d = str(r.get("date") or "").strip()
+        d = _clean_date(r.get("date"), r.get("desc")) or ""
         if d:
+            if str(r.get("date") or "") != d:
+                # تاريخ مُستعاد من الوصف (أو منظَّف من «None») — يُكتب في خانته
+                r["date"] = d
+                r["date_source"] = "recovered-from-description"
             last = d
             r.setdefault("date_source", "printed")
             continue
+        if r.get("date") is not None:
+            r["date"] = None      # «None» نصّية تُفرَّغ: ليست تاريخاً ولا تُورَّث
         if (last and r.get("kind") != "opening" and not r.get("boundary")
                 and (r.get("side") or r.get("movement") is not None)):
             r["date"] = last
