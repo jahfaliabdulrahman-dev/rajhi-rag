@@ -28,12 +28,26 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+from statement_qa.row_audit import DEBIT_ONLY_DESCRIPTIONS  # noqa: E402
+from statement_qa.vlm_reader import chain_derive  # noqa: E402
+
+# الأوصاف التي لا تكون **دائنة** أبداً في هذا الكشف: مدفوعات نقاط البيع وسحوب
+# الصراف تخرج من الحساب لا تدخله. فصفّ يجمع وصفاً منها بمبلغ دائن = الوصف أُزيح
+# عن مبلغه (أو قراءة خاطئة) — كاشف حتمي بلا رؤية وبلا كلفة. القائمة في نواة
+# المشروع (`row_audit`) لا هنا: مصدر واحد للحقيقة.
+DEBIT_ONLY = DEBIT_ONLY_DESCRIPTIONS
+SIDE_AR = {"credit": "دائن", "debit": "مدين", "": "غير محدّد"}
 
 ARABIC_VERDICT = {
     "ok": "مطابق لإجمالياته المطبوعة",
@@ -88,6 +102,70 @@ HEAD_FONT = Font(color="FFFFFF", bold=True, size=11)
 NOTE_FONT = Font(italic=True, size=10, color="555555")
 
 
+def _dec(value) -> Decimal | None:
+    """الرقم كـDecimal — السلسلة تعمل بـDecimal لا بنصوص."""
+    if value is None:
+        return None
+    try:
+        return Decimal(str(to_ascii_digits(str(value)).replace(",", "")))
+    except (ArithmeticError, ValueError):
+        return None
+
+
+def _row_state(der: dict) -> str:
+    """حكم السلسلة على الصفّ — بصياغة يقرؤها محاسب لا مبرمج."""
+    if der.get("balance") is None:
+        return "بلا رصيد مقروء — خارج السلسلة"
+    mv = der.get("derived_movement")
+    if mv is None:
+        return "بلا حركة مقروءة"
+    if der.get("opening"):
+        return "رصيد مرحّل/افتتاحي (ليس حركة)"
+    if Decimal(str(mv)) == 0:
+        # سطر إجماليات قرأه القارئ صفّاً: لا فرق رصيد فيه، ومبلغه المطبوع
+        # (الإجمالي التراكمي) لا يساوي صفراً ⇒ يُسمّى بما هو لا بما ظهر به.
+        note = (" — ومبلغه المطبوع لا يطابق فرق الرصيد (إجماليات مُقروءة حركة)"
+                if der.get("ok") is False else "")
+        return f"لا حركة فيه: سطر إجماليات أو صفّ مكرّر{note}"
+    if der.get("ok") is False:
+        return "مشكوك: المبلغ المطبوع لا يطابق فرق الرصيد"
+    return "حركة مثبتة بالسلسلة"
+
+
+def _shift_suspect(row: dict, der: dict) -> str:
+    """وصف لا يمكن أن يكون دائناً + مبلغ دائن ⇒ الوصف أُزيح عن مبلغه."""
+    if der.get("side") != "credit":
+        return ""
+    desc = str(row.get("desc") or "")
+    hit = next((d for d in DEBIT_ONLY if d in desc), None)
+    return (f"الوصف «{hit}» لا يكون دائناً في هذا الكشف — الوصف أُزيح عن مبلغه"
+            if hit else "")
+
+
+def derive_pages(raw_by_page: list[tuple[int, list[dict]]]) -> list[list[dict]]:
+    """يشتقّ كل صفحة بالسلسلة **بنفس دالة المحكَّم**، بالترتيب مع ترحيل الرصيد.
+
+    الحاجة: المحكَّم يحكم على الصفوف المشتقّة، والتصدير كان ينشر الخام ⇒ كان
+    يُسلّم ما لم يُثبت. الاشتقاق هنا ليس اجتهاداً جديداً: نفس الدالة، ونفس
+    الترتيب، والتحقق أسفل البناء يقارن نتيجته بأحكام التقرير صفحةً صفحة.
+    """
+    out: list[list[dict]] = []
+    prev: Decimal | None = None
+    for _page, raw in raw_by_page:
+        converted = [{**r, "movement": _dec(r.get("movement")),
+                      "balance": _dec(r.get("balance"))} for r in raw]
+        try:
+            derived = chain_derive(converted, prev_balance=prev)
+        except Exception:                       # noqa: BLE001 — لا نخمّن عند الفشل
+            derived = [{**r, "derived_movement": None, "side": "", "ok": None,
+                        "opening": False} for r in converted]
+        out.append(derived)
+        last = next((r["balance"] for r in reversed(derived)
+                     if r.get("balance") is not None), None)
+        prev = last if last is not None else None
+    return out
+
+
 def load(run: Path) -> tuple[list[dict], dict, dict, dict]:
     """(rows, report, per-page verdicts, per-page repair flags) — straight from
     the run's own files. The repair flags live in the checkpoints (the evidence),
@@ -96,21 +174,30 @@ def load(run: Path) -> tuple[list[dict], dict, dict, dict]:
     per_page = {int(e["page"]): e for e in report.get("per_page") or []}
     flags: dict[int, dict] = {}
 
-    rows: list[dict] = []
-    for cache in sorted((run / "results").glob("pg-*.json")):
+    caches = sorted((run / "results").glob("pg-*.json"))
+    loaded: list[tuple[int, dict, list[dict], dict]] = []
+    for cache in caches:
         try:
             data = json.loads(cache.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue                      # a truncated checkpoint is reported, not guessed
         page = int(data.get("pg") or 0)
-        verdict = per_page.get(page, {})
+        loaded.append((page, data, data.get("raw_rows") or [],
+                       per_page.get(page, {})))
+
+    derived_pages = derive_pages([(p, raw) for p, _d, raw, _v in loaded])
+    rows: list[dict] = []
+    for (page, data, raw, verdict), derived in zip(loaded, derived_pages):
         flags[page] = {
             "recovered": bool(data.get("recovered")),
             "reread": bool(data.get("reread")),
             "error": bool(data.get("error")),
             "arbitrated": bool(data.get("arbitrated_by")),
+            # القيم **المطبوعة التراكمية** كما قرأها القارئ من الورقة (لا
+            # الفروق الحسابية في تفصيل التقرير): هي وحدها إجمالي الكشف.
+            "printed": data.get("footer") or {},
         }
-        for i, row in enumerate(data.get("raw_rows") or [], start=1):
+        for i, (row, der) in enumerate(zip(raw, derived), start=1):
             iso, status, year = normalize_date(row.get("date"))
             rows.append({
                 "page": page,
@@ -125,6 +212,12 @@ def load(run: Path) -> tuple[list[dict], dict, dict, dict]:
                 "printed_balance": row.get("raw_balance") or row.get("balance"),
                 "movement": row.get("movement"),
                 "balance": row.get("balance"),
+                "derived_movement": der.get("derived_movement"),
+                "side": der.get("side") or "",
+                "opening": bool(der.get("opening")),
+                "chain_ok": der.get("ok"),
+                "row_state": _row_state(der),
+                "shift": _shift_suspect(row, der),
                 "footer": verdict.get("footer"),
                 "counted": verdict.get("rows"),
             })
@@ -152,7 +245,8 @@ def _median(values: list[float]) -> float | None:
     return (ordered[mid - 1] + ordered[mid]) / 2
 
 
-def summary_facts(rows: list[dict], report: dict, per_page: dict) -> dict:
+def summary_facts(rows: list[dict], report: dict, per_page: dict,
+                  flags: dict | None = None) -> dict:
     """كل أرقام الملخص، محسوبة مرة واحدة ومُعلَنة الطريقة في الورقة نفسها."""
     by_status: dict[str, int] = {}
     for r in rows:
@@ -162,36 +256,39 @@ def summary_facts(rows: list[dict], report: dict, per_page: dict) -> dict:
     ok_pages = [e for e in per_page.values() if e.get("footer") == "ok"]
     last_ok = max(ok_pages, key=lambda e: e["page"]) if ok_pages else None
 
-    # الإجماليات المطبوعة **لكل صفحة** لا تراكمية (قِيست: صفحة 1 = 650.00 وصفحة
-    # 628 = 300.00) ⇒ جمعها عبر الصفحات المطابقة مشروع، وهو أقوى رقم في الملف
-    # لأنه من الورق لا من حسابنا.
-    printed = {"debits": 0.0, "credits": 0.0}
-    pages_in_total = 0
-    for entry in ok_pages:
-        values = {i.get("field"): _num(i.get("footer"))
-                  for i in (entry.get("footer_detail") or [])}
-        deb = values.get("debits")
-        cred = values.get("credits")
-        if deb is None or cred is None:
-            continue
-        printed["debits"] += deb
-        printed["credits"] += cred
-        pages_in_total += 1
-    last_balance = None
+    # الإجماليات المطبوعة **تراكمية من بداية الكشف** (قِيست على الصفحات: ص190
+    # مدين 9001.00 وفرقه عن الدائن = الرصيد 24.39؛ ص628 9001.00/9001.00
+    # وفرقه 570.59 = الرصيد) ⇒ **جمعها عبر الصفحات بلا معنى**، وهو خطأ وقع في
+    # نسخة سابقة من هذا الملف. الرقم الصحيح: قيم آخر صفحة مطابقة (إجمالي الكشف).
+    printed_debits = printed_credits = last_balance = None
     if last_ok:
-        for item in last_ok.get("footer_detail") or []:
+        for item in (last_ok.get("footer_detail") or []):
             if item.get("field") == "balance":
                 last_balance = item.get("footer")
+    if last_ok and flags:
+        last_printed = (flags.get(last_ok["page"]) or {}).get("printed") or {}
+        printed_debits = last_printed.get("debits") or printed_debits
+        printed_credits = last_printed.get("credits") or printed_credits
+        last_balance = last_printed.get("balance") or last_balance
 
-    # الترتيب على الصفحات المطابقة فقط: الصفحة الختامية تحمل سطور ملخّص
-    # («إجمالي الإيداعات») ولو دخلت لصار «أكبر حركة» رقماً ليس حركة.
-    ranked = [(abs(v), r) for r in rows
-              if r["footer"] == "ok" and (v := _num(r["movement"])) is not None and v != 0]
+    # الترتيب على **الحركات المثبتة بالسلسلة** فقط: الصفوف التي لا حركة فيها
+    # (سطر إجماليات قرأه القارئ صفّاً — وقع فعلاً في ص190) كانت تتصدّر الترتيب
+    # بـ9001.00 وهو رقم ليس حركة.
+    ranked = [(abs(Decimal(str(r["derived_movement"]))), r) for r in rows
+              if r["row_state"] == "حركة مثبتة بالسلسلة"
+              and _num(r["derived_movement"]) not in (None, 0)]
     biggest = max(ranked, key=lambda p: p[0]) if ranked else None
     smallest = min(ranked, key=lambda p: p[0]) if ranked else None
+    txn_rows = [r for r in rows if r["row_state"] == "حركة مثبتة بالسلسلة"]
+    shift_rows = [r for r in rows if r["shift"]]
+    chain_suspect = [r for r in rows if r["chain_ok"] is False]
     read_ms = [e["ms_read"] for e in per_page.values() if e.get("ms_read")]
     return {
         "rows": len(rows),
+        "txn_rows": len(txn_rows),
+        "nontxn_rows": len(rows) - len(txn_rows),
+        "shift_rows": shift_rows,
+        "chain_suspect": chain_suspect,
         "counted": sum(int(e.get("rows") or 0) for e in per_page.values()),
         "pages": len(per_page),
         "date_status": by_status,
@@ -200,10 +297,9 @@ def summary_facts(rows: list[dict], report: dict, per_page: dict) -> dict:
         "last_date": dates[-1] if dates else "",
         "years": years,
         "ok_pages": len(ok_pages),
-        "pages_in_total": pages_in_total,
         "last_ok_page": (last_ok or {}).get("page"),
-        "printed_debits": f"{printed['debits']:,.2f}",
-        "printed_credits": f"{printed['credits']:,.2f}",
+        "printed_debits": printed_debits,
+        "printed_credits": printed_credits,
         "printed_balance": last_balance,
         "biggest": biggest,
         "smallest": smallest,
@@ -218,8 +314,16 @@ def summary_sheet(facts: dict, rows: list[dict], report: dict) -> list[list]:
     return [
         ["نظرة عامة", "", ""],
         ["الصفوف المقروءة من الكشوف", facts["rows"], "كل سطر عاد به القارئ من الورق"],
-        ["الصفوف المحتسبة معاملات في التقرير", facts["counted"],
-         "الفرق سطور ملخّص في الصفحة الختامية (لا معاملات)"],
+        ["منها حركات مثبتة بالسلسلة", facts["txn_rows"],
+         "أثبتها فرق الرصيد — هذا هو العدد الذي يقوم عليه التقرير"],
+        ["منها سطور ليست حركة", facts["nontxn_rows"],
+         "رصيد مرحّل/افتتاحي أو سطر إجماليات أو صفّ بلا حركة — لا تُعدّ ولا تدخل الترتيب"],
+        ["صفوف مشكوك في إزاحة وصفها", len(facts["shift_rows"]),
+         "وصف لا يكون دائناً في هذا الكشف جاء بمبلغ دائن — التفصيل في «ما لم يُثبت»"],
+        ["صفوف خالفت السلسلة", len(facts["chain_suspect"]),
+         "المبلغ المطبوع لا يطابق فرق الرصيد — أعاد التشغيل قراءتها"],
+        ["الصفوف المحتسبة في تقرير التشغيل", facts["counted"],
+         "عدّاد التشغيل نفسه — قد يختلف عن عدد الصفوف أعلاه"],
         ["الصفحات", facts["pages"], "صفحة ممسوحة"],
         ["الصفحات المطابقة لإجمالياتها المطبوعة", facts["ok_pages"],
          "حكم المحكَّم: مجموع الصفوف == الإجمالي المطبوع أسفل الصفحة"],
@@ -235,14 +339,14 @@ def summary_sheet(facts: dict, rows: list[dict], report: dict) -> list[list]:
         ["السنوات المشمولة", " · ".join(str(y) for y in facts["years"]),
          f"عددها {len(facts['years'])}"],
         ["", "", ""],
-        ["الإجماليات المطبوعة (لكل صفحة — تُجمع)", "", ""],
-        ["إجمالي المدين المطبوع", facts["printed_debits"],
-         f"جمع سطر الإجماليات المطبوع في {facts['pages_in_total']} صفحة مطابقة — "
-         f"الرقم من الورق لا من حسابنا"],
-        ["إجمالي الدائن المطبوع", facts["printed_credits"],
-         "نفس المصدر: سطور الإجماليات المطبوعة"],
+        ["الإجماليات المطبوعة (تراكمية من بداية الكشف — لا تُجمع)", "", ""],
+        ["إجمالي المدين حتى آخر صفحة مطابقة", facts["printed_debits"],
+         f"من سطر الإجماليات في الصفحة {facts['last_ok_page']} — رقم الورق لا حسابنا. "
+         f"وهو **تراكمي** (فرقه عن الدائن = الرصيد) فلا يُجمع مع صفحة أخرى"],
+        ["إجمالي الدائن حتى آخر صفحة مطابقة", facts["printed_credits"],
+         "نفس المصدر ونفس القيد: تراكمي"],
         ["الرصيد الختامي المطبوع", facts["printed_balance"],
-         f"من سطر الإجماليات في آخر صفحة مطابقة (صفحة {facts['last_ok_page']})"],
+         f"من نفس السطر في الصفحة {facts['last_ok_page']} — وفرق المدين عن الدائن يساويه"],
         ["", "", ""],
         ["الحركات", "", ""],
         ["أكبر حركة", f"{facts['biggest'][0]:,.2f}" if facts["biggest"] else "",
@@ -283,19 +387,20 @@ def question_set(rows: list[dict], facts: dict, per_page: dict,
         questions.append([qid, question, answer, method, basis])
 
     add(1, "كم عدد الحركات المقروءة؟", facts["rows"],
-        "عدّ الصفوف في كاش القراءة", "كل صفوف الورق (منها سطور ملخّص)")
+        "عدّ كل سطر عاد به القارئ من الورق",
+        f"منها {facts['txn_rows']} حركة أثبتها فرق الرصيد · "
+        f"و{facts['nontxn_rows']} سطراً ليس حركة")
     add(2, "كم عدد الصفحات ولم تُقبل منها كم صفحة؟",
         f"{facts['pages']} صفحة · {facts['ok_pages']} مطابقة · "
         f"{facts['verdicts'].get('absent', 0)} بلا سطر إجماليات · "
         f"{facts['verdicts'].get('unchecked', 0)} غير قابلة للتحقق",
         "حكم المحكَّم لكل صفحة", "ورقة «التحقق لكل صفحة»")
-    add(3, "ما إجمالي المدين المطبوع في الكشوف؟", facts["printed_debits"],
-        f"جمع سطور الإجماليات المطبوعة في {facts['pages_in_total']} صفحة مطابقة "
-        f"(الإجماليات لكل صفحة، فجمعها مشروع) — المصدر هو الورق",
-        f"الصفحات المطابقة ({facts['ok_pages']} من {facts['pages']})")
-    add(4, "ما إجمالي الدائن المطبوع في الكشوف؟", facts["printed_credits"],
-        "نفس المصدر: سطور الإجماليات المطبوعة",
-        f"الصفحات المطابقة ({facts['pages_in_total']} صفحة دخلت في المجموع)")
+    add(3, "ما إجمالي المدين في الكشوف؟", facts["printed_debits"] or "-",
+        f"سطر الإجماليات المطبوع في الصفحة {facts['last_ok_page']} — **تراكمي** "
+        f"من بداية الكشف، ففرقه عن الدائن = الرصيد ولا يُجمع مع صفحة أخرى",
+        "من الورق مباشرة · رقم مطبوع لا محسوب")
+    add(4, "ما إجمالي الدائن في الكشوف؟", facts["printed_credits"] or "-",
+        "نفس السطر ونفس القيد: تراكمي", "وفرقه عن المدين يساوي الرصيد الختامي")
     add(5, "ما الرصيد الختامي المطبوع؟", facts["printed_balance"] or "-",
         "من سطر الإجماليات في آخر صفحة مطابقة", f"الصفحة {facts['last_ok_page']}")
     add(6, "ما مدى التواريخ؟",
@@ -307,16 +412,20 @@ def question_set(rows: list[dict], facts: dict, per_page: dict,
     if facts["biggest"]:
         amount, rec = facts["biggest"]
         add(7, "ما أكبر حركة؟", f"{amount:,.2f}",
-            "فرز القيم المطلقة على الصفحات المطابقة (سطور الملخّص مستثناة)",
+            "فرز القيم المطلقة للحركات **المثبتة بالسلسلة** فقط — "
+            "سطور الإجماليات والأرصدة المرحّلة مستثناة",
             f"صفحة {rec['page']} · صفّ {rec['row_no']}")
         evidence.append([7, rec["page"], rec["row_no"], rec["date_iso"], rec["desc"],
-                         rec["movement"], rec["balance"], "أكبر حركة"])
+                         rec["derived_movement"], rec["balance"],
+                         f"أكبر حركة (اتجاه: {SIDE_AR.get(rec['side'], '')})"])
     if facts["smallest"]:
         amount, rec = facts["smallest"]
         add(8, "ما أصغر حركة غير صفرية؟", f"{amount:,.2f}",
-            "فرز القيم المطلقة للمقروء", f"صفحة {rec['page']} · صفّ {rec['row_no']}")
+            "فرز القيم المطلقة للحركات المثبتة بالسلسلة",
+            f"صفحة {rec['page']} · صفّ {rec['row_no']}")
         evidence.append([8, rec["page"], rec["row_no"], rec["date_iso"], rec["desc"],
-                         rec["movement"], rec["balance"], "أصغر حركة"])
+                         rec["derived_movement"], rec["balance"],
+                         f"أصغر حركة (اتجاه: {SIDE_AR.get(rec['side'], '')})"])
     odd = [r for r in rows if r["date_status"] != "ok"]
     add(9, "كم حركة بلا تاريخ صالح؟", len(odd),
         "تصنيف كل صفّ: مكتمل/غير مكتمل/بلا تاريخ",
@@ -340,6 +449,28 @@ def question_set(rows: list[dict], facts: dict, per_page: dict,
         f"${facts['cost']:.4f} · {facts['median_page_s']} ث" if isinstance(
             facts["cost"], (int, float)) else "-",
         "مجموع usage.cost ووسيط ms_read", "كاش التشغيل")
+    add(13, "كم سطراً قرأه القارئ وليس حركة؟", facts["nontxn_rows"],
+        "حكم السلسلة على كل صفّ: رصيد مرحّل/افتتاحي، أو لا فرق رصيد فيه "
+        "(سطر إجماليات أو صفّ مكرّر)، أو بلا رصيد مقروء",
+        "لا يُحتسب في أي مجموع ولا يدخل ترتيب الحركات")
+    for r in rows:
+        if r["row_state"] != "حركة مثبتة بالسلسلة":
+            evidence.append([13, r["page"], r["row_no"], r["date_iso"], r["desc"],
+                             r["printed_movement"], r["balance"], r["row_state"]])
+    add(14, "كم صفّاً وصفه لا يطابق مبلغه (إزاحة وصف)؟", len(facts["shift_rows"]),
+        "وصف مدين لا يكون دائناً في هذا الكشف (نقاط بيع/صراف) جاء بمبلغ دائن — "
+        "دليل حسابي على أن الوصف أُزيح عن مبلغه، لا حكم بصري",
+        " · ".join(f"ص{r['page']} صفّ{r['row_no']}" for r in facts["shift_rows"]) or "-")
+    for r in facts["shift_rows"]:
+        evidence.append([14, r["page"], r["row_no"], r["date_iso"], r["desc"],
+                         r["derived_movement"], r["balance"], r["shift"]])
+    add(15, "كم صفّاً خالف السلسلة (مبلغ مطبوع ≠ فرق الرصيد)؟",
+        len(facts["chain_suspect"]),
+        "مقارنة المبلغ المطبوع بفرق الرصيد لكل صفّ",
+        " · ".join(f"ص{r['page']} صفّ{r['row_no']}" for r in facts["chain_suspect"]) or "-")
+    for r in facts["chain_suspect"]:
+        evidence.append([15, r["page"], r["row_no"], r["date_iso"], r["desc"],
+                         r["printed_movement"], r["balance"], r["row_state"]])
     return questions, evidence
 
 
@@ -358,12 +489,60 @@ def write_sheet(ws, header: list[str], rows: list[list], widths: list[int],
     ws.auto_filter.ref = ws.dimensions
 
 
+def verify_derivation(rows: list[dict], per_page: dict) -> tuple[list[str], int]:
+    """يقارن اشتقاقَنا بأرقام المحكَّم المسجَّلة في تقريره — صفحةً صفحة.
+
+    هذا ما يجعل نشر الصفوف المشتقّة أميناً: نفس دالة المحكَّم، ونفس الترتيب،
+    والنتيجة تُقابَل بـ`app` الذي كتبه المحكَّم نفسه (مجموع الصفحة من جانبه).
+    أي اختلاف ⇒ التصدير يمتنع ولا يُسلَّم ملف يحمل أرقاماً غير محكَّمة.
+    """
+    by_page: dict[int, list[dict]] = {}
+    for r in rows:
+        by_page.setdefault(r["page"], []).append(r)
+    problems: list[str] = []
+    checked = 0
+    for page, entries in sorted(by_page.items()):
+        detail = {i.get("field"): i
+                  for i in (per_page.get(page, {}).get("footer_detail") or [])}
+        if not detail:
+            continue
+        mine = {"debits": Decimal("0"), "credits": Decimal("0")}
+        for r in entries:
+            mv, side = r["derived_movement"], r["side"]
+            field = {"debit": "debits", "credit": "credits"}.get(side)
+            if mv is None or r["opening"] or field is None:
+                continue
+            mine[field] += Decimal(str(mv))
+        for field in ("debits", "credits"):
+            item = detail.get(field) or {}
+            # نقارن حيث قارن المحكَّم نفسه فقط: على صفحات «غير قابلة للتحقق»
+            # (سلسلة مكسورة) يسجّل أرقاماً تراكمية بلا `ok` — وهي ليست مجموع
+            # الصفحة، فمقابلتها بها قياس خاطئ لا فحص.
+            if item.get("ok") is not True:
+                continue
+            want = _dec(item.get("app"))
+            if want is None:
+                continue
+            checked += 1
+            if mine[field] != want:
+                problems.append(
+                    f"ص{page}: {field} عندنا {mine[field]} وعند المحكَّم {want}")
+    return problems, checked
+
+
 def build(run: Path, out: Path, gate: Path | None) -> dict:
     rows, report, per_page, flags = load(run)
     if not rows:
         raise SystemExit(f"لا صفوف في {run}/results — هل المسار صحيح؟")
 
-    facts = summary_facts(rows, report, per_page)
+    # بوّابة الأمانة: ما ننشره مشتقّ هنا، فيجب أن يطابق ما أثبته المحكَّم حرفياً.
+    problems, checked = verify_derivation(rows, per_page)
+    if problems:
+        raise SystemExit("اشتقاق التصدير لا يطابق المحكَّم — لا يُسلَّم ملف: "
+                         + " | ".join(problems[:5])
+                         + (f" (+{len(problems) - 5})" if len(problems) > 5 else ""))
+
+    facts = summary_facts(rows, report, per_page, flags)
     wb = Workbook()
 
     ws0 = wb.active
@@ -388,14 +567,17 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
         ws,
         ["الصفحة (ملف)", "رقم الصفّ", "رقم الصفحة المطبوع", "التاريخ (كما طُبع)",
          "التاريخ (ميلادي)", "حالة التاريخ", "السنة", "الوصف",
-         "الحركة كما طُبعت", "الرصيد كما طُبع", "الحركة (رقمي)",
-         "الرصيد (رقمي)", "حالة إجماليات الصفحة"],
+         "الحركة كما طُبعت", "الحركة المثبتة بالسلسلة", "الاتجاه",
+         "الرصيد كما طُبع", "الرصيد (رقمي)", "حكم السلسلة على الصفّ",
+         "تنبيه", "حالة إجماليات الصفحة"],
         [[r["page"], r["row_no"], r["printed_page"], r["date"], r["date_iso"],
           _DATE_STATUS_AR[r["date_status"]], r["year"], r["desc"],
-          r["printed_movement"], r["printed_balance"], r["movement"],
-          r["balance"], ARABIC_VERDICT.get(r["footer"], r["footer"])]
+          r["printed_movement"], r["derived_movement"],
+          SIDE_AR.get(r["side"], r["side"]), r["printed_balance"], r["balance"],
+          r["row_state"], r["shift"],
+          ARABIC_VERDICT.get(r["footer"], r["footer"])]
          for r in rows],
-        [12, 9, 16, 18, 14, 26, 8, 46, 16, 16, 14, 14, 30])
+        [12, 9, 16, 18, 14, 26, 8, 46, 16, 18, 10, 16, 14, 34, 40, 30])
 
     # الأسئلة: حساب حتمي على أدلة التشغيل — بلا نموذج لغوي وبلا كلفة، فالجواب
     # نفسه يُعاد إنتاجه بنفس الأمر غداً. ما يحتاج تفسيراً لا يُخمَّن هنا.
@@ -446,6 +628,19 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
                          "فجوة مسح: ورقة غائبة من المسح" +
                          (f" — الأوراق الغائبة: {missing}" if missing else ""),
                          "من مسح الترقيم الميكانيكي (بلا استدعاء)"])
+
+    # مشاكل على مستوى **الصفّ** لا الصفحة: تُدرج في هذه الورقة لأنها عقد الأمانة
+    # في الملف — كل ما لم يُثبت يُسمّى باسمه، لا يُخفى في عمود جانبي.
+    for r in facts["shift_rows"]:
+        unproven.append([r["page"], r["printed_page"], None,
+                         f"صفّ {r['row_no']}: إزاحة وصف محتملة — «{str(r['desc'])[:38]}» "
+                         f"بمبلغ {r['derived_movement']} ({SIDE_AR.get(r['side'], '')})",
+                         "كاشف حسابي: وصف لا يكون دائناً جاء دائناً"])
+    for r in facts["chain_suspect"]:
+        unproven.append([r["page"], r["printed_page"], None,
+                         f"صفّ {r['row_no']}: المبلغ المطبوع {r['printed_movement']} "
+                         f"لا يطابق فرق الرصيد {r['derived_movement']}",
+                         "سلسلة الرصيد (المحكَّم)"])
 
     ws3 = wb.create_sheet("ما لم يُثبت")
     write_sheet(ws3, ["الصفحة (ملف)", "رقم الصفحة", "صفوف", "ما لم يُثبت", "مصدر الحكم"],
