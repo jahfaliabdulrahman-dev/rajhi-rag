@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from statement_qa.row_audit import desc_direction_clash, nonzero_row_count
+from statement_qa.row_audit import (
+    clash_resolved, desc_direction_clash, nonzero_row_count,
+)
 
 
 def _row(desc: str, side: str, mv: str, opening: bool = False) -> dict:
@@ -66,3 +68,27 @@ def test_nonzero_row_count_skips_openings_and_blank_rows():
             {"desc": "لا حركة", "side": "", "derived_movement": Decimal("0")},
             {"desc": "بلا رصيد", "side": "", "derived_movement": None}]
     assert nonzero_row_count(rows) == 1
+
+
+def test_a_reread_is_accepted_only_when_the_clash_is_gone():
+    """قاعدة قبول إعادة القراءة: زال التناقض ⇒ مقبولة.
+
+    مُثبتة على الحالة الحقيقية (ص190): قراءة مخزّنة فيها صفّان يناقض وصفهما
+    اتجاهَه، وإعادة قراءة واحدة صحيحة ⇒ التقرير يسجّل صفر تناقض والكاش يحمل
+    القراءة الجديدة.
+    """
+    before = desc_direction_clash([_row("مدفوعات نقاط البيع", "credit", "100.00")])
+    after = desc_direction_clash([_row("تحويل W-/FRACCT", "credit", "100.00")])
+    assert clash_resolved(before, after) is True
+
+
+def test_a_reread_that_keeps_the_clash_is_rejected():
+    """إعادة قراءة تُبقي التناقض لا تُقبل — ولو طابقت أرقامَها."""
+    before = desc_direction_clash([_row("مدفوعات نقاط البيع", "credit", "100.00")])
+    after = desc_direction_clash([_row("مدفوعات نقاط البيع", "credit", "100.00")])
+    assert clash_resolved(before, after) is False
+
+
+def test_no_clash_means_nothing_to_accept():
+    """بلا تناقض أصلاً لا تُقبل «إصلاحات»: الشرط كان موجوداً ثم زال."""
+    assert clash_resolved([], []) is False

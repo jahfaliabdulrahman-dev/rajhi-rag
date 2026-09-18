@@ -11,8 +11,8 @@
  "documented_ratio": "621/629",
  "clean_ratio": "5770/5793",
  "recoveries": 23,
- "rereads": 15,
+ "rereads": 16,
  "arbitrations": 3,
  "median_page_s": 22.18,
- "tests": 217
+ "tests": 220
 }
