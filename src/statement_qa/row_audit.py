@@ -56,7 +56,16 @@ def _hit(desc: str, needles: tuple[str, ...]) -> str | None:
     return next((n for n in needles if n in desc), None)
 
 
-def nonzero_row_count(rows: list[dict]) -> int:
+def clash_resolved(before: list[dict], after: list[dict]) -> bool:
+    """هل أزالت إعادةُ القراءة تناقضَ الوصف؟
+
+    الشرط: كان هناك تناقض، ولم يبقَ بعده. إعادة القراءة التي تُصلح رقماً
+    وتُدخل تناقضاً في الوصف لا تُقبل — القراءة الجديدة تُقاس بنفس الميزان.
+    """
+    return bool(before) and not after
+
+
+def nonzero_row_count(rows: list[dict]):
     """عدد الصفوف التي فيها حركة فعلية (لا سطور إجماليات ولا أرصدة مرحّلة)."""
     n = 0
     for r in rows:
