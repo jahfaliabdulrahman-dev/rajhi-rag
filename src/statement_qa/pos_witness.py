@@ -94,13 +94,24 @@ def chain_side(previous_balance, balance) -> str | None:
     return "debit" if a > b else "credit"
 
 
-def compare_with_chain(rows: list[Row], cols: dict[str, float]) -> dict:
-    """مقابلة الهندسة بالسلسلة ⇒ توافق/خلاف/غير محسوم + الصفوف المخالفة بأرقامها."""
+def compare_with_chain(rows: list[Row], cols: dict[str, float],
+                       previous_balance=None) -> dict:
+    """مقابلة الهندسة بالسلسلة ⇒ توافق/خلاف/غير محسوم + الصفوف المخالفة بأرقامها.
+
+    و``previous_balance`` يُدخل **الصفّ الأول من كل صفحة** في المقابلة: بدونه كان
+    ``range(1, …)`` يُخرج أوّل صفّ في كل صفحة من شاهدين من ثلاثة (٦٢٩ صفّاً، ومنها
+    مرساتا الفجوة) — وهذا ما لاحظه مدقّق خارجي: كلّ عيوب الأوسمة كانت صفوفاً أُوَل.
+    """
     agree = clash = undetermined = 0
     clashes = []
+    pairs = []
+    if previous_balance is not None and rows:
+        pairs.append((previous_balance, rows[0], 1))
     for i in range(1, len(rows)):
-        side = chain_side(rows[i - 1].get("balance"), rows[i].get("balance"))
-        xs = rows[i].get("x")
+        pairs.append((rows[i - 1].get("balance"), rows[i], i + 1))
+    for prev_bal, row, idx in pairs:
+        side = chain_side(prev_bal, row.get("balance"))
+        xs = row.get("x")
         col = assign_column(float(xs), cols) if isinstance(xs, (int, float)) else None
         if side is None or col is None:
             undetermined += 1
@@ -108,8 +119,8 @@ def compare_with_chain(rows: list[Row], cols: dict[str, float]) -> dict:
             agree += 1
         else:
             clash += 1
-            clashes.append({"row": i + 1, "chain": side, "geometry": col,
-                            "amount": rows[i].get("amount")})
+            clashes.append({"row": idx, "chain": side, "geometry": col,
+                            "amount": row.get("amount")})
     return {"agree": agree, "clash": clash, "undetermined": undetermined,
             "clashes": clashes}
 

@@ -682,7 +682,7 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
           if g["status"] == "proven" else
           f"قيد فجوة مسح غير مُثبت — {g['note']}"),
          None, None, g["debits"], g["credits"], None, None,
-         "قيد فجوة مسح (ورق غائب من المسح)"
+         "قيد فجوة مسح — موثّق لا اتهام صفحة (ورق غائب من المسح)"
          + (" — الشاهدان متفقان" if g["witnesses_agree"] else " — غير مُثبت"),
          "", ""]
         for g in gaps]
