@@ -184,6 +184,25 @@ def main() -> int:
     clash = [r for r in rows if str(r.get("تنبيه") or "").strip()]
     check("لا تناقض وصف↔اتجاه", not clash, f"{len(clash)} صفّاً")
 
+    # **مصدر الإثبات**: عمود «المثبتة بالسلسلة» يحمل في مرساة الفجوة **مبلغاً
+    # مطبوعاً** لا تُقفله السلسلة (رفعه مدقّق خارجي) — فالقيمة صحيحة والاسم عليها
+    # كاذب. والعلاج صنفٌ: كل حركة تُعلن مصدر إثباتها، ويجب أن يوافق إعلانُها حكمَ
+    # السلسلة عليها — وإلا صار الإعلان زينة. (والكشف بالحقن: تزوير مصدر مرساة.)
+    mis_declared = [
+        r for r in rows
+        if (str(r.get("حكم السلسلة على الصفّ") or "").startswith("حركة مثبتة")
+            and not str(r.get("مصدر إثبات الحركة") or "").startswith("السلسلة"))
+        or (str(r.get("حكم السلسلة على الصفّ") or "").startswith("حركة — مرساة")
+            and not str(r.get("مصدر إثبات الحركة") or "").startswith("الورق المطبوع"))]
+    no_source = [r for r in rows
+                 if str(r.get("حكم السلسلة على الصفّ") or "").startswith("حركة")
+                 and not str(r.get("مصدر إثبات الحركة") or "").strip()]
+    check("كل حركة تُعلن مصدر إثباتها", not no_source,
+          f"{len(no_source)} حركة بلا مصدر من "
+          f"{len([r for r in rows if str(r.get('حكم السلسلة على الصفّ') or '').startswith('حركة')])}")
+    check("إعلان المصدر يوافق حكم السلسلة (سلسلة ⇄ سلسلة · مرساة ⇄ ورق مطبوع)",
+          not mis_declared, f"{len(mis_declared)} صفّاً")
+
     dates_needed = profile["statement"]["date"].get("require_all_rows", False)
     dated = [r for r in txns if r.get("التاريخ (ميلادي)")]
     # كل عمودين يصفان الشيء نفسه يجب أن يتفقا: صفٌّ أثبتته السلسلة ولا يوافق
