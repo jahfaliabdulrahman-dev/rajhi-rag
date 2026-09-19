@@ -747,12 +747,41 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
         [13, 16, 13, 32, 12, 11, 18, 13, 13, 15, 11])
 
     # ما لم يُثبت — كل ما ليس "ok"، ومعه الفارغ من بوابة الصفحة (قياس ميكانيكي مجاني)
+    #
+    # وشهادات الشاهد الموضعي (عند الطلب) تُنسخ هنا بلفظها: «أثبته شاهد الموضع» لا
+    # «أثبته الورق المطبوع» — الشاهد يُثبت أن المبلغ في موضعه وأن الإطار على حبر
+    # فعلاً، ولا يُثبت إجماليات الصفحة؛ فالورق يبقى الحاكم والموضع شاهدٌ ثالث.
+    witness: dict = {}
+    try:
+        base = Path(run)
+        files = sorted(base.glob("pos_witness*.json")) or \
+            sorted(base.parent.glob("pos_witness*.json"))
+        for wf in files:
+            witness.update(json.loads(wf.read_text(encoding="utf-8")))
+    except (OSError, ValueError, TypeError):
+        witness = {}
+
+    def _cert(page: int) -> str:
+        """شهادة الشاهد بلفظها — أو نصٌّ فارغ حيث لا شهادة (لا يُخترع شاهد)."""
+        c = witness.get(str(page))
+        if not c:
+            return ""
+        rows_n = len(c.get("rows") or [])
+        if not rows_n:
+            return " · شاهد الموضع: صفر صفوف (بلا حركات فعلاً)"
+        ok = c.get("on_ink") or 0
+        return (f" · شاهد الموضع: {rows_n} صفّاً · {ok}/{rows_n} إطاراً على حبر · "
+                f"توافق مع السلسلة {c.get('agree', 0)} · خلاف {c.get('clash', 0)}")
+
     unproven: list[list] = []
     for p, e in sorted(per_page.items()):
         if e.get("footer") != "ok":
-            unproven.append([p, e.get("page_no"), e.get("rows"),
-                             ARABIC_VERDICT.get(e.get("footer"), e.get("footer")),
-                             "من تقرير التشغيل (المحكَّم)"])
+            cert = _cert(p)
+            reason = str(ARABIC_VERDICT.get(str(e.get("footer") or ""))
+                         or e.get("footer") or "")
+            unproven.append([p, e.get("page_no"), e.get("rows"), reason + cert,
+                             "من تقرير التشغيل (المحكَّم)"
+                             + (" + شاهد الموضع" if cert else "")])
     gate_verdict = {}
     if gate and gate.exists():
         gate_verdict = json.loads(gate.read_text(encoding="utf-8")).get("verdict") or {}
