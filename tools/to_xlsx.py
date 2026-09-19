@@ -251,8 +251,14 @@ def load(run: Path) -> tuple[list[dict], dict, dict, dict]:
                 "side": der.get("side") or "",
                 "opening": bool(der.get("opening")),
                 "chain_ok": der.get("ok"),
-                "row_state": (_row_state(der) if is_movement
-                              else "سطر ملخّص/افتتاحي — ليست حركة"),
+                "row_state": (
+                    # **مرساةُ فجوة**: مبلغٌ مطبوع ورصيدٌ مطبوع ⇒ حركة فعليّة،
+                    # لكن فرق الرصيد يبتلع ورقةً غائبة فلا تُقفله السلسلة. ووسمُها
+                    # «ليس حركة» كان خطأً يُنكر حركةً مبصوطة على الورق.
+                    "حركة — مرساة بعد ورقة غائبة (المبلغ مطبوع ولا تُقفله السلسلة)"
+                    if (is_movement and der.get("ok") is False)
+                    else (_row_state(der) if is_movement
+                          else "سطر ملخّص/افتتاحي — ليست حركة")),
                 "shift": _shift_suspect(row, der),
                 "footer": verdict.get("footer"),
                 "counted": verdict.get("rows"),
@@ -325,7 +331,7 @@ def summary_facts(rows: list[dict], report: dict, per_page: dict,
               and _num(r["derived_movement"]) not in (None, 0)]
     biggest = max(ranked, key=lambda p: p[0]) if ranked else None
     smallest = min(ranked, key=lambda p: p[0]) if ranked else None
-    txn_rows = [r for r in rows if r["row_state"] == "حركة مثبتة بالسلسلة"]
+    txn_rows = [r for r in rows if str(r["row_state"]).startswith("حركة")]
     shift_rows = [r for r in rows if r["shift"]]
     # سطور الملخّص/الافتتاح ليست حركات: سلسلة الرصيد لا تُقاس عليها، فسقوطها من
     # فحص السلسلة ليس عيباً يُعلن — والملخص يعدّها في «سطور ليست حركة».
@@ -363,7 +369,7 @@ def summary_sheet(facts: dict, rows: list[dict], report: dict) -> list[list]:
     return [
         ["نظرة عامة", "", ""],
         ["الصفوف المقروءة من الكشوف", facts["rows"], "كل سطر عاد به القارئ من الورق"],
-        ["منها حركات مثبتة بالسلسلة", facts["txn_rows"],
+        ["منها حركات (مثبتة بالسلسلة أو مرساة فجوة)", facts["txn_rows"],
          "أثبتها فرق الرصيد — هذا هو العدد الذي يقوم عليه التقرير"],
         ["منها سطور ليست حركة", facts["nontxn_rows"],
          "رصيد مرحّل/افتتاحي أو سطر إجماليات أو صفّ بلا حركة — لا تُعدّ ولا تدخل الترتيب"],
