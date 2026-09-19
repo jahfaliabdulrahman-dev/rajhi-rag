@@ -61,6 +61,15 @@ ARABIC_VERDICT = {
 }
 
 
+def _row_date_source(row: dict) -> str:
+    """مصدر تاريخ الصفّ بحكم القانون — لا بالتخمين."""
+    from statement_qa.row_dates import resolve
+    try:
+        return str(resolve(row)["date_source"])
+    except Exception:                                    # noqa: BLE001
+        return "unknown"
+
+
 def page_verdict(entry: dict, last_page: int) -> str:
     """حكم الصفحة بلفظه — ولا يُوهم بعيبٍ حيث الورق سليم.
 
@@ -249,7 +258,11 @@ def load(run: Path) -> tuple[list[dict], dict, dict, dict]:
                 "date_status": status,
                 # مصدر التاريخ: من خانة الورق أو من نصّ السطر نفسه (تعميم لاحق على
                 # صفحات قُرئت قبل وجود القانون) — يُعرض بلفظه في ورقة الحركات.
-                "date_source": str(row.get("date_source") or "cell"),
+                # لا يُختلق مصدر: إن لم يُعلن الكاش مصدراً نسأل قانون
+                # التواريخ عن الصفّ نفسه (قد يكون missing أو ليس حركة)
+                # — وإلا كُتب «من خانة الورق» على صفّ لا تاريخ له (كشفه مدقّق خارجي).
+                "date_source": str(row.get("date_source")
+                                   or _row_date_source(row)),
                 "year": year,
                 "desc": row.get("desc"),
                 "printed_movement": row.get("raw_movement") or row.get("movement"),

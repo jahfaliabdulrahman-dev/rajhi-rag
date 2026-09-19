@@ -281,7 +281,11 @@ def recover_anchor(raw_rows: list[dict], prev_closing, image_path: str,
         got = None
     if got is None or got != abs(delta):
         return raw_rows, None
-    patched = [dict(first, movement=got)] + list(raw_rows[1:])
+    # القراءة الجديدة للصفّ الأول هي **المطبوعة الصحيحة** (الورق نفسه أُعيد قراءته)،
+    # فيجب أن تحملها خانة «الحركة كما طُبعت» مع الرقمية — وإلا تناقض عمودا الصفّ في
+    # الملف المُسلَّم بلا تنبيه (٢٤ صفّاً: أوّل صفّ في كل صفحة استُدركت آلياً).
+    # كشفه مدقّق خارجي، والبوابة لم تكن تراه لأنها تُقارن الرقمي بالسلسلة لا العمودين.
+    patched = [dict(first, movement=got, raw_movement=got)] + list(raw_rows[1:])
     return patched, got
 
 
