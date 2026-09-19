@@ -383,15 +383,29 @@ def test_the_gap_check_names_the_printed_sheets_not_the_file_position(tmp_path, 
     run, clean, passed = gate_fixture
     gap = next(n for n in passed if n.startswith("قيد ص"))
     assert gap == "قيد ص3 له مقدارا مدين ودائن", gap
-    # وحتى لو أُفرغ موقع الملف، يبقى الاسم على الورق (وهو البديل الآخر في الكود).
+    # ١) موقع الملف فارغ ⇒ الاسم يبقى على الورق.
     poisoned = tmp_path / "no-position.xlsx"
     shutil.copy(clean, poisoned)
     wb = load_workbook(poisoned)
+    ws = wb["الحركات"]
     i, _ = _gap_row(wb)
-    wb["الحركات"].cell(row=i, column=_col(wb["الحركات"], "الصفحة (ملف)")).value = None
+    ws.cell(row=i, column=_col(ws, "الصفحة (ملف)")).value = None
     wb.save(poisoned)
     _code, _passed, fails = _run_gate(run, poisoned)
     assert all("?" not in f for f in fails), fails
+    # ٢) **والعمودان فارغان معاً** (الحدّ الذي أعلنه المدقّق): لا علامة بديلة —
+    #    يُسمّى القيد بترتيبه فيُقرأ الاسم ولا يمرّ `?` صامتاً.
+    both = tmp_path / "no-both.xlsx"
+    shutil.copy(clean, both)
+    wb = load_workbook(both)
+    ws = wb["الحركات"]
+    j, _ = _gap_row(wb)
+    ws.cell(row=j, column=_col(ws, "الصفحة (ملف)")).value = None
+    ws.cell(row=j, column=_col(ws, "رقم الصفحة المطبوع")).value = None
+    wb.save(both)
+    _code, passed2, fails = _run_gate(run, both)
+    assert all("?" not in f for f in fails + passed2), fails + passed2
+    assert "قيد فجوة #1 له مقدارا مدين ودائن" in passed2, passed2
 
 
 @pytest.mark.parametrize("rule", POISONS, ids=[r[0] for r in POISONS])
