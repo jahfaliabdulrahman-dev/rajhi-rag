@@ -168,6 +168,37 @@ def test_a_scan_gap_names_the_missing_printed_sheets_not_a_file_page(tmp_path):
     assert gap[0] is None, "لا صفحة ملف تُتَّهم بالفجوة"
     assert gap[1] == "1 · 2", "أرقام الأوراق الغائبة وحدها"
     assert "بين الملفين 1 و2" in str(gap[3])
+    # وصياغة **قيد الفجوة** في ورقة «الحركات» تصف «ما بين الرصيدين» لا «حركات
+    # الأوراق الغائبة» وحدها — وتُقاس على الملف المبني (proof: الرسالة الرابعة)،
+    # لأن هذا الـfixture يبني فجوةً بلا تذييل مطبوع قبلها فلا يُثبت قيدها.
+
+
+def test_movement_source_column_separates_the_chain_from_the_paper(tmp_path):
+    """عمود «المثبتة بالسلسلة» لا يكفي: في مرساة الفجوة يحمل مبلغاً مطبوعاً.
+
+    رفعه مدقّق خارجي: قيمةٌ من الورق في عمودٍ اسمه السلسلة. فالعلاج صنفٌ — عمود
+    «مصدر إثبات الحركة» يُعلن مصدر كل حركة، ويُنبَّه إن خالف إعلانُه حكمَ السلسلة.
+    """
+    out = tmp_path / "export.xlsx"
+    build(_synthetic_run(tmp_path), out, None)
+    ws = load_workbook(out)["الحركات"]
+    header = [c.value for c in ws[1]]
+    assert "مصدر إثبات الحركة" in header
+    assert header.index("مصدر إثبات الحركة") == header.index("الحركة المثبتة بالسلسلة") + 1
+    i = header.index("مصدر إثبات الحركة")
+    sources = [r[i] for r in ws.iter_rows(min_row=2, values_only=True)]
+    assert sources and str(sources[0]).startswith("السلسلة"), sources[0]
+
+
+def test_an_anchor_declares_the_paper_and_a_chain_row_declares_the_chain():
+    from tools.to_xlsx import _assertion_source
+
+    anchor = _assertion_source(
+        "حركة — مرساة بعد ورقة غائبة (المبلغ مطبوع ولا تُقفله السلسلة)", {})
+    assert anchor.startswith("الورق المطبوع"), anchor
+    chain = _assertion_source("حركة مثبتة بالسلسلة", {"reread": True})
+    assert chain.startswith("السلسلة") and "إعادة قراءة محكَّمة" in chain, chain
+    assert _assertion_source("سطر ملخّص/افتتاحي — ليست حركة", {}) == ""
 
 
 def test_markdown_renderer_keeps_rtl_and_tables():
