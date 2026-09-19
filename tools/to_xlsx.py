@@ -87,6 +87,12 @@ def page_verdict(entry: dict, last_page: int) -> str:
 # the original kept beside it and the failures counted, never silently dropped.
 _DIGIT_MAP = {chr(0x0660 + i): str(i) for i in range(10)}
 _DIGIT_MAP.update({chr(0x06F0 + i): str(i) for i in range(10)})
+_DATE_SOURCE_AR = {
+    "cell": "من خانة التاريخ في الورق",
+    "text": "من نصّ السطر نفسه (الخانة كانت فارغة)",
+    "not_a_movement": "ليس حركة — لا تاريخ عليه",
+    "missing": "بلا تاريخ (لا في الخانة ولا في النصّ)",
+}
 _DATE_STATUS_AR = {
     # سطرٌ ليس حركة (ملخّص حساب أو رصيد افتتاحي): لا تاريخ عليه ولا سلسلة — ووسمه
     # يمنعه أن يُقرأ «تاريخاً ناقصاً» أو بنداً «لم يُثبت»، وهو بريء من الاثنين.
@@ -241,6 +247,9 @@ def load(run: Path) -> tuple[list[dict], dict, dict, dict]:
                 "date": row.get("date"),
                 "date_iso": iso,
                 "date_status": status,
+                # مصدر التاريخ: من خانة الورق أو من نصّ السطر نفسه (تعميم لاحق على
+                # صفحات قُرئت قبل وجود القانون) — يُعرض بلفظه في ورقة الحركات.
+                "date_source": str(row.get("date_source") or "cell"),
                 "year": year,
                 "desc": row.get("desc"),
                 "printed_movement": row.get("raw_movement") or row.get("movement"),
@@ -649,7 +658,10 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
     identity_ok = closing is not None and abs(walk - closing) <= Decimal("0.005")
     _fmt = lambda v: f"{v:,.2f}"  # noqa: E731 — صيغة عرض واحدة في هذا القسم
     gap_rows = [
-        [g["before_page"], None, None, None, None, None, None,
+        # ملاحظة: عمود «مصدر التاريخ» أُضيف بعد «حالة التاريخ»، فصفوف الفجوة تُدرج
+        # فراغاً ثامناً قبله ليبقى العمودان (مدين/دائن) في موضعهما — وإلا أُزيحت
+        # قيمُها فاختلّت المجاميع (وقد رصدته البوابة فوراً).
+        [g["before_page"], None, None, None, None, None, None, None,
          (f"قيد فجوة مسح — الأوراق الغائبة {g['missing_sheets']} "
           f"(بين الصفحتين {g['after_page']} و{g['before_page']}): "
           f"مقداراه من زيادة التذييل المطبوع، وعبور الرصيد "
@@ -710,12 +722,13 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
     write_sheet(
         ws,
         ["الصفحة (ملف)", "رقم الصفّ", "رقم الصفحة المطبوع", "التاريخ (كما طُبع)",
-         "التاريخ (ميلادي)", "حالة التاريخ", "السنة", "الوصف",
+         "التاريخ (ميلادي)", "حالة التاريخ", "مصدر التاريخ", "السنة", "الوصف",
          "الحركة كما طُبعت", "الحركة المثبتة بالسلسلة", "مدين", "دائن",
          "الرصيد كما طُبع", "الرصيد (رقمي)", "حكم السلسلة على الصفّ",
          "تنبيه", "حالة إجماليات الصفحة"],
         [[r["page"], r["row_no"], r["printed_page"], r["date"], r["date_iso"],
-          _DATE_STATUS_AR[r["date_status"]], r["year"], r["desc"],
+          _DATE_STATUS_AR[r["date_status"]], _DATE_SOURCE_AR[r["date_source"]],
+          r["year"], r["desc"],
           r["printed_movement"], r["derived_movement"],
           (debit_credit(r["derived_movement"], r["side"])[0]
            if not r["opening"] else None),
