@@ -79,7 +79,22 @@ def main() -> int:
 
     print("===== الأوراق =====")
     want = profile["artifacts"]["sheets"]
-    check("الأوراق المطلوبة", wb.sheetnames == want, str(wb.sheetnames))
+    missing = [s for s in want if s not in wb.sheetnames]
+    extra = [s for s in wb.sheetnames if s not in want]
+    detail = ("ناقص: " + str(missing) if missing else "") + \
+             ("، زائد: " + str(extra) if extra else "")
+    check("الأوراق المطلوبة", not missing and not extra,
+          detail or str(wb.sheetnames))
+    if missing:
+        # **ورقة مفقودة = لا حكم.** كان الملف ينهار بـ`KeyError` قبل أن تُطبع
+        # `RESULT` — أثرٌ غير مقروء بدل حكم (أمسكه مدقّق خارجي بإعادة تسمية ورقة).
+        # والقاعدة: عقد الأوراق يُفحص وجوداً قبل أي قراءة، فلا يُتَّهم الملف
+        # بانهيار أداتنا. الفشل يبقى **مغلقاً** (exit 1) ومسمّىً.
+        print()
+        print("=" * 46)
+        print(f"RESULT: {len(FAILS)} FAILURES: {FAILS} — "
+              f"لا حكم على ملف ناقص الأوراق: {missing}")
+        return 1
 
     rows = read_rows(wb["الحركات"])
     txns = [r for r in rows if str(r.get("حكم السلسلة على الصفّ") or "").startswith("حركة مثبتة")]
