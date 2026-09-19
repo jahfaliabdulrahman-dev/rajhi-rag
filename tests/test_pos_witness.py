@@ -3,7 +3,8 @@
 أرقام الشاهد الحقيقية (ص621) مستعملة كحقيقة أرضية: السلسلة والهندسة اتفقتا 10/10
 بينما أخطأ قارئنا في صفّ واحد — فالاختبار يثبّت أن الاتفاق ليس صدفةً في العيّنة.
 """
-import numpy as np
+import pytest
+
 from decimal import Decimal
 
 from statement_qa.pos_witness import (INK_MIN, assign_column, chain_side,
@@ -78,6 +79,7 @@ def test_geometry_disagreement_is_reported_with_numbers_not_hidden():
 
 def test_snap_moves_an_approximate_claim_onto_real_ink():
     """إحداثيات النموذج تقريبية (35–105 بكسل): السنّ هو ما يجعلها دليلاً."""
+    np = pytest.importorskip("numpy")      # بيئة CI الخفيفة لا تحمل numpy
     arr = np.full((400, 400), 250, dtype=np.uint8)
     arr[190:215, 250:330] = 60                             # كتلة حبر حقيقية
     ink = lambda x0, y0, x1, y1: (                            # noqa: E731
@@ -91,6 +93,7 @@ def test_snap_moves_an_approximate_claim_onto_real_ink():
 
 
 def test_snap_leaves_an_already_good_claim_where_it_is():
+    np = pytest.importorskip("numpy")
     arr = np.full((400, 400), 250, dtype=np.uint8)
     arr[190:215, 250:330] = 60
     ink = lambda x0, y0, x1, y1: (                            # noqa: E731
