@@ -152,6 +152,24 @@ def main() -> int:
 
     dates_needed = profile["statement"]["date"].get("require_all_rows", False)
     dated = [r for r in txns if r.get("التاريخ (ميلادي)")]
+    # كل عمودين يصفان الشيء نفسه يجب أن يتفقا: صفٌّ أثبتته السلسلة ولا يوافق
+    # رقمُه المكتوب رقمَه المطبوع = تناقضٌ داخلي صامت (مرّ ٢٤ مرة قبل أن يراه مدقّق).
+    import sys as _sys
+    _sys.path.insert(0, str(PROJ / "tools"))
+    from to_xlsx import _num as _to_num
+    contradictory = [
+        r for r in rows
+        if str(r.get("row_state") or "").startswith("حركة مثبتة")
+        and _to_num(r.get("printed_movement")) is not None
+        and _to_num(r.get("derived_movement")) is not None
+        and abs(_to_num(r["printed_movement"]) - _to_num(r["derived_movement"]))
+        > Decimal("0.005")
+    ]
+    check("لا تناقض بين «الحركة كما طُبعت» و«المثبتة بالسلسلة»",
+          not contradictory,
+          f"{len(contradictory)} صفّاً" + (f" · مثال ص{contradictory[0]['page']}"
+                                           if contradictory else ""))
+
     check("التواريخ: كل صفّ حركة له تاريخ", len(dated) == len(txns) or not dates_needed,
           f"{len(dated)}/{len(txns)} (الشرط الصارم: {dates_needed})")
     if txns:
