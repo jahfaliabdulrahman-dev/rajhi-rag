@@ -182,18 +182,24 @@ def main() -> int:
     # الوثيقة أنه يحرس. والقاعدة: يُثبَت **بحقن تناقض** — والفارق أن الفحص الحيّ يقول
     # كم صفّاً فحص («من N»)، فتمييزُه عن الميت لا يحتاج قراءة كود.
     contradictory = []
+    examined = 0   # العدّ من الحلقة لا من `txns`: المؤكَّدة + مرساتا الفجوة
     for r in rows:
-        if not str(r.get("حكم السلسلة على الصفّ") or "").startswith("حركة مثبتة"):
-            continue
+        if not str(r.get("حكم السلسلة على الصفّ") or "").startswith("حركة"):
+            continue  # المؤكَّدة ومرساتا الفجوة (والملخص/الافتتاحي خارجها)
+        # المقارنة على **المثبتة بالسلسلة** لا على مدين/دائن: الصفّ المؤكَّد يتساويان
+        # فيه، ومرساة الفجوة تُثبت مبلغها المطبوع بلا مدين/دائن ⇒ فالمقارنة على
+        # الأعمدة المالية كانت تُخرج المرساتين من الفحص — وهما بعينهما الباقيان.
         printed = _to_num(r.get("الحركة كما طُبعت"))
-        amount = dec(r.get("مدين")) or dec(r.get("دائن"))
+        amount = _to_num(r.get("الحركة المثبتة بالسلسلة"))
         if printed is None or amount is None:
             continue
+        examined += 1
+        amount = Decimal(str(amount))
         if abs(Decimal(str(printed)) - amount) > Decimal("0.005"):
             contradictory.append(r)
     check("لا تناقض بين «الحركة كما طُبعت» و«المثبتة بالسلسلة»",
           not contradictory,
-          f"{len(contradictory)} صفّاً **من {len(txns)} حركة فُحصت**"
+          f"{len(contradictory)} صفّاً **من {examined} حركة فُحصت**"
           + (f" · مثال ص{contradictory[0].get('الصفحة (ملف)')}" if contradictory else ""))
 
     # ⚠️ كان `or not dates_needed` ⇒ الشرط مُعطَّل بالعقد (`require_all_rows: false`)

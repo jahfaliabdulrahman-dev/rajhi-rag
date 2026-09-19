@@ -293,7 +293,15 @@ def load(run: Path) -> tuple[list[dict], dict, dict, dict]:
                 "printed_balance": row.get("raw_balance") or row.get("balance"),
                 "movement": row.get("movement"),
                 "balance": row.get("balance"),
-                "derived_movement": der.get("derived_movement"),
+                # **مرساة الفجوة**: السلسلة لا تُقفل صفّاً يبتلع فرقُ رصيده ورقةً
+                # غائبة، فيبقى `derived_movement` صفراً والورق يطبع ٢٥.٠٠ ⇒ تناقضٌ
+                # داخلي بين عمودين (رفعه مدقّق ثلاث مرات). والصواب: المرساة تُثبت
+                # **مبلغها المطبوع** بنفسها — ولا يدخل «مدين/دائن» فلا تتغيّر المجاميع
+                # (الفجوة محسوبة في قيودها المستقلّة)، والوسم يبقى في «حكم السلسلة».
+                "derived_movement": (_num0(row.get("movement"))
+                                     if (is_movement and der.get("opening")
+                                         and _num0(row.get("movement")))
+                                     else der.get("derived_movement")),
                 "side": der.get("side") or "",
                 "opening": bool(der.get("opening")),
                 "chain_ok": der.get("ok"),
