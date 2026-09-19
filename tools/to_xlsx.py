@@ -88,6 +88,9 @@ def page_verdict(entry: dict, last_page: int) -> str:
 _DIGIT_MAP = {chr(0x0660 + i): str(i) for i in range(10)}
 _DIGIT_MAP.update({chr(0x06F0 + i): str(i) for i in range(10)})
 _DATE_STATUS_AR = {
+    # سطرٌ ليس حركة (ملخّص حساب أو رصيد افتتاحي): لا تاريخ عليه ولا سلسلة — ووسمه
+    # يمنعه أن يُقرأ «تاريخاً ناقصاً» أو بنداً «لم يُثبت»، وهو بريء من الاثنين.
+    "not_a_movement": "ليس حركة (سطر ملخّص/افتتاحي)",
     "ok": "تاريخ كامل",
     "incomplete": "تاريخ غير مكتمل (أقل من ٨ خانات)",
     "implausible": "تاريخ غير معقول (خارج 1900–2100)",
@@ -223,6 +226,14 @@ def load(run: Path) -> tuple[list[dict], dict, dict, dict]:
         }
         for i, (row, der) in enumerate(zip(raw, derived), start=1):
             iso, status, year = normalize_date(row.get("date"))
+            # **سطرٌ بلا رصيد مطبوع ليس حركة**: كل حركة في هذا الكشف تحمل رصيداً
+            # جارياً؛ والذي لا يحمله هو سطر ملخّص الحساب (اجمالي الايداعات ·
+            # اجمالي السحوبات · رصيد الاقفال …) أو الرصيد الافتتاحي. ووسمه هنا
+            # يُخرجه من «الحركات» ومن «بلا تاريخ» ومن «ما لم يُثبت» معاً —
+            # وهو بريء من الثلاثة: لا سلسلة تُقاس عليه ولا تاريخ يُطلب منه.
+            is_movement = row.get("balance") is not None
+            if not is_movement and status == "missing":
+                status = "not_a_movement"
             rows.append({
                 "page": page,
                 "row_no": i,
@@ -240,7 +251,8 @@ def load(run: Path) -> tuple[list[dict], dict, dict, dict]:
                 "side": der.get("side") or "",
                 "opening": bool(der.get("opening")),
                 "chain_ok": der.get("ok"),
-                "row_state": _row_state(der),
+                "row_state": (_row_state(der) if is_movement
+                              else "سطر ملخّص/افتتاحي — ليست حركة"),
                 "shift": _shift_suspect(row, der),
                 "footer": verdict.get("footer"),
                 "counted": verdict.get("rows"),
@@ -315,7 +327,10 @@ def summary_facts(rows: list[dict], report: dict, per_page: dict,
     smallest = min(ranked, key=lambda p: p[0]) if ranked else None
     txn_rows = [r for r in rows if r["row_state"] == "حركة مثبتة بالسلسلة"]
     shift_rows = [r for r in rows if r["shift"]]
-    chain_suspect = [r for r in rows if r["chain_ok"] is False]
+    # سطور الملخّص/الافتتاح ليست حركات: سلسلة الرصيد لا تُقاس عليها، فسقوطها من
+    # فحص السلسلة ليس عيباً يُعلن — والملخص يعدّها في «سطور ليست حركة».
+    chain_suspect = [r for r in rows if r["chain_ok"] is False
+                     and r["row_state"] != "سطر ملخّص/افتتاحي — ليست حركة"]
     read_ms = [e["ms_read"] for e in per_page.values() if e.get("ms_read")]
     return {
         "rows": len(rows),
