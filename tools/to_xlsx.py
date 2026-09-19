@@ -190,6 +190,32 @@ def _row_state(der: dict) -> str:
     return "حركة مثبتة بالسلسلة"
 
 
+def _assertion_source(state: str, page_flags: dict) -> str:
+    """من أين جاء **إثبات** الحركة — يُعلن بلفظه، ولا يُستنتج من اسم العمود.
+
+    المشكلة (رفعها مدقّق خارجي): عمود «الحركة المثبتة بالسلسلة» يحمل في مرساة
+    الفجوة **المبلغ المطبوع**، لأن السلسلة لا تُقفل صفّاً يبتلع فرقُ رصيده ورقةً
+    غائبة. فالقيمة صحيحة والعمود يكذب عليها. والعلاج صنفٌ لا صفّان: عمود يعلن
+    مصدر الإثبات لكل حركة، ويُنسب إصلاح القراءة (استدراك/إعادة قراءة/تحكيم)
+    إلى صفحته — فالصفوف المستدركة كانت صامتة عن أن رصيدها من قراءةٍ مصلَحة.
+    """
+    if state.startswith("حركة — مرساة"):
+        base = ("الورق المطبوع: مبلغ المرساة — ولا تُقفلها السلسلة "
+                "(ورقة غائبة قبلها فلا رصيد سابق)")
+    elif state.startswith("حركة مثبتة"):
+        base = "السلسلة: فرق رصيدين متتاليين"
+    else:
+        return ""                      # ليست حركة: لا مصدر إثبات يُطلب منها
+    read = []
+    if page_flags.get("recovered"):
+        read.append("استدراك آلي (قيمة متوقَّعة من دلتا التذييل)")
+    if page_flags.get("reread"):
+        read.append("إعادة قراءة محكَّمة")
+    if page_flags.get("arbitrated"):
+        read.append("تحكيم موثَّق بمصدره (قيمة مطبوعة قُرئت بعين)")
+    return base + (" · القراءة: " + " + ".join(read) if read else "")
+
+
 def _shift_suspect(row: dict, der: dict) -> str:
     """وصف لا يمكن أن يكون دائناً + مبلغ دائن ⇒ الوصف أُزيح عن مبلغه."""
     if der.get("side") != "credit":
@@ -269,6 +295,14 @@ def load(run: Path) -> tuple[list[dict], dict, dict, dict]:
             is_movement = row.get("balance") is not None
             if not is_movement and status == "missing":
                 status = "not_a_movement"
+            # **مرساةُ فجوة**: مبلغٌ مطبوع ورصيدٌ مطبوع ⇒ حركة فعليّة، لكن فرق
+            # الرصيد يبتلع ورقةً غائبة فلا تُقفله السلسلة. ووسمُها «ليس حركة»
+            # كان خطأً يُنكر حركةً مبصوطة على الورق.
+            state = ("حركة — مرساة بعد ورقة غائبة (المبلغ مطبوع ولا تُقفله السلسلة)"
+                     if (is_movement and der.get("opening")
+                         and _num0(row.get("movement")))
+                     else (_row_state(der) if is_movement
+                           else "سطر ملخّص/افتتاحي — ليست حركة"))
             rows.append({
                 "page": page,
                 "row_no": i,
@@ -305,15 +339,8 @@ def load(run: Path) -> tuple[list[dict], dict, dict, dict]:
                 "side": der.get("side") or "",
                 "opening": bool(der.get("opening")),
                 "chain_ok": der.get("ok"),
-                "row_state": (
-                    # **مرساةُ فجوة**: مبلغٌ مطبوع ورصيدٌ مطبوع ⇒ حركة فعليّة،
-                    # لكن فرق الرصيد يبتلع ورقةً غائبة فلا تُقفله السلسلة. ووسمُها
-                    # «ليس حركة» كان خطأً يُنكر حركةً مبصوطة على الورق.
-                    "حركة — مرساة بعد ورقة غائبة (المبلغ مطبوع ولا تُقفله السلسلة)"
-                    if (is_movement and der.get("opening")
-                        and _num0(row.get("movement")))
-                    else (_row_state(der) if is_movement
-                          else "سطر ملخّص/افتتاحي — ليست حركة")),
+                "row_state": state,
+                "source": _assertion_source(state, flags[page]),
                 "shift": _shift_suspect(row, der),
                 "footer": verdict.get("footer"),
                 "counted": verdict.get("rows"),
@@ -716,22 +743,40 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
     closing = _num0(facts["printed_balance"])
     identity_ok = closing is not None and abs(walk - closing) <= Decimal("0.005")
     _fmt = lambda v: f"{v:,.2f}"  # noqa: E731 — صيغة عرض واحدة في هذا القسم
-    gap_rows = [
-        # ملاحظة: عمود «مصدر التاريخ» أُضيف بعد «حالة التاريخ»، فصفوف الفجوة تُدرج
-        # فراغاً ثامناً قبله ليبقى العمودان (مدين/دائن) في موضعهما — وإلا أُزيحت
-        # قيمُها فاختلّت المجاميع (وقد رصدته البوابة فوراً).
-        [g["before_page"], None, None, None, None, None, None, None,
-         (f"قيد فجوة مسح — الأوراق الغائبة {g['missing_sheets']} "
-          f"(بين الصفحتين {g['after_page']} و{g['before_page']}): "
-          f"مقداراه من زيادة التذييل المطبوع، وعبور الرصيد "
-          f"{g['crossing']} يثبت صافيه"
-          if g["status"] == "proven" else
-          f"قيد فجوة مسح غير مُثبت — {g['note']}"),
-         None, None, g["debits"], g["credits"], None, None,
-         "قيد فجوة مسح — موثّق لا اتهام صفحة (ورق غائب من المسح)"
-         + (" — الشاهدان متفقان" if g["witnesses_agree"] else " — غير مُثبت"),
-         "", ""]
-        for g in gaps]
+    # **الصياغة الصادقة لقيود الفجوة (رفعها مدقّق خارجي):** المقدار ليس «حركات
+    # الأوراق الغائبة» وحدها — إنه **ما بين الرصيدين**: فارق التذييل المطبوع بين
+    # طرفَي الفجوة بعد استبعاد حركات الصفحة المقروءة الموجَّهة. ومبلغ المرساة
+    # المطبوعة يسكن هذا الفارق لأن رصيد ما قبل الأوراق الغائبة غير مطبوع ⇒ لا
+    # سبيل إلى فصله عن حركات الغائب. فلا يُكتب «الغائب» وفيه حركةٌ من ورقٍ قُرئ.
+    # ملاحظة: صفوف الفجوة تُدرج فراغاً لكل عمود لا يخصّها (مدين/دائن تُملأ هنا)
+    # — وترتيب الفراغات هو ما يُبقي الأعمدة في موضعها، وأي إزاحة تُكشف فوراً
+    # باختلال المجاميع في البوابة.
+    gap_rows = []
+    for g in gaps:
+        anchors = [r for r in rows if r["page"] == g["before_page"]
+                   and str(r["row_state"]).startswith("حركة — مرساة")]
+        amounts = " · ".join(_fmt(Decimal(str(r["derived_movement"])))
+                             for r in anchors if r["derived_movement"] is not None)
+        if g["status"] == "proven":
+            label = (f"قيد فجوة مسح — {g['missing_sheets']} بين الملفين "
+                     f"{g['after_page']} و{g['before_page']}: المقدار هو **ما بين "
+                     f"الرصيدين** عبر الفجوة — فارق التذييل المطبوع بعد استبعاد "
+                     f"حركات الصفحة المقروءة الموجَّهة"
+                     + (f" — ويشمل مبلغ المرساة المطبوعة {amounts} التي لا تُفصل "
+                        f"عنه لأن رصيد ما قبل الأوراق الغائبة غير مطبوع"
+                        if amounts else "")
+                     + f" · وعبور الرصيد {g['crossing']} يثبت صافيه")
+        else:
+            label = f"قيد فجوة مسح غير مُثبت — {g['note']}"
+        gap_rows.append([
+            g["before_page"], None, None, None, None, None, None, None, label,
+            None, None,
+            "الورق المطبوع: فارق التذييل التراكمي بين طرفَي الفجوة "
+            "(لا سلسلة رصيد تُقفله — الأوراق بينهما غائبة)",
+            g["debits"], g["credits"], None, None,
+            "قيد فجوة مسح — موثّق لا اتهام صفحة (ورق غائب من المسح)"
+            + (" — الشاهدان متفقان" if g["witnesses_agree"] else " — غير مُثبت"),
+            "", ""])
     wb = Workbook()
 
     ws0 = wb.active
@@ -766,7 +811,9 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
          f"بتسامح ≤ 0.005 — الفرق {_fmt(walk - closing) if closing is not None else '?'}"],
         ["قيود الفجوة", f"{len(gaps)} قيداً · صافيها "
          f"{_fmt(gap_credits - gap_debits)}",
-         "أوراق غائبة من المسح: مقداراها من زيادة التذييل المطبوع، وعبور الرصيد شاهد ثانٍ"],
+         "كل قيد هو **ما بين الرصيدين** عبر فجوته (فارق التذييل المطبوع، بعد "
+         "استبعاد حركات الصفحة المقروءة الموجَّهة) — ويشمل مبلغ المرساة المطبوعة "
+         "الذي لا يُفصل لأن رصيد ما قبل الأوراق الغائبة غير مطبوع؛ وعبور الرصيد شاهد ثانٍ"],
     ):
         ws0.append([label, value, note])
         if label and not value and not note:
@@ -782,13 +829,14 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
         ws,
         ["الصفحة (ملف)", "رقم الصفّ", "رقم الصفحة المطبوع", "التاريخ (كما طُبع)",
          "التاريخ (ميلادي)", "حالة التاريخ", "مصدر التاريخ", "السنة", "الوصف",
-         "الحركة كما طُبعت", "الحركة المثبتة بالسلسلة", "مدين", "دائن",
+         "الحركة كما طُبعت", "الحركة المثبتة بالسلسلة", "مصدر إثبات الحركة",
+         "مدين", "دائن",
          "الرصيد كما طُبع", "الرصيد (رقمي)", "حكم السلسلة على الصفّ",
          "تنبيه", "حالة إجماليات الصفحة"],
         [[r["page"], r["row_no"], r["printed_page"], r["date"], r["date_iso"],
           _DATE_STATUS_AR[r["date_status"]], _DATE_SOURCE_AR[r["date_source"]],
           r["year"], r["desc"],
-          r["printed_movement"], r["derived_movement"],
+          r["printed_movement"], r["derived_movement"], r["source"],
           (debit_credit(r["derived_movement"], r["side"])[0]
            if not r["opening"] else None),
           (debit_credit(r["derived_movement"], r["side"])[1]
@@ -798,7 +846,10 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
           ARABIC_VERDICT.get(r["footer"], r["footer"])]
          for r in rows]
         + gap_rows,
-        [12, 9, 16, 18, 14, 26, 8, 46, 16, 18, 12, 12, 16, 14, 34, 40, 30])
+        # الأعراض بترتيب الأعمدة نفسه — ولو أُزيحت لأصبح عمودٌ عريض وعمودٌ رقم
+        # غير مقروء: قائمةُ الأعراض جزءٌ من العقد لا زينة. (كانت منزاحةً عن
+        # «مصدر التاريخ» بعد إدراجه، فأُعيد ترتيبها مع إدراج عمود المصدر.)
+        [12, 9, 16, 20, 14, 24, 22, 8, 46, 18, 20, 44, 12, 12, 14, 16, 40, 26, 22])
 
     # الأسئلة: حساب حتمي على أدلة التشغيل — بلا نموذج لغوي وبلا كلفة، فالجواب
     # نفسه يُعاد إنتاجه بنفس الأمر غداً. ما يحتاج تفسيراً لا يُخمَّن هنا.

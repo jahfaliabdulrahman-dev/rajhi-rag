@@ -48,11 +48,15 @@ def main() -> int:
     clean_ok = code == 0
     results.append(("الملف السليم يجب أن يمرّ", clean_ok, f"exit={code}"))
 
-    poisons = {
-        "حذف تاريخ حركة مثبتة": ("التاريخ (ميلادي)", None),
-        "تناقض «كما طُبعت» مع المثبتة": ("الحركة كما طُبعت", "٩٩٩٩٩.٩٩"),
-    }
-    for label, (col, value) in poisons.items():
+    poisons = [
+        ("حذف تاريخ حركة مثبتة", "حركة مثبتة", "التاريخ (ميلادي)", None),
+        ("تناقض «كما طُبعت» مع المثبتة", "حركة مثبتة", "الحركة كما طُبعت", "٩٩٩٩٩.٩٩"),
+        # مصدر الإثبات: المرساة تُنسب إلى الورق المطبوع — فمن نسبها إلى السلسلة
+        # يكذب على العمود، وهو ما رفعه المدقّق (قيمة مطبوعة في عمود السلسلة).
+        ("مصدر مزوَّر: مرساة تدّعي السلسلة", "حركة — مرساة",
+         "مصدر إثبات الحركة", "السلسلة: فرق رصيدين متتاليين"),
+    ]
+    for label, prefix, col, value in poisons:
         tmp = Path(tempfile.mkdtemp(prefix="inject-")) / "poisoned.xlsx"
         shutil.copy(src, tmp)
         wb = openpyxl.load_workbook(tmp)
@@ -61,7 +65,7 @@ def main() -> int:
         iv, it = h.index("حكم السلسلة على الصفّ") + 1, h.index(col) + 1
         hit = 0
         for r in range(2, ws.max_row + 1):
-            if str(ws.cell(r, iv).value or "").startswith("حركة") and ws.cell(r, it).value not in (None, ""):
+            if str(ws.cell(r, iv).value or "").startswith(prefix) and ws.cell(r, it).value not in (None, ""):
                 ws.cell(r, it).value = value
                 hit += 1
                 break                      # **صفٌّ واحد** — أدقّ من تعميم السمّ
