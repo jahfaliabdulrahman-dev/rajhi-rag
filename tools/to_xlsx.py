@@ -847,6 +847,48 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
                          f"لا يطابق فرق الرصيد {r['derived_movement']}",
                          "سلسلة الرصيد (المحكَّم)"])
 
+    # ——— تفكيك البنك لمجاميعه (الصفحة الختامية): شاهد مستقل على المجموعين ———
+    # البنك يطبع في الصفحة الختامية تفكيك مجاميعه: مكوّنات الإيداعات ثم إجماليها،
+    # ومكوّنات السحوبات ثم إجماليها. فإذا جمعت المكوّنات فطابقت الإجمالي المطبوع،
+    # فهذا **برهانٌ من داخل الورق** على Σدائن وΣمدين — لا حسابٌ من عندنا.
+    # (كشفه مدقّق خارجي: كان في الملف ونحن نطرحه بوصفه «ليس حركة».)
+    parts_c: list = []
+    parts_d: list = []
+    printed_totals: dict = {}
+    bucket = parts_c
+    for r in rows:
+        if not str(r["row_state"]).startswith("سطر ملخّص"):
+            continue
+        label = str(r.get("desc") or "").strip()
+        amount = _num(r.get("movement"))
+        if "اجمالي الايداعات" in label:
+            printed_totals["credits"] = amount
+            bucket = parts_d
+        elif "اجمالي السحوبات" in label:
+            printed_totals["debits"] = amount
+            bucket = None
+        elif amount is not None and bucket is not None:
+            bucket.append(amount)
+    sum_c = round(sum(parts_c), 2) if parts_c else None
+    sum_d = round(sum(parts_d), 2) if parts_d else None
+    decomp = []
+    if printed_totals.get("credits") is not None:
+        decomp.append(["تفكيك البنك — الإيداعات (شاهد مستقل)", f"{sum_c:,.2f}",
+                       f"مكوّنات مطبوعة مجموعها = إجمالي الإيداعات المطبوع "
+                       f"{_fmt(Decimal(str(printed_totals['credits'])))}"
+                       + (" ✓ يقفل" if abs(Decimal(str(sum_c)) -
+                                           Decimal(str(printed_totals["credits"])))
+                          <= Decimal("0.005") else " ✗ لا يقفل")])
+    if printed_totals.get("debits") is not None:
+        decomp.append(["تفكيك البنك — السحوبات (شاهد مستقل)", f"{sum_d:,.2f}",
+                       f"مكوّنات مطبوعة مجموعها = إجمالي السحوبات المطبوع "
+                       f"{_fmt(Decimal(str(printed_totals['debits'])))}"
+                       + (" ✓ يقفل" if abs(Decimal(str(sum_d)) -
+                                           Decimal(str(printed_totals["debits"])))
+                          <= Decimal("0.005") else " ✗ لا يقفل")])
+    for label_row in decomp:
+        ws0.append(label_row)
+
     ws3 = wb.create_sheet("ما لم يُثبت")
     write_sheet(ws3, ["الصفحة (ملف)", "رقم الصفحة", "صفوف", "ما لم يُثبت", "مصدر الحكم"],
                 sorted(unproven, key=lambda r: (r[0] or 0)), [13, 14, 9, 40, 30])

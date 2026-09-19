@@ -88,7 +88,26 @@ def main() -> int:
     print("===== المجاميع والهوية =====")
     sd = sum((dec(r.get("مدين")) or Decimal("0")) for r in rows)
     sc = sum((dec(r.get("دائن")) or Decimal("0")) for r in rows)
-    opening = dec(profile["identity"]["opening_default"]) or Decimal("0")
+    # **الافتتاح من الورق لا من العقد**: الورق يطبع «الرصيد الافتتاحي» في الصفحة
+    # الختامية وفي أوّل صفّ. فنأخذه من الملف المُسلَّم (المصدر)، ونستعمل قيمة العقد
+    # بديلاً احتياطياً — وإن اختلفا نُعلن الاختلاف بدل أن نمرّ عليه.
+    opening = None
+    try:
+        ws_m = wb["الملخص"] if "الملخص" in wb.sheetnames else None
+        if ws_m is not None:
+            for row_m in ws_m.iter_rows(values_only=True):
+                label_m = str(row_m[0] or "")
+                if "الافتتاح" in label_m and (opening := dec(row_m[1])) is not None:
+                    break
+    except Exception:                                        # noqa: BLE001
+        opening = None
+    declared = dec(profile["identity"]["opening_default"]) or Decimal("0")
+    if opening is None:
+        opening = declared
+    else:
+        check("الافتتاح المقروء من الورق يوافق قيمة العقد",
+              abs(opening - declared) <= Decimal("0.005"),
+              f"الورق {opening} · العقد {declared}")
     walk = identity(opening, sd, sc)
     closing = None
     # الإقفال المطبوع: من سطر الملخص (رقم الورق) — لا من حسابنا
