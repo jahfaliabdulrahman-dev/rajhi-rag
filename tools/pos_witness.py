@@ -39,7 +39,8 @@ def make_ink(arr: np.ndarray):
     return ink
 
 
-def witness_page(png: Path, max_tokens: int = MAX_TOKENS) -> dict:
+def witness_page(png: Path, max_tokens: int = MAX_TOKENS,
+                 prev_balance: float | None = None) -> dict:
     stats: dict = {}
     raw = chat_vlm_image(base64.b64encode(png.read_bytes()).decode(), PROMPT,
                          max_tokens=max_tokens, stats=stats)
@@ -58,7 +59,7 @@ def witness_page(png: Path, max_tokens: int = MAX_TOKENS) -> dict:
         row["column"] = assign_column(row["x"], cols)
         if after >= INK_MIN:
             on_ink += 1
-    verdict = compare_with_chain(rows, cols)
+    verdict = compare_with_chain(rows, cols, prev_balance)
     return {"page": int(png.stem.split("-")[1]), "cols": cols, "rows": rows,
             "on_ink": on_ink, "ink_min": INK_MIN, **verdict,
             "cost": float(Decimal(str(stats.get("cost") or 0))),
@@ -71,6 +72,10 @@ def main() -> int:
     ap.add_argument("--pages", required=True, help="أرقام صفحات مفصولة بفواصل")
     ap.add_argument("--out", default="data/local_sample/pos_witness.json")
     ap.add_argument("--max-cost", type=float, default=0.30)
+    # رصيد الصفحة السابقة: بدون تمريره يُستثنى **أوّل صفّ من كل صفحة** من شاهد
+    # السلسلة (٦٢٩ صفّاً). ولا يُخمَّن: يُمرَّر صراحةً من رصيد الصفحة السابقة كما
+    # طُبع في الملف، ويُعلن في المخرَج أيّ صفوفٍ قُوبلت.
+    ap.add_argument("--prev-balance", type=float, default=None)
     args = ap.parse_args()
 
     pages = [int(p) for p in args.pages.replace(" ", "").split(",") if p]
@@ -82,7 +87,7 @@ def main() -> int:
             print(f"ص{page}: لا صورة", flush=True)
             continue
         try:
-            res = witness_page(png)
+            res = witness_page(png, prev_balance=args.prev_balance)
         except Exception as exc:                              # noqa: BLE001
             print(f"ص{page}: عطل — {str(exc)[:70]}", flush=True)
             continue
