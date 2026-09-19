@@ -805,7 +805,8 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
         ["الصفحة (ملف)", "رقم الصفحة المطبوع", "صفوف معتمدة", "إجماليات الصفحة",
          "عدد الشكوك", "المصدر", "زمن القراءة (ملّي ث)", "تناقض داخلي",
          "استُدركت آلياً", "أُعيدت قراءتها", "خطأ قراءة"],
-        [[p, e.get("page_no") or _page_no_label(p), e.get("rows"),
+        [[p, (f"{e['page_no']} — مقروء من الورق" if e.get("page_no")
+             else _page_no_label(p)), e.get("rows"),
           page_verdict(e, max(per_page) if per_page else 0),
           e.get("suspects"), e.get("origin"), e.get("ms_read"), bool(e.get("paradox")),
           (flags.get(p) or {}).get("recovered"), (flags.get(p) or {}).get("reread"),
