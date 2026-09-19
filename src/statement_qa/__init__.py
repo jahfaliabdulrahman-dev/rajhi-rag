@@ -10,9 +10,31 @@ Architecture (3 layers):
   3. understand: LangChain RAG answers ONLY from retrieved statement chunks
 """
 
-from statement_qa.extract_text import read_statement
-from statement_qa.parser import parse_text
-from statement_qa.verifier import verify_statement
+from __future__ import annotations
 
-__all__ = ["read_statement", "parse_text", "verify_statement"]
+import importlib
+from typing import Any
+
+# **الأسماء العامة تُستورد عند الطلب لا عند استيراد الحزمة.**
+# كان الاستيراد المتلهّف يُلزم **كل** مستهلك للحزمة بـ`pdfplumber` (عبر
+# `extract_text`) و`polars` — حتى من يريد `gap_ledger` وحده. والثمن ظهر عملياً:
+# مجموعة CI الخفيفة سقطت عند جمع `tests/test_gate_bites.py` بـ
+# `ModuleNotFoundError: pdfplumber`، وهو فحص لا يقرأ PDF ولا يستحقّ تبعيةً ثقيلة.
+_LAZY: dict[str, str] = {
+    "read_statement": "statement_qa.extract_text",
+    "parse_text": "statement_qa.parser",
+    "verify_statement": "statement_qa.verifier",
+}
+
+__all__ = list(_LAZY)
 __version__ = "0.3.0"
+
+
+def __getattr__(name: str) -> Any:
+    """يستورد الاسم عند أول طلب (PEP 562) ثم يخزّنه في مساحة الحزمة."""
+    module = _LAZY.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(importlib.import_module(module), name)
+    globals()[name] = value
+    return value

@@ -21,12 +21,24 @@ LIGHT_TOOLS = ("health_monitor", "health_check", "publish_guard",
 
 
 def _app_stack_available() -> bool:
-    """Can the application package import on this machine at all?
+    """Can the application stack import on this machine at all?
 
     CI installs pytest and nothing else — no pdfplumber, no torch — so the
     import check is a LOCAL gate, and it says so instead of failing there. The
     compile test above still runs everywhere: it needs no dependency at all.
+
+    **The probe checks the heavy dependencies themselves, not `import
+    statement_qa`.** The package became lazy (PEP 562), so a light environment
+    imports it successfully while the tools under test still need pdfplumber,
+    PIL and langchain — and a probe on the package would open this gate in the
+    one place it must stay shut (measured: the light suite went red with
+    `No module named 'PIL'` the moment that happened).
     """
+    import importlib.util
+
+    heavy = ("pdfplumber", "PIL", "langchain")
+    if not all(importlib.util.find_spec(mod) is not None for mod in heavy):
+        return False
     try:
         import statement_qa  # noqa: F401
 
