@@ -60,6 +60,23 @@ ARABIC_VERDICT = {
     "gate_rejected": "لم تُقرأ (رفضتها بوابة جودة المسح)",
 }
 
+
+def page_verdict(entry: dict, last_page: int) -> str:
+    """حكم الصفحة بلفظه — ولا يُوهم بعيبٍ حيث الورق سليم.
+
+    صفحةٌ **بلا حركات** ليست صفحة عمليات ناقصة الإجماليات: هي ملخّص الحساب
+    (الصفحة الختامية بعد آخر حركة) أو ورقة بيضاء في الأصل. وتسميتها «لا سطر
+    إجماليات مطبوع» تُقرأ عيباً في الورق أو في قراءتنا، وكلاهما غير صحيح.
+    """
+    if not (entry.get("rows") or 0):
+        if entry.get("footer") == "gap":
+            return ARABIC_VERDICT["gap"]
+        if entry.get("page") == last_page:
+            return "ملخص الحساب — صفحة ختامية بلا حركات"
+        return "صفحة بلا حركات (ليست صفحة عمليات)"
+    val = str(entry.get("footer") or "")
+    return ARABIC_VERDICT.get(val, val)
+
 # ————— التواريخ: ثلاثة أصناف لا واحد —————
 # The reader returned the printed date as it found it, and the paper (and the
 # model) mixed digit sets: Arabic-Indic ٠-٩ (U+0660), **Extended** Arabic-Indic
@@ -374,7 +391,8 @@ def summary_sheet(facts: dict, rows: list[dict], report: dict) -> list[list]:
          if facts["smallest"] else ""],
         ["", "", ""],
         ["حالة الإثبات", "", ""],
-        ["صفحات لا سطر إجماليات لها", facts["verdicts"].get("absent", 0), "منها أوراق بيضاء فعلاً"],
+        ["صفحات بلا حركات أو بلا سطر إجماليات", facts["verdicts"].get("absent", 0),
+         "منها ملخّص الحساب (الصفحة الختامية) وأوراق بيضاء فعلاً — ليست صفحات عمليات"],
         ["صفحات غير قابلة للتحقق", facts["verdicts"].get("unchecked", 0), "جوارها بلا إطار"],
         ["فجوات إطارات", facts["verdicts"].get("gap", 0), "أوراق غائبة من المسح نفسه"],
         ["", "", ""],
@@ -409,7 +427,7 @@ def question_set(rows: list[dict], facts: dict, per_page: dict,
         f"و{facts['nontxn_rows']} سطراً ليس حركة")
     add(2, "كم عدد الصفحات ولم تُقبل منها كم صفحة؟",
         f"{facts['pages']} صفحة · {facts['ok_pages']} مطابقة · "
-        f"{facts['verdicts'].get('absent', 0)} بلا سطر إجماليات · "
+        f"{facts['verdicts'].get('absent', 0)} بلا حركات أو بلا إجماليات · "
         f"{facts['verdicts'].get('unchecked', 0)} غير قابلة للتحقق",
         "حكم المحكَّم لكل صفحة", "ورقة «التحقق لكل صفحة»")
     add(3, "ما إجمالي المدين في الكشوف؟", facts["printed_debits"] or "-",
@@ -705,7 +723,8 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
         ["الصفحة (ملف)", "رقم الصفحة المطبوع", "صفوف معتمدة", "إجماليات الصفحة",
          "عدد الشكوك", "المصدر", "زمن القراءة (ملّي ث)", "تناقض داخلي",
          "استُدركت آلياً", "أُعيدت قراءتها", "خطأ قراءة"],
-        [[p, e.get("page_no"), e.get("rows"), ARABIC_VERDICT.get(e.get("footer"), e.get("footer")),
+        [[p, e.get("page_no"), e.get("rows"),
+          page_verdict(e, max(per_page) if per_page else 0),
           e.get("suspects"), e.get("origin"), e.get("ms_read"), bool(e.get("paradox")),
           (flags.get(p) or {}).get("recovered"), (flags.get(p) or {}).get("reread"),
           (flags.get(p) or {}).get("error")]
