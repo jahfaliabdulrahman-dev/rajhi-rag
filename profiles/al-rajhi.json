@@ -12,7 +12,7 @@
       "form": "YYYYMMDD",
       "gregorian_range": [1900, 2100],
       "inherit_from_neighbour": false,
-      "require_all_rows": false
+      "require_all_rows": true
     },
     "footer": {
       "role": "cumulative_printed_totals",

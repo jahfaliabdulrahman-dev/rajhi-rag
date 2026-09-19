@@ -196,7 +196,11 @@ def main() -> int:
           f"{len(contradictory)} صفّاً **من {len(txns)} حركة فُحصت**"
           + (f" · مثال ص{contradictory[0].get('الصفحة (ملف)')}" if contradictory else ""))
 
-    check("التواريخ: كل صفّ حركة له تاريخ", len(dated) == len(txns) or not dates_needed,
+    # ⚠️ كان `or not dates_needed` ⇒ الشرط مُعطَّل بالعقد (`require_all_rows: false`)
+    # فمرّ حذفُ تاريخٍ من حركة مثبتة والبوابة تطبع PASS برمز خروج صفر — **والفحص كان
+    # يقول العدد ويُظهر النقص ثم يمرّ**. فالقاعدة: `or` في شرط فحص = بابٌ خلفي،
+    # وإعلانُ العدد يكشف الميت بمفتاح خاطئ ولا يكشف الميت بشرطٍ مُعطَّل. صِنفان.
+    check("التواريخ: كل صفّ حركة له تاريخ", len(dated) == len(txns),
           f"{len(dated)}/{len(txns)} (الشرط الصارم: {dates_needed})")
     if txns:
         dmin = min(str(r["التاريخ (ميلادي)"]) for r in dated)
