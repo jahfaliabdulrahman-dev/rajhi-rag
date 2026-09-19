@@ -285,6 +285,10 @@ def load(run: Path) -> tuple[list[dict], dict, dict, dict]:
                                    or _row_date_source(row)),
                 "year": year,
                 "desc": row.get("desc"),
+                # ⚠️ بنية الكاش (تُقرأ قبل أي إصلاح يمسّها): المجلد `results/` يحمل
+                # ملفات `pg-NNN.json` وصفوفها تحت المفتاح **`raw_rows`** — لا `rows`.
+                # وقراءة المفتاح الخطأ تُرجع [] بصمت ⇒ إصلاحات «ناجحة» بلا صفّ واحد
+                # (وقع: ثلاث محاولات لتصحيح خطّ عمود «كما طُبعت» أنتجت صفراً).
                 "printed_movement": row.get("raw_movement") or row.get("movement"),
                 "printed_balance": row.get("raw_balance") or row.get("balance"),
                 "movement": row.get("movement"),
