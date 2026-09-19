@@ -35,12 +35,13 @@ jobs:
       # docs/claims.json and asserts the public documents still match it.
       - name: Public claims must match their derived snapshot
         run: python3 tools/render_claims.py --check
-      - name: Lightweight suite (no ML deps — compile, lock, public claims)
+      - name: Lightweight suite (no ML deps — compile, lock, public claims, gate injection)
         run: |
-          python3 -m pip install --quiet pytest
+          python3 -m pip install --quiet pytest openpyxl==3.1.5
           python3 -m pytest tests/test_compile_all.py \
                            tests/test_requirements_lock.py \
-                           tests/test_public_claims.py -q
+                           tests/test_public_claims.py \
+                           tests/test_gate_bites.py -q
       - name: Real-data files must never be tracked
         run: |
           if git ls-files | grep -q '^data/local_sample/'; then
