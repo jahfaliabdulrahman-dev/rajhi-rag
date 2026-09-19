@@ -201,6 +201,21 @@ def test_an_anchor_declares_the_paper_and_a_chain_row_declares_the_chain():
     assert _assertion_source("سطر ملخّص/افتتاحي — ليست حركة", {}) == ""
 
 
+def test_the_guide_sheet_declares_what_the_file_does_not_witness(tmp_path):
+    """نصف الحارس الثاني: ما لا يشهد به الملف يُكتب في الملف، ويُحرَس بالاختبار.
+
+    الملف يشهد على نقل الصور وحسابها، ولا يشهد أن الصور صادرة عن المصرف — ولا
+    شاهد في المنظومة يمسّ أصل الورق. سطرٌ يُحذف بسهولة إن لم يحرسه اختبار.
+    """
+    out = tmp_path / "export.xlsx"
+    build(_synthetic_run(tmp_path), out, None)
+    ws = load_workbook(out)["كيف تُقرأ هذه الأوراق"]
+    notes = {str(r[0]): str(r[1]) for r in ws.iter_rows(min_row=2, values_only=True) if r[0]}
+    assert "ما لا يشهد به هذا الملف" in notes
+    assert "لا يشهد أن الصور صادرة عن المصرف" in notes["ما لا يشهد به هذا الملف"]
+    assert "مصدر إثبات كل حركة" in notes, "العمود الجديد يُشرح في ورقة القراءة"
+
+
 def test_markdown_renderer_keeps_rtl_and_tables():
     html_out = render("# عنوان\n\n| أ | ب |\n|---|---|\n| ١ | ٢ |\n", "عنوان")
     assert 'dir="rtl"' in html_out and 'lang="ar"' in html_out
