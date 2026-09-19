@@ -70,6 +70,25 @@ def _row_date_source(row: dict) -> str:
         return "unknown"
 
 
+def _page_no_label(page: int) -> str | None:
+    """رقم الصفحة المطبوع: مقروء إن قُرئ، وإلا مشتقّ بالحساب — والوسم يمنع الالتباس.
+
+    الترقيم يتسلسل (وتنقص أرقامٌ عند الأوراق الغائبة)، فمن ٥٢ مرساة مقروءة يُشتقّ
+    الباقي بلا نموذج. والخريطة لم تكن موصولة: الملف يعلن ١٧ صفحة ويصمت عن ٦١٢.
+    """
+    try:
+        path = (Path(__file__).resolve().parent.parent
+                / "data" / "local_sample" / "page_numbers_map.json")
+        info = (json.loads(path.read_text(encoding="utf-8")) or {}).get(str(page))
+        if not info:
+            return None
+        src = {"read": "مقروء من الورق", "derived": "مشتقّ بالحساب من مرساة",
+               "extrapolated": "ممتدّ — أضعف شهادة"}
+        return f"{info['printed']} — {src.get(info.get('source'), info.get('source'))}"
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
 def page_verdict(entry: dict, last_page: int) -> str:
     """حكم الصفحة بلفظه — ولا يُوهم بعيبٍ حيث الورق سليم.
 
@@ -771,7 +790,7 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
         ["الصفحة (ملف)", "رقم الصفحة المطبوع", "صفوف معتمدة", "إجماليات الصفحة",
          "عدد الشكوك", "المصدر", "زمن القراءة (ملّي ث)", "تناقض داخلي",
          "استُدركت آلياً", "أُعيدت قراءتها", "خطأ قراءة"],
-        [[p, e.get("page_no"), e.get("rows"),
+        [[p, e.get("page_no") or _page_no_label(p), e.get("rows"),
           page_verdict(e, max(per_page) if per_page else 0),
           e.get("suspects"), e.get("origin"), e.get("ms_read"), bool(e.get("paradox")),
           (flags.get(p) or {}).get("recovered"), (flags.get(p) or {}).get("reread"),
