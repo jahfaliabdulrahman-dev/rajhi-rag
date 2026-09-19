@@ -147,6 +147,29 @@ def test_xlsx_names_the_unproven_page_with_its_reason(tmp_path):
     assert "لا سطر إجماليات مطبوع" in str(rows[0][3])
 
 
+def test_a_scan_gap_names_the_missing_printed_sheets_not_a_file_page(tmp_path):
+    """فجوة المسح لا تتّهم صفحةً في الملف — لأن الموقع ليس هوية.
+
+    بنية المُنتِج `(موقع_قبل, مطبوع_قبل, موقع_بعد, مطبوع_بعد, [أرقام غائبة])`:
+    الموقع 426 في الملف هو المطبوعة 425 وهي **مقروءة ومحسوبة**، فوضعُ الموقع في
+    عمود «الصفحة (ملف)» يتّهم صفحةً موجودة، ووضعُه في عمود «رقم الصفحة» يُخفي
+    أيّ الأوراق غاب. القاعدة: العمود الأول فارغ، والثاني يحمل الغائب المطبوع.
+    """
+    run = _synthetic_run(tmp_path)
+    report = json.loads((run / "slice_report.json").read_text(encoding="utf-8"))
+    report["page_numbers"] = {"gaps": [[1, 0, 2, 3, [1, 2]]]}
+    (run / "slice_report.json").write_text(json.dumps(report, ensure_ascii=False),
+                                          encoding="utf-8")
+    out = tmp_path / "export.xlsx"
+    build(run, out, None)
+    rows = [[c.value for c in r]
+            for r in load_workbook(out)["ما لم يُثبت"].iter_rows(min_row=2)]
+    gap = next(r for r in rows if "فجوة مسح" in str(r[3]))
+    assert gap[0] is None, "لا صفحة ملف تُتَّهم بالفجوة"
+    assert gap[1] == "1 · 2", "أرقام الأوراق الغائبة وحدها"
+    assert "بين الملفين 1 و2" in str(gap[3])
+
+
 def test_markdown_renderer_keeps_rtl_and_tables():
     html_out = render("# عنوان\n\n| أ | ب |\n|---|---|\n| ١ | ٢ |\n", "عنوان")
     assert 'dir="rtl"' in html_out and 'lang="ar"' in html_out

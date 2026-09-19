@@ -869,16 +869,26 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
             disk = int("".join(ch for ch in name if ch.isdigit()) or 0)
             unproven.append([disk, None, 0, "صورة فارغة (لا حبر يُقرأ)",
                              "من بوابة جودة المسح — بلا استدعاء"])
-    # فجوات المسح: كل عنصر [صفحة, سياق..., [أرقام الأوراق الغائبة]] — تُقرأ كما هي
-    # ولا تُفسَّر: البنية من المُنتِج، والتصدير لا يعيد اختراعها.
+    # فجوات المسح: البنية من المُنتِج `(موقع_قبل, مطبوع_قبل, موقع_بعد, مطبوع_بعد,
+    # [أرقام غائبة])` — تُقرأ كما هي ولا تُعاد اختراعها. و**الموقع ليس هوية**:
+    # الموقع 426 في الملف هو المطبوعة 425 وهي مقروءة (7 صفوف) ومحسوبة في
+    # المطابقات ⇒ لا صفحةَ ملفٍ تُتَّهم بالفجوة. فالعمود «الصفحة (ملف)» يبقى
+    # **فارغاً** (لا صفحة مفقودة في الملف)، وعمود «رقم الصفحة» يحمل أرقام
+    # الأوراق الغائبة المطبوعة وحدها، والسبب يسمّي الملفين المحيطين بالفجوة.
+    # (أمسكه المدقّق الخارجي: رقم ورقة مطبوعة في عمود عنوانه رقم صفحة ملف.)
     for gap in ((report.get("page_numbers") or {}).get("gaps")) or []:
         if not isinstance(gap, list) or not gap:
             continue
         missing = gap[-1] if isinstance(gap[-1], list) else None
-        page = next((x for x in gap if isinstance(x, int)), None)
-        unproven.append([page, page, None,
-                         "فجوة مسح: ورقة غائبة من المسح" +
-                         (f" — الأوراق الغائبة: {missing}" if missing else ""),
+        pos_before = gap[0] if isinstance(gap[0], int) else None
+        pos_after = gap[2] if len(gap) > 2 and isinstance(gap[2], int) else None
+        around = (f" — بين الملفين {pos_before} و{pos_after}"
+                  if pos_before is not None and pos_after is not None else "")
+        unproven.append([None,
+                         " · ".join(str(m) for m in missing) if missing else None,
+                         None,
+                         "فجوة مسح: ورقة غائبة من المسح" + around +
+                         (f" (الأوراق الغائبة: {missing})" if missing else ""),
                          "من مسح الترقيم الميكانيكي (بلا استدعاء)"])
 
     # مشاكل على مستوى **الصفّ** لا الصفحة: تُدرج في هذه الورقة لأنها عقد الأمانة
