@@ -256,7 +256,8 @@ def load(run: Path) -> tuple[list[dict], dict, dict, dict]:
                     # لكن فرق الرصيد يبتلع ورقةً غائبة فلا تُقفله السلسلة. ووسمُها
                     # «ليس حركة» كان خطأً يُنكر حركةً مبصوطة على الورق.
                     "حركة — مرساة بعد ورقة غائبة (المبلغ مطبوع ولا تُقفله السلسلة)"
-                    if (is_movement and der.get("ok") is False)
+                    if (is_movement and der.get("opening")
+                        and _num0(row.get("movement")))
                     else (_row_state(der) if is_movement
                           else "سطر ملخّص/افتتاحي — ليست حركة")),
                 "shift": _shift_suspect(row, der),
