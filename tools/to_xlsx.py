@@ -769,7 +769,13 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
         else:
             label = f"قيد فجوة مسح غير مُثبت — {g['note']}"
         gap_rows.append([
-            g["before_page"], None, None, None, None, None, None, None, label,
+            g["before_page"], None,
+            # **رقم الصفحة المطبوع**: لصفّ القيد هو أرقام الأوراق **الغائبة** المطبوعة
+            # (فالقيد يمثّل ما بينها) — والعمود كان فارغاً، فصار يحملها. وفائدته
+            # مباشرة: فحص البوابة يُسمّى بها («قيد ص426 · 427») لا بموقع الملف،
+            # والموقع ليس هوية (قاعدة أمسكها مدقّق خارجي في ورقة «ما لم يُثبت»).
+            " · ".join(str(m) for m in (g["missing_sheets"] or [])) or None,
+            None, None, None, None, None, label,
             None, None,
             "الورق المطبوع: فارق التذييل التراكمي بين طرفَي الفجوة "
             "(لا سلسلة رصيد تُقفله — الأوراق بينهما غائبة)",

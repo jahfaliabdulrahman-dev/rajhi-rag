@@ -365,6 +365,35 @@ def test_every_gate_check_has_a_poison(gate_fixture):
         "فحوص بلا حالة حقن (أضف سمّاً في POISONS): " + " · ".join(uncovered))
 
 
+def test_no_check_name_carries_an_unresolved_placeholder(gate_fixture):
+    """الأسمام تحرس **حياة** الفحص، ولا تحرس **صحّة اسمه** — فالاسم يُحرَس هنا.
+
+    دفعَ إليها مدقّق خارجي: أفرغ «الصفحة (ملف)» لصفّ القيد، فطبع البديلُ الخاطئ
+    (`g.get("رقم الصفحة")` — والعمود اسمه «رقم الصفحة المطبوع») اسماً هو
+    `قيد ص?`. ولم يمسكه سمّ، لأن السمّ يطابق بالبادئة. فالحدّ البنيوي يبقى (لا
+    اختبار يقرأ النية)، لكن **موضعَ علامةٍ لم تُستبدل** يُحرَس كصنف.
+    """
+    _run, _clean, passed = gate_fixture
+    bad = [n for n in passed if "?" in n or "None" in n or "{" in n or "}" in n]
+    assert not bad, f"أسماء فحوص فيها علامة لم تُستبدل: {bad}"
+
+
+def test_the_gap_check_names_the_printed_sheets_not_the_file_position(tmp_path, gate_fixture):
+    """القيد يُسمّى بورقه: «قيد ص3» — لا بموقع الملف ولا بعلامةٍ بديلة."""
+    run, clean, passed = gate_fixture
+    gap = next(n for n in passed if n.startswith("قيد ص"))
+    assert gap == "قيد ص3 له مقدارا مدين ودائن", gap
+    # وحتى لو أُفرغ موقع الملف، يبقى الاسم على الورق (وهو البديل الآخر في الكود).
+    poisoned = tmp_path / "no-position.xlsx"
+    shutil.copy(clean, poisoned)
+    wb = load_workbook(poisoned)
+    i, _ = _gap_row(wb)
+    wb["الحركات"].cell(row=i, column=_col(wb["الحركات"], "الصفحة (ملف)")).value = None
+    wb.save(poisoned)
+    _code, _passed, fails = _run_gate(run, poisoned)
+    assert all("?" not in f for f in fails), fails
+
+
 @pytest.mark.parametrize("rule", POISONS, ids=[r[0] for r in POISONS])
 def test_a_poison_trips_its_named_check(rule, gate_fixture, tmp_path):
     """الشرط على **اسم الفحص** لا على الفشل وحده: التسميم قد يُسقط جارَه أيضاً."""
