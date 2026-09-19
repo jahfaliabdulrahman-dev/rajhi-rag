@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -322,7 +323,21 @@ def _num(value) -> float | None:
     """القيمة كما فُهمت رقماً — أو None. تُستعمل للفرز والجمع فقط."""
     if value is None:
         return None
-    text = to_ascii_digits(str(value)).replace(",", "").replace("٫", ".").strip()
+    # **عيب قاسه فحص البوابة**: الورق يكتب الفاصلة العربية ``٣٠٠,٠٠`` بمعنى **عشري**
+    # لا آلاف، وكان ``replace(",", "")`` يقرؤها ٣٠٠٠٠ ⇒ ٣٨٥ «مخالفة» كاذبة في فحص
+    # التناقض (الفرق ٤٩٥٠ = 50.00 − 5000 بالضبط). القاعدة: في النصّ العربي-الهندي
+    # فاصلةٌ يتبعها رقمان = عشرية؛ وفي اللاتيني تبقى آلافاً (``1,234.56``).
+    raw = str(value).strip()
+    arabic = any("\u0660" <= ch <= "\u0669" or "\u06f0" <= ch <= "\u06f9" for ch in raw)
+    text = to_ascii_digits(raw)
+    if arabic and re.fullmatch(r"[0-9,]*,[0-9]{2}", text):
+        # الفاصلة **الأخيرة** في النصّ العربي-الهندي عشرية، وما قبلها آلاف:
+        # ``9001.00`` = 9001.00 (قاسها الفحص حيّاً: الشكل الثاني للعيب نفسه).
+        head_, _, tail_ = text.rpartition(",")
+        text = head_.replace(",", "") + "." + tail_
+    else:
+        text = text.replace(",", "")
+    text = text.replace("٫", ".").strip()
     try:
         return float(text)
     except ValueError:

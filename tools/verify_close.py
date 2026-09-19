@@ -176,18 +176,25 @@ def main() -> int:
     import sys as _sys
     _sys.path.insert(0, str(PROJ / "tools"))
     from to_xlsx import _num as _to_num
-    contradictory = [
-        r for r in rows
-        if str(r.get("row_state") or "").startswith("حركة مثبتة")
-        and _to_num(r.get("printed_movement")) is not None
-        and _to_num(r.get("derived_movement")) is not None
-        and abs(_to_num(r["printed_movement"]) - _to_num(r["derived_movement"]))
-        > Decimal("0.005")
-    ]
+    # ⚠️ الدرس: كُتب أولاً بأسماء الباني الداخلية (row_state/printed_movement) بينما
+    # `rows` تقرأ **عناوين الأعمدة العربية** — فصار كل .get() يُرجع None، وعبر المرشِّح
+    # صفر صفّ، وطبعت البوابة PASS وهي لا تحرس. والفحص الميت أسوأ من الغائب: يُكتب في
+    # الوثيقة أنه يحرس. والقاعدة: يُثبَت **بحقن تناقض** — والفارق أن الفحص الحيّ يقول
+    # كم صفّاً فحص («من N»)، فتمييزُه عن الميت لا يحتاج قراءة كود.
+    contradictory = []
+    for r in rows:
+        if not str(r.get("حكم السلسلة على الصفّ") or "").startswith("حركة مثبتة"):
+            continue
+        printed = _to_num(r.get("الحركة كما طُبعت"))
+        amount = dec(r.get("مدين")) or dec(r.get("دائن"))
+        if printed is None or amount is None:
+            continue
+        if abs(Decimal(str(printed)) - amount) > Decimal("0.005"):
+            contradictory.append(r)
     check("لا تناقض بين «الحركة كما طُبعت» و«المثبتة بالسلسلة»",
           not contradictory,
-          f"{len(contradictory)} صفّاً" + (f" · مثال ص{contradictory[0]['page']}"
-                                           if contradictory else ""))
+          f"{len(contradictory)} صفّاً **من {len(txns)} حركة فُحصت**"
+          + (f" · مثال ص{contradictory[0].get('الصفحة (ملف)')}" if contradictory else ""))
 
     check("التواريخ: كل صفّ حركة له تاريخ", len(dated) == len(txns) or not dates_needed,
           f"{len(dated)}/{len(txns)} (الشرط الصارم: {dates_needed})")
