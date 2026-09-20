@@ -265,11 +265,15 @@ def _weld_adjacent_literals(line: str) -> str:
     return line
 
 
-HEX_CHARS = "0123456789abcdefABCDEF"
-HEX_LETTERS = "abcdefABCDEF"
+# **حروفٌ صغيرة فقط** — والقياس هو الذي فرضها: بصمةُ sha256 تُكتب صغيرةً،
+# والمعرّفاتُ التي نطاردها (IBAN · بطاقة · مرجع مُبطَّن) تُكتب **كبيرة** أو أرقاماً
+# لا غير. فلو قبل العُرف الحروفَ الكبيرة لمرّ IBAN كامل تحت اسم «بصمة» — وهو ما
+# أمسكه اختبارُ `test_an_upper_case_iban_is_still_blocked` بعد أن كان يمرّ.
+HEX_CHARS = "0123456789abcdef"
+HEX_LETTERS = "abcdef"
 
 
-def _in_hex_token(src: str, match, min_len: int = 24) -> bool:
+def _in_hex_token(src: str, match, min_len: int = 16) -> bool:
     """A ten-digit run inside a long hexadecimal token is a hash, not an account.
 
     Both auditors hit this: a commit sha blocked the message that documented it,
@@ -283,6 +287,11 @@ def _in_hex_token(src: str, match, min_len: int = 24) -> bool:
     number, a card, an IBAN's digits and a padded reference never do. Requiring
     a letter keeps the sha exemption and closes the hole, and it fails SAFE: an
     all-digit token is scanned, not waived.
+
+    و`min_len` نزل من 24 إلى **16**: القياس أراه — ملفُّ دليلٍ يحمل بصماتِ صفحاتٍ
+    **مقتطعة** (16 محرفاً) حُجب ثلاث مرات، فصار الدليل يُحجب **لأنه دليل**. وشرطُ
+    الحرف اللاتيني (a–f صغيرة) هو الفاصل الحقيقي: الحسابُ والبطاقة أرقامٌ بلا حروف،
+    والـIBAN بحروفٍ **كبيرة** — فالبصمةُ الصغيرة تمرّ والمعرّفُ لا.
     """
     a = match.start()
     while a > 0 and src[a - 1] in HEX_CHARS:

@@ -214,3 +214,32 @@ def test_commit_messages_are_wired_into_the_scan():
     assert "def scan_messages" in src
     assert "git-msg/" in src
     assert "scan_messages(findings, entries)" in src
+
+
+# ── البصمةُ المقتطعة ليست حساباً (عطلٌ في الحارس نفسه، أُغلق بقياس) ──────────
+# ملفُّ دليلٍ يحمل بصماتِ صفحاتٍ **مقتطعة** (16 محرفاً) حُجب ثلاثاً: الدليلُ يُحجب
+# **لأنه دليل**. والفاصل الحقيقي هو الحرف اللاتيني الصغير (a–f) لا الطول وحده —
+# فالحسابُ والبطاقة أرقامٌ بلا حروف، والـIBAN بحروفٍ كبيرة.
+
+def _scan_one(text: str) -> list[tuple[str, str]]:
+    findings: list[tuple[str, str]] = []
+    pg._scan_text("docs/evidence/probe.json", text, "tree", findings, [])
+    return [(f[0], f[1]) for f in findings]
+
+
+def test_a_truncated_digest_with_letters_is_evidence_not_an_account():
+    line = f' "sha256": "{_run("4", 6)}ab{_run("9", 8)}c{-0 if False else ""}"'
+    assert not [r for r in _scan_one(line) if r[1] == "long_digits"], \
+        "بصمةٌ مقتطعة (حروف a–f) يجب ألا تُحجب"
+
+
+def test_an_all_digit_run_is_still_blocked_however_long():
+    line = f' "account": "{FAKE_ACCOUNT}"'
+    assert [r for r in _scan_one(line) if r[1] == "long_digits"], \
+        "رقمٌ كلُّه أرقام يبقى محجوباً"
+
+
+def test_an_upper_case_iban_is_still_blocked():
+    line = ' "iban": "SA' + _run("8", 20) + '6129"'
+    assert [r for r in _scan_one(line) if r[1] == "long_digits"], \
+        "IBAN بحروفٍ كبيرة يبقى محجوباً"
