@@ -50,5 +50,11 @@
     "closing": null,
     "date_min": null,
     "date_max": null
+  },
+  "reasoning": {
+    "_note": "سقف الإعادات قرارُ عقدٍ لا ثابتٌ في الكود: الافتراضي المثبَّت (langgraph 1.2.11) = 10007 خطوة ⇒ «إعادة تلقائية» بلا ميزانية معلنة. القيمة تُقرأ من العقد حين يُبنى مسار السؤال.",
+    "retry_budget": 3,
+    "recursion_limit": 12,
+    "measured_default_without_cap": 10007
   }
 }

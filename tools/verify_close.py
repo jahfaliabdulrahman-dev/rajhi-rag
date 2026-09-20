@@ -285,6 +285,23 @@ def main() -> int:
             continue
         check(f"الملخص يذكر «{needle}»", needle in joined)
     check("الملخص يعلن حكم الهوية", "مطابق ✓" in joined)
+    # ── FM-1: الكوربوس يُعلن بمن قُرئ ────────────────────────────────────────
+    # كان الرقم يُنشر بلا نسب: كوربوسٌ بنى نصفه قارئٌ ونصفه آخر يجمع رقمين تحت
+    # اسمٍ واحد، ولا شيء في الملف يقول ذلك (D=5: لا رصد). فصار الإعلان فحصاً:
+    # سطرٌ يسمّي (النموذج · التلقينة)، وسطرٌ يعدّ ما قُرئ قبل وجود الختم.
+    def _summary_row_value(label: str):
+        for r in wb["الملخص"].iter_rows(min_row=2, values_only=True):
+            if str(r[0] or "").startswith(label):
+                return r[1]
+        return None
+
+    identity_value = _summary_row_value("هوية القارئ")
+    check("الملخص يعلن هوية القارئ (نموذج · تلقينة)",
+          bool(identity_value) and "غير مذكور" not in str(identity_value),
+          f"{identity_value}")
+    unstamped_pages = _summary_row_value("صفحات بلا ختم قارئ")
+    check("الملخص يعدّ الصفحات بلا ختم قارئ", unstamped_pages is not None,
+          f"{unstamped_pages}")
     unproven = wb["ما لم يُثبت"]
     check("ورقة «ما لم يُثبت» قائمة وفيها سطور",
           unproven.max_row >= 2, f"{unproven.max_row - 1} بنداً")

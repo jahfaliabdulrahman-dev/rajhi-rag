@@ -88,6 +88,15 @@ def _make_run(base: Path) -> Path:
         "slice": {"first": 1, "count": 4, "pages_done": 4},
         "totals": {"rows": 5, "clean": 5, "clean_ratio": 1.0},
         "usage": {"cost": 0.0, "calls": 4},
+        # هوية القارئ (FM-1): العيّنة تُولَد بما تُولَد به التشغيلة الحقيقية، وإلا
+        # صار الفحص الجديد يسقط على ملفٍّ سليم — والفحص الذي يسقط على السليم
+        # يُعطَّل، فيعود البابُ الذي أُغلق.
+        "reader_stamp": {"model": "test-model", "prompt_version": "v2"},
+        "corpus_provenance": {"reader": {"model": "test-model",
+                                         "prompt_version": "v2"},
+                              "legacy_unstamped_pages": 0,
+                              "stamp_conflict_pages": 0,
+                              "declaration": "كوربوسٌ بنسبٍ واحد"},
         "footer": {"ok": 3, "mismatch": 0, "absent": 1, "unchecked": 0, "gap": 0},
         "page_numbers": {"gaps": [[2, 2, 3, 4, [3]]], "duplicates": {}, "backwards": {}},
         "per_page": [
@@ -278,6 +287,26 @@ def p_date_removed(wb):
     ws.cell(row=i, column=_col(ws, "التاريخ (ميلادي)")).value = None
 
 
+def p_reader_identity_blank(wb):
+    """إفراغ هوية القارئ ⇒ رقمٌ يُنشر بلا نسب (FM-1: كان هذا الباب مفتوحاً)."""
+    ws = wb["الملخص"]
+    for i, values in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if str(values[0] or "").startswith("هوية القارئ"):
+            ws.cell(row=i, column=2).value = None
+            return
+    raise AssertionError("لا سطر «هوية القارئ» في العيّنة")
+
+
+def p_unstamped_row_removed(wb):
+    """حذف سطر «صفحات بلا ختم قارئ» ⇒ يُسكَت عن الصفحات التي قُرئت بلا ختم."""
+    ws = wb["الملخص"]
+    for i, values in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if str(values[0] or "").startswith("صفحات بلا ختم قارئ"):
+            ws.delete_rows(i, 1)
+            return
+    raise AssertionError("لا سطر «صفحات بلا ختم قارئ» في العيّنة")
+
+
 def p_anchor_date_removed(wb):
     """مرساةٌ تفقد تاريخها.
 
@@ -352,6 +381,10 @@ POISONS: list[tuple[str, str, Callable[[Workbook], None]]] = [
     ("الملخص يذكر «الإقفال الحسابي", "تغيير وسم الإقفال", p_summary_identity_label),
     ("الملخص يذكر «قيود الفجوة»", "تغيير وسم قيود الفجوة", p_summary_gap_label),
     ("الملخص يذكر «حكم الهوية»", "تغيير وسم حكم الهوية", p_summary_verdict_label),
+    ("الملخص يعلن هوية القارئ", "إفراغ هوية القارئ (نموذج · تلقينة)",
+     p_reader_identity_blank),
+    ("الملخص يعدّ الصفحات بلا ختم", "حذف سطر الصفحات بلا ختم قارئ",
+     p_unstamped_row_removed),
     ("الملخص يعلن حكم الهوية", "قلب قيمة الحكم", p_summary_verdict_value),
     ("ورقة «ما لم يُثبت» قائمة", "حذف سطور الورقة", p_unproven_rows_cleared),
 ]

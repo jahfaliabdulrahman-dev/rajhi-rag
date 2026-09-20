@@ -49,7 +49,7 @@ from statement_qa.ordering import (  # noqa: E402
     summarize_page_numbers,
 )
 from statement_qa.vlm_reader import (  # noqa: E402
-    chain_derive, read_rows_vlm, recover_anchor,
+    chain_derive, read_rows_vlm, reader_stamp, recover_anchor, stamp_conflict,
 )
 
 DEFAULT_SOURCE = None  # resolved at startup: --source, else a LOCAL pointer file
@@ -260,6 +260,11 @@ def main() -> None:
                    "cost": 0.0}
     stop_reason = None
     per_page = []
+    # هوية القارئ لهذه الجولة (FMEA FM-1): تُختم بها كل نقطة فحص، ويُقارَن بها
+    # ختمُ النقاط عند الاستئناف. والقديم بلا ختم **يُعلن بالعدّ** لا يُعاد دفعه.
+    read_stamp = reader_stamp()
+    legacy_unstamped = 0
+    stamp_conflict_pages = 0
     # حُكّام الفوتر لكل صفحة (يستهلكه `format_effects` في التقرير). كان الاسم
     # مستعملاً بلا تعريف ⇒ كل تشغيل **مدفوع** يموت بـNameError **بعد** إنفاق
     # كامل الكلفة وقبل كتابة `slice_report.json`: عمل مدفوع بلا مُخرَج.
@@ -311,7 +316,19 @@ def main() -> None:
             if data is None:   # damaged checkpoint ≠ dead run (audit P2-4)
                 print(f"[p{pg}] كاش غير مقروء — إعادة قراءة نظيفة", flush=True)
                 use_cache = False
-            elif data.get("gate_skipped"):
+            else:
+                # FM-1: لا يُستأنف على نقطةٍ خُتمت بقارئٍ آخر — وإلا صار الكوربوس
+                # نسبين تحت رقمٍ واحد. والنقطة القديمة بلا ختم تُعلن ولا تُعاد
+                # قراءتها (إعادةُ دفع ثمنها إتلافٌ لا إصلاح).
+                why = stamp_conflict(data, read_stamp)
+                if why == "plain_legacy":
+                    legacy_unstamped += 1
+                elif why:
+                    print(f"[p{pg}] ختم قارئ مختلف ({why}) — تُقرأ من جديد",
+                          flush=True)
+                    stamp_conflict_pages += 1
+                    use_cache = False
+            if use_cache and data is not None and data.get("gate_skipped"):
                 # صفحة تخطّاها تشغيل سابق ببوابة الجودة: تُعاد مجاناً بلا استدعاء.
                 # (بلا هذه الحالة كان سجلّها بلا `raw_rows` فيسقط كـKeyError أو
                 # يُقرأ كـ«كاش غير مقروء» فيُدفع ثمنها مرتين.)
@@ -325,7 +342,7 @@ def main() -> None:
                     print(f"[p{pg}] GATE-SKIP (cached) — بلا استدعاء", flush=True)
                     continue
                 use_cache = False   # تغيّر الوضع إلى warn/off ⇒ تُقرأ الآن فعلاً
-            elif data.get("error"):
+            elif use_cache and data is not None and data.get("error"):
                 if args.retry_errors:
                     print(f"[p{pg}] إعادة محاولة خطأ سابق: {data['error']}",
                           flush=True)
@@ -378,7 +395,8 @@ def main() -> None:
                 )
                 if _skip:
                     gate = {**gate, "skipped": True, "mode": args.page_gate}
-                    _write_json_atomic(cache, {"pg": pg, "gate": gate,
+                    _write_json_atomic(cache, {**read_stamp,
+                                               "pg": pg, "gate": gate,
                                                "gate_skipped": True,
                                                "usage": {"calls": 0, "cost": 0.0}})
                     # الصفحة المتخطّاة = صفحة **لم تُقرأ**: المجموع التراكمي لا
@@ -401,6 +419,7 @@ def main() -> None:
             except Exception as e:  # page failed — honest, keeps going
                 prev_usage = ((_read_cache(cache) or {}).get("usage") or {})
                 _write_json_atomic(cache, {
+                    **read_stamp,
                     "pg": pg, "error": f"{type(e).__name__}: {e}",
                     "usage": _sum_dicts(prev_usage,
                                         _sum_dicts({"calls": 1}, st_r))})
@@ -434,6 +453,9 @@ def main() -> None:
             usage_total = _sum_dicts(usage_total, usage)
             page_no = st_r.get("page_no")
             _write_json_atomic(cache, {
+                # ختم القارئ مع كل نقطة فحص: بكوربوسٍ واحد قارئان = رقمٌ واحد
+                # يحمل نسبين (FMEA FM-1 — D=5، وكان لا رصد له إطلاقاً).
+                **read_stamp,
                 "pg": pg, "ms_read": ms_read, "ms_footer": ms_footer,
                 "page_no": page_no,
                 "raw_rows": [row_to_json(r) for r in raw_rows],
@@ -662,6 +684,15 @@ def main() -> None:
                  "avg_page_s": round(elapsed / max(1, len(per_page)), 1)},
         "usage": usage_total,
         "usage_ledger": ledger,
+        "reader_stamp": read_stamp,
+        "corpus_provenance": {
+            "reader": read_stamp,
+            "legacy_unstamped_pages": legacy_unstamped,
+            "stamp_conflict_pages": stamp_conflict_pages,
+            "declaration": ("كوربوسٌ بنسبٍ واحد" if not legacy_unstamped
+                            and not stamp_conflict_pages else
+                            "مختلط/غير مختم — يُعلن ولا يُجمَع تحت رقمٍ واحد"),
+        },
         "stop_reason": stop_reason,
         "per_page": per_page,
     }

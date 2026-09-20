@@ -39,6 +39,43 @@ MODEL = os.environ.get("OPENROUTER_MODEL_VLM", "google/gemini-3.7-flash")
 # witness; v1 is the frozen 629-page prompt, kept for comparison runs
 # (`read_rows_vlm(path, prompt=PROMPTS["v1"])`).
 PROMPTS = {"v2": FRONTIER_PROMPT_V2, "v1": FRONTIER_PROMPT}
+
+
+def reader_stamp(prompt: str | None = None) -> dict:
+    """هوية القارئ الفعلية: النموذج والتلقينة اللذان أنتجا هذه القراءة.
+
+    سببه حادثة مسجَّلة (FMEA FM-1): كوربوسٌ واحد قد يُبنى بقارئين مختلفين
+    فيُجمَع تحت رقمٍ واحد، ولا شيء في نقطة الفحص يقول بأيّهما قُرئ. فالختم
+    يُكتب مع كل قراءة، ويُقارَن عند الاستئناف. والتلقينة المجهولة تُختم
+    ببصمتها لا باسمٍ عام.
+    """
+    import hashlib
+
+    if prompt is None or prompt is FRONTIER_PROMPT_V2:
+        version = "v2"
+    elif prompt is FRONTIER_PROMPT:
+        version = "v1"
+    else:
+        version = "custom:" + hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:8]
+    return {"model": MODEL, "prompt_version": version}
+
+
+def stamp_conflict(cached: dict | None, current: dict) -> str | None:
+    """يُقارن ختم نقطة فحص بختم القارئ الحالي ⇒ سببُ رفضِ الاستئناف أو None.
+
+    ولا يُعاد دفع ثمن صفحةٍ قديمة بلا ختم: ذلك يُعلن بالعدّ (`plain_legacy`)
+    لأنّ الكوربوس القائم (629 صفحة) قُرئ قبل وجود الختم، وإعادةُ دفعه إتلافٌ
+    لا إصلاح.
+    """
+    if not cached:
+        return "checkpoint-unreadable"
+    have_m, have_p = cached.get("model"), cached.get("prompt_version")
+    if not have_m and not have_p:
+        return "plain_legacy"
+    if have_m != current["model"] or have_p != current["prompt_version"]:
+        return (f"stamp-mismatch: cached={have_m}/{have_p} "
+                f"current={current['model']}/{current['prompt_version']}")
+    return None
 # Response-level blips (RemoteDisconnected et al.) once killed whole runs —
 # they now retry like any network error. 4 attempts: 10s/20s/40s backoff.
 _ATTEMPTS = 4
@@ -199,10 +236,13 @@ def read_rows_vlm(image_path: str, prompt: str | None = None,
                            'desc': str|None, 'date': str|None,
                            'raw_movement': str|None, 'raw_balance': str|None}].
 
-    Uses the FROZEN era-neutral prompt from the 629-page case by default
-    (FRONTIER_PROMPT) — proven copy-exact behavior. Pass
-    prompt=STRUCTURE_AWARE_PROMPT for red-band anatomy reads, or a
-    TOP_BAND_PROMPT.format(...) for boundary recovery.
+    Uses the FROZEN v2 prompt by default (`FRONTIER_PROMPT_V2`) — the same one the
+    629-page corpus was read with since `reader_stamp` was added; `v1` is the
+    earlier frozen prompt, kept for comparison runs. (The docstring here claimed
+    the default was v1 while the code read v2 — a document contradicting code is a
+    defect, not a note: FMEA FM-2.) Pass `prompt=STRUCTURE_AWARE_PROMPT` for
+    red-band anatomy reads, or a `TOP_BAND_PROMPT.format(...)` for boundary
+    recovery.
 
     Raises RuntimeError after retries; caller decides suspect handling.
     """
