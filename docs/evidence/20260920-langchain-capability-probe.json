@@ -1,0 +1,30 @@
+{
+ "measured_at": "2026-09-21",
+ "stack": {
+  "langchain": "1.4.0",
+  "langchain-core": "1.6.3",
+  "langgraph": "1.2.11",
+  "langchain-openai": "1.6.2"
+ },
+ "question": "سؤالٌ حسابيّ محايد — لا بيانات كشف",
+ "structured_output": {
+  "model": "افتراضي التطبيق",
+  "ok": true,
+  "type": "Answer",
+  "fields": [
+   "answer",
+   "cited_row_ids"
+  ],
+  "answers_the_question": true,
+  "seconds": 3.81
+ },
+ "retry_ceiling": {
+  "model": "افتراضي التطبيق",
+  "recursion_limit_passed": 6,
+  "installed_default": 10007,
+  "stopped_by": "GraphRecursionError",
+  "limit_seen_in_message": 6,
+  "message": "Recursion limit of 6 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GR",
+  "seconds": 13.07
+ }
+}
