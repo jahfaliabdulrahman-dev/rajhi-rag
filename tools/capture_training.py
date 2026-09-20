@@ -137,6 +137,71 @@ def redact_top(img: Image.Image, frac: float) -> Image.Image:
     return img
 
 
+def load_private_patterns(path: Path | None) -> dict[str, list[str]]:
+    """أنماطُ الخصوصية في قسمين صريحين.
+
+    ```
+    [anywhere]   ← يُمنع ظهوره في أي صفحةٍ مُلتقطة (IBAN · رقم الحساب)
+    [header]     ← ترويسةٌ تُقنَّع بالشريط الأعلى (المرجع · اسم صاحب الحساب)
+    ```
+
+    ولا يُخمَّن أيُّ نمط: ملفُّ الأنماط يعيش **خارج المستودع** (`~/.hermes/private/`)،
+    فلا يصل إلى الالتزام ولا إلى المخرجات.
+    """
+    out: dict[str, list[str]] = {"anywhere": [], "header": []}
+    if not path:
+        return out
+    section = "anywhere"
+    for line in Path(path).expanduser().read_text(encoding="utf-8").splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        if s.startswith("["):
+            section = s.strip("[]").strip().lower()
+            out.setdefault(section, [])
+            continue
+        out.setdefault(section, []).append(s)
+    return out
+
+
+def audit_privacy(pdf: Path, page: int, patterns: dict[str, list[str]],
+                  mask_top_frac: float) -> dict:
+    """يقيس: أتسرّب معرّفٌ تحت القناع؟ وهل غطّى القناعُ ترويسةَ الصفحة؟
+
+    والتفريق بين `[anywhere]` و`[header]` ليس ترفاً — هو الفرق بين **معرّفٍ** و**محتوى**:
+
+    - `[anywhere]`: معرّفاتٌ لا تظهر من الكشف (IBAN · رقم الحساب) ⇒ **ظهورُها تحت
+      القناع رفضٌ**، وظهورُها داخله مقبول (لأنه مستور).
+    - `[header]`: المرجعُ واسمُ صاحب الحساب — يُطبَعان في الترويسة (تُقنَّع)،
+      **ويظهران داخل خلايا الوصف** حين تكون الحركة تحويلاً باسمه. وذلك **محتوى
+      الكشف** يُعلن ولا يُخفى — كما في المسار الممسوح بالضبط.
+    """
+    import fitz
+    with fitz.open(pdf) as doc:
+        if page > doc.page_count:
+            return {"page": page, "status": "no_such_page"}
+        pg = doc[page - 1]
+        H = pg.rect.height or 1.0
+        hits: dict[str, list[float]] = {"anywhere": [], "header": []}
+        for blk in pg.get_text("dict")["blocks"]:
+            for ln in blk.get("lines", []):
+                for sp in ln["spans"]:
+                    y = round(sp["bbox"][1] / H, 3)
+                    for kind in ("anywhere", "header"):
+                        if any(pat and pat in sp["text"]
+                               for pat in patterns.get(kind, [])):
+                            hits[kind].append(y)
+
+    below = lambda ys: sorted(y for y in ys if y >= mask_top_frac)   # noqa: E731
+    inside = lambda ys: sorted(y for y in ys if y < mask_top_frac)   # noqa: E731
+    return {"page": page, "status": "ok",
+            "anywhere_under_mask": below(hits["anywhere"]),
+            "anywhere_inside_mask": len(inside(hits["anywhere"])),
+            "header_furniture_inside_mask": len(inside(hits["header"])),
+            "header_inside_table_declared": len(below(hits["header"])),
+            "mask_top_frac": mask_top_frac}
+
+
 def capture_page(page: int, run: Path, out_root: Path, rows: list[dict],
                  doc_id: str, meta: dict, mask_frac: float) -> dict:
     """يكتب صورة الصفحة وملف وسمها. الكلفة صفر: لا نداء نموذج."""
@@ -193,17 +258,37 @@ def main() -> None:
                     help="كل صفحةٍ رقمها يقبل القسمة على هذا لا تُلتقط (حجز التقييم)")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--redact-top", type=float, default=HEADER_MASK_FRACTION)
+    ap.add_argument("--pdf", type=Path, default=None,
+                    help="ملف الأصل — يُفحَص نصُّه لمقابلة أنماط الخصوصية (قياسٌ لا دعوى)")
+    ap.add_argument("--private-patterns-file", type=Path, default=None,
+                    help="أنماطُ الخصوصية ([anywhere] · [header]) — تعيش خارج المستودع")
     args = ap.parse_args()
 
     mask_frac = args.redact_top
-    doc_file = args.run / "slice_629p.pdf"
+    # الأصل: الملف المُعطى صراحةً، وإلا ملفُّ التشغيلة الممسوحة
+    doc_file = (args.pdf.expanduser() if args.pdf
+                else args.run / "slice_629p.pdf")
     doc_id = sha256_file(doc_file)[:16] if doc_file.exists() else "unknown_doc"
     certified = load_certified_rows(args.export)
+    # **هويةُ القارئ من تقرير التشغيلة** (لا «unknown»): الوسمُ ناقلُ حقيقةٍ لا حقلٌ فارغ
+    stamp = {}
+    rep_file = args.run / "slice_report.json"
+    if rep_file.exists():
+        _rep = json.loads(rep_file.read_text(encoding="utf-8"))
+        stamp = _rep.get("reader_stamp") or {}
     meta = {"label_source": {"export": args.export.name,
                              "export_sha256": sha256_file(args.export)[:16],
                              "gate": "verify_close ALL PASS (25 checks)",
                              "holdout_mod": args.holdout_mod},
-            "prompt_version": "unknown", "model_id": "unknown", "ink_ratio": None}
+            "prompt_version": stamp.get("prompt_version") or "unknown",
+            "model_id": stamp.get("model") or "unknown",
+            "stamp_source": ("reader_stamp في slice_report.json" if stamp
+                             else "غير مُعلن في التقرير (يُعلن ولا يُخمَّن)"),
+            "ink_ratio": None}
+
+    private = load_private_patterns(args.private_patterns_file)
+    if private.get("anywhere") and not doc_file.exists():
+        raise SystemExit("أنماطٌ ممنوعة معلنة وملفُّ الأصل غير موجود — لا فحص، لا التقاط")
 
     pages = sorted(certified)
     if args.limit:
@@ -214,6 +299,14 @@ def main() -> None:
             results.append({"page": p, "status": "holdout_reserved"})
             continue
         r = capture_page(p, args.run, args.out, certified[p], doc_id, meta, mask_frac)
+        # **فحصُ الخصوصية قبل قبول الصفحة**: تسرُّبٌ ممنوع ⇒ رفضٌ بالاسم لا تجاوز
+        if private.get("anywhere"):
+            audit = audit_privacy(doc_file, p, private, mask_frac)
+            r["privacy_audit"] = audit
+            if audit.get("anywhere_under_mask"):
+                raise SystemExit(
+                    f"معرّفٌ مكشوفٌ تحت القناع في الصفحة {p}: "
+                    f"{audit['anywhere_under_mask']} — لا تُلتقط صفحةٌ تحمل معرّفاً")
         results.append(r)
         train_pages += 1 if r["status"] == "captured" else 0
 
@@ -234,9 +327,33 @@ def main() -> None:
                     "balances_joined": sum(r.get("bal_ok", 0) for r in captured),
                     "balances_not_joined": sum(r.get("bal_bad", 0) for r in captured)},
         "holdout_rule": f"page % {args.holdout_mod} == 0 ⇒ لا تُلتقط (حجز التقييم)",
-        "privacy": {"header_masked_fraction": HEADER_MASK_FRACTION,
-                    "mask_evidence": HEADER_MASK_EVIDENCE,
-                    "note": "بيانات حقيقية محليّة · المجلد مُدرَج في .gitignore"},
+        "privacy": {
+            "header_masked_fraction": mask_frac,
+            # الدليلُ يتبع التصميم: دليلُ المسح (أدنى y لصفٍّ مُثبت) لا يُنسب
+            # إلى تصميمٍ رقميّ لم يُقس فيه شيء — يُقاس هنا ما يخصّه.
+            "mask_evidence": (HEADER_MASK_EVIDENCE if not args.pdf else
+                              "قياسٌ على الأصل الرقمي: ظهورُ الترويسة داخل الشريط "
+                              "مُحصى في هذا الملف · والمعرّفات تحت القناع صفر"),
+            "mode": ("نصُّ الأصل يُفحَص بمقابلة الأنماط (قياسٌ لا دعوى)" if private.get("anywhere")
+                     else "قناعٌ بلا فحص نصّ — لم تُعطَ أنماط"),
+            "patterns_file": (args.private_patterns_file.name
+                              if args.private_patterns_file else None),
+            "anywhere_patterns": len(private.get("anywhere", [])),
+            "header_patterns": len(private.get("header", [])),
+            "anywhere_identifiers_under_mask": sum(
+                len(r.get("privacy_audit", {}).get("anywhere_under_mask", []))
+                for r in captured),
+            "anywhere_identifiers_inside_mask": sum(
+                r.get("privacy_audit", {}).get("anywhere_inside_mask", 0) for r in captured),
+            "header_furniture_inside_mask": sum(
+                r.get("privacy_audit", {}).get("header_furniture_inside_mask", 0)
+                for r in captured),
+            "header_inside_table_declared": sum(
+                r.get("privacy_audit", {}).get("header_inside_table_declared", 0)
+                for r in captured),
+            "note": ("ترويسةٌ مقنّعة · وظهورُ الاسم أو معرّفات التحويلات (IBANs) "
+                     "**داخل خلايا الوصف** محتوى الكشف — يُعلن ولا يُقنَّع، كالمسار "
+                     "الممسوح · المجلد غير مُلتزم")},
         "label_source": meta["label_source"],
         "cost_usd": "0 — لا نداء نموذج: الوسم من المصدَّر المعتمد",
     }

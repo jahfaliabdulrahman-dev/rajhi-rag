@@ -55,6 +55,18 @@ from statement_qa.vlm_reader import (  # noqa: E402
 DEFAULT_SOURCE = None  # resolved at startup: --source, else a LOCAL pointer file
 
 
+def _contract_footer_role() -> str:
+    """دور التذييل من عقد البنك — يُقرأ ولا يُفترض."""
+    try:
+        import json as _json
+        prof = PROJ / "profiles" / "al-rajhi.json"
+        data = _json.loads(prof.read_text(encoding="utf-8"))
+        return ((data.get("statement") or {}).get("footer") or {}).get("role") \
+            or "غير مُعلن في العقد"
+    except Exception:                       # noqa: BLE001
+        return "غير مُعلن في العقد"
+
+
 def _resolve_source(arg: str | None) -> str:
     """--source wins; else the gitignored local pointer
     (data/local_sample/.slice_source) — the real filename never enters git."""
@@ -685,6 +697,9 @@ def main() -> None:
         "usage": usage_total,
         "usage_ledger": ledger,
         "reader_stamp": read_stamp,
+        # **دور التذييل من العقد** (لا من العادة): التقارير القديمة لم تحمله،
+        # فصار يُكتب — والبوابة تقابله بالعقد فلا يمرّ تقريرٌ صامت.
+        "footer_role": _contract_footer_role(),
         "corpus_provenance": {
             "reader": read_stamp,
             "legacy_unstamped_pages": legacy_unstamped,
