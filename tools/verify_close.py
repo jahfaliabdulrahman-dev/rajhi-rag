@@ -61,19 +61,23 @@ def _measure_stamps(run: Path | str) -> dict:
 
     results = Path(run) / "results"
     stamps: set[tuple[str, str]] = set()
-    unstamped = pages = 0
+    unstamped = pages = unreadable = 0
     for f in sorted(results.glob("pg-*.json")):
         try:
             c = _json.loads(f.read_text(encoding="utf-8"))
         except Exception:
-            continue          # نقطة غير مقروءة: تُعدّ مفحوصةً لا مختمةً (لا تُخمَّن)
+            # نقطة تالفة **تختفي من كل تعداد** إن مرّت صامتة، فيصير فرقُ العدّ
+            # لغزاً يُنسب إلى الإعلان والعلّةُ ملفٌّ تالف. فتُعلن بعددها.
+            unreadable += 1
+            continue
         pages += 1
         model, prompt = c.get("model"), c.get("prompt_version")
         if model and prompt:
             stamps.add((str(model), str(prompt)))
         else:
             unstamped += 1
-    return {"stamps": sorted(stamps), "unstamped": unstamped, "pages": pages}
+    return {"stamps": sorted(stamps), "unstamped": unstamped, "pages": pages,
+            "unreadable": unreadable}
 
 
 def read_rows(ws) -> list[dict]:
@@ -166,8 +170,23 @@ def main() -> int:
     last_ok = max((p for p, e in per_page.items() if e.get("footer") == "ok"), default=None)
     printed = {}
     if last_ok is not None:
-        cache = json.loads((run / f"results/pg-{last_ok:03d}.json").read_text(encoding="utf-8"))
-        printed = cache.get("footer") or {}
+        # نقطةٌ تالفة **تُعلن بالاسم** ولا تُسقط الأداة بانهيار: كان `json.loads`
+        # عارياً يُخرج `JSONDecodeError` بدل حكمٍ مسمّى، فيرى القارئ انهياراً لا
+        # عطلاً — وهو صنف «العطل بلا اسم» الذي دفعه هذا المشروع مراراً.
+        try:
+            cache = json.loads((run / f"results/pg-{last_ok:03d}.json").read_text(encoding="utf-8"))
+            printed = cache.get("footer") or {}
+        except Exception as exc:
+            printed = {}
+            check("نقطة الفحص الأخيرة المطابقة مقروءة", False,
+                  f"{type(exc).__name__} في pg-{last_ok:03d}.json — والعلّة الملف لا الإعلان")
+    if not printed:
+        # **السكوت ليس اجتيازاً:** حين لا فوتر تراكمي (تصميمٌ تذييله ملخّص فترة)،
+        # تُعلن الشهودُ الغائبة بأسمائها بدل أن تُحذف بصمت فيُقرأ `ALL PASS`
+        # وكأن شيئاً لم يُفحص.
+        print("[INFO] مجاميع الورق المطبوعة: **لم تُفحَص** — لا فوتر تراكمي في هذه "
+              "التشغيلة (دور التذييل المُعلن: "
+              f"{(report.get('footer_role') or 'غير مُعلن')}) ⇒ شهود المجاميع غائبة لا ناجحة")
     if printed:
         check("Σ المدين == المطبوع على الورق",
               abs(sd - (dec(printed.get("debits")) or Decimal("-1"))) <= TOL,
@@ -335,10 +354,16 @@ def main() -> int:
     # نفسه: **اشترط القيمة وقابِلها بمصدرها.** والمصدر هنا الكاش، وهو في يد
     # البوابة أصلاً (تقرؤه للتذييل).
     measured = _measure_stamps(args.run)
-    check("كوربوسٌ واحد بنسبٍ واحد (لا قارئان تحت رقم)",
+    # ⚠️ والاسم كسب: «لا قارئان تحت رقم» أوسع من المقيس، لأن **غيابَ الختم ليس
+    # دليلاً على وحدة القارئ** — فالـ329 بلا ختم قد تكون من قارئٍ ثانٍ. فالفحص
+    # يقيس ما يقيسه ويُعلن مجتمعه (كقاعدة «من N فُحصت» في فحص التناقض).
+    check("لا نسبتان مسجَّلتان في كوربوسٍ واحد",
           len(measured["stamps"]) <= 1,
-          f"{len(measured['stamps'])} نسباً: {measured['stamps']}"
-          + (f" · بلا ختم: {measured['unstamped']}" if measured["unstamped"] else ""))
+          f"مسجَّلة: {len(measured['stamps'])} {measured['stamps']}"
+          f" · بلا نسب: {measured['unstamped']} (غيابُ الختم ليس دليل وحدة القارئ)")
+    check("كل نقاط الفحص مقروءة (لا نقطة تالفة تُسكَت)",
+          measured["unreadable"] == 0,
+          f"غير مقروءة: {measured['unreadable']} · مقروءة: {measured['pages']}")
     if len(measured["stamps"]) == 1:
         model, prompt = measured["stamps"][0]
         declared_ok = (model in str(identity_value)
