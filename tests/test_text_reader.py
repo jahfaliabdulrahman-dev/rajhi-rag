@@ -24,7 +24,7 @@ for _p in (str(PROJ), str(PROJ / "src")):
 import pytest  # noqa: E402
 
 from statement_qa.text_reader import (  # noqa: E402
-    _lines, normalize_arabic_visual, read_rows,
+    APP_PROFILE, _lines, contract_footer_role, normalize_arabic_visual, read_rows,
 )
 
 APP_PDF = PROJ / "data" / "local_sample" / "digital" / "app_statement.pdf"
@@ -85,3 +85,20 @@ def test_the_real_app_statement_parses_and_its_chain_closes():
             breaks += 1
         prev = r["balance"]
     assert breaks == 0, f"{breaks} كسراً في سلسلة الرصيد على كشفٍ رقميّ"
+
+
+# ── العقد: دور التذييل يُعلنه التصميم لا القارئ ──────────────────────────
+def test_each_layout_declares_its_own_footer_role():
+    """تصميمان ⇒ عقدان: من يقرأ الإقفال من فوترٍ تراكميّ ومن يقرأه من ملخّص فترة."""
+    import json
+
+    scan = json.loads((PROJ / "profiles" / "al-rajhi.json").read_text(encoding="utf-8"))
+    app = json.loads(APP_PROFILE.read_text(encoding="utf-8"))
+    assert scan["statement"]["footer"]["role"] == "cumulative_printed_totals"
+    assert app["statement"]["footer"]["role"] == "period_summary"
+    assert app["layout"] == "app_digital"
+    # والقراءة تتبع الإعلان: القارئ يقرأ الدور من العقد، ولا يثبّته في الكود
+    assert contract_footer_role(APP_PROFILE) == "period_summary"
+    assert contract_footer_role(PROJ / "profiles" / "al-rajhi.json") \
+        == "cumulative_printed_totals"
+    assert contract_footer_role(PROJ / "profiles" / "لا-يوجد.json") == "غير مُعلن في العقد"
