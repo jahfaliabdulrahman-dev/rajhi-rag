@@ -57,6 +57,10 @@ def derive() -> dict | None:
         facts = scale_slice._cache_facts(RESULTS)
     f = rep["footer"]
     return {
+        # كل رقم معلن مربوطٌ بالزوج الذي أنتجه (FMEA FM-1.4): نموذجٌ وتلقينة.
+        # فحين يُعاد القياس بقارئٍ آخر، يُعرف الرقم القديم بمن قُرئ.
+        "reader_stamp": rep.get("reader_stamp") or "غير مختم",
+        "corpus_declaration": (rep.get("corpus_provenance") or {}).get("declaration"),
         "pages": rep["slice"]["pages_done"],
         "rows": rep["totals"]["rows"],
         "clean": rep["totals"]["clean"],
