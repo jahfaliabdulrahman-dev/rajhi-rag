@@ -50,6 +50,32 @@ def dec(v) -> Decimal | None:
         return None
 
 
+def _measure_stamps(run: Path | str) -> dict:
+    """(النموذج · التلقينة) من **الكاش** — المصدر لا ورقةُ الملخص.
+
+    وسبب وجودها: الإعلان في الملخص يحرُس **الحضور** لا **الصدق** — فسطرٌ يقول
+    «قارئٌ واحد: X» و«بلا ختم: 0» يمرّ على كوربوسٍ فيه 629 صفحة بلا ختم ومن
+    قارئين. فالقيمة تُقابَل بمصدرها، كما تُقابَل كل قيمة أخرى في هذه البوابة.
+    """
+    import json as _json
+
+    results = Path(run) / "results"
+    stamps: set[tuple[str, str]] = set()
+    unstamped = pages = 0
+    for f in sorted(results.glob("pg-*.json")):
+        try:
+            c = _json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue          # نقطة غير مقروءة: تُعدّ مفحوصةً لا مختمةً (لا تُخمَّن)
+        pages += 1
+        model, prompt = c.get("model"), c.get("prompt_version")
+        if model and prompt:
+            stamps.add((str(model), str(prompt)))
+        else:
+            unstamped += 1
+    return {"stamps": sorted(stamps), "unstamped": unstamped, "pages": pages}
+
+
 def read_rows(ws) -> list[dict]:
     header = [c.value for c in ws[1]]
     out = []
@@ -302,6 +328,34 @@ def main() -> int:
     unstamped_pages = _summary_row_value("صفحات بلا ختم قارئ")
     check("الملخص يعدّ الصفحات بلا ختم قارئ", unstamped_pages is not None,
           f"{unstamped_pages}")
+
+    # ⚠️ والحضورُ ليس صدقاً: «قارئٌ واحد: X» و«بلا ختم: 0» كانا يمرّان على
+    # كوربوسٍ فيه 629 بلا ختم ومن قارئين — لأن الفحص كان يقرأ الورقة وتسألها عن
+    # نفسها، ولا يقرأ الختم من الكاش إطلاقاً. فالعلاج هو علاج الجولة السابعة
+    # نفسه: **اشترط القيمة وقابِلها بمصدرها.** والمصدر هنا الكاش، وهو في يد
+    # البوابة أصلاً (تقرؤه للتذييل).
+    measured = _measure_stamps(args.run)
+    check("كوربوسٌ واحد بنسبٍ واحد (لا قارئان تحت رقم)",
+          len(measured["stamps"]) <= 1,
+          f"{len(measured['stamps'])} نسباً: {measured['stamps']}"
+          + (f" · بلا ختم: {measured['unstamped']}" if measured["unstamped"] else ""))
+    if len(measured["stamps"]) == 1:
+        model, prompt = measured["stamps"][0]
+        declared_ok = (model in str(identity_value)
+                       and prompt in str(identity_value))
+        detail = f"الكاش {model} · تلقينة {prompt} — والورقة «{identity_value}»"
+    else:
+        declared_ok = not any(ch.isalpha() and ch.isascii()
+                              for ch in str(identity_value).split("—")[0])
+        detail = f"الكاش بلا ختم ({measured['unstamped']} صفحة) — والورقة «{identity_value}»"
+    check("هوية القارئ المعلنة توافق الكاش", declared_ok, detail)
+    try:
+        declared_count = int(str(unstamped_pages).strip())
+    except (TypeError, ValueError):
+        declared_count = None
+    check("عدد الصفحات بلا ختم يطابق الكاش",
+          declared_count == measured["unstamped"],
+          f"الورقة {unstamped_pages} · الكاش {measured['unstamped']}")
     unproven = wb["ما لم يُثبت"]
     check("ورقة «ما لم يُثبت» قائمة وفيها سطور",
           unproven.max_row >= 2, f"{unproven.max_row - 1} بنداً")
