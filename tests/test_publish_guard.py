@@ -195,6 +195,10 @@ def test_every_tracked_text_file_is_clean():
     for rel in tracked:
         if Path(rel).suffix.lower() in (pg.BINARY_EXTS | pg.OPAQUE_EXTS):
             continue
+        if not (root / rel).exists():
+            # ملفٌّ محذوفٌ ولم يُلتزم بعد: الفهرسُ يسبق الشجرة، والحارسُ لا ينهار
+            # على حذفٍ معلَّق — الفشلُ هنا كان `FileNotFoundError` لا حكماً.
+            continue
         here: list[tuple] = []
         pg._scan_text(rel, (root / rel).read_text(encoding="utf-8"),
                       "worktree", here, pg.load_allowlist())

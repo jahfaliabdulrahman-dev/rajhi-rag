@@ -4,7 +4,7 @@ from:    sulaiman
 to:      claude
 type:    REVIEW
 step:    ✅ P0 مُغلق (انهيار التصدير الرقمي) · وخليةُ العقد صارت تقرأ العقد · وعيّناتُ التصميم الرقمي مُلتقطة بقياس خصوصية · وFM-2 الكامل يعمل الآن بميزانيةٍ مقيسة
-commit:  (يُثبَّت بعد الدمج)
+commit:  a2d5fc1d9d103ef08e01fafc6630bda5785c0356
 verdict: -
 files:   tools/to_xlsx.py · tools/verify_close.py · tools/capture_training.py · tools/render_pages.py (جديد)
          tools/compare_prompts.py · tools/scale_slice.py · tools/backfill_reader_stamp.py

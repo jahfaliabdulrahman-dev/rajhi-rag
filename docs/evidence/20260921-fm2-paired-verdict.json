@@ -1,0 +1,67 @@
+{
+ "pages_paired": 420,
+ "pages_clean_in_both": 413,
+ "errors_v1": 4,
+ "errors_v2": 3,
+ "v1": {
+  "rows": 3801,
+  "matches": 3721,
+  "closed": 405,
+  "exact": 383,
+  "median_s": 17.8,
+  "p95_s": 55.1
+ },
+ "v2": {
+  "rows": 3783,
+  "matches": 3721,
+  "closed": 409,
+  "exact": 390,
+  "median_s": 18.1,
+  "p95_s": 53.9
+ },
+ "page_level_wins": {
+  "v1": 13,
+  "v2": 21,
+  "tie": 379
+ },
+ "paired_difference": {
+  "mean_pairs": 0,
+  "median_pairs": 0,
+  "pages_v2_ahead": 21,
+  "pages_v1_ahead": 13,
+  "pages_tied": 379
+ },
+ "spend_usd": 9.6433,
+ "budget_usd": 16.0,
+ "pages_where_v1_lost": [
+  38,
+  49,
+  67,
+  119,
+  134,
+  139,
+  173,
+  184,
+  197,
+  206,
+  235,
+  245,
+  260,
+  344
+ ],
+ "pages_where_v2_lost": [
+  1,
+  20,
+  107,
+  146,
+  188,
+  193,
+  248,
+  281,
+  388,
+  410,
+  506,
+  547,
+  629
+ ]
+}
