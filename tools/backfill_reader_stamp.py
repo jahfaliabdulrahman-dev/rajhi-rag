@@ -35,7 +35,6 @@ def main() -> None:
         return
     if not report.get("footer_role"):
         # دورُ التذييل لعقد البنك: قراءةٌ من العقد لا اجتهاد
-        import json as _json
         prof = json.loads((PROJ / "profiles" / "al-rajhi.json").read_text(encoding="utf-8"))
         report["footer_role"] = ((prof.get("statement") or {}).get("footer") or {}).get("role")
         report["footer_role_note"] = ("أُعلن عند الاستدراك: تشغيلةٌ سبقت وجود الحقل — "
