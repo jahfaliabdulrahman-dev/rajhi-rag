@@ -128,6 +128,10 @@ def main() -> int:
 
     rows = read_rows(wb["الحركات"])
     txns = [r for r in rows if str(r.get("حكم السلسلة على الصفّ") or "").startswith("حركة مثبتة")]
+    # كل صفٍّ حكمه يبدأ بـ«حركة» (والمَراسي داخلة) — تعريفٌ واحد يُستعمل في فحص
+    # التواريخ وفي عدد الصفوف مقابل ملخّص الفترة، فلا تتناسل نسخٌ من القاعدة.
+    movements = [r for r in rows
+                 if str(r.get("حكم السلسلة على الصفّ") or "").startswith("حركة")]
     gaps = [r for r in rows if "قيد فجوة" in str(r.get("حكم السلسلة على الصفّ") or "")]
 
     print("===== المجاميع والهوية =====")
@@ -180,22 +184,55 @@ def main() -> int:
             printed = {}
             check("نقطة الفحص الأخيرة المطابقة مقروءة", False,
                   f"{type(exc).__name__} في pg-{last_ok:03d}.json — والعلّة الملف لا الإعلان")
+    if (report.get("footer_role") or "") == "period_summary" and \
+            (report.get("period_summary") or {}):
+        # **شاهدٌ مختلف لا شاهدٌ ناقص:** هذا التصميم يطبع ملخّص فترة (إجماليان ·
+        # إقفال · عدد الحركات) بدل إجمالياتٍ تراكميةٍ لكل صفحة. فتُقابَل المجاميع
+        # والعدد والإقفال بذلك الملخّص — ثلاثة شهود مستقلّين عن السلسلة.
+        period = report["period_summary"]
+        # ⚠️ **الصفر كاذبٌ في `or`**: `dec("0.00") or Decimal("-1")` يعطي `-1`
+        # لأن Decimal("0.00") صفرٌ كاذب ⇒ فحصُ إقفالٍ صفريّ يسقط وهو صحيح (وقع
+        # الآن). فالمقارنة تُبنى على `is not None` لا على صدق القيمة.
+        pd_, pc_, pcl = (dec(period.get("printed_debits")),
+                         dec(period.get("printed_credits")),
+                         dec(period.get("closing")))
+        check("Σ المدين == ملخّص الفترة المطبوع",
+              pd_ is not None and abs(sd - pd_) <= TOL,
+              f"{sd} مقابل {period.get('printed_debits')}")
+        check("Σ الدائن == ملخّص الفترة المطبوع",
+              pc_ is not None and abs(sc - pc_) <= TOL,
+              f"{sc} مقابل {period.get('printed_credits')}")
+        check("رصيد الإقفال == ملخّص الفترة المطبوع",
+              pcl is not None and closing is not None and abs(closing - pcl) <= TOL,
+              f"{closing} مقابل {period.get('closing')}")
+        n_dep, n_wd = dec(period.get("n_deposits")), dec(period.get("n_withdrawals"))
+        if n_dep is not None and n_wd is not None:
+            check("عدد الصفوف == عدد الحركات المطبوع في ملخّص الفترة",
+                  Decimal(len(movements)) == n_dep + n_wd,
+                  f"{len(movements)} صفّاً مقابل {int(n_dep + n_wd)} حركة مطبوعة")
     if not printed:
         # **السكوت ليس اجتيازاً:** حين لا فوتر تراكمي (تصميمٌ تذييله ملخّص فترة)،
         # تُعلن الشهودُ الغائبة بأسمائها بدل أن تُحذف بصمت فيُقرأ `ALL PASS`
         # وكأن شيئاً لم يُفحص.
-        print("[INFO] مجاميع الورق المطبوعة: **لم تُفحَص** — لا فوتر تراكمي في هذه "
-              "التشغيلة (دور التذييل المُعلن: "
-              f"{(report.get('footer_role') or 'غير مُعلن')}) ⇒ شهود المجاميع غائبة لا ناجحة")
+        role = report.get("footer_role") or "غير مُعلن"
+        if role == "period_summary":
+            print("[INFO] المجاميع **التراكمية** (لكل صفحة) غير موجودة في هذا التصميم — "
+                  "والمجاميع المطبوعة **مُتحقَّقة أعلاه من ملخّص الفترة** (Σ · إقفال · عدد). "
+                  "فالغائبُ مُعلن، والمُتحقَّقُ مذكور.")
+        else:
+            print("[INFO] مجاميع الورق المطبوعة: **لم تُفحَص** — لا فوتر تراكمي، ودور "
+                  f"التذييل المُعلن: {role} ⇒ شهود المجاميع غائبة لا ناجحة")
     if printed:
+        p_d, p_c, p_b = (dec(printed.get("debits")), dec(printed.get("credits")),
+                         dec(printed.get("balance")))
         check("Σ المدين == المطبوع على الورق",
-              abs(sd - (dec(printed.get("debits")) or Decimal("-1"))) <= TOL,
+              p_d is not None and abs(sd - p_d) <= TOL,
               f"{sd} مقابل {printed.get('debits')}")
         check("Σ الدائن == المطبوع على الورق",
-              abs(sc - (dec(printed.get("credits")) or Decimal("-1"))) <= TOL,
+              p_c is not None and abs(sc - p_c) <= TOL,
               f"{sc} مقابل {printed.get('credits')}")
         check("رصيد الإقفال == المطبوع على الورق",
-              closing is not None and abs(closing - (dec(printed.get("balance")) or Decimal("-1"))) <= TOL,
+              closing is not None and p_b is not None and abs(closing - p_b) <= TOL,
               f"{closing} مقابل {printed.get('balance')}")
 
     if golden.get("sum_debit") is not None:
@@ -203,7 +240,15 @@ def main() -> int:
               abs(sd - dec(golden["sum_debit"])) <= TOL, f"{sd}")
 
     print("===== قيود الفجوة =====")
-    check("قيود الفجوة قائمة كصفوف", len(gaps) > 0, f"{len(gaps)} قيداً")
+    # **الطلب يتبع الإعلان:** كشفٌ لا أوراق غائبة فيه (التصميم الرقمي) لا تُتوقَّع
+    # فيه قيود فجوة. وكان الفحص يطلبها دائماً ⇒ يسقط على ملفٍّ سليم — وهو افتراضٌ
+    # من تصميمٍ واحد عُمِّم على تصميمين.
+    declared_gaps = (report.get("page_numbers") or {}).get("gaps") or []
+    if declared_gaps:
+        check("قيود الفجوة قائمة كصفوف", len(gaps) > 0, f"{len(gaps)} قيداً")
+    else:
+        check("لا أوراق غائبة مُعلنة ⇒ لا قيود فجوة متوقَّعة", len(gaps) == 0,
+              f"{len(gaps)} قيداً · ومجموعات الأوراق الغائبة المعلنة: 0")
     for idx, g in enumerate(gaps, start=1):
         d, c = dec(g.get("مدين")), dec(g.get("دائن"))
         # **يُسمّى القيد بالورق لا بالموقع.** عمود «رقم الصفحة المطبوع» في صفّ القيد
@@ -262,8 +307,6 @@ def main() -> int:
     # البوابةُ وهي تطبع PASS. والمجتمع الصحيح: **كل صفٍّ حكمه يبدأ بـ«حركة»**،
     # والمَراسي داخلة فيه. (اكتشفه المدقّق الخارجي: عددُ البوابة صادقٌ عن مجتمعها
     # لا عن الملف — وهو الصنف نفسه بوجهٍ ثالث: السطر/الفرع/المجتمع.)
-    movements = [r for r in rows
-                 if str(r.get("حكم السلسلة على الصفّ") or "").startswith("حركة")]
     dated = [r for r in movements if r.get("التاريخ (ميلادي)")]
     # كل عمودين يصفان الشيء نفسه يجب أن يتفقا: صفٌّ أثبتته السلسلة ولا يوافق
     # رقمُه المكتوب رقمَه المطبوع = تناقضٌ داخلي صامت (مرّ ٢٤ مرة قبل أن يراه مدقّق).

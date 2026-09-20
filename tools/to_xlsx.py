@@ -418,6 +418,15 @@ def summary_facts(rows: list[dict], report: dict, per_page: dict,
         printed_debits = last_printed.get("debits") or printed_debits
         printed_credits = last_printed.get("credits") or printed_credits
         last_balance = last_printed.get("balance") or last_balance
+    # **دور التذييل**: التصميم الثاني (كشف التطبيق) لا يطبع إجمالياتٍ تراكميةً في
+    # كل صفحة، بل **ملخّص فترة** واحداً (افتتاح · إقفال · عدد · إجماليان). فيُقرأ
+    # الإقفال والمجموعان من هناك — رقمُ الورق كما هو، لا حسابٌ منّا. والعقد يسمّي
+    # الدور (`statement.footer.role`) والتقريرُ يحمله، فالقراءة تتبع الإعلان.
+    if (report.get("footer_role") or "") == "period_summary":
+        period = report.get("period_summary") or {}
+        printed_debits = period.get("printed_debits") or printed_debits
+        printed_credits = period.get("printed_credits") or printed_credits
+        last_balance = period.get("closing") or last_balance
 
     # الترتيب على **الحركات المثبتة بالسلسلة** فقط: الصفوف التي لا حركة فيها
     # (سطر إجماليات قرأه القارئ صفّاً — وقع فعلاً في ص190) كانت تتصدّر الترتيب

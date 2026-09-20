@@ -467,9 +467,107 @@ CACHE_POISONS: list[tuple[str, str, Callable[[Path], None]]] = [
 ]
 
 
+# ─────────────────── تشغيلةٌ تذييلها «ملخّص فترة» (التصميم الثاني) ───────────────────
+def _make_period_run(base: Path) -> Path:
+    """تشغيلةٌ بدور تذييلٍ ثانٍ: لا إجمالياتٍ لكل صفحة، بل ملخّص فترة واحد.
+
+    سببُ وجودها: الفحوص التي لا تُطلَق إلا على تصميمٍ آخر **لا يسمّمها المصنّف
+    الأول** ⇒ تبقى بلا سمّ. فالتصميم الثاني يُبنى هنا كما يُبنى الأول.
+    """
+    run = base / "period"
+    (run / "results").mkdir(parents=True, exist_ok=True)
+    pages = {
+        1: [{"movement": None, "balance": "0.00", "desc": "الرصيد الافتتاحي",
+             "date": None, "raw_movement": None, "raw_balance": "0.00"},
+            {"movement": "100.00", "balance": "100.00", "desc": "إيداع نقدي",
+             "date": "20250101", "raw_movement": "100.00", "raw_balance": "100.00"}],
+        2: [{"movement": "40.00", "balance": "60.00", "desc": "سحب نقدي",
+             "date": "20250102", "raw_movement": "40.00", "raw_balance": "60.00"}],
+    }
+    for pg, rows in pages.items():
+        (run / "results" / f"pg-{pg:03d}.json").write_text(json.dumps(
+            {"pg": pg, "page_no": pg, "raw_rows": rows, "footer": None,
+             "model": "deterministic", "prompt_version": "text-v1",
+             "usage": {"cost": 0.0, "calls": 0}}, ensure_ascii=False), encoding="utf-8")
+    report = {
+        "slice": {"first": 1, "count": 2, "pages_done": 2},
+        "totals": {"rows": 3, "clean": 3, "clean_ratio": 1.0},
+        "footer_role": "period_summary",
+        "period_summary": {"opening": "0.00", "closing": "60.00",
+                           "printed_debits": "40.00", "printed_credits": "100.00",
+                           "n_deposits": "1", "n_withdrawals": "1"},
+        "footer": {"ok": 0, "mismatch": 0, "absent": 2, "unchecked": 0, "gap": 0},
+        "page_numbers": {"gaps": [], "duplicates": {}, "backwards": {}},
+        "reader_stamp": {"model": "deterministic", "prompt_version": "text-v1"},
+        "corpus_provenance": {"reader": {"model": "deterministic",
+                                         "prompt_version": "text-v1"},
+                              "legacy_unstamped_pages": 0,
+                              "stamp_conflict_pages": 0,
+                              "declaration": "كوربوسٌ بنسبٍ واحد (قارئٌ حتميّ)"},
+        "usage": {"cost": 0.0, "calls": 0},
+        "per_page": [{"page": pg, "rows": len(rows), "footer": "absent",
+                      "suspects": 0, "page_no": pg, "origin": "text", "ms_read": 0}
+                     for pg, rows in pages.items()],
+    }
+    (run / "slice_report.json").write_text(json.dumps(report, ensure_ascii=False),
+                                           encoding="utf-8")
+    return run
+
+
+@pytest.fixture(scope="module")
+def period_fixture(tmp_path_factory) -> tuple[Path, Path, list[str]]:
+    base = tmp_path_factory.mktemp("gate-bites-period")
+    run = _make_period_run(base)
+    clean = base / "period.xlsx"
+    build(run, clean, None)
+    code, passed, fails = _run_gate(run, clean)
+    assert code == 0 and fails == [], f"عيّنة ملخّص الفترة يجب أن تمرّ: {fails}"
+    return run, clean, passed
+
+
+def _period_report_edit(run: Path, **fields) -> None:
+    f = run / "slice_report.json"
+    d = json.loads(f.read_text(encoding="utf-8"))
+    d["period_summary"] |= fields
+    f.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+
+
+def _period_credits_lie(run: Path) -> None:
+    _period_report_edit(run, printed_credits="999.00")
+
+
+def _period_closing_lie(run: Path) -> None:
+    _period_report_edit(run, closing="61.00")
+
+
+def _period_count_lie(run: Path) -> None:
+    _period_report_edit(run, n_withdrawals="7")
+
+
+def _period_declares_gaps(run: Path) -> None:
+    """يُعلن أوراقاً غائبة بلا قيدٍ يقابلها ⇒ يجب أن يسقط فحص القيود."""
+    f = run / "slice_report.json"
+    d = json.loads(f.read_text(encoding="utf-8"))
+    d["page_numbers"]["gaps"] = [[1, 1, 2, 3, [2]]]
+    f.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+
+
+# أسمامُ التصميم الثاني: تُوقَع على تشغيلة «ملخّص الفترة» لا على الأولى — فلكل
+# تصميمٍ عيّنته، وسمُّ تصميمٍ لا يُجرَّب على آخر.
+PERIOD_POISONS: list[tuple[str, str, Callable[[Path], None]]] = [
+    ("Σ الدائن == ملخّص الفترة", "إجمالي الدائن في ملخّص الفترة يكذب",
+     _period_credits_lie),
+    ("رصيد الإقفال == ملخّص الفترة", "إقفال ملخّص الفترة يكذب", _period_closing_lie),
+    ("عدد الصفوف == عدد الحركات المطبوع", "عدد الحركات المطبوع يكذب",
+     _period_count_lie),
+    ("قيود الفجوة قائمة كصفوف", "أوراقٌ غائبة مُعلنة بلا قيد", _period_declares_gaps),
+]
+
+
 def _rules_for(name: str) -> list[tuple[str, str, Callable]]:
     return ([r for r in POISONS if name.startswith(r[0])]
-            + [r for r in CACHE_POISONS if name.startswith(r[0])])
+            + [r for r in CACHE_POISONS if name.startswith(r[0])]
+            + [r for r in PERIOD_POISONS if name.startswith(r[0])])
 
 
 # ─────────────────────────── الفحوص ───────────────────────────
@@ -533,6 +631,26 @@ def test_the_gap_check_names_the_printed_sheets_not_the_file_position(tmp_path, 
     assert "قيد فجوة #1 له مقدارا مدين ودائن" in passed2, passed2
 
 
+def _cache_poison_case(make_run, rule, tmp_path) -> None:
+    name, desc, mutate = rule
+    base = tmp_path / "cache-bite"
+    run = make_run(base)
+    clean = base / "export.xlsx"
+    build(run, clean, None)
+    mutate(run)
+    code, _passed, fails = _run_gate(run, clean)
+    assert code != 0, f"السمّ «{desc}» لم يُسقط البوابة"
+    assert any(f.startswith(name) for f in fails), \
+        f"سقط غير المسمّى: {fails} (المطلوب: {name})"
+
+
+@pytest.mark.parametrize("rule", PERIOD_POISONS,
+                         ids=[r[0] for r in PERIOD_POISONS])
+def test_a_second_layout_poison_fails_the_gate(tmp_path, rule):
+    """فحوصٌ لا تُطلَق إلا على تصميمٍ آخر: تُسمَّم على عيّنة ذلك التصميم."""
+    _cache_poison_case(_make_period_run, rule, tmp_path)
+
+
 @pytest.mark.parametrize("rule", CACHE_POISONS, ids=[r[0] for r in CACHE_POISONS])
 def test_a_cache_poison_fails_the_gate(tmp_path, rule):
     """سمٌّ على الكاش ⇒ البوابة تسقط بالاسم.
@@ -569,3 +687,4 @@ def test_a_poison_trips_its_named_check(rule, gate_fixture, tmp_path):
     code, _passed, fails = _run_gate(run, poisoned)
     assert code != 0, f"البوابة مرّت على سمّ «{label}» (exit=0)"
     assert target in fails, f"السمّ أسقط {fails} ولم يُسقط «{target}»"
+
