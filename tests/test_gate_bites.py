@@ -79,6 +79,10 @@ def _make_run(base: Path) -> Path:
     for pg, spec in pages.items():
         cache = {"pg": pg, "page_no": spec["page_no"], "raw_rows": spec["rows"],
                  "footer": spec["footer"], "usage": {"cost": 0.0, "calls": 1}}
+        if pg <= 3:
+            # ثلاث نقاط مختمة وواحدة قديمة بلا ختم: الشكل الذي يجب أن يُعلن
+            # لا أن يُسكَت عنه (FM-1) — وبه يصير عدّاد البوابة ذا معنى.
+            cache |= {"model": "test-model", "prompt_version": "v2"}
         if spec.get("missing_sheets"):
             cache["missing_sheets"] = spec["missing_sheets"]
         (run / "results" / f"pg-{pg:03d}.json").write_text(
@@ -94,9 +98,9 @@ def _make_run(base: Path) -> Path:
         "reader_stamp": {"model": "test-model", "prompt_version": "v2"},
         "corpus_provenance": {"reader": {"model": "test-model",
                                          "prompt_version": "v2"},
-                              "legacy_unstamped_pages": 0,
+                              "legacy_unstamped_pages": 1,
                               "stamp_conflict_pages": 0,
-                              "declaration": "كوربوسٌ بنسبٍ واحد"},
+                              "declaration": "نقطةٌ واحدة بلا ختم + نسبٌ واحد"},
         "footer": {"ok": 3, "mismatch": 0, "absent": 1, "unchecked": 0, "gap": 0},
         "page_numbers": {"gaps": [[2, 2, 3, 4, [3]]], "duplicates": {}, "backwards": {}},
         "per_page": [
@@ -287,6 +291,30 @@ def p_date_removed(wb):
     ws.cell(row=i, column=_col(ws, "التاريخ (ميلادي)")).value = None
 
 
+def p_identity_fabricated(wb):
+    """هويةٌ مُختلقة: قارئٌ لا وجود له ⇒ يجب أن تسقط بمقابلتها بالكاش.
+
+    سمُّ الحضور (`p_reader_identity_blank`) يحرس أن *يُقال شيء*؛ وهذا يحرس أن
+    يكون ما قيل **صادقاً** — وهو غرض FM-1 بعينه.
+    """
+    ws = wb["الملخص"]
+    for i, values in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if str(values[0] or "").startswith("هوية القارئ"):
+            ws.cell(row=i, column=2).value = "قارئٌ واحد: acme/reader-v9 · تلقينة V7"
+            return
+    raise AssertionError("لا سطر «هوية القارئ» في العيّنة")
+
+
+def p_unstamped_count_lies(wb):
+    """عدّادٌ يكذب: 1 ⇐ 0 ⇒ الكاش يقول غير ذلك."""
+    ws = wb["الملخص"]
+    for i, values in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if str(values[0] or "").startswith("صفحات بلا ختم قارئ"):
+            ws.cell(row=i, column=2).value = 0
+            return
+    raise AssertionError("لا سطر «صفحات بلا ختم قارئ» في العيّنة")
+
+
 def p_reader_identity_blank(wb):
     """إفراغ هوية القارئ ⇒ رقمٌ يُنشر بلا نسب (FM-1: كان هذا الباب مفتوحاً)."""
     ws = wb["الملخص"]
@@ -383,6 +411,9 @@ POISONS: list[tuple[str, str, Callable[[Workbook], None]]] = [
     ("الملخص يذكر «حكم الهوية»", "تغيير وسم حكم الهوية", p_summary_verdict_label),
     ("الملخص يعلن هوية القارئ", "إفراغ هوية القارئ (نموذج · تلقينة)",
      p_reader_identity_blank),
+    ("هوية القارئ المعلنة توافق الكاش", "اختلاق هوية قارئ", p_identity_fabricated),
+    ("عدد الصفحات بلا ختم يطابق الكاش", "عدّاد بلا ختم يكذب",
+     p_unstamped_count_lies),
     ("الملخص يعدّ الصفحات بلا ختم", "حذف سطر الصفحات بلا ختم قارئ",
      p_unstamped_row_removed),
     ("الملخص يعلن حكم الهوية", "قلب قيمة الحكم", p_summary_verdict_value),
@@ -390,8 +421,24 @@ POISONS: list[tuple[str, str, Callable[[Workbook], None]]] = [
 ]
 
 
+def _cache_second_reader(run: Path) -> None:
+    """قارئٌ ثانٍ في نقطة فحص واحدة: الكوربوس المختلط الذي يمنعه الفحص الثالث."""
+    f = run / "results" / "pg-004.json"
+    d = json.loads(f.read_text(encoding="utf-8"))
+    d |= {"model": "other-model", "prompt_version": "v2"}
+    f.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+
+
+# (اسم الفحص · وصف · ما يُسمَّم) — أسمامٌ تُوقَع على **الكاش** لا على الورقة:
+# فحصُ صدق الإعلان لا يُسمَّم بتزوير الإعلان وحده، بل بتزوير مصدره.
+CACHE_POISONS: list[tuple[str, str, Callable[[Path], None]]] = [
+    ("كوربوسٌ واحد بنسبٍ واحد", "قارئٌ ثانٍ في نقطة فحص واحدة", _cache_second_reader),
+]
+
+
 def _rules_for(name: str) -> list[tuple[str, str, Callable]]:
-    return [r for r in POISONS if name.startswith(r[0])]
+    return ([r for r in POISONS if name.startswith(r[0])]
+            + [r for r in CACHE_POISONS if name.startswith(r[0])])
 
 
 # ─────────────────────────── الفحوص ───────────────────────────
@@ -453,6 +500,27 @@ def test_the_gap_check_names_the_printed_sheets_not_the_file_position(tmp_path, 
     _code, passed2, fails = _run_gate(run, both)
     assert all("?" not in f for f in fails + passed2), fails + passed2
     assert "قيد فجوة #1 له مقدارا مدين ودائن" in passed2, passed2
+
+
+@pytest.mark.parametrize("rule", CACHE_POISONS, ids=[r[0] for r in CACHE_POISONS])
+def test_a_cache_poison_fails_the_gate(tmp_path, rule):
+    """سمٌّ على الكاش ⇒ البوابة تسقط بالاسم.
+
+    وسببُ وجود هذا الصنف: بعض الفحوص لا يُسمَّم محتواها بورقة — فحصُ «كوربوسٌ
+    واحد بنسبٍ واحد» لا معنى لتسميمه في الملخص، لأن **مصدر الحكم هو الكاش**.
+    فتسميمه أن يُصنَع الكوربوس المختلط نفسه — وهو ما طلبه المدقّق: لا تنتظروا
+    قارئاً ثانياً حقيقياً، اصنعوه في العيّنة.
+    """
+    name, desc, mutate = rule
+    base = tmp_path / "cache-bite"
+    run = _make_run(base)
+    clean = base / "export.xlsx"
+    build(run, clean, None)
+    mutate(run)
+    code, _passed, fails = _run_gate(run, clean)
+    assert code != 0, f"السمّ «{desc}» لم يُسقط البوابة"
+    assert any(f.startswith(name) for f in fails), \
+        f"سقط غير المسمّى: {fails} (المطلوب: {name})"
 
 
 @pytest.mark.parametrize("rule", POISONS, ids=[r[0] for r in POISONS])
