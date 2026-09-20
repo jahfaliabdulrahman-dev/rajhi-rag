@@ -41,16 +41,22 @@ MODEL = os.environ.get("OPENROUTER_MODEL_VLM", "google/gemini-3.7-flash")
 PROMPTS = {"v2": FRONTIER_PROMPT_V2, "v1": FRONTIER_PROMPT}
 
 
-def reader_stamp(prompt: str | None = None) -> dict:
+def reader_stamp(prompt: str | None = None, *, reader: str = "vlm",
+                 version: str | None = None) -> dict:
     """هوية القارئ الفعلية: النموذج والتلقينة اللذان أنتجا هذه القراءة.
 
     سببه حادثة مسجَّلة (FMEA FM-1): كوربوسٌ واحد قد يُبنى بقارئين مختلفين
     فيُجمَع تحت رقمٍ واحد، ولا شيء في نقطة الفحص يقول بأيّهما قُرئ. فالختم
     يُكتب مع كل قراءة، ويُقارَن عند الاستئناف. والتلقينة المجهولة تُختم
     ببصمتها لا باسمٍ عام.
+
+    والقارئ الحتميّ (نصّ رقميّ بلا نموذج) يُختم `deterministic` ونسخته —
+    فالمقارنة تبقى ممكنة مع بقية الكوربوس بلا اسم نموذجٍ لا وجود له.
     """
     import hashlib
 
+    if reader == "text":
+        return {"model": "deterministic", "prompt_version": version or "text-v1"}
     if prompt is None or prompt is FRONTIER_PROMPT_V2:
         version = "v2"
     elif prompt is FRONTIER_PROMPT:
