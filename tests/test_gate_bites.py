@@ -278,6 +278,18 @@ def p_date_removed(wb):
     ws.cell(row=i, column=_col(ws, "التاريخ (ميلادي)")).value = None
 
 
+def p_anchor_date_removed(wb):
+    """مرساةٌ تفقد تاريخها.
+
+    والمَراسي كانت **خارج مجتمع الفحص** حتى هذه الجولة: البوابة كانت تفحص
+    «المُثبَتة بالسلسلة» وحدها، وحكم المرساة يبدأ بـ«حركة — مرساة» ⇒ فحذفُ
+    تاريخها كان يمرّ PASS. وهذا السمّ هو ما يُثبت أن الباب أُغلق.
+    """
+    ws = wb["الحركات"]
+    i, _ = _hit(ws, lambda d: str(d.get("حكم السلسلة على الصفّ") or "").startswith("حركة — مرساة"))
+    ws.cell(row=i, column=_col(ws, "التاريخ (ميلادي)")).value = None
+
+
 def p_date_out_of_range(wb):
     ws = wb["الحركات"]
     i, _ = _first_movement(ws)
@@ -334,6 +346,8 @@ POISONS: list[tuple[str, str, Callable[[Workbook], None]]] = [
     ("إعلان المصدر يوافق حكم السلسلة", "تزوير مصدر مرساة", p_source_forged_on_anchor),
     ("لا تناقض بين «الحركة كما طُبعت»", "تناقض المكتوب بالمثبت", p_printed_contradiction),
     ("التواريخ: كل صفّ حركة له تاريخ", "حذف تاريخ حركة", p_date_removed),
+    ("التواريخ: كل صفّ حركة له تاريخ", "حذف تاريخ مرساة (خارج المجتمع سابقاً)",
+     p_anchor_date_removed),
     ("النطاق الزمني داخل", "تاريخ خارج المدى", p_date_out_of_range),
     ("الملخص يذكر «الإقفال الحسابي", "تغيير وسم الإقفال", p_summary_identity_label),
     ("الملخص يذكر «قيود الفجوة»", "تغيير وسم قيود الفجوة", p_summary_gap_label),
