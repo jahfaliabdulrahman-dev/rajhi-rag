@@ -39,6 +39,7 @@ from tools.to_xlsx import build  # noqa: E402
 import verify_close  # noqa: E402
 
 PROFILE = ROOT / "profiles" / "al-rajhi.json"
+APP_PROFILE = ROOT / "profiles" / "al-rajhi-app.json"
 OPENS = "حركة مثبتة"
 
 
@@ -137,13 +138,14 @@ def gate_fixture(tmp_path_factory) -> tuple[Path, Path, list[str]]:
 
 # ─────────────────────────── تشغيل البوابة ───────────────────────────
 
-def _run_gate(run: Path, xlsx: Path) -> tuple[int, list[str], list[str]]:
+def _run_gate(run: Path, xlsx: Path,
+              profile: Path | None = None) -> tuple[int, list[str], list[str]]:
     """يشغّل البوابة في العملية نفسها: رمز الخروج + أسماء الناجحة + أسماء الساقطة."""
     verify_close.FAILS.clear()
     buf = io.StringIO()
     argv = sys.argv
     sys.argv = ["verify_close.py", "--run", str(run), "--xlsx", str(xlsx),
-                "--profile", str(PROFILE)]
+                "--profile", str(profile or PROFILE)]
     try:
         with contextlib.redirect_stdout(buf):
             code = verify_close.main()
@@ -326,6 +328,19 @@ def p_unstamped_count_lies(wb):
     raise AssertionError("لا سطر «صفحات بلا ختم قارئ» في العيّنة")
 
 
+def p_scan_limits_row_renamed(wb):
+    """**يُفرّغ ورقة الحدود** ⇒ الحدود الموعودة لم تُقل.
+
+    وأولُ محاولةٍ كانت أضعف: غيّرتُ سطراً واحداً فمرّ الفحص، لأن النصّ المطلوب
+    كان مذكوراً في سطور أخرى. فالسمّ يجب أن يُزيل **ما يُشترط** لا ما يظنّه
+    المسمِّم. (وهذا فرقٌ بين سمٍّ يبدو وسمٍّ يقع.)
+    """
+    ws = wb["كيف تُقرأ هذه الأوراق"]
+    for i in range(2, ws.max_row + 1):
+        for col in (1, 2):
+            ws.cell(row=i, column=col).value = None
+
+
 def p_reader_identity_blank(wb):
     """إفراغ هوية القارئ ⇒ رقمٌ يُنشر بلا نسب (FM-1: كان هذا الباب مفتوحاً)."""
     ws = wb["الملخص"]
@@ -420,6 +435,8 @@ POISONS: list[tuple[str, str, Callable[[Workbook], None]]] = [
     ("الملخص يذكر «الإقفال الحسابي", "تغيير وسم الإقفال", p_summary_identity_label),
     ("الملخص يذكر «قيود الفجوة»", "تغيير وسم قيود الفجوة", p_summary_gap_label),
     ("الملخص يذكر «حكم الهوية»", "تغيير وسم حكم الهوية", p_summary_verdict_label),
+    ("ورقة الحدود تُعلن حقيقة هذا التصميم", "تغيير حدٍّ في ورقة الحدود",
+     p_scan_limits_row_renamed),
     ("الملخص يعلن هوية القارئ", "إفراغ هوية القارئ (نموذج · تلقينة)",
      p_reader_identity_blank),
     ("هوية القارئ المعلنة توافق الكاش", "اختلاق هوية قارئ", p_identity_fabricated),
@@ -520,7 +537,7 @@ def period_fixture(tmp_path_factory) -> tuple[Path, Path, list[str]]:
     run = _make_period_run(base)
     clean = base / "period.xlsx"
     build(run, clean, None)
-    code, passed, fails = _run_gate(run, clean)
+    code, passed, fails = _run_gate(run, clean, APP_PROFILE)
     assert code == 0 and fails == [], f"عيّنة ملخّص الفترة يجب أن تمرّ: {fails}"
     return run, clean, passed
 
@@ -544,6 +561,14 @@ def _period_count_lie(run: Path) -> None:
     _period_report_edit(run, n_withdrawals="7")
 
 
+def _period_disclosure_blank(wb) -> None:
+    """يُفرّغ ورقة الحدود في التصدير الرقمي ⇒ قارئُه لا يعرف ما لا يُشهد به."""
+    ws = wb["كيف تُقرأ هذه الأوراق"]
+    for i in range(2, ws.max_row + 1):
+        for col in (1, 2):
+            ws.cell(row=i, column=col).value = None
+
+
 def _period_declares_gaps(run: Path) -> None:
     """يُعلن أوراقاً غائبة بلا قيدٍ يقابلها ⇒ يجب أن يسقط فحص القيود."""
     f = run / "slice_report.json"
@@ -554,6 +579,13 @@ def _period_declares_gaps(run: Path) -> None:
 
 # أسمامُ التصميم الثاني: تُوقَع على تشغيلة «ملخّص الفترة» لا على الأولى — فلكل
 # تصميمٍ عيّنته، وسمُّ تصميمٍ لا يُجرَّب على آخر.
+# أسمامُ **ورقةٍ** في التصميم الثاني: بعض الفحوص يقع على المصنّف لا على الكاش
+PERIOD_WORKBOOK_POISONS: list[tuple[str, str, Callable]] = [
+    ("ورقة الحدود تُعلن حقيقة هذا التصميم", "إفراغ حدّ الملف الرقمي",
+     _period_disclosure_blank),
+]
+
+
 PERIOD_POISONS: list[tuple[str, str, Callable[[Path], None]]] = [
     ("Σ الدائن == ملخّص الفترة", "إجمالي الدائن في ملخّص الفترة يكذب",
      _period_credits_lie),
@@ -567,7 +599,8 @@ PERIOD_POISONS: list[tuple[str, str, Callable[[Path], None]]] = [
 def _rules_for(name: str) -> list[tuple[str, str, Callable]]:
     return ([r for r in POISONS if name.startswith(r[0])]
             + [r for r in CACHE_POISONS if name.startswith(r[0])]
-            + [r for r in PERIOD_POISONS if name.startswith(r[0])])
+            + [r for r in PERIOD_POISONS if name.startswith(r[0])]
+            + [r for r in PERIOD_WORKBOOK_POISONS if name.startswith(r[0])])
 
 
 # ─────────────────────────── الفحوص ───────────────────────────
@@ -642,6 +675,25 @@ def _cache_poison_case(make_run, rule, tmp_path) -> None:
     assert code != 0, f"السمّ «{desc}» لم يُسقط البوابة"
     assert any(f.startswith(name) for f in fails), \
         f"سقط غير المسمّى: {fails} (المطلوب: {name})"
+
+
+@pytest.mark.parametrize("rule", PERIOD_WORKBOOK_POISONS,
+                         ids=[r[0] for r in PERIOD_WORKBOOK_POISONS])
+def test_a_second_layout_sheet_poison_fails_the_gate(tmp_path, rule):
+    """فحصٌ يقع على ورقة التصدير في التصميم الثاني: يُسمَّم على مصنّفه."""
+    name, desc, mutate = rule
+    base = tmp_path / "sheet-bite"
+    run = _make_period_run(base)
+    clean = base / "period.xlsx"
+    build(run, clean, None)
+    poisoned = base / "poisoned.xlsx"
+    shutil.copy(clean, poisoned)
+    wb = load_workbook(poisoned)
+    mutate(wb)
+    wb.save(poisoned)
+    code, _passed, fails = _run_gate(run, poisoned, APP_PROFILE)
+    assert code != 0, f"السمّ «{desc}» لم يُسقط البوابة"
+    assert any(f.startswith(name) for f in fails), f"سقط غير المسمّى: {fails}"
 
 
 @pytest.mark.parametrize("rule", PERIOD_POISONS,

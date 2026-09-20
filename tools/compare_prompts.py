@@ -84,18 +84,24 @@ def main() -> None:
     ap.add_argument("--run", required=True, type=Path)
     ap.add_argument("--count", type=int, default=24)
     ap.add_argument("--holdout-mod", type=int, default=3)
+    ap.add_argument("--set", choices=("holdout", "training"), default="holdout",
+                    help=("من أين تُسحَب الصفحات: `holdout` لقياسٍ لا يُنفق مجموعة "
+                          "التدريب · و`training` للمقارنة الكاملة **بلا إنفاق الحجز** "
+                          "(قرارٌ يُتّخذ على الحجز يُنفقه — فالحجز للنموذج)."))
     ap.add_argument("--out", type=Path, default=PROJ / "docs/evidence")
     args = ap.parse_args()
 
     run = args.run if args.run.is_absolute() else PROJ / args.run
     pages = sorted(int(p.stem.split("-")[1]) for p in (run / "results").glob("pg-*.json"))
-    holdout = [p for p in pages if p % args.holdout_mod == 0]
-    step = max(1, len(holdout) // args.count)
-    picked = holdout[::step][:args.count]
+    divisible = [p for p in pages if p % args.holdout_mod == 0]
+    pool = divisible if args.set == "holdout" else [p for p in pages if p not in divisible]
+    step = max(1, len(pool) // args.count)
+    picked = pool[::step][:args.count]
 
     report = {"measured_at": date.today().isoformat(), "run": str(args.run),
               "sample": {"requested": args.count, "picked": len(picked),
-                         "from": "holdout (page % {} == 0)".format(args.holdout_mod),
+                         "from": (f"{args.set} (page % {args.holdout_mod} "
+                                  f"{'==' if args.set == 'holdout' else '!='} 0)"),
                          "pages": picked},
               "prompts": {}}
     for name in ("v1", "v2"):
