@@ -31,6 +31,37 @@ LINE_TOL = 3.0          # دقّة تجميع السطور (نقاط)
 AMOUNT_X = 300          # ما بعد هذا العمود مبالغ (Debit/Credit/Balance)
 
 
+def non_witnesses() -> tuple[str, ...]:
+    """ما **لا** يشهد به ملفٌّ رقمي — تُطبَع مع كل قياس لا تُترك للقارئ.
+
+    سببُ وجودها: كل فحوص المسبار تُحسب من **داخل الملف نفسه**، فملفٌّ عُدِّل ثم
+    أُعيد حساب أرصدته يمرّ منها كلها. فـ«0 كسور» تُثبت **اتّساق المستند** لا
+    **صدوره عن المصرف** — والدقّة والحجّيّة محوران لا محور. والمرجع المطبوع
+    عنوانُ الجهة التي تُسأل، لا شهادةً منها.
+    """
+    return (
+        "لا توقيع رقمي ولا تشفير: لا شيء يمنع تعديل الملف وإعادة حساب أرصدته.",
+        "حقل /Author نصٌّ يكتبه أي محرِّر PDF — لا يشهد بالمصدر.",
+        "كل فحوص هذا المسبار تُحسب من داخل الملف نفسه ⇒ «0 كسور» اتّساقٌ داخلي "
+        "لا صدورٌ عن المصرف.",
+        "المرجع المطبوع (Ref. No) عنوانُ الجهة التي تُسأل — لا شهادةٌ منها.",
+    )
+
+
+def signature_facts(path: Path) -> dict:
+    """التوقيع والتشفير مقيسان لا مُفترضان (pypdf — بلا شبكة)."""
+    try:
+        from pypdf import PdfReader
+        r = PdfReader(str(path))
+        root = r.trailer.get("/Root") or {}
+        return {"signed_acroform": "/AcroForm" in root,
+                "encrypted": bool(r.is_encrypted),
+                "author": str((r.metadata or {}).get("/Author") or "") or None}
+    except Exception as exc:  # pragma: no cover - يعتمد على الملف
+        return {"signed_acroform": "unreadable", "encrypted": "unreadable",
+                "error": f"{type(exc).__name__}: {exc}"[:160]}
+
+
 def _dec(s: str) -> Decimal | None:
     try:
         return Decimal(s.replace(",", ""))
@@ -158,6 +189,8 @@ def main() -> None:
         "ref_present": bool(parsed["header"].get("ref")),
         "pages_with_rows": len([n for n in parsed["per_page"] if n]),
         **result,
+        "signature": signature_facts(args.pdf),
+        "ما_لا_يشهد_به_هذا_الملف": list(non_witnesses()),
         "cost_usd": "0 — لا نموذج ولا شاهد موضعي: النصّ هو الدليل",
     }
     args.out.mkdir(parents=True, exist_ok=True)

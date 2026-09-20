@@ -460,6 +460,35 @@ def summary_facts(rows: list[dict], report: dict, per_page: dict,
     }
 
 
+def _reader_identity(report: dict) -> str:
+    """(نموذج · تلقينة) من تقرير الجولة — أو إعلانٌ صريح بأنه غير مختم.
+
+    لا يُكتب بيد: الكوربوس الذي قُرئ بقارئين لا يجوز أن يحمل رقماً واحداً بلا
+    أن يقول بمن قُرئ (FMEA FM-1 · D=5). وثلاث حالات تُفرَّق، لأن جمعها في نصٍّ
+    واحد يجعل «لا أعلم» و«لم يُسجَّل» شيئاً واحداً:
+      · ختمٌ موجود ⇒ يُسمّى؛
+      · تقريرٌ يعلن عدد الصفحات غير المختمة ⇒ «غير مختم — N صفحة» (إعلانٌ صادق)؛
+      · تقريرٌ صامت ⇒ «غير مذكور» (وهذا هو الباب الذي يُسقطه الفحص).
+    """
+    stamp = (report or {}).get("reader_stamp") or {}
+    model, prompt = stamp.get("model"), stamp.get("prompt_version")
+    if model and prompt:
+        return f"{model} · تلقينة {prompt}"
+    prov = (report or {}).get("corpus_provenance")
+    if prov:
+        n = (prov.get("legacy_unstamped_pages", 0)
+             + prov.get("stamp_conflict_pages", 0))
+        return f"غير مختم — {n} صفحة قُرئت قبل تسجيل الهوية"
+    return "غير مذكور في تقرير الجولة"
+
+
+def _legacy_unstamped(report: dict) -> int | str:
+    prov = (report or {}).get("corpus_provenance")
+    if not prov:
+        return "غير مذكور في تقرير الجولة"
+    return prov.get("legacy_unstamped_pages", 0) + prov.get("stamp_conflict_pages", 0)
+
+
 def summary_sheet(facts: dict, rows: list[dict], report: dict) -> list[list]:
     ds = facts["date_status"]
     return [
@@ -519,6 +548,11 @@ def summary_sheet(facts: dict, rows: list[dict], report: dict) -> list[list]:
         ["وسيط زمن الصفحة (ث)", facts["median_page_s"], "المقيس، لا المقدَّر"],
         ["طريقة كل رقم أعلاه", "من أدلة التشغيل أو من الإجماليات المطبوعة",
          "لا رقم في هذه الورقة أُعيد اشتقاقه يدوياً"],
+        ["", "", ""],
+        ["هوية القارئ (نموذج · تلقينة)", _reader_identity(report),
+         "من تقرير الجولة — بكوربوسٍ واحد قارئٌ واحد (FMEA FM-1)"],
+        ["صفحات بلا ختم قارئ", _legacy_unstamped(report),
+         "قُرئت قبل وجود الختم ⇒ تُعلن ولا تُجمَع تحت رقمٍ واحد"],
     ]
 
 

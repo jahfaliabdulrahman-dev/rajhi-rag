@@ -1,4 +1,6 @@
 {
+ "reader_stamp": "غير مختم",
+ "corpus_declaration": "غير مختم — قُرئ قبل تسجيل الهوية",
  "pages": 629,
  "rows": 5793,
  "clean": 5770,
@@ -14,5 +16,5 @@
  "rereads": 23,
  "arbitrations": 3,
  "median_page_s": 22.18,
- "tests": 289
+ "tests": 296
 }
