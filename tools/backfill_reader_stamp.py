@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""يُعلن حقيقة هوية القارئ لتشغيلةٍ سبقت تسجيل الهوية (FMEA FM-1).
+"""يُعلن حقيقة هوية القارئ **ودورَ التذييل** لتشغيلةٍ سبقت تسجيلهما.
 
 الـ629 صفحة قُرئت **قبل** أن يُختم القارئ في نقاط الفحص، ولا شيء يقول بأيّ
 تلقينةٍ ونموذجٍ قُرئت. وإعادةُ قراءتها لدفع ثمن المعلومة **إتلافٌ لا إصلاح**
@@ -30,9 +30,16 @@ def main() -> None:
     run = args.run if args.run.is_absolute() else PROJ / args.run
     report_path = run / "slice_report.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    if report.get("reader_stamp"):
-        print("التقرير يحمل ختماً بالفعل — لا شيء يُفعل.")
+    if report.get("reader_stamp") and report.get("footer_role"):
+        print("التقرير يحمل ختماً ودوراً بالفعل — لا شيء يُفعل.")
         return
+    if not report.get("footer_role"):
+        # دورُ التذييل لعقد البنك: قراءةٌ من العقد لا اجتهاد
+        import json as _json
+        prof = json.loads((PROJ / "profiles" / "al-rajhi.json").read_text(encoding="utf-8"))
+        report["footer_role"] = ((prof.get("statement") or {}).get("footer") or {}).get("role")
+        report["footer_role_note"] = ("أُعلن عند الاستدراك: تشغيلةٌ سبقت وجود الحقل — "
+                                      "والدور من عقد البنك نفسه.")
 
     stamped = unstamped = 0
     for f in sorted((run / "results").glob("pg-*.json")):
@@ -59,7 +66,8 @@ def main() -> None:
     if args.model:
         report["corpus_provenance"]["model_note"] = f"نموذج القراءة المعلن خارج الكاش: {args.model}"
 
-    print(f"نقاط فحص مختمة: {stamped} · غير مختمة: {unstamped}")
+    print(f"نقاط فحص مختمة: {stamped} · غير مختمة: {unstamped} · "
+          f"دور التذييل: {report.get('footer_role')}")
     if args.dry_run:
         print("(تجربة — لم يُكتب شيء)")
         return
