@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -35,9 +36,17 @@ SNAPSHOT = PROJ / "docs" / "claims.json"
 
 
 def _test_count() -> int | None:
+    """عدُّ الاختبارات — ببيئةٍ نظيفة.
+
+    عطلٌ مُعلن كان يُعطي أرقاماً خاطئة (227 · 232 · 233) حين يُستدعى من عمليةٍ
+    أخرى: المتغيّرات الموروثة (`PYTHONPATH` خصوصاً) تُغيّر ما يُجمَع. **الوثائق
+    ليست البيئة** — فالقياس يُنزع من بيئة الاستدعاء قبل أن يُشغَّل.
+    """
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("PYTHONPATH", "PYTHONHOME", "PYTEST_ADDOPTS")}
     out = subprocess.run([sys.executable, "-m", "pytest", "tests/",
                           "--collect-only", "-q"],
-                         cwd=PROJ, capture_output=True, text=True)
+                         cwd=PROJ, capture_output=True, text=True, env=env)
     for line in reversed(out.stdout.splitlines()):
         parts = line.split()
         if len(parts) >= 2 and parts[0].isdigit() and "test" in parts[1]:

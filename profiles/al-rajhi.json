@@ -5,23 +5,51 @@
   "_note": "عقد البنك: القواعد الميكانيكية التي تُقبل بها النتائج. لا يحمل بيانات شخصية — الأرقام الذهبية الخاصة (إن لزم تجميدها) في ملف محلي متجاهَل بـgit.",
   "statement": {
     "direction_source": "printed_column",
-    "columns": ["مدين", "دائن"],
-    "zero_forms": ["0.00", ".,..", "..", "."],
-    "digit_sets": ["ascii", "arabic_indic", "extended_arabic_indic"],
+    "columns": [
+      "مدين",
+      "دائن"
+    ],
+    "zero_forms": [
+      "0.00",
+      ".,..",
+      "..",
+      "."
+    ],
+    "digit_sets": [
+      "ascii",
+      "arabic_indic",
+      "extended_arabic_indic"
+    ],
     "date": {
       "form": "YYYYMMDD",
-      "gregorian_range": [1900, 2100],
+      "gregorian_range": [
+        1900,
+        2100
+      ],
       "inherit_from_neighbour": false,
       "require_all_rows": true
     },
     "footer": {
       "role": "cumulative_printed_totals",
-      "fields": ["debits", "credits", "balance"],
+      "fields": [
+        "debits",
+        "credits",
+        "balance"
+      ],
       "crop_from": 0.75
     },
     "labels": {
-      "debit_only": ["مدفوعات نقاط البيع", "سحب الصراف", "سحب نقدي"],
-      "credit_only": ["إيداع راتب", "راتب", "حوالة واردة", "إيداع نقدي"]
+      "debit_only": [
+        "مدفوعات نقاط البيع",
+        "سحب الصراف",
+        "سحب نقدي"
+      ],
+      "credit_only": [
+        "إيداع راتب",
+        "راتب",
+        "حوالة واردة",
+        "إيداع نقدي"
+      ]
     }
   },
   "identity": {
@@ -32,14 +60,32 @@
   "gap": {
     "detect": "printed_page_number_jump",
     "entry": "named",
-    "witnesses": ["footer_increment", "balance_crossing"],
+    "witnesses": [
+      "footer_increment",
+      "balance_crossing"
+    ],
     "tolerance": 0.01,
     "assume_zero_net": false
   },
   "artifacts": {
-    "sheets": ["الملخص", "الحركات", "الأسئلة", "صفوف الأسئلة", "التحقق لكل صفحة",
-               "ما لم يُثبت", "كيف تُقرأ هذه الأوراق"],
-    "summary_must_contain": ["الإقفال الحسابي (الهوية)", "قيود الفجوة", "حكم الهوية"]
+    "sheets": [
+      "الملخص",
+      "الحركات",
+      "الأسئلة",
+      "صفوف الأسئلة",
+      "التحقق لكل صفحة",
+      "ما لم يُثبت",
+      "كيف تُقرأ هذه الأوراق"
+    ],
+    "summary_must_contain": [
+      "الإقفال الحسابي (الهوية)",
+      "قيود الفجوة",
+      "حكم الهوية"
+    ],
+    "disclosure_must_contain": [
+      "لا سطر إجماليات",
+      "ما لم يُثبت"
+    ]
   },
   "golden": {
     "_note": "اختياري: يُملأ في ملف محلي عند تجميد أرقام تشغيلة بعينها. القيم هنا تُقرأ من الورق لا تُكتب بيد.",

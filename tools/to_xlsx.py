@@ -61,6 +61,17 @@ ARABIC_VERDICT = {
     "gate_rejected": "لم تُقرأ (رفضتها بوابة جودة المسح)",
 }
 
+# ⚠️ ولفظُ التصميم الثاني مختلف، وإلا **كذب على قارئه**: «لا سطر إجماليات مطبوع»
+# في تصميمٍ لا يطبع إجمالياتٍ لكل صفحة **ليست نقصاً بل هي التصميم** — فيقرأ
+# القارئ «صفحة بلا شاهد» والحقيقة أنّ شاهدها ملخّص الفترة. والمصدر واحد: العقد.
+ARABIC_VERDICT_PERIOD = {
+    "ok": "مطابق لإجمالياته المطبوعة",
+    "absent": "لا ينطبق — هذا التصميم لا يطبع إجمالياتٍ لكل صفحة (الشاهد: ملخّص الفترة)",
+    "unchecked": "غير قابل للتحقق (جارُه بلا إطار)",
+    "gap": "فجوة إطارات",
+    "gate_rejected": "لم تُقرأ (رفضتها بوابة جودة المسح)",
+}
+
 
 def _row_date_source(row: dict) -> str:
     """مصدر تاريخ الصفّ بحكم القانون — لا بالتخمين."""
@@ -90,21 +101,23 @@ def _page_no_label(page: int) -> str | None:
         return None
 
 
-def page_verdict(entry: dict, last_page: int) -> str:
+def page_verdict(entry: dict, last_page: int,
+                 verdict_map: dict | None = None) -> str:
     """حكم الصفحة بلفظه — ولا يُوهم بعيبٍ حيث الورق سليم.
 
     صفحةٌ **بلا حركات** ليست صفحة عمليات ناقصة الإجماليات: هي ملخّص الحساب
     (الصفحة الختامية بعد آخر حركة) أو ورقة بيضاء في الأصل. وتسميتها «لا سطر
     إجماليات مطبوع» تُقرأ عيباً في الورق أو في قراءتنا، وكلاهما غير صحيح.
     """
+    vm = verdict_map or ARABIC_VERDICT
     if not (entry.get("rows") or 0):
         if entry.get("footer") == "gap":
-            return ARABIC_VERDICT["gap"]
+            return vm["gap"]
         if entry.get("page") == last_page:
             return "ملخص الحساب — صفحة ختامية بلا حركات"
         return "صفحة بلا حركات (ليست صفحة عمليات)"
     val = str(entry.get("footer") or "")
-    return ARABIC_VERDICT.get(val, val)
+    return vm.get(val, val)
 
 # ————— التواريخ: ثلاثة أصناف لا واحد —————
 # The reader returned the printed date as it found it, and the paper (and the
@@ -758,6 +771,11 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
     if not rows:
         raise SystemExit(f"لا صفوف في {run}/results — هل المسار صحيح؟")
 
+    # **الدور من التقرير (الذي أعلنه العقد)**: تصميمٌ تذييله ملخّص فترة يقرأ
+    # ألفاظه الخاصة — وإلا قال لقارئه «لم يُثبت» عن صفحةٍ شاهدُها ملخّص الفترة.
+    period_layout = (report.get("footer_role") or "") == "period_summary"
+    verdict_map = ARABIC_VERDICT_PERIOD if period_layout else ARABIC_VERDICT
+
     # بوّابة الأمانة: ما ننشره مشتقّ هنا، فيجب أن يطابق ما أثبته المحكَّم حرفياً.
     problems, checked = verify_derivation(rows, per_page)
     if problems:
@@ -919,7 +937,8 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
          "استُدركت آلياً", "أُعيدت قراءتها", "خطأ قراءة"],
         [[p, (f"{e['page_no']} — مقروء من الورق" if e.get("page_no")
              else _page_no_label(p)), e.get("rows"),
-          page_verdict(e, max(per_page) if per_page else 0),
+          page_verdict(e, max(per_page) if per_page else 0,
+                       verdict_map=verdict_map),
           e.get("suspects"), e.get("origin"), e.get("ms_read"), bool(e.get("paradox")),
           (flags.get(p) or {}).get("recovered"), (flags.get(p) or {}).get("reread"),
           (flags.get(p) or {}).get("error")]
@@ -954,7 +973,15 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
                 f"توافق مع السلسلة {c.get('agree', 0)} · خلاف {c.get('clash', 0)}")
 
     unproven: list[list] = []
-    for p, e in sorted(per_page.items()):
+    if period_layout:
+        # لا بنود: كل حركةٍ في هذا التصميم مُثبتة بالسلسلة، وغيابُ تذييلٍ لكل
+        # صفحة **هو التصميم** لا نقص. والإعلان يُكتب سطراً واحداً يُقرأ، بدل
+        # ستة عشر بنداً تُقرأ ضعفَ قراءة.
+        unproven.append(["—", "—", len(rows),
+                         "لا بنود: هذا التصميم لا يطبع إجمالياتٍ لكل صفحة — "
+                         "وشاهدُ المجاميع ملخّص الفترة (مُقابَل ومُعلن في «الملخص»)",
+                         "دور التذييل المُعلن في العقد: period_summary"])
+    for p, e in sorted(per_page.items()) if not period_layout else []:
         if e.get("footer") != "ok":
             cert = _cert(p)
             reason = str(ARABIC_VERDICT.get(str(e.get("footer") or ""))
@@ -1053,7 +1080,10 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
     ws4 = wb.create_sheet("كيف تُقرأ هذه الأوراق")
     cost = (report.get("usage") or {}).get("cost")
     notes = [
-        ("المصدر", f"{run} — نتائج القراءة الفعلية للكشف (629 ورقة ممسوحة)"),
+        ("المصدر", (f"{run} — قراءةٌ حتميّة من نصّ ملف PDF صادر عن نظام المصرف "
+                    "(بلا مسح ولا صور ولا نموذج لغوي)")
+                    if period_layout else
+                    f"{run} — نتائج القراءة الفعلية للكشف (629 ورقة ممسوحة)"),
         ("تاريخ التصدير", datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M %z")),
         ("الصفوف المصدَّرة", f"{len(rows)} صفّاً كما قرأها النظام (منها سطور ملخّص لا معاملات)"),
         ("الصفوف المحتسبة في التقرير", f"{(report.get('totals') or {}).get('rows')} معاملة"),
@@ -1107,6 +1137,31 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
                                    "يشهد على ذلك. فمَن احتاجه أمام جهة قضائية فالشهادة على المصدر "
                                    "تُطلب من المصدر لا من هذا الملف."),
     ]
+    if period_layout:
+        # **الحدود تُكتب لهذا التصميم لا تُنسخ من غيره**: لا صور ولا ورق هنا،
+        # وما لا يشهد به الملف الرقمي مقيسٌ في المسبار (توقيع · تشفير · مرجع).
+        # ⚠️ ويُسقَط **كلُّ** نصٍّ يخصّ المسح — ومنه سطرُ «ما لا يشهد به هذا الملف»
+        # الذي كان يبقى **بلفظ المسح** («يشهد على نقل الصور المسلَّمة…») فوق السطر
+        # الرقمي الذي يخصّ هذا التصميم ⇒ حدّان متناقضان في ورقةٍ واحدة. والقاعدة:
+        # **لا يُنسخ نصُّ تصميمٍ إلى تصميمٍ يعني فيه شيئاً آخر.**
+        notes = [n for n in notes if n[0] not in
+                 ("تكرار مقصود", "أصناف ما لم يُثبت", "ما لا تجده هنا",
+                  "ما لا يشهد به هذا الملف", "ما لم يُثبت")]
+        notes += [
+            ("دور التذييل", "**ملخّص فترة**: إجمالي الإيداعات · إجمالي السحوبات · "
+                            "عدد الحركات · الافتتاح · الإقفال — والشاهد عليه لا على "
+                            "تذييلٍ مطبوع في كل صفحة (وهو غير موجود في هذا التصميم)."),
+            ("ما لا يشهد به هذا الملف", "**لا توقيع رقمي ولا تشفير** (مقيسان: "
+                                        "/AcroForm=False · encrypted=False) · وحقل "
+                                        "/Author نصٌّ يكتبه أي محرّر · وكل الفحوص "
+                                        "تُحسب **من داخل الملف** ⇒ اتّساقُه مُثبت، "
+                                        "وصدورُه عن المصرف **لا**. والمرجع المطبوع "
+                                        "(Ref. No) عنوانُ الجهة التي تُسأل."),
+            ("القارئ", "قارئٌ حتميّ من نصّ الملف — لا نموذج لغوي ولا صورة. "
+                       "الكلفة صفر، والقراءة قابلة للتكرار بالبايت نفسه."),
+            ("ورقة «التحقق لكل صفحة»", "«**لا ينطبق**» تعني أن هذا التصميم لا يطبع "
+                                       "إجمالياتٍ لكل صفحة — لا أنّ الصفحة ناقصة."),
+        ]
     ws4.append(["البند", "البيان"])
     for cell in ws4[1]:
         cell.fill, cell.font = HEAD_FILL, HEAD_FONT
