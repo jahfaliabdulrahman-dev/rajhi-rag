@@ -766,14 +766,37 @@ def verify_derivation(rows: list[dict], per_page: dict) -> tuple[list[str], int]
     return problems, checked
 
 
-def build(run: Path, out: Path, gate: Path | None) -> dict:
+def _contract_footer_role(profile: Path | str | None) -> str:
+    """دور التذييل من العقد — و«غير مُعلن» نتيجةٌ صريحة لا تُخمَّن."""
+    if not profile:
+        return "غير مُعلن في العقد"
+    try:
+        data = json.loads(Path(profile).read_text(encoding="utf-8"))
+        return ((data.get("statement") or {}).get("footer") or {}).get("role") \
+            or "غير مُعلن في العقد"
+    except Exception:                       # noqa: BLE001
+        return "غير مُعلن في العقد"
+
+
+def build(run: Path, out: Path, gate: Path | None,
+          profile: Path | str | None = None) -> dict:
     rows, report, per_page, flags = load(run)
     if not rows:
         raise SystemExit(f"لا صفوف في {run}/results — هل المسار صحيح؟")
 
     # **الدور من التقرير (الذي أعلنه العقد)**: تصميمٌ تذييله ملخّص فترة يقرأ
     # ألفاظه الخاصة — وإلا قال لقارئه «لم يُثبت» عن صفحةٍ شاهدُها ملخّص الفترة.
-    period_layout = (report.get("footer_role") or "") == "period_summary"
+    # **الدورُ يُقرأ من العقد** (لا من التقرير وحده): والاختلاف بينهما **يمنع
+    # التسليم** — لأن ملفاً يقول في خلاياه «مُعلن في العقد» وعقدُه يقول غيره هو
+    # ملفٌّ يكذب على قارئه. (مأخذ المدقّق: الخلية نسبت الدور إلى العقد ولم يكن
+    # الكود يفتح عقداً أصلاً.)
+    contract_role = _contract_footer_role(profile)
+    report_role = report.get("footer_role") or ""
+    if contract_role != report_role:
+        raise SystemExit(
+            "دور التذييل في التقرير يخالف العقد — لا يُسلَّم ملف: "
+            f"العقد «{contract_role}» · التقرير «{report_role}»")
+    period_layout = report_role == "period_summary"
     verdict_map = ARABIC_VERDICT_PERIOD if period_layout else ARABIC_VERDICT
 
     # بوّابة الأمانة: ما ننشره مشتقّ هنا، فيجب أن يطابق ما أثبته المحكَّم حرفياً.
@@ -977,7 +1000,7 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
         # لا بنود: كل حركةٍ في هذا التصميم مُثبتة بالسلسلة، وغيابُ تذييلٍ لكل
         # صفحة **هو التصميم** لا نقص. والإعلان يُكتب سطراً واحداً يُقرأ، بدل
         # ستة عشر بنداً تُقرأ ضعفَ قراءة.
-        unproven.append(["—", "—", len(rows),
+        unproven.append([None, None, len(rows),
                          "لا بنود: هذا التصميم لا يطبع إجمالياتٍ لكل صفحة — "
                          "وشاهدُ المجاميع ملخّص الفترة (مُقابَل ومُعلن في «الملخص»)",
                          "دور التذييل المُعلن في العقد: period_summary"])
@@ -1075,7 +1098,14 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
 
     ws3 = wb.create_sheet("ما لم يُثبت")
     write_sheet(ws3, ["الصفحة (ملف)", "رقم الصفحة", "صفوف", "ما لم يُثبت", "مصدر الحكم"],
-                sorted(unproven, key=lambda r: (r[0] or 0)), [13, 14, 9, 40, 30])
+                # ⚠️ **P0 (حكم المدقّق):** الترتيب كان `r[0] or 0` على قائمةٍ تخلط
+                # `int` (أرقام صفحات) بـ`"—"` (سطر الإعلان) ⇒ `TypeError` في
+                # `sorted` **حين يكون فيها عنصران فأكثر** — أي أنّ التصدير الرقمي
+                # كان **ينهار بالضبط حين يكون عنده ما يُعلنه**، ويمرّ في العيّنة
+                # ذات العنصر الواحد لأن المقارن لا يُستدعى. فالمفتاح يفصل النوعين
+                # ولا يقارن نصّاً بعدد أبداً.
+                sorted(unproven, key=lambda r: (r[0] is None, r[0] or 0)),
+                [13, 14, 9, 40, 30])
 
     ws4 = wb.create_sheet("كيف تُقرأ هذه الأوراق")
     cost = (report.get("usage") or {}).get("cost")
@@ -1148,9 +1178,10 @@ def build(run: Path, out: Path, gate: Path | None) -> dict:
                  ("تكرار مقصود", "أصناف ما لم يُثبت", "ما لا تجده هنا",
                   "ما لا يشهد به هذا الملف", "ما لم يُثبت")]
         notes += [
-            ("دور التذييل", "**ملخّص فترة**: إجمالي الإيداعات · إجمالي السحوبات · "
-                            "عدد الحركات · الافتتاح · الإقفال — والشاهد عليه لا على "
-                            "تذييلٍ مطبوع في كل صفحة (وهو غير موجود في هذا التصميم)."),
+            ("دور التذييل", "**ملخّص فترة** (من العقد ومن التقرير — متطابقان): "
+                            "إجمالي الإيداعات · إجمالي السحوبات · عدد الحركات · "
+                            "الافتتاح · الإقفال — والشاهد عليه لا على تذييلٍ مطبوع "
+                            "في كل صفحة (وهو غير موجود في هذا التصميم)."),
             ("ما لا يشهد به هذا الملف", "**لا توقيع رقمي ولا تشفير** (مقيسان: "
                                         "/AcroForm=False · encrypted=False) · وحقل "
                                         "/Author نصٌّ يكتبه أي محرّر · وكل الفحوص "
@@ -1193,9 +1224,13 @@ def main() -> None:
     ap.add_argument("--run", required=True, help="مجلد التشغيل (فيه slice_report.json و results/)")
     ap.add_argument("--out", required=True, help="مسار ملف xlsx الناتج")
     ap.add_argument("--gate", default=None, help="ملف بوابة جودة المسح (اختياري · مجاني)")
+    ap.add_argument("--profile", default=str(Path(__file__).resolve().parents[1] /
+                                           "profiles" / "al-rajhi.json"),
+                    help="عقد البنك/التصميم — يُقرأ منه دورُ التذييل ويُقابَل بالتقرير")
     args = ap.parse_args()
     info = build(Path(args.run).expanduser(), Path(args.out).expanduser(),
-                 Path(args.gate).expanduser() if args.gate else None)
+                 Path(args.gate).expanduser() if args.gate else None,
+                 profile=args.profile)
     print(f"[to-xlsx] {info['out']}")
     print(f"  صفوف: {info['rows']} · صفحات: {info['pages']} · بلا إثبات: {info['unproven']}"
           f" · مرفوضة من البوابة: {info['rejected_by_gate']}")

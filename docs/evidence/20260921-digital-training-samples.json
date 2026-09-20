@@ -1,0 +1,153 @@
+{
+ "measured_at": "2026-09-21",
+ "path": "التصميم الرقمي (نصّ) — عيّناتُ تدريبٍ بوسمٍ حتميّ",
+ "reader_stamp": {
+  "model": "deterministic",
+  "prompt_version": "text-v1",
+  "source": "reader_stamp في slice_report.json"
+ },
+ "render": {
+  "pdf": "app_statement.pdf",
+  "pdf_sha256": "093e1b733689193f48bf2ddeb23235672fb01b71ce97b036eb09d76d1afe46b3",
+  "dpi": 200,
+  "pages": 17,
+  "page_files": [
+   {
+    "page": 1,
+    "file": "pg-001.png",
+    "bytes": 272027,
+    "sha256": "e5290b2c5114ff1c"
+   },
+   {
+    "page": 2,
+    "file": "pg-002.png",
+    "bytes": 591157,
+    "sha256": "9e96a738b997d6f9"
+   },
+   {
+    "page": 3,
+    "file": "pg-003.png",
+    "bytes": 611008,
+    "sha256": "42970344183ac988"
+   },
+   {
+    "page": 4,
+    "file": "pg-004.png",
+    "bytes": 597212,
+    "sha256": "d6b383d2e752e70a"
+   },
+   {
+    "page": 5,
+    "file": "pg-005.png",
+    "bytes": 574579,
+    "sha256": "20c2067794896147"
+   },
+   {
+    "page": 6,
+    "file": "pg-006.png",
+    "bytes": 585467,
+    "sha256": "d8a2babb531b599d"
+   },
+   {
+    "page": 7,
+    "file": "pg-007.png",
+    "bytes": 593554,
+    "sha256": "af8ca85cb776a489"
+   },
+   {
+    "page": 8,
+    "file": "pg-008.png",
+    "bytes": 642488,
+    "sha256": "791c535cc3b1db6a"
+   },
+   {
+    "page": 9,
+    "file": "pg-009.png",
+    "bytes": 618712,
+    "sha256": "9e119c735df748de"
+   },
+   {
+    "page": 10,
+    "file": "pg-010.png",
+    "bytes": 589544,
+    "sha256": "b400e21fd7c6237b"
+   },
+   {
+    "page": 11,
+    "file": "pg-011.png",
+    "bytes": 615048,
+    "sha256": "4fe228ade98b4c7e"
+   },
+   {
+    "page": 12,
+    "file": "pg-012.png",
+    "bytes": 631929,
+    "sha256": "820e2df3128d0b2e"
+   },
+   {
+    "page": 13,
+    "file": "pg-013.png",
+    "bytes": 621627,
+    "sha256": "54afc0e18d6c56b8"
+   },
+   {
+    "page": 14,
+    "file": "pg-014.png",
+    "bytes": 592313,
+    "sha256": "cf175fd2a0e4c867"
+   },
+   {
+    "page": 15,
+    "file": "pg-015.png",
+    "bytes": 588991,
+    "sha256": "b5e7e96c730d5b4c"
+   },
+   {
+    "page": 16,
+    "file": "pg-016.png",
+    "bytes": 595247,
+    "sha256": "ed335c9e93f3b3cd"
+   },
+   {
+    "page": 17,
+    "file": "pg-017.png",
+    "bytes": 388245,
+    "sha256": "251f30bdd2a69157"
+   }
+  ],
+  "declaration": "صورٌ مُشتقّة من الملف نفسه ببصمةٍ مُثبتة قبل التصيير وبعده"
+ },
+ "pages": {
+  "total_in_export": 16,
+  "visited": 16,
+  "captured": 11,
+  "holdout_reserved": 5,
+  "skipped": []
+ },
+ "samples": {
+  "rows": 297,
+  "dropped_rows": 1,
+  "balances_joined": 273,
+  "balances_not_joined": 24
+ },
+ "holdout_rule": "page % 3 == 0 ⇒ لا تُلتقط (حجز التقييم)",
+ "privacy": {
+  "header_masked_fraction": 0.05,
+  "mask_evidence": "قياسٌ على الأصل الرقمي: ظهورُ الترويسة داخل الشريط مُحصى في هذا الملف · والمعرّفات تحت القناع صفر",
+  "mode": "نصُّ الأصل يُفحَص بمقابلة الأنماط (قياسٌ لا دعوى)",
+  "patterns_file": "rajhi-private-patterns.txt",
+  "anywhere_patterns": 2,
+  "header_patterns": 3,
+  "anywhere_identifiers_under_mask": 0,
+  "anywhere_identifiers_inside_mask": 0,
+  "header_furniture_inside_mask": 11,
+  "header_inside_table_declared": 23,
+  "note": "ترويسةٌ مقنّعة · وظهورُ الاسم أو معرّفات التحويلات (IBANs) **داخل خلايا الوصف** محتوى الكشف — يُعلن ولا يُقنَّع، كالمسار الممسوح · المجلد غير مُلتزم"
+ },
+ "cost_usd": 0,
+ "declared_limits": [
+  "الطرفُ الثاني في تحديث FM-2 قراءةٌ سابقة (صفوف الكوربوس) لا قراءةٌ جديدة",
+  "أرصدةٌ لم تُوصل: 24 (مُعلنة لا مُخفاة)",
+  "ظهورُ الاسم/IBANs داخل خلايا الوصف محتوى الكشف — يُعلن ولا يُقنَّع"
+ ]
+}

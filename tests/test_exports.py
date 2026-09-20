@@ -26,6 +26,7 @@ for _p in (str(PROJ), str(PROJ / "src")):
 from openpyxl import load_workbook  # noqa: E402
 
 from tools.to_pdf import render  # noqa: E402
+PROFILE = Path(__file__).resolve().parents[1] / "profiles" / "al-rajhi.json"
 from tools.to_xlsx import build  # noqa: E402
 
 
@@ -54,6 +55,7 @@ def _synthetic_run(tmp_path: Path) -> Path:
     (run / "slice_report.json").write_text(json.dumps({
         "slice": {"first": 1, "count": 2, "pages_done": 2},
         "totals": {"rows": 2, "clean": 2, "clean_ratio": 1.0},
+        "footer_role": "cumulative_printed_totals",
         "usage": {"cost": 0.0123, "calls": 2},
         "footer": {"ok": 1, "mismatch": 0, "absent": 1, "unchecked": 0, "gap": 0},
         "page_numbers": {"gaps": []},
@@ -72,7 +74,7 @@ def _synthetic_run(tmp_path: Path) -> Path:
 
 def test_xlsx_has_the_seven_sheets(tmp_path):
     out = tmp_path / "export.xlsx"
-    info = build(_synthetic_run(tmp_path), out, None)
+    info = build(_synthetic_run(tmp_path), out, None, profile=PROFILE)
     wb = load_workbook(out)
     assert wb.sheetnames == ["الملخص", "الحركات", "الأسئلة", "صفوف الأسئلة",
                              "التحقق لكل صفحة", "ما لم يُثبت", "كيف تُقرأ هذه الأوراق"]
@@ -97,7 +99,7 @@ def test_xlsx_keeps_both_the_printed_and_the_parsed_number(tmp_path):
     filter can use (parsed). The parsed column now carries the value the balance
     chain proved, not the raw read — both stay visible."""
     out = tmp_path / "export.xlsx"
-    build(_synthetic_run(tmp_path), out, None)
+    build(_synthetic_run(tmp_path), out, None, profile=PROFILE)
     ws = load_workbook(out)["الحركات"]
     header = [c.value for c in ws[1]]
     row = [c.value for c in ws[2]]
@@ -114,7 +116,7 @@ def test_xlsx_keeps_both_the_printed_and_the_parsed_number(tmp_path):
 def test_summary_counts_the_date_statuses_including_failures(tmp_path):
     """A summary that hides the bad dates behind an empty cell is not a summary."""
     out = tmp_path / "export.xlsx"
-    build(_synthetic_run(tmp_path), out, None)
+    build(_synthetic_run(tmp_path), out, None, profile=PROFILE)
     ws = load_workbook(out)["الملخص"]
     facts = {str(r[0]): r[1] for r in ws.iter_rows(min_row=2, values_only=True)}
     assert facts["تاريخ كامل (٨ خانات)"] == 2
@@ -124,7 +126,7 @@ def test_summary_counts_the_date_statuses_including_failures(tmp_path):
 
 def test_questions_sheet_is_deterministic_and_names_its_method(tmp_path):
     out = tmp_path / "export.xlsx"
-    build(_synthetic_run(tmp_path), out, None)
+    build(_synthetic_run(tmp_path), out, None, profile=PROFILE)
     wb = load_workbook(out)
     ws = wb["الأسئلة"]
     rows = [[c.value for c in r] for r in ws.iter_rows(min_row=2)]
@@ -139,7 +141,7 @@ def test_questions_sheet_is_deterministic_and_names_its_method(tmp_path):
 
 def test_xlsx_names_the_unproven_page_with_its_reason(tmp_path):
     out = tmp_path / "export.xlsx"
-    build(_synthetic_run(tmp_path), out, None)
+    build(_synthetic_run(tmp_path), out, None, profile=PROFILE)
     ws = load_workbook(out)["ما لم يُثبت"]
     rows = [[c.value for c in r] for r in ws.iter_rows(min_row=2)]
     assert len(rows) == 1
@@ -161,7 +163,7 @@ def test_a_scan_gap_names_the_missing_printed_sheets_not_a_file_page(tmp_path):
     (run / "slice_report.json").write_text(json.dumps(report, ensure_ascii=False),
                                           encoding="utf-8")
     out = tmp_path / "export.xlsx"
-    build(run, out, None)
+    build(run, out, None, profile=PROFILE)
     rows = [[c.value for c in r]
             for r in load_workbook(out)["ما لم يُثبت"].iter_rows(min_row=2)]
     gap = next(r for r in rows if "فجوة مسح" in str(r[3]))
@@ -180,7 +182,7 @@ def test_movement_source_column_separates_the_chain_from_the_paper(tmp_path):
     «مصدر إثبات الحركة» يُعلن مصدر كل حركة، ويُنبَّه إن خالف إعلانُه حكمَ السلسلة.
     """
     out = tmp_path / "export.xlsx"
-    build(_synthetic_run(tmp_path), out, None)
+    build(_synthetic_run(tmp_path), out, None, profile=PROFILE)
     ws = load_workbook(out)["الحركات"]
     header = [c.value for c in ws[1]]
     assert "مصدر إثبات الحركة" in header
@@ -208,7 +210,7 @@ def test_the_guide_sheet_declares_what_the_file_does_not_witness(tmp_path):
     شاهد في المنظومة يمسّ أصل الورق. سطرٌ يُحذف بسهولة إن لم يحرسه اختبار.
     """
     out = tmp_path / "export.xlsx"
-    build(_synthetic_run(tmp_path), out, None)
+    build(_synthetic_run(tmp_path), out, None, profile=PROFILE)
     ws = load_workbook(out)["كيف تُقرأ هذه الأوراق"]
     notes = {str(r[0]): str(r[1]) for r in ws.iter_rows(min_row=2, values_only=True) if r[0]}
     assert "ما لا يشهد به هذا الملف" in notes

@@ -95,8 +95,10 @@ def test_the_export_declares_the_identity_block_and_the_gap_ledger(tmp_path):
     from openpyxl import load_workbook
     from tools.to_xlsx import build
 
+    PROFILE = Path(__file__).resolve().parents[1] / "profiles" / "al-rajhi.json"
+
     out = tmp_path / "export.xlsx"
-    build(_synthetic_run(tmp_path), out, None)
+    build(_synthetic_run(tmp_path), out, None, profile=PROFILE)
     wb = load_workbook(out)
     joined = " ".join(str(v) for row in wb["الملخص"].iter_rows(values_only=True)
                       for v in row if v is not None)
