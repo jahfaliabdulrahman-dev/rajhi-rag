@@ -102,7 +102,9 @@ def main() -> None:
                     help=("من أين تُسحَب الصفحات: `holdout` لقياسٍ لا يُنفق مجموعة "
                           "التدريب · و`training` للمقارنة الكاملة **بلا إنفاق الحجز** "
                           "(قرارٌ يُتّخذ على الحجز يُنفقه — فالحجز للنموذج)."))
-    ap.add_argument("--out", type=Path, default=PROJ / "docs/evidence")
+    ap.add_argument("--out", type=Path, default=PROJ / "docs" / "evidence")
+    ap.add_argument("--out-name", default="20260921-fm2-prompt-comparison.json",
+                    help="اسمُ ملف النتيجة — فيُكتب كلُّ ذراعٍ في ملفّه ولا يُبطل ما قبله")
     args = ap.parse_args()
 
     run = args.run if args.run.is_absolute() else PROJ / args.run
@@ -176,7 +178,7 @@ def main() -> None:
             "per_page": per,
         }
     args.out.mkdir(parents=True, exist_ok=True)
-    out = args.out / "20260921-fm2-prompt-comparison.json"
+    out = (args.out / args.out_name).resolve()
     out.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     for name, d in report["prompts"].items():
         print(f"{name}: {d['pages_measured']} صفحة · قرأ {d['rows_read']}/{d['rows_certified']} · "
@@ -184,7 +186,13 @@ def main() -> None:
               f"مطابقةٌ تامة {d['pages_exact_against_certified']} · ${d['cost_usd']}")
     print(f"\nالمصروف: ${report['spend_usd']} من سقف ${args.budget} · "
           f"توقّف بالسقف: {stopped_by_budget} · العيّنة: {len(picked)} من {len(pool)}")
-    print(f"الملف: {out.relative_to(PROJ)}")
+    # ⚠️ الطبعُ لا يُسقط تشغيلةً مدفوعة: كان `relative_to` على مسارٍ **نسبيّ**
+    # ⇒ `ValueError` **بعد** أن كُتب الملف، فيُقرأ الخروجُ فشلاً والقياسُ تامّ.
+    try:
+        shown = out.relative_to(PROJ)
+    except ValueError:
+        shown = out
+    print(f"الملف: {shown}")
 
 
 if __name__ == "__main__":
