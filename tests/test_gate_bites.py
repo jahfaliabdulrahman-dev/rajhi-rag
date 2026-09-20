@@ -79,9 +79,10 @@ def _make_run(base: Path) -> Path:
     for pg, spec in pages.items():
         cache = {"pg": pg, "page_no": spec["page_no"], "raw_rows": spec["rows"],
                  "footer": spec["footer"], "usage": {"cost": 0.0, "calls": 1}}
-        if pg <= 3:
-            # ثلاث نقاط مختمة وواحدة قديمة بلا ختم: الشكل الذي يجب أن يُعلن
-            # لا أن يُسكَت عنه (FM-1) — وبه يصير عدّاد البوابة ذا معنى.
+        if pg == 1:
+            # **الخليط الأرجح**: نقطةٌ مختومة وثلاثٌ قديمة بلا ختم — وهو حال
+            # الكوربوس القائم لحظةَ تُقرأ أول صفحة بعد `reader_stamp()`. وسمّاه
+            # المدقّق: الحالة التي يمرّ فيها «ختمٌ واحد + صفحات بلا ختم» بلا فحص.
             cache |= {"model": "test-model", "prompt_version": "v2"}
         if spec.get("missing_sheets"):
             cache["missing_sheets"] = spec["missing_sheets"]
@@ -98,7 +99,7 @@ def _make_run(base: Path) -> Path:
         "reader_stamp": {"model": "test-model", "prompt_version": "v2"},
         "corpus_provenance": {"reader": {"model": "test-model",
                                          "prompt_version": "v2"},
-                              "legacy_unstamped_pages": 1,
+                              "legacy_unstamped_pages": 3,
                               "stamp_conflict_pages": 0,
                               "declaration": "نقطةٌ واحدة بلا ختم + نسبٌ واحد"},
         "footer": {"ok": 3, "mismatch": 0, "absent": 1, "unchecked": 0, "gap": 0},
@@ -305,6 +306,16 @@ def p_identity_fabricated(wb):
     raise AssertionError("لا سطر «هوية القارئ» في العيّنة")
 
 
+def p_identity_denies_the_stamp(wb):
+    """إعلانُ «غير مختم» على كوربوسٍ فيه ختمٌ مسجَّل ⇒ يكذّب الكاش."""
+    ws = wb["الملخص"]
+    for i, values in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if str(values[0] or "").startswith("هوية القارئ"):
+            ws.cell(row=i, column=2).value = "غير مختم — 3 صفحة قُرئت قبل تسجيل الهوية"
+            return
+    raise AssertionError("لا سطر «هوية القارئ» في العيّنة")
+
+
 def p_unstamped_count_lies(wb):
     """عدّادٌ يكذب: 1 ⇐ 0 ⇒ الكاش يقول غير ذلك."""
     ws = wb["الملخص"]
@@ -412,6 +423,8 @@ POISONS: list[tuple[str, str, Callable[[Workbook], None]]] = [
     ("الملخص يعلن هوية القارئ", "إفراغ هوية القارئ (نموذج · تلقينة)",
      p_reader_identity_blank),
     ("هوية القارئ المعلنة توافق الكاش", "اختلاق هوية قارئ", p_identity_fabricated),
+    ("هوية القارئ المعلنة توافق الكاش", "إنكار ختمٍ مسجَّل",
+     p_identity_denies_the_stamp),
     ("عدد الصفحات بلا ختم يطابق الكاش", "عدّاد بلا ختم يكذب",
      p_unstamped_count_lies),
     ("الملخص يعدّ الصفحات بلا ختم", "حذف سطر الصفحات بلا ختم قارئ",
@@ -431,8 +444,26 @@ def _cache_second_reader(run: Path) -> None:
 
 # (اسم الفحص · وصف · ما يُسمَّم) — أسمامٌ تُوقَع على **الكاش** لا على الورقة:
 # فحصُ صدق الإعلان لا يُسمَّم بتزوير الإعلان وحده، بل بتزوير مصدره.
+def _cache_corrupt_checkpoint(run: Path) -> None:
+    """نقطة فحص تالفة: كانت تختفي من كل تعداد فيُنسب الفرق إلى الإعلان."""
+    (run / "results" / "pg-003.json").write_text("{ ليس JSON", encoding="utf-8")
+
+
+def _cache_corrupt_last(run: Path) -> None:
+    """آخر نقطةٍ مطابقة (footers == ok) يُقرأ فوترُها للمجاميع المطبوعة.
+
+    وهي `pg-003` في العيّنة (footers: 1..3 = ok · 4 = absent) — وكانت تالفةً
+    تُسقط الأداة بـ`JSONDecodeError` بدل حكمٍ مسمّى.
+    """
+    (run / "results" / "pg-003.json").write_text("{ ليس JSON", encoding="utf-8")
+
+
 CACHE_POISONS: list[tuple[str, str, Callable[[Path], None]]] = [
-    ("كوربوسٌ واحد بنسبٍ واحد", "قارئٌ ثانٍ في نقطة فحص واحدة", _cache_second_reader),
+    ("لا نسبتان مسجَّلتان في كوربوسٍ واحد", "قارئٌ ثانٍ في نقطة فحص واحدة",
+     _cache_second_reader),
+    ("كل نقاط الفحص مقروءة", "نقطة فحص تالفة", _cache_corrupt_checkpoint),
+    ("نقطة الفحص الأخيرة المطابقة مقروءة", "نقطة الفحص الأخيرة تالفة",
+     _cache_corrupt_last),
 ]
 
 
