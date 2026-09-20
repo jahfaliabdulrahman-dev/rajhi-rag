@@ -1,0 +1,109 @@
+{
+  "bank": "al-rajhi",
+  "label_ar": "كشف حساب مصرف الراجحي — تصميم التطبيق (رقميّ)",
+  "version": 1,
+  "_note": "عقد البنك نفسه بتصميمٍ ثانٍ (كشف التطبيق/الموقع): رقميّ لا ممسوح، وتذييله **ملخّص فترة** لا إجماليات تراكمية لكل صفحة. لا يحمل بيانات شخصية.",
+  "statement": {
+    "direction_source": "printed_column",
+    "columns": [
+      "Debit",
+      "Credit"
+    ],
+    "zero_forms": [
+      "0.00",
+      ".,..",
+      "..",
+      "."
+    ],
+    "digit_sets": [
+      "ascii",
+      "arabic_indic",
+      "extended_arabic_indic"
+    ],
+    "date": {
+      "form": "YYYYMMDD",
+      "gregorian_range": [
+        1900,
+        2100
+      ],
+      "inherit_from_neighbour": false,
+      "require_all_rows": true
+    },
+    "footer": {
+      "_note": "**دور التذييل** يحدّد من أين يُقرأ رقم الورق: هذا التصميم يطبع ملخّص فترة واحداً (افتتاح · إقفال · عدد الحركات · إجماليان).",
+      "role": "period_summary",
+      "fields": [
+        "debits",
+        "credits",
+        "balance",
+        "opening",
+        "closing",
+        "n_deposits",
+        "n_withdrawals"
+      ],
+      "crop_from": null
+    },
+    "labels": {
+      "debit_only": [
+        "مدفوعات نقاط البيع",
+        "سحب الصراف",
+        "سحب نقدي"
+      ],
+      "credit_only": [
+        "إيداع راتب",
+        "راتب",
+        "حوالة واردة",
+        "إيداع نقدي"
+      ]
+    }
+  },
+  "identity": {
+    "formula": "opening + credits - debits = closing",
+    "opening_default": "0.00",
+    "tolerance": 0.005
+  },
+  "gap": {
+    "detect": "printed_page_number_jump",
+    "entry": "named",
+    "witnesses": [
+      "footer_increment",
+      "balance_crossing"
+    ],
+    "tolerance": 0.01,
+    "assume_zero_net": false
+  },
+  "artifacts": {
+    "sheets": [
+      "الملخص",
+      "الحركات",
+      "الأسئلة",
+      "صفوف الأسئلة",
+      "التحقق لكل صفحة",
+      "ما لم يُثبت",
+      "كيف تُقرأ هذه الأوراق"
+    ],
+    "summary_must_contain": [
+      "الإقفال الحسابي (الهوية)",
+      "قيود الفجوة",
+      "حكم الهوية"
+    ]
+  },
+  "golden": {
+    "_note": "اختياري: يُملأ في ملف محلي عند تجميد أرقام تشغيلة بعينها. القيم هنا تُقرأ من الورق لا تُكتب بيد.",
+    "source": "bank_printed_summary",
+    "rows": null,
+    "sum_debit": null,
+    "sum_credit": null,
+    "closing": null,
+    "date_min": null,
+    "date_max": null
+  },
+  "reasoning": {
+    "_note": "سقف الإعادات قرارُ عقدٍ لا ثابتٌ في الكود: الافتراضي المثبَّت (langgraph 1.2.11) = 10007 خطوة ⇒ «إعادة تلقائية» بلا ميزانية معلنة. القيمة تُقرأ من العقد حين يُبنى مسار السؤال.",
+    "retry_budget": 3,
+    "recursion_limit": 12,
+    "measured_default_without_cap": 10007
+  },
+  "layout": "app_digital",
+  "source_kind": "digital"
+}

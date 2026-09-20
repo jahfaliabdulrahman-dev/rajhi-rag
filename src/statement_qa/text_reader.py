@@ -194,8 +194,26 @@ def read_period_summary(pdf_path: str | Path) -> dict:
     return found
 
 
+APP_PROFILE = Path(__file__).resolve().parents[2] / "profiles" / "al-rajhi-app.json"
+
+
+def contract_footer_role(profile: Path | str | None = None) -> str:
+    """**دور التذييل من العقد** لا من القارئ: التصميم يعلنه، والقارئ يقرؤه.
+
+    فإضافة تصميمٍ ثانٍ لا تُعدّل بايثون — وهذا شرطُ الانتقال إلى المرحلة ٢ في
+    خارطة الطريق («تصميمٌ جديد لم يتطلّب تعديل بايثون»).
+    """
+    path = Path(profile) if profile else APP_PROFILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return (data.get("statement") or {}).get("footer", {}).get("role") \
+            or "cumulative_printed_totals"
+    except Exception:                       # noqa: BLE001 — يُعلن ولا يُخمَّن
+        return "غير مُعلن في العقد"
+
+
 def emit_run(pdf_path: str | Path, out_dir: Path, *, doc_id: str | None = None,
-             label: str = "app_digital") -> dict:
+             label: str = "app_digital", profile: Path | str | None = None) -> dict:
     """يكتب نقاط فحص بشكل التشغيلة نفسه (+ وسم القارئ) — فيقرؤها ما بعدها كما هي."""
     import hashlib
     import sys
@@ -248,7 +266,8 @@ def emit_run(pdf_path: str | Path, out_dir: Path, *, doc_id: str | None = None,
         # الدور المُعلن للتذييل: **ملخّص فترة** لا تراكميٌّ لكل صفحة ⇒ فوتر كل
         # صفحة «غائب» بصدق، والمجاميع المطبوعة تُسجَّل تشهّداً مستقلاً يُفحص
         # بفحصه هو (ولا يُقحَم في شاهد الأعمدة التراكمي).
-        "footer_role": "period_summary",
+        "footer_role": contract_footer_role(profile),
+        "layout": label,
         "period_summary": period_summary,
         "footer": {"ok": 0, "mismatch": 0, "unchecked": 0,
                    "absent": pages_done, "gap": 0},
@@ -275,10 +294,12 @@ def main() -> None:
     ap.add_argument("--emit-run", type=Path, default=None,
                     help="مجلد تشغيلة تُكتب فيه results/pg-NNN.json بشكل المشروع")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--profile", default=None,
+                    help="عقد التصميم (يفتح منه دور التذييل) — افتراضياً al-rajhi-app.json")
     args = ap.parse_args()
 
     if args.emit_run:
-        report = emit_run(args.pdf, args.emit_run)
+        report = emit_run(args.pdf, args.emit_run, profile=args.profile)
         report["measured_on"] = _date.today().isoformat()
         print(json.dumps(report, ensure_ascii=False, indent=1))
         return
