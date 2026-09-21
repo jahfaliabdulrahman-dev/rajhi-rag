@@ -1,39 +1,58 @@
 {
- "pages_paired": 420,
- "pages_clean_in_both": 413,
- "errors_v1": 4,
- "errors_v2": 3,
- "v1": {
-  "rows": 3801,
-  "matches": 3721,
+ "derived_by": "tools/fm2_verdict.py — كلُّ رقمٍ هنا محسوبٌ من ملفَّي الذراعين",
+ "arms": {
+  "a": "20260921-fm2-v1-arm.json",
+  "b": "20260921-fm2-v2-arm.json"
+ },
+ "criteria": {
+  "exact": "كل الأزواج مطابقة **و** آخر رصيد مطابق (الأشدّ)",
+  "closed": "آخر رصيد مطابق = إقفال السلسلة",
+  "overread": "rows_read − rows_chain_verified (صفوفٌ لا تُصدّقها السلسلة)"
+ },
+ "reference_bias": "⚠️ المرجع (صفوف الكوربوس) كتبته **v2 نفسه** ⇒ تفوّقُ b في الإقفال والمطابقة التامة **حدٌّ أعلى** لا قياسٌ محايد (قد يكون اتفاقاً مع الذات). وفي المقابل: a **غريبٌ عن ذلك المرجع** ومع ذلك طابق نفس عدد الأزواج ⇒ «التكافؤ في الاستخراج» يصمد رغم التحيّز.",
+ "pages": {
+  "paired": 420,
+  "clean_in_both": 413,
+  "errors_a": 4,
+  "errors_b": 3
+ },
+ "a": {
+  "rows_read": 3801,
+  "rows_certified": 3801,
+  "rows_chain_verified": 3766,
+  "pairs_matching": 3721,
+  "overread": 35,
   "closed": 405,
   "exact": 383,
   "median_s": 17.8,
-  "p95_s": 55.1
+  "p95_s": 55.1,
+  "errors": 4
  },
- "v2": {
-  "rows": 3783,
-  "matches": 3721,
+ "b": {
+  "rows_read": 3783,
+  "rows_certified": 3801,
+  "rows_chain_verified": 3765,
+  "pairs_matching": 3721,
+  "overread": 18,
   "closed": 409,
   "exact": 390,
   "median_s": 18.1,
-  "p95_s": 53.9
+  "p95_s": 53.9,
+  "errors": 3
  },
- "page_level_wins": {
-  "v1": 13,
-  "v2": 21,
-  "tie": 379
- },
- "paired_difference": {
-  "mean_pairs": 0,
-  "median_pairs": 0,
-  "pages_v2_ahead": 21,
-  "pages_v1_ahead": 13,
+ "paired_difference_pairs": {
+  "mean": 0,
+  "median": 0,
+  "pages_b_ahead": 21,
+  "pages_a_ahead": 13,
   "pages_tied": 379
  },
- "spend_usd": 9.6433,
- "budget_usd": 16.0,
- "pages_where_v1_lost": [
+ "page_level_wins": {
+  "a": 13,
+  "b": 21,
+  "tie": 379
+ },
+ "pages_where_a_lost": [
   38,
   49,
   67,
@@ -47,9 +66,16 @@
   235,
   245,
   260,
-  344
+  344,
+  368,
+  469,
+  479,
+  503,
+  541,
+  553,
+  595
  ],
- "pages_where_v2_lost": [
+ "pages_where_b_lost": [
   1,
   20,
   107,
@@ -63,5 +89,8 @@
   506,
   547,
   629
- ]
+ ],
+ "spend_usd": 9.6433,
+ "spend_on_pages_outside_the_count_usd": 0.1963,
+ "budget_usd_charged": 13.0
 }
