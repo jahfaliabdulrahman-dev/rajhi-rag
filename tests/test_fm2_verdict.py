@@ -77,3 +77,35 @@ def test_the_spend_on_pages_outside_the_count_is_measured():
     assert v["spend_on_pages_outside_the_count_usd"] == recomputed, \
         "المشتقُّ يساوي المجموع المحسوب من ملفَّي الذراعين"
     assert v["spend_usd"] == round(a_arm["spend_usd"] + b_arm["spend_usd"], 4)
+
+
+def test_the_bias_sentence_is_derived_not_declared(tmp_path):
+    """⚠️ كانت الجملةُ **مكتوبةً بيد** في ملفٍّ مشتقّ — وهي وحدها كانت الخطأ:
+    قالت «المرجع كتبته v2» والكوربوس يقول `reader = None` و629 بلا ختم.
+
+    فالسمّ: نسبٌ مجهول ⇒ «مجهول» صريحاً · ونسبٌ معلن ⇒ يُسمّى القارئ. ولو عادت
+    الجملةُ تُكتب بيد لسقط هذا الاختبار.
+    """
+    def run_with(prov: dict | None) -> dict:
+        run = tmp_path / "run"
+        run.mkdir(parents=True, exist_ok=True)
+        (run / "slice_report.json").write_text(
+            json.dumps({"corpus_provenance": prov} if prov is not None else {},
+                       ensure_ascii=False), encoding="utf-8")
+        return fv._provenance(run)
+
+    unknown = fv.bias_sentence(run_with(None))
+    assert "مجهول" in unknown and "v2" not in unknown, unknown
+    named = fv.bias_sentence(run_with({"reader": {"model": "some-model",
+                                                  "prompt_version": "v9"}}))
+    assert "some-model/v9" in named, named
+    legacy = fv.bias_sentence(run_with({"reader": None, "legacy_unstamped_pages": 629}))
+    assert "629" in legacy, "العدّاد المعلن يُذكر مع الجهل"
+
+
+def test_the_verdict_is_derived_from_the_runs_own_provenance():
+    """الملفُ المُلتزم يقول «مجهول» — لأن التشغيلة تقول ذلك، لا لأننا ظنّناه."""
+    v, _ = fv.build(A, B)
+    assert v["reference_provenance"]["source"].endswith("corpus_provenance")
+    assert v["reference_provenance"]["reader"] is None
+    assert "مجهول" in v["reference_bias"]
