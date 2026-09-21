@@ -1,0 +1,19 @@
+{
+ "copied_by": "sulaiman",
+ "note": "نسخٌ بالبايت من worktree المدقّق إلى صندوق البريد",
+ "at": "2026-09-21",
+ "files": [
+  {
+   "file": "20260921-014333-third-eye-review-16.md",
+   "sha256_src": "3528cb044df2f79d679d042af52e73ad355fbc8b9850f712900127452e27d9a6",
+   "sha256_dst": "3528cb044df2f79d679d042af52e73ad355fbc8b9850f712900127452e27d9a6",
+   "identical": true
+  },
+  {
+   "file": "20260921-060727-third-eye-review-18.md",
+   "sha256_src": "5a3ec12a9e556a423db5c2c78b0d4655df4aa9b8c2db79125298b5e22ecc51cc",
+   "sha256_dst": "5a3ec12a9e556a423db5c2c78b0d4655df4aa9b8c2db79125298b5e22ecc51cc",
+   "identical": true
+  }
+ ]
+}

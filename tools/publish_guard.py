@@ -329,6 +329,14 @@ def _digit_variants(line: str) -> list[str]:
             continue
         if len({len(g) for g in groups}) != 1:
             continue
+        # **قائمةُ أرقامٍ بفراغٍ ليست حساباً.** قياسٌ فرضها: قائمةُ أرقام صفحاتٍ
+        # (38 49 67 119 134 …) في رسالةٍ عربية لم تُلتزم، وُلّدت منها «سلسلةٌ
+        # طويلة» فحُجب الدليلُ **لأنه دليل** — الثالث من صنفه. والحسابُ المكتوب
+        # بثلاثاتٍ يُكتب بشُرَطٍ أو نُقَط (صكوك)، والبطاقةُ برُباعياتٍ بفراغ ✓
+        # فالقيدُ على **ثلاثات مفصولةٍ بفراغ/جدولة** وحدها.
+        seps = {c for c in m.group(0) if c in _GROUP_SEP}
+        if len(groups[0]) == 3 and seps <= {" ", "\t"}:
+            continue
         joined = line[:m.start()] + "".join(groups) + line[m.end():]
         if joined not in out:
             out.append(joined)
