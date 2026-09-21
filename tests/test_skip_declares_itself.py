@@ -1,36 +1,109 @@
-"""**التخطّي يُعلن نفسَه بالاسم** — ولا يُسكَت عن فحصٍ غائب.
+"""**التخطّي يُعلن نفسَه — ويُقاس بسلوكٍ لا بوجود نصّ.**
 
-سببُ هذا الملف: فحصٌ يُخطّى بلا سببٍ مكتوب = فحصٌ ميت تُقرأ نتيجتُه نجاحاً. وقد ثبت
-بالقياس (RCA · 2026-09-21) أنّ ثلاثةَ اختباراتٍ تُخطّى في **worktree** لأن `git worktree`
-لا يحمل المُتجاهَل (`data/local_sample/*`)، وأنّ تغطيةَ المراجعة **دالّةٌ على البيئة**.
-فالمطلوب: كلُّ تخطيطٍ يذكر **ما فُقد**، حتى يُقرأ الرقمُ مقروناً ببيئته.
+سببُ هذا الملف، وسببُ إعادة كتابته:
 
-    العادة: bash tools/link_local_data.sh <worktree>   ⇒ 0 تخطّى
+1. RCA مُقاس (2026-09-21): ثلاثةُ اختباراتٍ تُخطّى في **worktree** لأن `git worktree`
+   لا يحمل المُتجاهَل (`data/local_sample/*`)، وأنّ **تغطيةَ المراجعة دالّةٌ على البيئة
+   لا على العدد**.
+2. ⚠️ **ومأخذُ المدقّق (الجولة ٢١) على النسخة الأولى:** كانت `assert reason in text`
+   ⇒ يكفي أن يكون السببُ **في تعليق** ليمرّ — وهو بعينه العطبُ الذي يقول نصُّ الملف
+   إنه يمنعه («تخطيطٌ بلا سببٍ مكتوب = فحصٌ ميت يُقرأ نجاحاً»). ومرّر المدقّق على
+   اختباري الأول بأن عطّل جسم السكربت وأبقى رأسه ⇒ `2 passed`.
+   **فالحكمُ صار سلوكيّاً:** نُنشئ worktree حقيقيّاً، ونشغّل pytest فيه، ونقرأ سطورَ
+   `SKIPPED` من مخرجه — ثم نشغّل السكربت ونتحقّق أن التخطّي **زال**.
+   **والدرسُ أوسع من الحالة:** عُلق المثالُ في الحارس ثم في اختباراته — فالطبقةُ
+   تُقاس بالأثر لا يُلتمس لها نصّ.
+
+الكلفة: worktree مؤقّت + pytest على ملفّين ⇒ ثوانٍ، بلا شبكة وبلا كلفة.
 """
 from __future__ import annotations
 
+import re
+import subprocess
+import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
+VENV_PY = ROOT / ".venv" / "bin" / "python"
+GATED = ("tests/test_page_gate.py", "tests/test_text_reader.py")
 
-# (الملف، السطر أو النمط، ما يجب أن يذكره السبب)
-CORPUS_MARKERS = [
-    ("tests/test_page_gate.py", "المسحة الحقيقية غير موجودة"),
-    ("tests/test_text_reader.py", "الكشف الرقمي محليّ لا يدخل المستودع"),
-]
-
-
-def test_corpus_dependent_tests_declare_what_is_missing():
-    for rel, reason in CORPUS_MARKERS:
-        text = (ROOT / rel).read_text(encoding="utf-8")
-        assert "skipif" in text or "skip(" in text, f"{rel}: لا تخطّي فيه أصلاً؟"
-        assert reason in text, f"{rel}: التخطّي لا يذكر ما فُقد («{reason}» مفقود)"
+# ما يجب أن يذكره سببُ التخطّي (ويجوز أن يزيد عليه)
+MUST_MENTION = ("المسحة الحقيقية", "الكشف الرقمي")
 
 
-def test_the_linking_habit_exists_and_is_executable():
-    """العلاجُ عادةٌ تُعاد: سكربتٌ قائمٌ بصلاحية تنفيذ وسببٍ مكتوب في رأسه."""
-    script = ROOT / "tools" / "link_local_data.sh"
-    assert script.exists(), "لا سكربت وصل البيانات المحلية"
-    assert script.stat().st_mode & 0o111, "السكربت غير قابل للتنفيذ"
-    head = script.read_text(encoding="utf-8")[:600]
-    assert "worktree" in head and "data/local_sample" in head, "لا سببَ مكتوباً في رأس السكربت"
+def _git(*args: str) -> str:
+    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True,
+                          text=True, check=True).stdout
+
+
+@pytest.fixture()
+def fresh_worktree(tmp_path):
+    """worktree نظيفٌ من نفس الالتزام — بلا المُتجاهَل، أي بيئةَ المدقّق بعينها."""
+    if not VENV_PY.exists():
+        pytest.skip("لا مفسّر افتراضيّ (venv) — الفحص السلوكيّ يحتاج تشغيلَ pytest")
+    wt = tmp_path / "auditor-worktree"
+    _git("worktree", "add", "--detach", str(wt), "HEAD")
+    try:
+        yield wt
+    finally:
+        subprocess.run(["git", "worktree", "remove", "--force", str(wt)],
+                       cwd=ROOT, capture_output=True)
+        subprocess.run(["git", "worktree", "prune"], cwd=ROOT, capture_output=True)
+
+
+def _pytest_in(wt: Path) -> tuple[str, list[str]]:
+    """يُشغّل الملفّات المحروسة داخل الـworktree ويعيد مخرجه وسطورَ التخطّي."""
+    out = subprocess.run([str(VENV_PY), "-m", "pytest", "-q", "-rs",
+                          "-p", "no:cacheprovider", *GATED],
+                         cwd=wt, capture_output=True, text=True)
+    text = out.stdout + out.stderr
+    skipped = [ln for ln in text.splitlines() if ln.strip().startswith("SKIPPED")]
+    return text, skipped
+
+
+def test_a_fresh_worktree_declares_what_is_missing(fresh_worktree):
+    """**سلوكٌ لا وجودُ نصّ:** في worktree نظيف تُخطّى الفحوصُ، وكلُّ تخطيطٍ يذكر ما فُقد."""
+    wt = fresh_worktree
+    assert not (wt / "data" / "local_sample" / "slice_629p").exists(), \
+        "الـworktree يجب ألا يحمل المُتجاهَل — وإلا فالفحص لا يقيس شيئاً"
+    text, skipped = _pytest_in(wt)
+    assert skipped, f"لم يُخطَّ شيءٌ في الـworktree — هل صارت البيانات مُلتزمة؟\n{text[-800:]}"
+    assert len(skipped) >= 3, f"الفحوصُ المحروسة ثلاثة على الأقل: {skipped}"
+    for line in skipped:
+        reason = line.split(":", 1)[1].strip() if ":" in line else ""
+        assert len(reason) > 10, f"تخطيطٌ بلا سببٍ مقروء: {line}"
+    joined = " ".join(skipped)
+    for needle in MUST_MENTION:
+        assert needle in joined, f"سببُ التخطّي لا يذكر «{needle}»: {skipped}"
+
+
+def test_the_script_links_from_inside_a_worktree_and_removes_the_skips(fresh_worktree):
+    """**الحالة الوحيدة التي وُجد السكربت لها:** يُشغَّل من **داخل** الـworktree.
+
+    وفيها كان يخرج بـ1 قائلاً «لا مسحة محلية في المستودع الأصلي» — وهو **كذبٌ**
+    يُقنع المدقّق أن البيانات غير موجودة فيمضي بتغطيةٍ ناقصة. فالمسارُ يُشتقّ من
+    `git rev-parse --git-common-dir`.
+    """
+    wt = fresh_worktree
+    script = wt / "tools" / "link_local_data.sh"
+    assert script.exists(), "السكربت غير موجود في الالتزام"
+    # نُشغّل **نسخةَ العمل** لا نسخةَ الالتزام: وإلا لَاختُبر إصدارٌ قديم
+    # (وقد وقع: النسخةُ الملتزمة كانت المعطوبة، فسقط هذا الفحص — وهو الصواب).
+    import shutil
+    shutil.copyfile(ROOT / "tools" / "link_local_data.sh", script)
+    run = subprocess.run(["bash", str(script), str(wt)], cwd=wt,
+                         capture_output=True, text=True)
+    assert run.returncode == 0, f"السكربت فشل من داخل worktree: {run.stdout}{run.stderr}"
+    link = wt / "data" / "local_sample" / "slice_629p"
+    assert link.exists(), "لم يُنشأ الرابط"
+    assert link.is_symlink(), "الوصلُ يجب أن يكون رابطاً (لا نسخةً من بيانات العملاء)"
+    assert link.resolve() == (ROOT / "data" / "local_sample" / "slice_629p").resolve(), \
+        "الرابط لا يشير إلى بيانات المستودع الأصلي"
+
+    text, skipped = _pytest_in(wt)
+    assert not skipped, f"التخطّي لم يزل بعد الوصل: {skipped}\n{text[-800:]}"
+    assert re.search(r"\d+ passed", text), f"لا نجاحَ بعد الوصل:\n{text[-800:]}"
+    print(f"[skip-declares-itself] python {sys.version_info.major}."
+          f"{sys.version_info.minor} · {text.strip().splitlines()[-1]}")
