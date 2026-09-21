@@ -96,8 +96,19 @@ def bias_sentence(prov: dict) -> str:
 
 
 def build(a_path: Path, b_path: Path, run: Path | None = None) -> tuple[dict, dict]:
+    """مشتقٌّ من **ملفَّي الذراعين** — وهما يحملان نسبَ المرجع وقتَ القياس.
+
+    ⚠️ مأخذ المدقّق (الجولة ٢٢): كان `build` يقرأ تشغيلةً **مُتجاهَلة** ⇒ لم يبقَ
+    دالّةً لملفَّيه، ولا تُعاد نتيجتُه في بيئةٍ نظيفة. فالنسبُ صار يُسجَّل في ملف
+    الذراع وقت القياس، والقراءةُ من التشغيلة **بديلٌ يُعلن نفسه** لا مسارٌ خفيّ.
+    """
     a_arm, b_arm = _load(a_path), _load(b_path)
-    prov = _provenance(run or PROJ / "data" / "local_sample" / "slice_629p")
+    prov = a_arm.get("corpus_provenance")
+    if not prov:
+        prov = _provenance(run or PROJ / "data" / "local_sample" / "slice_629p")
+        prov = dict(prov, source=prov.get("source", "") + " (بديلٌ: ملفُّ الذراع لا يحمل نسباً)")
+    else:
+        prov = dict(prov, source=prov.get("source", "") + " · من ملف الذراع")
     a, b = _per_page(a_arm), _per_page(b_arm)
     pages = sorted(set(a) | set(b))
     clean = [p for p in pages if not a[p].get("error") and not b[p].get("error")]

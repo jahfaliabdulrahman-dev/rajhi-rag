@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -26,8 +27,30 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-VENV_PY = ROOT / ".venv" / "bin" / "python"
 GATED = ("tests/test_page_gate.py", "tests/test_text_reader.py")
+# نُشغّل **نسخةَ العمل** لا نسخةَ الالتزام: وإلا اختُبر إصدارٌ قديم
+# (مأخذ المدقّق · ٢٢: سمُّه في نسخة العمل مرّ، وفي المُلتزمة سقط — فالفرقُ تأخّرٌ لا عمى).
+WORKING_COPY = ("tools/link_local_data.sh",) + GATED
+
+
+def _main_repo() -> Path:
+    """المستودعُ الأصلي — من المستودع المشترك، فيعمل من أي worktree."""
+    common = Path(_git("rev-parse", "--git-common-dir").strip())
+    if not common.is_absolute():
+        common = ROOT / common
+    return common.resolve().parent
+
+
+def _python() -> str:
+    """المفسّرُ الذي يشغّل هذه الحزمة — **لا** مسارَ venv في المستودع الأصلي.
+
+    ⚠️ مأخذ المدقّق (٢٢): كان `VENV_PY = ROOT/.venv` ⇒ في worktree لا venv
+    ⇒ الحارسان **يُخطَّيان في البيئة التي كُتبا للتحقّق منها**. و`sys.executable`
+    موجودٌ حيث تُشغَّل الحزمة، دائماً.
+    """
+    if not sys.executable:
+        pytest.skip("لا مفسّرَ متاحاً لتنفيذ الفحص السلوكيّ")
+    return sys.executable
 
 # ما يجب أن يذكره سببُ التخطّي (ويجوز أن يزيد عليه)
 MUST_MENTION = ("المسحة الحقيقية", "الكشف الرقمي")
@@ -41,10 +64,11 @@ def _git(*args: str) -> str:
 @pytest.fixture()
 def fresh_worktree(tmp_path):
     """worktree نظيفٌ من نفس الالتزام — بلا المُتجاهَل، أي بيئةَ المدقّق بعينها."""
-    if not VENV_PY.exists():
-        pytest.skip("لا مفسّر افتراضيّ (venv) — الفحص السلوكيّ يحتاج تشغيلَ pytest")
     wt = tmp_path / "auditor-worktree"
     _git("worktree", "add", "--detach", str(wt), "HEAD")
+    # نسخةُ العمل تُنقل إلى الـworktree: الحارسُ يقيس ما ستلتزمه لا ما التزمتَه
+    for rel in WORKING_COPY:
+        shutil.copyfile(ROOT / rel, wt / rel)
     try:
         yield wt
     finally:
@@ -55,7 +79,7 @@ def fresh_worktree(tmp_path):
 
 def _pytest_in(wt: Path) -> tuple[str, list[str]]:
     """يُشغّل الملفّات المحروسة داخل الـworktree ويعيد مخرجه وسطورَ التخطّي."""
-    out = subprocess.run([str(VENV_PY), "-m", "pytest", "-q", "-rs",
+    out = subprocess.run([_python(), "-m", "pytest", "-q", "-rs",
                           "-p", "no:cacheprovider", *GATED],
                          cwd=wt, capture_output=True, text=True)
     text = out.stdout + out.stderr
@@ -99,7 +123,9 @@ def test_the_script_links_from_inside_a_worktree_and_removes_the_skips(fresh_wor
     link = wt / "data" / "local_sample" / "slice_629p"
     assert link.exists(), "لم يُنشأ الرابط"
     assert link.is_symlink(), "الوصلُ يجب أن يكون رابطاً (لا نسخةً من بيانات العملاء)"
-    assert link.resolve() == (ROOT / "data" / "local_sample" / "slice_629p").resolve(), \
+    # المقابلةُ مع بيانات **المستودع الأصلي** لا شجرة التشغيل: وإلا لطلب الفحصُ
+    # أن يكون الوصلُ مُنفَّذاً سلفاً (مأخذ المدقّق · ٢٢).
+    assert link.resolve() == (_main_repo() / "data" / "local_sample" / "slice_629p").resolve(), \
         "الرابط لا يشير إلى بيانات المستودع الأصلي"
 
     text, skipped = _pytest_in(wt)
