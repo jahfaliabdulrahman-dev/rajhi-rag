@@ -249,14 +249,23 @@ def test_an_upper_case_iban_is_still_blocked():
         "IBAN بحروفٍ كبيرة يبقى محجوباً"
 
 
-def test_a_space_separated_page_number_list_is_not_an_account():
-    """قائمةُ أرقامِ صفحاتٍ في نصٍّ عربي: وُلّدت منها «سلسلةٌ طويلة» فحُجب الدليل
-    **لأنه دليل** (وقع مرّة على رسالة المدقّق نفسها). والفرق: ثلاثاتٌ بفراغ = قائمة.
+def test_a_page_number_list_is_exempted_by_a_written_allowlist_entry():
+    """قائمةُ أرقام صفحاتٍ مفصولةٍ بفراغ **تُحجب بقصد** — لأن الحسابَ نفسه يُكتب
+    بثلاثاتٍ بفراغ، فالقاعدة لا تستطيع التمييز ⇒ **الثمنُ مقبول**: تُحجب القائمة
+    ويُستثنى **ملفٌّ بعينه** بسببٍ مكتوب في `.publish-allowlist`.
 
-    والأرقامُ تُبنى في زمن التشغيل — فملفُّ اختبارات الحارس **يمرّ من الحارس**.
+    وهذا هو الفرقُ الذي فرضه المدقّق: كان استثنائي **توسيعاً للقاعدة** فمرّت أرقامُ
+    حسابٍ حقيقية؛ فصار استثناءً **لملفٍ** — أضيقَ أثراً وأصدقَ في التوثيق.
     """
-    line = "مذكورة: " + " ".join(str(n * 7) for n in range(3, 20))
-    assert not _scan_one(line), "قائمةُ أرقامٍ مفصولةٌ بفراغ ليست حساباً"
+    list_line = "مذكورة: " + " ".join(str(n * 7) for n in range(3, 20))
+    assert [r for r in _scan_one(list_line) if r[1] == "long_digits"], \
+        "القاعدة تحجب القائمة (ثمنُ عدم فتح الثغرة)"
+    allow = (Path(pg.ROOT) / ".publish-allowlist").read_text(encoding="utf-8")
+    entry = next((ln for ln in allow.splitlines()
+                  if ln.startswith("long_digits :: handoff/claude/")), None)
+    assert entry, "لا بد أن يكون الاستثناءُ لملفٍ بعينه لا للشجرة"
+    assert len(entry.split("::")) == 3 and entry.split("::")[2].strip(), \
+        "كل استثناءٍ بسببٍ مكتوب"
 
 
 def test_a_three_wide_hyphenated_cheque_is_still_blocked():
@@ -269,3 +278,13 @@ def test_a_four_wide_card_still_blocked_even_with_spaces():
     line = ' "card": "' + " ".join(_run(str(n), 4) for n in (4, 8, 2, 6)) + '"'
     assert [r for r in _scan_one(line) if r[1] == "long_digits"], \
         "بطاقةٌ برُباعياتٍ مفصولةٍ بفراغ تبقى محجوبة"
+
+
+def test_a_three_wide_space_grouped_account_is_blocked():
+    """**الثغرة التي فتحها توسيعي ثم أُغلق.** مدقّقٌ خارجي قاس أن حساباً من 15 أو
+    18 رقماً مكتوباً بثلاثاتٍ مفصولةٍ بفراغ كان **يمرّ**، لأنني وسّعتُ القاعدة
+    ليُقبل ملفٌّ واحد. والاختبارات الثلاثة السابقة كانت تغطّي الحالات **الآمنة**
+    وحدها — فلا يسمّم أحدٌ الحالةَ التي يفتحها استثناؤه. هذا هو السمّ الغائب."""
+    line = ' "account": "' + " ".join(_run(str(n), 3) for n in range(1, 6)) + '"'
+    findings = [r for r in _scan_one(line) if r[1] == "long_digits"]
+    assert findings, "حسابٌ بثلاثاتٍ مفصولةٍ بفراغ يجب أن يُحجب (ثغرةٌ كانت مفتوحة)"

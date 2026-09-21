@@ -55,7 +55,25 @@ def test_the_overread_class_names_its_cause_and_its_impact():
 
 
 def test_the_spend_on_pages_outside_the_count_is_measured():
-    """«لم يُصرف دولارٌ على صفحةٍ خارج العدّ» كان غير دقيق: المقياس $0.1963."""
+    """«لم يُصرف دولارٌ على صفحةٍ خارج العدّ» كان غير دقيق: المقياس $0.1963.
+
+    ⚠️ **وكان في هذا الاختبار تأكيدٌ طائويٌّ** (`a_spend` غير موجود في المخرج ⇒
+    السطر يُختصر إلى `x == round(x, 4)` فلا يفشل أبداً). والمدقّق أمسكه. فصار
+    الرقمُ **يُشتقّ من ملفَّي الذراعين داخل الاختبار** ويُقابَل — فإن انكسر المشتقّ
+    انكسر الاختبار.
+    """
     v, _ = fv.build(A, B)
-    assert v["spend_on_pages_outside_the_count_usd"] > 0
-    assert v["spend_usd"] == round(v["a_spend"] if "a_spend" in v else v["spend_usd"], 4)
+    a_arm = json.loads(A.read_text(encoding="utf-8"))
+    b_arm = json.loads(B.read_text(encoding="utf-8"))
+    # نفسُ صيغة الأداة المعلنة: كلُّ صفحةٍ سقط أحدُ ذراعيها ⇒ كلفةُ **الذراعين**
+    # (الصفحةُ قيست مرتين ثُمّ أُسقطت ⇒ الصرفُ كله مهدور).
+    a_per = {p["page"]: p for p in list(a_arm["prompts"].values())[0]["per_page"]}
+    b_per = {p["page"]: p for p in list(b_arm["prompts"].values())[0]["per_page"]}
+    recomputed = round(sum(float(a_per[g].get("cost_usd") or 0.0)
+                           + float(b_per[g].get("cost_usd") or 0.0)
+                           for g in set(a_per) | set(b_per)
+                           if a_per[g].get("error") or b_per[g].get("error")), 4)
+    assert recomputed > 0, "يجب أن يكون هناك صرفٌ على صفحاتٍ فيها خطأ"
+    assert v["spend_on_pages_outside_the_count_usd"] == recomputed, \
+        "المشتقُّ يساوي المجموع المحسوب من ملفَّي الذراعين"
+    assert v["spend_usd"] == round(a_arm["spend_usd"] + b_arm["spend_usd"], 4)
