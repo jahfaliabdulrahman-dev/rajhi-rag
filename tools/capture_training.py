@@ -249,6 +249,57 @@ def capture_page(page: int, run: Path, out_root: Path, rows: list[dict],
             "dropped": len(dropped), "bal_ok": ok, "bal_bad": bad}
 
 
+def adopt_legacy(out: Path) -> None:
+    """يرحّل بياناً بصيغةٍ سبقت الإصلاح إلى مجلد مستنده — نسخٌ ثم إعادةُ تسمية، لا حذف.
+
+    محتوى البيان يُنسخ كما هو (بايتاً ببايت من ناحية القيم)، والأصلُ يبقى على القرص
+    باسمٍ آخر: التراجعُ ممكن، والضياعُ لا.
+    """
+    legacy = out / "manifest.json"
+    if not legacy.exists():
+        return
+    d = json.loads(legacy.read_text(encoding="utf-8"))
+    did = d.get("doc_id") or "unknown_doc"
+    (out / did).mkdir(parents=True, exist_ok=True)
+    (out / did / "manifest.json").write_text(
+        json.dumps(d, ensure_ascii=False, indent=1))
+    legacy.rename(out / "manifest.json.adopted")
+    print(f"رُحّل بيانُ {did} إلى {did}/manifest.json · والأصلُ صار manifest.json.adopted")
+
+
+def write_index(out: Path) -> dict:
+    """فهرسُ المستندات المُلتقَطة — مفتاحُ بوابة التقاطع `(doc_id, page)`.
+
+    يُبنى من بيانات المستندات على القرص لا من ذاكرة تشغيلةٍ واحدة. ووجودُ بيانٍ
+    بصيغةٍ سبقت الإصلاح في أعلى المجلد **يوقف الكتابة بالاسم**: بيانٌ يُهمَل صامتاً
+    يُضيّع نسبَ عيّناته، وهو العطبُ الذي جعل تشغيلةَ مسحٍ تمحو بيانَ التقاطٍ رقميّ.
+    """
+    legacy = out / "manifest.json"
+    if legacy.exists():
+        raise SystemExit(
+            f"بيانٌ بصيغةٍ سبقت الإصلاح في أعلى مجلد الالتقاط ({legacy.name}) — "
+            "شغّل بـ`--adopt-legacy` لترحيله إلى مجلد مستنده أولاً: "
+            "بيانٌ يُهمَل صامتاً يُضيّع نسبَ العيّنات.")
+    docs = []
+    for mf in sorted(out.glob("*/manifest.json")):
+        d = json.loads(mf.read_text(encoding="utf-8"))
+        pages = d.get("pages") or {}
+        docs.append({"doc_id": d.get("doc_id"), "dir": mf.parent.name,
+                     "manifest": str(mf.relative_to(out)),
+                     "captured_at": d.get("captured_at"),
+                     "captured": pages.get("captured"),
+                     "holdout_reserved": pages.get("holdout_reserved"),
+                     "holdout_rule": d.get("holdout_rule"),
+                     "cost_usd": d.get("cost_usd")})
+    index = {"documents": docs, "count": len(docs),
+             "declaration": ("قائمةُ الالتقاط لكل مستند — مفتاحُ بوابة التقاطع "
+                             "(doc_id, page): لا تُقابَل صفحةٌ بصفحةٍ من مستندٍ آخر "
+                             "(تصادمُ رقمٍ ليس تلوّثاً)")}
+    (out / "index.json").write_text(
+        json.dumps(index, ensure_ascii=False, indent=1))
+    return index
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True, type=Path)
@@ -262,7 +313,13 @@ def main() -> None:
                     help="ملف الأصل — يُفحَص نصُّه لمقابلة أنماط الخصوصية (قياسٌ لا دعوى)")
     ap.add_argument("--private-patterns-file", type=Path, default=None,
                     help="أنماطُ الخصوصية ([anywhere] · [header]) — تعيش خارج المستودع")
+    ap.add_argument("--adopt-legacy", action="store_true",
+                    help="يرحّل بياناً بصيغةٍ سبقت الإصلاح (مستوى أعلى) إلى مجلد مستنده")
     args = ap.parse_args()
+
+    if args.adopt_legacy:
+        args.out.mkdir(parents=True, exist_ok=True)
+        adopt_legacy(args.out)
 
     mask_frac = args.redact_top
     # الأصل: الملف المُعطى صراحةً، وإلا ملفُّ التشغيلة الممسوحة
@@ -358,10 +415,16 @@ def main() -> None:
         "cost_usd": "0 — لا نداء نموذج: الوسم من المصدَّر المعتمد",
     }
     args.out.mkdir(parents=True, exist_ok=True)
-    (args.out / "manifest.json").write_text(
+    # **بيانٌ لكل مستند، لا بيانٌ واحد** — تشغيلةُ مستندٍ ثانٍ كانت تمحو بيانَ الأول
+    # (العلّة البنيوية المقيسة). فالبيان ينزل في مجلد مستنده وفهرسٌ يجمع المستندات.
+    (args.out / doc_id).mkdir(parents=True, exist_ok=True)
+    (args.out / doc_id / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=1))
+    idx = write_index(args.out)
     print(json.dumps(manifest["pages"] | manifest["samples"],
                      ensure_ascii=False, indent=1))
+    print(f"فهرسُ المستندات: {idx['count']} · " +
+          " · ".join(f"{d['doc_id']}:{d['captured']}" for d in idx["documents"]))
 
 
 if __name__ == "__main__":
