@@ -58,8 +58,46 @@ def _row(p: dict) -> dict:
             "error": p.get("error")}
 
 
-def build(a_path: Path, b_path: Path) -> tuple[dict, dict]:
+def _provenance(run: Path) -> dict:
+    """نسبُ المرجع من **تقرير التشغيلة** لا من رواية.
+
+    والقياس الذي فرضه (2026-09-21): `corpus_provenance.reader = None` و`629 صفحةً
+    بلا ختم` في كوربوس المسح ⇒ فالادّعاء بأن «v2 كتب المرجع» **لا سندَ له**، ولا
+    يجوز أن يُقال عكسُه أيضاً. فيُعلن **مجهولاً**.
+    """
+    rep = run / "slice_report.json"
+    if not rep.exists():
+        return {"reader": None, "source": f"لا تقريرَ في {run} — النسبُ مجهول",
+                "legacy_unstamped_pages": None, "declaration": None}
+    d = json.loads(rep.read_text(encoding="utf-8"))
+    cp = d.get("corpus_provenance") or {}
+    return {"reader": (cp.get("reader") or None),
+            "source": "slice_report.json → corpus_provenance",
+            "legacy_unstamped_pages": cp.get("legacy_unstamped_pages"),
+            "declaration": cp.get("declaration")}
+
+
+def bias_sentence(prov: dict) -> str:
+    """الجملةُ تُبنى من النسب — «مجهول» نتيجةٌ مشروعة، والتخمينُ ليس كذلك."""
+    reader = prov.get("reader")
+    if not reader:
+        legacy = prov.get("legacy_unstamped_pages")
+        extra = (f" و{legacy} صفحةً بلا ختم" if isinstance(legacy, int) and legacy else "")
+        return ("⚠️ **نسبُ المرجع مجهول**: `corpus_provenance.reader = None`" + extra +
+                " ⇒ لا يُقال «منحازٌ إلى b» ولا «محايد» — **الاتجاهُ غير محدَّد**. "
+                "وما يصمد مستقلّاً عن النسب: الذراعان طابقا المرجع في **نفس** عدد "
+                "الأزواج، وهذا لا يتوقّف على من كتبه.")
+    model = reader.get("model")
+    pv = reader.get("prompt_version")
+    # ⚠️ لا تُقارَن الأذرعُ بالقارئ من هذه الملفات: ملفّاتُ الذراعين لا تسجّل النموذج،
+    # فالقول «هو ذراع b نفسه» سيكون **تخميناً آخر** — ويُعلن المعلومُ فقط.
+    return (f"⚠️ المرجعُ من قارئٍ معلن: `{model}/{pv}` — والقرارُ يُقرأ على ضوء ذلك، "
+            "ولا تُقارَن الأذرعُ به من هذه الملفات (لا تسجّل النموذج).")
+
+
+def build(a_path: Path, b_path: Path, run: Path | None = None) -> tuple[dict, dict]:
     a_arm, b_arm = _load(a_path), _load(b_path)
+    prov = _provenance(run or PROJ / "data" / "local_sample" / "slice_629p")
     a, b = _per_page(a_arm), _per_page(b_arm)
     pages = sorted(set(a) | set(b))
     clean = [p for p in pages if not a[p].get("error") and not b[p].get("error")]
@@ -106,11 +144,12 @@ def build(a_path: Path, b_path: Path) -> tuple[dict, dict]:
             "closed": "آخر رصيد مطابق = إقفال السلسلة",
             "overread": "rows_read − rows_chain_verified (صفوفٌ لا تُصدّقها السلسلة)",
         },
-        "reference_bias": ("⚠️ المرجع (صفوف الكوربوس) كتبته **v2 نفسه** ⇒ تفوّقُ b في "
-                           "الإقفال والمطابقة التامة **حدٌّ أعلى** لا قياسٌ محايد (قد يكون "
-                           "اتفاقاً مع الذات). وفي المقابل: a **غريبٌ عن ذلك المرجع** "
-                           "ومع ذلك طابق نفس عدد الأزواج ⇒ «التكافؤ في الاستخراج» يصمد "
-                           "رغم التحيّز."),
+        # ⚠️ **كانت هذه الجملة مكتوبةً بيد** — وهي الجملةُ الوحيدة غير المشتقّة في ملفٍّ
+        # مشتقّ، فكانت **هي الخطأ**: قالت «المرجع كتبته v2» والكوربوس يقول
+        # `corpus_provenance.reader = None` و`629 صفحةً بلا ختم`. والمأخذُ من المدقّق
+        # (مالكُ الادّعاء أصلاً) ومنه أيضاً الحكم: **يُشتقّ، ويقول «مجهول» حين يُجهَل.**
+        "reference_provenance": prov,
+        "reference_bias": bias_sentence(prov),
         "pages": {"paired": len(pages), "clean_in_both": len(clean),
                   "errors_a": sa["errors"], "errors_b": sb["errors"]},
         "a": sa, "b": sb,
@@ -169,11 +208,13 @@ def main() -> None:
     ap.add_argument("--b", type=Path, required=True)
     ap.add_argument("--out", type=Path, default=PROJ / "docs" / "evidence")
     ap.add_argument("--name", default="20260921-fm2-paired-verdict.json")
+    ap.add_argument("--run", type=Path, default=PROJ / "data" / "local_sample" / "slice_629p",
+                    help="تشغيلةُ المرجع — يُقرأ منها نسبُ الكوربوس فلا يُدَّعى")
     ap.add_argument("--overread", type=Path,
                     default=PROJ / "docs" / "evidence" / "20260921-fm2-overread.json")
     args = ap.parse_args()
 
-    verdict, overread = build(args.a, args.b)
+    verdict, overread = build(args.a, args.b, args.run)
     args.out.mkdir(parents=True, exist_ok=True)
     vp = (args.out / args.name).resolve()
     vp.write_text(json.dumps(verdict, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")

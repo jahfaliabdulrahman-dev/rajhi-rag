@@ -13,7 +13,15 @@
 set -euo pipefail
 
 WT="${1:?استعمال: bash tools/link_local_data.sh <worktree-path>}"
-MAIN="$(cd "$(dirname "$0")/.." && pwd)"
+# ⚠️ المستودعُ الأصلي من `git rev-parse --git-common-dir` **لا من مسار السكربت**:
+# المدقّقُ في worktree يستعمل نسخةً من هذا السكربت **داخله**، فلو اشتُقّ المسار من
+# نفسه لقال «لا مسحة محلية في المستودع الأصلي» وكذب — وهي **الحالة الوحيدة التي
+# وُجد السكربت لها**، فيظنّ المدقّق أن البيانات غير موجودة فيمضي بتغطيةٍ ناقصة.
+# (مأخذ المدقّق · الجولة ٢١ — قِيس: من داخل worktree كان يخرج بـ1.)
+COMMON="$(git -C "$WT" rev-parse --git-common-dir 2>/dev/null || true)"
+if [ -z "$COMMON" ]; then echo "لا مستودع في: $WT"; exit 1; fi
+case "$COMMON" in /*) ;; *) COMMON="$WT/$COMMON" ;; esac
+MAIN="$(cd "$(dirname "$COMMON")" && pwd)"
 LO="$MAIN/data/local_sample"
 
 [ -d "$WT" ] || { echo "لا مسار: $WT"; exit 1; }
