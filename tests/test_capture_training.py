@@ -27,12 +27,59 @@ from openpyxl import Workbook  # noqa: E402
 
 from tools.capture_training import (  # noqa: E402
     HEADER_MASK_FRACTION,
+    adopt_legacy,
     attach_balances,
     capture_page,
     is_holdout,
     redact_top,
     split_rows,
+    write_index,
 )
+
+
+# ── بيانٌ لكل مستند، لا بيانٌ واحد (عطب ف٢) ─────────────────────────────────
+# كان البيانُ يُكتب في أعلى مجلد الالتقاط، فتشغيلةُ مستندٍ ثانٍ تمحو بيانَ الأول:
+# عيّناتٌ تفقد نسبَها ولا شيء في الأثر يدلّ عليها.
+def test_two_documents_leave_two_manifests_and_an_index(tmp_path):
+    """مستندان مُلتقَطان ⇒ بيانان وفهرسٌ يجمعهما بمفتاح (doc_id, page)."""
+    out = tmp_path / "training"
+    for did in ("docA", "docB"):
+        (out / did).mkdir(parents=True)
+        (out / did / "manifest.json").write_text(json.dumps(
+            {"doc_id": did, "captured_at": "2026-09-22",
+             "pages": {"captured": 2, "holdout_reserved": 1},
+             "holdout_rule": "page % 3 == 0", "cost_usd": "0"}))
+    idx = write_index(out)
+    assert idx["count"] == 2, "بيانٌ واحد لمستندَين = عيّناتٌ تفقد نسبَها"
+    assert {d["doc_id"] for d in idx["documents"]} == {"docA", "docB"}
+    assert (out / "docB" / "manifest.json").exists(), "بيانُ المستند الثاني مُحي"
+
+
+def test_a_legacy_manifest_stops_the_capture_by_name(tmp_path):
+    """بيانٌ بصيغةٍ قديمة لا يُهمَل صامتاً: الكتابةُ تتوقّف ويُسمّى العلاج."""
+    out = tmp_path / "training"
+    out.mkdir()
+    (out / "manifest.json").write_text(json.dumps({"doc_id": "old"}))
+    try:
+        write_index(out)
+    except SystemExit as exc:
+        assert "adopt-legacy" in str(exc)
+    else:
+        raise AssertionError("بيانٌ بصيغةٍ قديمة مرّ صامتاً — وهذا هو العطبُ نفسه")
+
+
+def test_adopting_a_legacy_manifest_keeps_the_original_on_disk(tmp_path):
+    """الترحيلُ نسخٌ وإعادةُ تسمية: القيمُ تُنقل والأصلُ لا يُحذف."""
+    out = tmp_path / "training"
+    out.mkdir()
+    (out / "manifest.json").write_text(json.dumps(
+        {"doc_id": "old", "pages": {"captured": 3}}))
+    adopt_legacy(out)
+    moved = json.loads((out / "old" / "manifest.json").read_text())
+    assert moved["pages"]["captured"] == 3
+    assert (out / "manifest.json.adopted").exists(), "الأصل يجب ألا يُحذف"
+    assert not (out / "manifest.json").exists()
+    assert write_index(out)["count"] == 1
 
 
 # ── حجز التقييم ─────────────────────────────────────────────────────────────
