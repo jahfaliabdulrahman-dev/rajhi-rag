@@ -103,9 +103,15 @@ def test_the_bias_sentence_is_derived_not_declared(tmp_path):
     assert "629" in legacy, "العدّاد المعلن يُذكر مع الجهل"
 
 
-def test_the_verdict_is_derived_from_the_runs_own_provenance():
-    """الملفُ المُلتزم يقول «مجهول» — لأن التشغيلة تقول ذلك، لا لأننا ظنّناه."""
+def test_the_verdict_is_derived_from_the_arm_files_alone():
+    """**بلا بيئة:** النسبُ يُقرأ من ملفَّي الذراعين (سُجّل وقت القياس) — فلا يعتمد
+    المشتقُّ على تشغيلةٍ مُتجاهَلة، ويُعاد نفسُه في `CI` وفي worktreeٍ بلا بيانات.
+
+    (مأخذ المدقّق · الجولة ٢٢: كان `build` يقرأ التشغيلة ⇒ لا يُعاد في بيئةٍ نظيفة.)
+    """
     v, _ = fv.build(A, B)
-    assert v["reference_provenance"]["source"].endswith("corpus_provenance")
     assert v["reference_provenance"]["reader"] is None
+    assert "من ملف الذراع" in v["reference_provenance"]["source"], \
+        "النسبُ يجب أن يأتي من ملف الذراع لا من مسارٍ خفيّ"
+    assert v["reference_provenance"]["legacy_unstamped_pages"] == 629
     assert "مجهول" in v["reference_bias"]
