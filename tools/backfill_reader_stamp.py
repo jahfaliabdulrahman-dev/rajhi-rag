@@ -12,11 +12,21 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from datetime import date
 from pathlib import Path
 
 PROJ = Path(__file__).resolve().parents[1]
+
+
+def sha256_16(path: Path) -> str:
+    """الوسمُ المعتمد في المشروع: `sha256(file)[:16]` — كما في capture_training وtext_reader."""
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()[:16]
 
 
 def main() -> None:
@@ -25,13 +35,16 @@ def main() -> None:
     ap.add_argument("--model", default=None,
                     help="نموذج القراءة إن كان معلوماً من خارج الكاش (وإلا يُعلن مجهولاً)")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--doc", type=Path, default=None,
+                    help="ملفُّ أصل الكوربوس — تُشتقّ منه هويةُ المستند. وإن غاب يُعلن مجهولاً")
     args = ap.parse_args()
 
     run = args.run if args.run.is_absolute() else PROJ / args.run
     report_path = run / "slice_report.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    if report.get("reader_stamp") and report.get("footer_role"):
-        print("التقرير يحمل ختماً ودوراً بالفعل — لا شيء يُفعل.")
+    if (report.get("reader_stamp") and report.get("footer_role")
+            and (report.get("corpus_provenance") or {}).get("doc_id")):
+        print("التقرير يحمل ختماً ودوراً وهويةَ مستندٍ بالفعل — لا شيء يُفعل.")
         return
     if not report.get("footer_role"):
         # دورُ التذييل لعقد البنك: قراءةٌ من العقد لا اجتهاد
@@ -65,14 +78,39 @@ def main() -> None:
     if args.model:
         report["corpus_provenance"]["model_note"] = f"نموذج القراءة المعلن خارج الكاش: {args.model}"
 
+    # ── هويةُ المستند: مفتاحُ بوابة التقاطع `(doc_id, page)` ──────────────────
+    # الصفحاتُ قُرئت قبل أن يحمل الكوربوس هويةً، فالختمُ **استدراكٌ يُعلن** لا إعادةُ
+    # قراءةٍ تدفع الثمن. والوسمُ من الملف نفسه: `sha256(file)[:16]` — العُرفُ القائم
+    # في `capture_training.py` و`text_reader.py`، فلا يكون للمشروع وسمان.
+    doc = args.doc or (run / "slice_629p.pdf")
+    doc = doc if doc.is_absolute() else PROJ / doc
+    cp = report["corpus_provenance"]
+    if doc.exists():
+        cp["doc_id"] = sha256_16(doc)
+        cp["doc_file"] = doc.name
+        cp["doc_id_method"] = "sha256(file)[:16] — كما في tools/capture_training.py"
+        cp["doc_id_note"] = ("ختمُ استدراك: الصفحاتُ قُرئت قبل تسجيل الهوية، والوسمُ من "
+                             "الملف نفسه لا من قراءةٍ جديدة.")
+    else:
+        # لا يُخمَّن وسمٌ بلا ملفّ: يُعلن مجهولاً ويُسمّى المفقود
+        cp["doc_id"] = None
+        cp["doc_file"] = None
+        cp["doc_id_note"] = (f"مجهولٌ: ملفُّ الأصل غير موجود ({doc}) — ولا يُخمَّن "
+                             "وسمٌ بلا ملفّ.")
+    cp["doc_id_backfilled_at"] = date.today().isoformat()
+
     print(f"نقاط فحص مختمة: {stamped} · غير مختمة: {unstamped} · "
-          f"دور التذييل: {report.get('footer_role')}")
+          f"دور التذييل: {report.get('footer_role')} · doc_id: {cp['doc_id']}")
     if args.dry_run:
         print("(تجربة — لم يُكتب شيء)")
         return
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2),
                            encoding="utf-8")
-    print(f"كُتب الإعلان في {report_path.relative_to(PROJ)}")
+    try:
+        shown = report_path.relative_to(PROJ)   # أقصرُ للعين حين تكون التشغيلة داخل المستودع
+    except ValueError:
+        shown = report_path                    # وتشغيلةٌ خارج المستودع تُطبع بمسارها الكامل
+    print(f"كُتب الإعلان في {shown}")
 
 
 if __name__ == "__main__":
