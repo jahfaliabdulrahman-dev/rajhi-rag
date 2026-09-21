@@ -1,0 +1,39 @@
+{
+ "measured_at": "2026-09-21",
+ "symptom": "المدقّق يقيس 3 تخطّت ونحن نقيس 0 — والعددُ الكلي يختلف (309 مقابل 331)",
+ "method": "تشغيلٌ في worktree المدقّق نفسه بنفس المفسّر (.venv) ثم بإزالة السبب",
+ "reasons_measured": [
+  {
+   "test": "tests/test_page_gate.py:190",
+   "reason": "المسحة الحقيقية غير موجودة على هذا الجهاز"
+  },
+  {
+   "test": "tests/test_page_gate.py:201",
+   "reason": "المسحة الحقيقية غير موجودة على هذا الجهاز"
+  },
+  {
+   "test": "tests/test_text_reader.py:74",
+   "reason": "الكشف الرقمي محليّ لا يدخل المستودع"
+  }
+ ],
+ "root_cause": "`git worktree` لا يحمل المُتجاهَل: `data/local_sample/*` مُستثنى عمداً (بيانات كشوف حقيقية) ⇒ فحوصُ المسحة الحقيقية والكشف الرقمي لا تجد مدخلها.",
+ "ruled_out": [
+  "المفسّر: نفس `.venv` في الحالتين (numpy وpyflakes موجودان) — ولم تتغيّر مجموعةُ التخطّي",
+  "فرقُ العدد 309 مقابل 331: التزامُ المدقّق أقدم (قبل آخر PRين) لا بيئةً مختلفة — قِيس في worktree نفسه"
+ ],
+ "proved_by_removal": {
+  "before": {
+   "passed": 20,
+   "skipped": 3,
+   "command": "pytest tests/test_page_gate.py tests/test_text_reader.py"
+  },
+  "after": {
+   "passed": 20,
+   "skipped": 0,
+   "action": "وصلُ slice_629p وdigital برابطٍ رمزي إلى data/local_sample في الـworktree"
+  }
+ },
+ "structural_consequence": "**تغطية المراجعة دالّةٌ على البيئة لا على العدد**: من يراجع من worktree يُسقط — بلا أن يدري — الفحوصَ التي تحرس الكوربوس الحقيقي والمسار الرقمي. ولهذا يُقرأ الرقمُ المعلن مقروناً ببيئته.",
+ "remedy": "tools/link_local_data.sh <worktree> — عادةٌ تُعاد، والنتيجة المتوقّعة 0 تخطّى.",
+ "cost_usd": 0
+}
