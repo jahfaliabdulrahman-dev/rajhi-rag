@@ -143,7 +143,21 @@ def main() -> None:
                 spent += float(res.get("cost_usd") or 0.0)
                 results[name].append(res)
 
+    # **نسبُ المرجع يُسجَّل وقتَ القياس** (مأخذ المدقّق · الجولة ٢٢): بدونه صار
+    # المشتقُّ يقرأ تشغيلةً مُتجاهَلة، فلم يبقَ دالّةً لملفَّي الذراعين — ولا تُعاد
+    # نتيجتُه في بيئةٍ نظيفة (CI أو worktree بلا بيانات).
+    _rep = run / "slice_report.json"
+    provenance = {"reader": None, "legacy_unstamped_pages": None, "declaration": None,
+                  "source": "غير مُعلن في تقرير التشغيلة"}
+    if _rep.exists():
+        cp = (json.loads(_rep.read_text(encoding="utf-8")).get("corpus_provenance") or {})
+        provenance = {"reader": cp.get("reader") or None,
+                      "legacy_unstamped_pages": cp.get("legacy_unstamped_pages"),
+                      "declaration": cp.get("declaration"),
+                      "source": "slice_report.json → corpus_provenance (وقت القياس)"}
+
     report = {"measured_at": date.today().isoformat(), "run": str(args.run),
+              "corpus_provenance": provenance,
               "sample": {"requested": args.count, "picked": len(picked),
                          "from": (f"{args.set} (page % {args.holdout_mod} "
                                   f"{'==' if args.set == 'holdout' else '!='} 0)"),
