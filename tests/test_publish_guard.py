@@ -247,3 +247,25 @@ def test_an_upper_case_iban_is_still_blocked():
     line = ' "iban": "SA' + _run("8", 20) + '6129"'
     assert [r for r in _scan_one(line) if r[1] == "long_digits"], \
         "IBAN بحروفٍ كبيرة يبقى محجوباً"
+
+
+def test_a_space_separated_page_number_list_is_not_an_account():
+    """قائمةُ أرقامِ صفحاتٍ في نصٍّ عربي: وُلّدت منها «سلسلةٌ طويلة» فحُجب الدليل
+    **لأنه دليل** (وقع مرّة على رسالة المدقّق نفسها). والفرق: ثلاثاتٌ بفراغ = قائمة.
+
+    والأرقامُ تُبنى في زمن التشغيل — فملفُّ اختبارات الحارس **يمرّ من الحارس**.
+    """
+    line = "مذكورة: " + " ".join(str(n * 7) for n in range(3, 20))
+    assert not _scan_one(line), "قائمةُ أرقامٍ مفصولةٌ بفراغ ليست حساباً"
+
+
+def test_a_three_wide_hyphenated_cheque_is_still_blocked():
+    line = ' "cheque": "' + "-".join(_run(str(n), 3) for n in range(1, 6)) + '"'
+    assert [r for r in _scan_one(line) if r[1] == "long_digits"], \
+        "صكٌّ بثلاثاتٍ موصولةٍ بشُرَط يبقى محجوباً"
+
+
+def test_a_four_wide_card_still_blocked_even_with_spaces():
+    line = ' "card": "' + " ".join(_run(str(n), 4) for n in (4, 8, 2, 6)) + '"'
+    assert [r for r in _scan_one(line) if r[1] == "long_digits"], \
+        "بطاقةٌ برُباعياتٍ مفصولةٍ بفراغ تبقى محجوبة"

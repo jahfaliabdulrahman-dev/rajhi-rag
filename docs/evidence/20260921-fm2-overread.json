@@ -1,0 +1,212 @@
+{
+ "derived_by": "tools/fm2_verdict.py",
+ "class": "صفوفٌ يُعيدها القارئ ولا تُصدّقها السلسلة — تُسقطها البوّابة عند التسليم، فالأثر على المخرج صفر، والكلفةُ رموزٌ مدفوعة",
+ "totals": {
+  "rows_read": {
+   "a": 3801,
+   "b": 3783
+  },
+  "rows_chain_verified": {
+   "a": 3766,
+   "b": 3765
+  },
+  "pairs_matching": {
+   "a": 3721,
+   "b": 3721
+  },
+  "overread": {
+   "a": 35,
+   "b": 18
+  }
+ },
+ "per_page": [
+  {
+   "page": 1,
+   "a_overread": 1,
+   "b_overread": 1,
+   "certified": 12
+  },
+  {
+   "page": 107,
+   "a_overread": 0,
+   "b_overread": 1,
+   "certified": 11
+  },
+  {
+   "page": 139,
+   "a_overread": 1,
+   "b_overread": 0,
+   "certified": 10
+  },
+  {
+   "page": 146,
+   "a_overread": 0,
+   "b_overread": 1,
+   "certified": 10
+  },
+  {
+   "page": 154,
+   "a_overread": 1,
+   "b_overread": 1,
+   "certified": 9
+  },
+  {
+   "page": 173,
+   "a_overread": 1,
+   "b_overread": 0,
+   "certified": 9
+  },
+  {
+   "page": 184,
+   "a_overread": 1,
+   "b_overread": 0,
+   "certified": 10
+  },
+  {
+   "page": 188,
+   "a_overread": 0,
+   "b_overread": 1,
+   "certified": 10
+  },
+  {
+   "page": 193,
+   "a_overread": 0,
+   "b_overread": 1,
+   "certified": 10
+  },
+  {
+   "page": 206,
+   "a_overread": 1,
+   "b_overread": 1,
+   "certified": 10
+  },
+  {
+   "page": 220,
+   "a_overread": 1,
+   "b_overread": 1,
+   "certified": 10
+  },
+  {
+   "page": 235,
+   "a_overread": 1,
+   "b_overread": 0,
+   "certified": 10
+  },
+  {
+   "page": 248,
+   "a_overread": 0,
+   "b_overread": 1,
+   "certified": 9
+  },
+  {
+   "page": 281,
+   "a_overread": 0,
+   "b_overread": 1,
+   "certified": 9
+  },
+  {
+   "page": 292,
+   "a_overread": 1,
+   "b_overread": 1,
+   "certified": 10
+  },
+  {
+   "page": 355,
+   "a_overread": 1,
+   "b_overread": 1,
+   "certified": 9
+  },
+  {
+   "page": 368,
+   "a_overread": 1,
+   "b_overread": 0,
+   "certified": 9
+  },
+  {
+   "page": 410,
+   "a_overread": 0,
+   "b_overread": 1,
+   "certified": 8
+  },
+  {
+   "page": 427,
+   "a_overread": 1,
+   "b_overread": 1,
+   "certified": 9
+  },
+  {
+   "page": 469,
+   "a_overread": 1,
+   "b_overread": 0,
+   "certified": 7
+  },
+  {
+   "page": 479,
+   "a_overread": 1,
+   "b_overread": 0,
+   "certified": 8
+  },
+  {
+   "page": 506,
+   "a_overread": 0,
+   "b_overread": 1,
+   "certified": 7
+  },
+  {
+   "page": 532,
+   "a_overread": 1,
+   "b_overread": 1,
+   "certified": 9
+  },
+  {
+   "page": 553,
+   "a_overread": 1,
+   "b_overread": 0,
+   "certified": 10
+  },
+  {
+   "page": 584,
+   "a_overread": 1,
+   "b_overread": 1,
+   "certified": 11
+  },
+  {
+   "page": 626,
+   "a_overread": 1,
+   "b_overread": 1,
+   "certified": 9
+  },
+  {
+   "page": 629,
+   "a_overread": 17,
+   "b_overread": 0,
+   "certified": 17
+  }
+ ],
+ "pages_with_any_overread": 27,
+ "named_cause": [
+  {
+   "page": 629,
+   "a_overread": 17,
+   "b_overread": 0,
+   "a_chain_verified": 0,
+   "certified": 17
+  },
+  {
+   "page": 1,
+   "a_overread": 1,
+   "b_overread": 1,
+   "a_chain_verified": 11,
+   "certified": 12
+  },
+  {
+   "page": 154,
+   "a_overread": 1,
+   "b_overread": 1,
+   "a_chain_verified": 8,
+   "certified": 9
+  }
+ ],
+ "artefact_impact": "صفرٌ بالبناء: الصفوفُ التي لا تُصدّقها السلسلة تُسقطها البوّابة عند التسليم (`proof_source`) — فيُقاس الأثرُ في المخرج لا في الرجاء، والكلفةُ المتبقّية رموزٌ مدفوعة.",
+ "declared_unknown": "نصوصُ الصفوف الزائدة لا تُعرَف من الكاش: الذراعان يحفظان **عدّاً** لا صفوفاً. معرفتُها تحتاج قراءةً مدفوعة، ولا تُصرف بلا سؤال المالك."
+}
