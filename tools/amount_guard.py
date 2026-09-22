@@ -819,7 +819,9 @@ def main(argv=None) -> int:
         return proof_inject()
 
     deny = load_deny()
-    if deny is None and not args.ci:
+    # **`--baseline-audit` لا يمرّ من هنا:** لا مبلغَ يفحصه بل عتبةً يقارنها، وموضعُه
+    # في CI حيث لا مانيفستَ (لا يُنشر بالتصميم) ⇒ اشتراطُ سرٍّ له كان يُسقط بوابةَ CI.
+    if deny is None and not args.ci and not args.baseline_audit:
         # **الفشلُ المُغلَق:** غيابُ المانيفست لا يمرّ صامتاً — إلّا بعلَمٍ صريح يعلن السطحَ العامّ.
         print("⛔ " + _manifest_blind().lstrip("⚠ "))
         print("   (وبلا `--ci`: الحارسُ **يسقط مُغلَقاً** — لا يمرّ صامتاً. في CI: `--ci`.)")
