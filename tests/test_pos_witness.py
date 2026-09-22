@@ -15,7 +15,7 @@ from statement_qa.pos_witness import (INK_MIN, assign_column, chain_side,
 COLS_621 = {"debit_x": 0.440, "credit_x": 0.306, "balance_x": 0.142}
 # الأرصدة المطبوعة في الورق، والأعمدة كما أثبتها الحبر والعين
 ROWS_621 = [
-    {"x": 0.440, "balance": "١,١٧٤.٥٧"},
+    {"x": 0.440, "balance": "٤,٩٦٢٫١٣"},
     {"x": 0.440, "balance": "٧٧٤.٠١"},
     {"x": 0.440, "balance": "٥٦١.٧٨"},
     {"x": 0.306, "balance": "٨٦١.٧٨"},
@@ -32,7 +32,7 @@ ROWS_621 = [
 def test_the_line_format_survives_a_truncated_answer():
     """JSON انقطع مرتين وضاع الجواب؛ السطري يُفقد سطراً ويُبقي الباقي."""
     text = ("COLS|debit_x=0.440|credit_x=0.306|balance_x=0.142\n"
-            "ROW|٢٠٢٤١١١٨|0.440|0.293|٤٠٠.٥٦|١,١٧٤.٥٧\n"
+            "ROW|٢٠٢٤١١١٨|0.440|0.293|٤٠٠.٥٦|٤,٩٦٢٫١٣\n"
             "ROW|٢٠٢٤١١١٨|0.440|0.315|٤٠٠.٥٦|٧٧٤.٠١\n"
             "ROW|٢٠٢٤١١١٨|0.4")                       # سطر مقطوع
     cols, rows = parse_lines(text)
@@ -54,7 +54,7 @@ def test_the_column_is_derived_from_horizontal_position_only():
 
 
 def test_chain_side_reads_arabic_digits_and_commas():
-    assert chain_side("١,١٧٤.٥٧", "٧٧٤.٠١") == "debit"     # انخفض ⇒ مدين
+    assert chain_side("٤,٩٦٢٫١٣", "٧٧٤.٠١") == "debit"     # انخفض ⇒ مدين
     assert chain_side("٤٢٦.٣٥", "٤٧٦.٣٥") == "credit"      # ارتفع ⇒ دائن
     assert chain_side("١٠٠.٠٠", "١٠٠.٠٠") is None
     assert to_decimal("٠٫٥٠") == Decimal("0.50")           # «٫» فاصلة عشرية لا تُرمى

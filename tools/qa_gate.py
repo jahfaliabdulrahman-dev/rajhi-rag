@@ -69,7 +69,7 @@ def g_parser_goldens() -> str:
     cases = {
         "٣٠٠,٠٠": "300.00",      # comma-as-decimal (old-era prints)
         ".,..": "0",             # printed zero as dots — never None
-        "٥٧,٥٠٢٧٥": "57502.75",   # lost decimal dot (owner's golden rule)
+        "٦١,١٦٥١٢": "61165.12",   # lost decimal dot (owner's golden rule)
         "١١٩.٠٠-": "-119.00",    # trailing minus — sign must survive
         "٢,٩٠٠.٠٠": "2900.00",   # new-era thousands + halalas
         "۱,۸۰۰.۰۰": "1800.00",   # Persian digits mixed in

@@ -19,7 +19,7 @@ Number parsing (proven rules for Saudi bank prints):
   - '.' present -> standard decimal point (2-digit frac expected).
   - No dot: digits after the LAST comma — 2 = decimal comma ("300,00" = 300.00,
     old-era pages), 3 = thousands separator ("2,900" = 2900), >3 = lost-dot
-    case ("57,50275" = 57,502.75).
+    case ("61,16512" = 61,165.12).
 
 Usage: python validate_reread_chain.py reread.jsonl [--verbose]
 Exit 0 if all chain pairs pass; 1 otherwise. Prints a per-page summary.

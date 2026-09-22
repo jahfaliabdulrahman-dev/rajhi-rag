@@ -36,7 +36,7 @@ def test_a_gap_entry_is_measured_from_the_footer_and_witnessed_by_the_balance():
         _facts(426, {"debits": "218998.15", "credits": "647041.04"}, {"debits": "0", "credits": "0"},
                "392.40", "392.40"),
         _facts(427, {"debits": "323267.17", "credits": "189784.39"}, {"debits": "120.22", "credits": "130.00"},
-               "1026.90", "1026.90", missing=(426, 427)),
+               "6345.36", "6345.36", missing=(426, 427)),
     ]
     entry = build_gap_entries(facts)[0]
     # الجمعان يُحسبان من فرق التذييل ناقص ما حسبناه على الصفحة نفسها

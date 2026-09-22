@@ -1,13 +1,14 @@
-"""حارسُ المبالغ — اختبارُ القاعدة **واختبارُ سقوطها**.
+"""حارسُ المبالغ — اختبارُ القاعدة، واختبارُ **اشتقاقها**، واختبارُ سقوطها.
 
-القاعدةُ التي لا تسقط عند حقن العطب الذي وُضعت له ليست قاعدة (القاعدةُ التاسعة).
-وهذه القاعدةُ وُضعت لأن حارساً قائماً مرّ وأمامه ١٢٦ ظهوراً لمبالغَ حقيقية.
+القاعدةُ العاشرة: حارسٌ بقائمةِ منعٍ مُشتقّة، **صحّتُه صحّةُ اشتقاقِها لا صحّةُ منطقِه**.
+وقد سقط هذا الحارسُ مرّةً لأنّه قرأ مفتاحاً غير موجود (`rows` بدل `raw_rows`) فدار صفرَ مرّة
+وبقي ٤,١٠٠ مبلغاً مصدريًّا خارجَه ⇒ صارت هذه الاختبارات تحرس **الاشتقاقَ** لا المنطقَ وحدَه.
 """
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("amount_guard", ROOT / "tools" / "amount_guard.py")
@@ -15,7 +16,16 @@ ag = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ag)
 
 
-def test_normalizes_arabic_and_persian_digits_alike():
+def _key(tmp_path, monkeypatch):
+    """مفتاحٌ وهميّ للاختبار: البصمةُ لا تُجرَد بغير المفتاح، والاختبارُ لا يحتاج المفتاحَ الحقيقيّ."""
+    kf = tmp_path / "k"
+    kf.write_text("test-key-not-the-real-one", encoding="utf-8")
+    monkeypatch.setattr(ag, "KEY_FILE", kf)
+    monkeypatch.delenv(ag.KEY_ENV, raising=False)
+
+
+def test_normalizes_arabic_and_persian_digits_alike(tmp_path, monkeypatch):
+    _key(tmp_path, monkeypatch)
     assert ag.normalize("٥٤٣٢١٠٫٩٩") == "543210.99"
     assert ag.normalize("۱٬۲۳۴٫۵۶") == "1234.56"
     assert ag.normalize("543,210.99") == "543210.99"
@@ -23,41 +33,65 @@ def test_normalizes_arabic_and_persian_digits_alike():
 
 def test_amount_shaped_requires_four_integer_digits():
     assert ag.is_amount_shaped("1234.00") and ag.is_amount_shaped("٥٤٣٢١٠٫٩٩")
-    assert not ag.is_amount_shaped("300.00")          # قيمٌ ذهبية صناعية
+    assert not ag.is_amount_shaped("300.00")
     assert not ag.is_amount_shaped("0.979")
 
 
-def test_the_rule_falls_on_a_real_amount_it_was_built_for(tmp_path, monkeypatch):
-    """**برهانُ السقوط:** مبلغٌ حقيقيّ ⇒ الحارسُ يسقط، بنفس النواة التي يفحص بها الشجرة."""
-    monkeypatch.setattr(ag, "MANIFEST", tmp_path / "deny.json")
-    assert ag.build(["543210.99"]) == 0
-    deny = ag.load_deny()
-    assert ag.find_in_text("الرصيد الصحيح 543210.99 في التذييل", deny)
-    assert ag.find_in_text("الرصيد بالعربية ٥٤٣٢١٠٫٩٩", deny)      # الأبجدية لا تُنجيه
-    assert not ag.find_in_text("الرصيد صناعيٌّ 300.00", deny)       # ولا إيجابيّةَ كاذبة
+def test_significance_filter_is_the_measured_one():
+    """المُصفّي مقيس: بلا هذا الحدّ تُطابق المجموعةُ ٤٣٠ ظهوراً (إصداراتٌ وقيمٌ ذهبية) بدل ٢٣."""
+    assert ag.is_significant("543210.99") and ag.is_significant("-543210.99")
+    assert not ag.is_significant("1500.00")      # مُدوَّرةٌ تتصادم
+    assert not ag.is_significant("450.00")       # قصيرةٌ تتصادم
 
 
-def test_the_committed_manifest_is_present_and_substantial():
-    assert ag.MANIFEST.exists(), "المانيفستُ الغائب يعني حارساً لا يعرف ما يحرس"
-    import json
+def test_the_rule_falls_on_a_value_it_was_built_for(tmp_path, monkeypatch):
+    """**برهانُ السقوط بنواة الفحص نفسها** (بقيمةٍ وهميّة، فلا تسريبَ في الاختبار)."""
+    _key(tmp_path, monkeypatch)
+    deny = {ag.fingerprint("543210.99")}
+    assert ag.find_in_text("الرصيد 543210.99", deny)
+    assert ag.find_in_text("الرصيد ٥٤٣٢١٠٫٩٩", deny)      # الأبجديةُ لا تُنجيه
+    assert not ag.find_in_text("قيمةٌ صناعية 300.00", deny)
+
+
+def test_fingerprints_are_keyed_so_the_published_list_cannot_be_enumerated(tmp_path, monkeypatch):
+    """البصمةُ المنشورة لا تُجرَد: بمفتاحٍ آخر لا تُطابق. (وبلا مفتاح: فشلٌ مُغلَق)"""
+    import hashlib
+    _key(tmp_path, monkeypatch)
+    keyed = ag.fingerprint("543210.99")
+    public = hashlib.sha256(b"rajhi-rag/amount-guard/v1" + b"543210.99").hexdigest()[:32]
+    assert keyed != public
+    monkeypatch.setattr(ag, "KEY_FILE", tmp_path / "missing")
+    monkeypatch.delenv(ag.KEY_ENV, raising=False)
+    try:
+        ag.load_key()
+        raise AssertionError("بلا مفتاح يجب أن يفشل الحارسُ مُغلَقاً لا صامتاً")
+    except SystemExit:
+        pass
+
+
+def test_the_manifest_derivation_closes():
+    """**حارسُ الاشتقاق:** لا يُنشر مانيفستٌ ناقص — الحسابُ يُغلق أو يسقط البناء."""
     data = json.loads(ag.MANIFEST.read_text(encoding="utf-8"))
-    assert data["count"] >= 500 and len(data["fingerprints"]) == data["count"]
+    d = data["derivation"]
+    assert d["source_shape_ok"] == d["entered"] + d["excluded_trivial"] + d["excluded_synthetic"]
+    assert data["count"] == d["entered"] > 500
+    assert data["keyed"] is True
+
+
+def test_injection_returns_nonzero_when_blind():
+    """أداةُ برهانٍ تُعلن الفشلَ وتخرج بنجاحٍ ليست بوابة ⇒ العمى يُخرج بغير الصفر."""
+    rc = ag.proof_inject()
+    has_corpus = bool(list((ROOT / "data" / "local_sample").glob("*/results/pg-*.json")))
+    if has_corpus:
+        assert rc == 0, "مع مصدرٍ محليّ يجب أن يسقط الحارسُ على سُمٍّ من قلب المصدر"
+    else:
+        assert rc == 5, "بلا مصدر: لا أُعلن نجاحاً — أخرج بغير الصفر"
 
 
 def test_the_repository_itself_carries_no_real_amount_in_tracked_text():
-    hits = ag.scan()
-    assert hits == [], f"مبالغُ حقيقيةٌ في ملفّاتٍ مُتتبَّعة: {hits[:5]}"
+    assert ag.scan() == [], f"مبالغُ حقيقيةٌ في ملفّاتٍ مُتتبَّعة: {ag.scan()[:3]}"
 
 
 def test_tracked_binaries_under_data_must_be_declared():
-    """الصنفُ الذي لا يراه الحارسُ النصّيّ: مسحٌ ضوئيٌّ مدفوع. الإعلانُ يجعل التتبّعَ قراراً معلناً."""
-    assert ag.DECLARED_BINARIES.exists(), "ملفُّ الإعلان غائب ⇒ لا يعرف أحدٌ لماذا هذا الثنائيُّ مدفوع"
-    assert ag.undeclared_binaries() == [], "ثنائيٌّ مدفوعٌ بلا إعلانٍ بسبب"
-
-
-def test_the_declared_binary_is_the_synthetic_sample_only():
-    import subprocess as sp
-    tracked = sp.run(["git", "ls-files"], cwd=str(ag.PROJ), capture_output=True, text=True).stdout.split()
-    bins = [f for f in tracked if f.startswith(("data/", "digital/"))
-            and f.rsplit(".", 1)[-1].lower() in {"pdf", "png", "jpg", "jpeg", "tif", "tiff"}]
-    assert bins == ["data/sample/statement_sample.pdf"], f"ثنائياتٌ مدفوعةٌ غيرُ متوقَّعة: {bins}"
+    assert ag.DECLARED_BINARIES.exists()
+    assert ag.undeclared_binaries() == []
