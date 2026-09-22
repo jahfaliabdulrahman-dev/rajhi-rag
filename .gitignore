@@ -22,3 +22,6 @@ data/.amount-guard-key
 data/eval_pack/amount-manifest.json
 data/eval_pack/amount_redaction_map.json
 docs/security/amount-denylist.json
+
+# أثرُ تنقيحٍ لخطّاف الدفع: لا يُتتبَّع أبداً (ولا يُكتب في الشجرة أصلاً)
+.hook-stdin.txt
