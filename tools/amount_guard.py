@@ -364,7 +364,9 @@ def load_deny() -> set[str] | None:
     """**None = سطحٌ عامٌّ بلا أدلّة** ⇒ يُعلن **ويسقط مُغلَقاً**، إلّا بعلَمٍ صريح `--ci`."""
     if not MANIFEST.exists():
         return None
-    return set(json.loads(MANIFEST.read_text(encoding="utf-8"))["fingerprints"])
+    fps = set(json.loads(MANIFEST.read_text(encoding="utf-8"))["fingerprints"])
+    # **مانيفستٌ فارغٌ ليس أدلّة** (أمسكه مقعدُ المعايير): كان set() ⇒ كلُّ عدّادٍ صفر ⇒ PASS بلا فحص.
+    return fps or None
 
 
 def _manifest_blind() -> str:
@@ -819,26 +821,26 @@ def history_forms(deny: set[str] | None = None) -> tuple[int, int]:
     shas = sorted({line.split()[0] for line in listing.stdout.splitlines() if line.split()})
     batch = subprocess.run(["git", "cat-file", "--batch"], input="\n".join(shas).encode(),
                            capture_output=True)
-    data, i, nblobs, forms = batch.stdout, 0, 0, set()
+    if batch.returncode != 0:
+        raise UnresolvedRange(f"cat-file --batch فشل (rc={batch.returncode}) ⇒ مسحٌ لم يقع ⇒ لا أمرّ")
+    data, i, seen, nblobs, forms = batch.stdout, 0, 0, 0, set()
     while i < len(data):
         nl = data.find(b"\n", i)
         if nl < 0:
             break
         head = data[i:nl].decode("utf-8", "replace").split()
-        if len(head) >= 2 and head[1] == "missing":       # كائنٌ فُقد: يُعلن ولا يُتخطّى بصمت
-            i = nl + 1
-            continue
         if len(head) < 3:
-            raise UnresolvedRange(f"ترويسةٌ غيرُ متوقَّعة عند {i} ⇒ مسحٌ ناقص ⇒ لا أمرّ")
+            break
         try:
             size = int(head[2])
         except ValueError:
-            raise UnresolvedRange(f"مقاسٌ غيرُ مقروء عند {i} ⇒ مسحٌ ناقص ⇒ لا أمرّ") from None
+            break
         body = data[nl + 1:nl + 1 + size]
-        if len(body) != size:                      # جسمٌ مقصوص ⇒ مسحٌ ناقص ⇒ يُسقط (لا فشلَ مفتوح)
-            raise UnresolvedRange(f"جسمٌ مقصوص ({len(body)}/{size}) ⇒ المسحُ غيرُ موثوق ⇒ لا أمرّ")
+        if len(body) != size:
+            break
         i = nl + 1 + size + 1
-        if head[1] != "blob":                      # commit/tree: له جسمٌ يُتخطّى بالحساب لا بالتخمين
+        seen += 1
+        if head[1] != "blob":
             continue
         nblobs += 1
         try:
@@ -848,6 +850,12 @@ def history_forms(deny: set[str] | None = None) -> tuple[int, int]:
         if deny:
             for tok, _ in find_in_text(text, deny):
                 forms.add(tok)
+    # **قيدٌ واحدٌ يُغني عن ثلاثةِ شروطٍ دفاعيّة:** قُرئ كلُّ كائنٍ؟ وإلّا فالمسحُ ناقصٌ (كائنٌ مفقود،
+    # تدفّقٌ مقصوص، أو ترويسةٌ غيرُ متوقَّعة) ⇒ يُسقط. و«الصفرُ علامةُ قياسٍ ميّت»: صفرُ blobٍ ليس نظافة.
+    if seen != len(shas):
+        raise UnresolvedRange(f"قُرئ {seen} كائناً من {len(shas)} ⇒ مسحٌ ناقصٌ أو كائنٌ مفقود ⇒ لا أمرّ")
+    if nblobs == 0 and len(shas):
+        raise UnresolvedRange("صفرُ blobٍ مقروء ⇒ قياسٌ ميّتٌ لا نظافةٌ ⇒ لا أمرّ")
     return nblobs, len(forms)
 
 
@@ -972,16 +980,25 @@ def main(argv=None) -> int:
                       " (بإعلانٍ لا بصمت)")
                 return main(["--history-rewrite", declared,
                              "--mirror", os.environ.get("AMOUNT_GUARD_MIRROR", "")])
-            print(f"⛔ BLOCK — لم أُثبت نظافةَ المدى ⇒ لا أمرّ (ثغرةُ ٣٩ رقم ٢): {e}")
-            print("   ⇒ `git fetch origin` ثم أعِد الدفع: مدىً غيرُ محلولٍ ليس مدىً نظيفاً.")
-            return 2
+            salvaged = _range_from_git()          # سلسلةُ الإرجاع المنصوصة في ٣٩ ⇒ تقليلُ حافز --no-verify
+            if salvaged:
+                print(f"⚠ المراجعُ غيرُ محلولة ({e}) ⇒ اشتُقّ المدى من حالة git "
+                      f"({len(salvaged)} التزاماً لم يعرفها الريموت) — يُعلن ولا يُخفى")
+                revs = salvaged
+            else:
+                print(f"⛔ BLOCK — لم أُثبت نظافةَ المدى ⇒ لا أمرّ (ثغرةُ ٣٩ رقم ٢): {e}")
+                print("   ⇒ `git fetch origin` ثم أعِد الدفع: مدىً غيرُ محلولٍ ليس مدىً نظيفاً.")
+                return 2
         if not revs:
             print("⛔ BLOCK — المدى فارغٌ ⇒ لا شيءَ أُثبته (ولا يُقال PASS على لا شيء)")
             return 2
         counts = pushed_counts(deny, revs)
         base = baseline_at("origin/main")
-        if base is None:                 # غيرُ مقروءٍ ≠ فارغٍ شرعاً: الفارغُ يعني «صفرَ دَين» فلا يُستبدل
-            base = read_baseline()
+        if base is None:
+            # **البابُ ٣أ/٣ب (أمسكه مقعدان):** كان يسقط إلى خطّ الشجرة العاملة ⇒ الدافعُ يضع عتبتَه.
+            print("⛔ BLOCK — عتبةُ origin/main غيرُ مقروءة ⇒ لا أستبدلها بخطّ الشجرة العاملة "
+                  "(العتبةُ ممن نُشر لا ممّا في يد الدافع) ⇒ `git fetch origin` ثم أعِد الدفع")
+            return 2
         bad = ratchet_violations(counts, base, f"دفعُ {len(revs)} التزاماً مقابل origin/main")
         for head in _local_heads(refs):
             pushed_base = baseline_at(head)
