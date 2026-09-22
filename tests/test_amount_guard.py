@@ -240,13 +240,21 @@ def test_injection_falls_on_both_surfaces_in_a_throwaway_worktree():
     assert rc == 0, "حقنٌ لم يسقط كلَّ الأصناف على السطحين ⇒ الحارسُ ليس حارساً"
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "مُنكَرٌ مُعلن — الهدفُ **٤٢ ظهوراً في ١١ ملفّاً** (المقيس بعد تصحيح المطابِق، مراجعة ٣٨)، "
-    "وكلُّها أسطحُ صناعة (tests/ · src/) تحتاج إعادةَ كتابةٍ بقيمٍ آمنةٍ مع توقّعاتها "
-    "(القاعدة ١٤: تُغيَّر القيمةُ لا يُعفى الموضع). والسقاطةُ تحرس الطريق: لا زيادةَ حتى تُعاد."))
 def test_the_repository_itself_carries_no_real_amount_in_tracked_text():
-    assert ag.counts_by_file(ag.load_deny() or set()) == {}, \
-        f"مبالغُ حقيقيّةٌ في ملفّاتٍ مُتتبَّعة: {ag.counts_by_file(ag.load_deny() or set())}"
+    """**الدَّينُ المُعلَن يُقاس عند التشغيل** — ولا يُقال «xfail صارم» فيُسقط نسخةً بلا أدلّة.
+
+    (كان `xfail(strict=True)`: في نسخةٍ بلا مانيفست يصير XPASS ⇒ **فشلٌ في أيّ استنساخٍ لا
+    بياناتَ فيه** — وهو «xnor» غيرُ مقصود: بوّابةٌ تُعاقب على غياب الأدلّة لا على وجود تسريب.)
+    """
+    deny = ag.load_deny()
+    if deny is None:
+        pytest.skip("لا مانيفستَ ⇒ لا شيءَ يُقارَن (القياسُ محليٌّ بالتصميم: لا يُنشر ما يمكن مهاجمتُه)")
+    counts = ag.counts_by_file(deny)
+    if counts:
+        pytest.xfail(f"دَينٌ مُعلَن (يُقاس عند التشغيل): {sum(counts.values())} ظهوراً في "
+                     f"{len(counts)} ملفّاً على أسطح الصناعة — القاعدة ١٤: تُغيَّر القيمةُ "
+                     f"ولا يُعفى الموضع، والسقاطةُ تمنع أيَّ زيادةٍ حتى تُعاد الكتابة")
+    assert counts == {}
 
 
 def test_tracked_binaries_under_data_must_be_declared():
