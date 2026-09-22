@@ -25,7 +25,6 @@ done
 [ -n "$PY" ] || PY=python3
 
 REFS=$(cat)
-printf '%s\n' "$REFS" > "$(git rev-parse --show-toplevel)/.hook-stdin.txt"   # DEBUG: يُزال
 printf '%s\n' "$REFS" | "$PY" tools/publish_guard.py --pre-push || exit 1
 printf '%s\n' "$REFS" | "$PY" tools/amount_guard.py --pre-push || exit 1
 
