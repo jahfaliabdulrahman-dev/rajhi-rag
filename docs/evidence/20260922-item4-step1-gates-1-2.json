@@ -86,5 +86,51 @@
    "الاصطلاحُ المستقرّ للعدّ هو git ls-tree -r <commit> لا ls -A: فالثاني دالّةٌ في الزمن (__pycache__ يولد بعد أول تشغيل)"
   ],
   "next_gate_contract": "في مُنشئ الحزمة: doc_id = null **يوقف البناء بالاسم** ولا يُمرَّر إلى unknown — وإلا سقطت بوابةُ التقاطع إلى الحالة التي بُنيت البوابة (٢) للخروج منها."
+ },
+ "explicit_replacement_records_itself": {
+  "defect_reproduced_with_the_reviewers_command": {
+   "command": "tools/backfill_reader_stamp.py --run <stamped run> --replace-doc-id  (doc file differs)",
+   "before": {
+    "exit": 0,
+    "doc_id": "d57019f0a654f9b9",
+    "doc_id_previous": "ABSENT",
+    "doc_id_note": "ختمُ استدراك: الصفحاتُ قُرئت قبل تسجيل الهوية…  (نصُّ الختم الأول)",
+    "doc_id_history": "ABSENT",
+    "tests_mentioning_replace": 0
+   },
+   "why_it_matters": "doc_id هو مفتاحُ بوابة التقاطع: حزمةٌ استُبدلت هويتُها تحتها تمرّ البوابة لأن الطرفين تحرّكا معاً — «الشاهدُ يتحرّك مع المشهود له»، أخطرُ من المحو لأن المحوَ يُرى."
+  },
+  "fix": [
+   "doc_id_previous = الوسمُ السابق",
+   "doc_id_replaced_at = تاريخ الاستبدال",
+   "doc_id_history[] سجلٌّ تراكميّ (previous · replaced_by · at · reason) — لا حقلُ آخر استبدال",
+   "doc_id_note تُعلن الاستبدال بالطرفين وتاريخه بدل نصّ الختم الأول",
+   "return 'replaced' متميّزٌ عن 'stamped' في المخرَج"
+  ],
+  "after_measured": {
+   "exit": 0,
+   "doc_id": "d57019f0a654f9b9",
+   "doc_id_previous": "3e2d360a665c88aa",
+   "doc_id_note": "ختمٌ صريحٌ باستبدال: من 3e2d360a665c88aa إلى d57019f0a654f9b9 في 2026-09-22 — الملفُّ المعطى مخالفٌ للوسم السابق، والاستبدالُ بطلبٍ صريح.",
+   "doc_id_history": [
+    {
+     "previous": "3e2d360a665c88aa",
+     "replaced_by": "d57019f0a654f9b9",
+     "at": "2026-09-22",
+     "reason": "استبدالٌ صريح بـ--replace-doc-id (إعلانُ إرادةٍ لا صمت)"
+    }
+   ],
+   "expected_new": "d57019f0a654f9b9"
+  },
+  "protocol_rule": "docs/handoff-protocol.md §٦/٥ — لا تدهورَ لحقيقةٍ مُثبتة، **والبابُ المعلن يُسجّل من عبَر**: كلُّ مسارٍ يغيّر حقيقةً مُثبتة يُقيَّد معه ما كان.",
+  "tests": {
+   "file": "tests/test_corpus_doc_id.py",
+   "count": 11,
+   "new": [
+    "test_an_unknown_identity_is_upgraded_when_the_document_appears",
+    "test_an_explicit_replacement_records_what_it_replaced",
+    "test_a_second_replacement_keeps_the_whole_history"
+   ]
+  }
  }
 }
