@@ -57,6 +57,18 @@ def resolve_doc_id(cp: dict, doc: Path, *, explicit: bool = False,
                 "لا يُستبدل وسمٌ بوسمٍ صامتاً: راجع الملفّ، أو مرّر --doc الصحيح، "
                 "أو أعلن الإرادة صراحةً بـ--replace-doc-id.")
         if previous == computed:
+            # **حقيقةٌ عادت إلى قيمتها الأولى ليست حقيقةً لم تتغيّر:** بعد ذهابٍ وعودة
+            # كان `before == after` يُعلن «لا تغيير» على مسارٍ مرّ بمستندين — والسجلُّ
+            # وحدَه يفضح ذلك. فالإعلانُ يُقرأ من السجلّ متى وُجد.
+            hist = list(cp.get("doc_id_history") or [])
+            if hist:
+                last = hist[-1]
+                cp["doc_id_note"] = (
+                    f"مطابقٌ للملفّ المعطى ({computed})، **والسجلُّ يُظهر أنها مرّت بـ"
+                    f"{len(hist)} استبدالاً** — آخرُها {last['previous']} → "
+                    f"{last['replaced_by']} في {last['at']}. فالرجوعُ إلى القيمة الأولى "
+                    "لا يعني أن المسارَ لم يتغيّر.")
+                return "unchanged_but_replaced"
             cp["doc_id_note"] = ("الهويةُ مُثبتةٌ سابقاً وتطابق الملفّ المعطى — لا تغيير "
                                  "(الاستدراكُ لا يُعاد).")
             return "unchanged"

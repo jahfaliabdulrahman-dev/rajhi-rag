@@ -10,6 +10,7 @@ vectorstore/
 # Real bank data NEVER leaves this machine
 data/local_sample/
 data/training/
+data/eval_pack/
 
 # Single-job lock (transient)
 data/.rajhi-job.lock
