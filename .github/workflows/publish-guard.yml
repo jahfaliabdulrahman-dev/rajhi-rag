@@ -58,3 +58,10 @@ jobs:
 
       - name: Amount-guard — the key/manifest must not be tracked (no secret needed)
         run: python3 tools/amount_guard.py --tracking-audit
+
+      - name: Amount-ratchet — a pushed baseline may never raise the threshold
+        # مراجعة ٣٩/٣: **العتبةُ لا يضعها من يدفع ثمنها.** هذا الفحصُ بلا سرٍّ وبلا أدلّة:
+        # يقرأ ملفَّين مُتتبَّعين فقط ⇒ فهو السطحُ الذي لا يستطيع دافعٌ محليٌّ تجاوزه بـ`--no-verify`.
+        run: |
+          git fetch --quiet origin main || true
+          python3 tools/amount_guard.py --baseline-audit origin/main

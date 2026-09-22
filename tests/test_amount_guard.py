@@ -4,19 +4,24 @@
 
 **والدروسُ التي دُمِّرت هنا مرّات، وكلُّ درسٍ مُجرَّبُ السقوط لا مُدَّعى:**
 ١) المدى = ≥٤ خاناتٍ صحيحة **+ كسرٌ عشريّ مقروء** (الاستدارةُ صفةُ المبلغ لا دليلُ صناعيّته).
-٢) **لا يُعفى موضع، يُعفى قيمة (القاعدة ١٢).**
-٣) **الإهمالُ واقعٌ يُقاس (القاعدة ١٤)** — والمفتاحُ والخريطةُ والمانيفستُ ثلاثةٌ لا واحد.
-٤) **المخرَجُ الآليُّ لا يُقصّ (القاعدة ١٣)** — والقيمةُ لا تُطبع أصلاً.
+٢) **لا يُعفى موضع، يُعفى قيمة (القاعدة ١٦).**
+٣) **الإهمالُ واقعٌ يُقاس (القاعدة ١٦)** — والمفتاحُ والخريطةُ والمانيفستُ ثلاثةٌ لا واحد.
+٤) **المخرَجُ الآليُّ لا يُقصّ (القاعدة ١٥)** — والقيمةُ لا تُطبع أصلاً.
 ٥) **القيمةُ تُقرأ بالمُحلِّل الموروث (مراجعة ٣٨):** البصمةُ **للمقدار** (فالإشارةُ ليست هويّة)،
    والمدى يراه **بفاصلةٍ عتيقة** (`N,dd`) كما يراه بنقطةٍ حديثة ⇒ المقيسُ **٤٢ لا ٣٩**.
 ٦) **السقاطةُ بدل «أحمرَ دائماً» (مراجعة ٣٨):** بوابةٌ تسقط على دَينٍ مُعلَنٍ لا تمنع شيئاً
    ⇒ الإسقاطُ عند **الزيادة** وحدها، والدَينُ يبقى مُعلَنًا حتى تُعاد كتابةُ قِيَمه.
+٧) **أربعُ أبوابٍ من مراجعة ٣٩ مُغلَقةٌ باختبار:** المصدرُ من `DATA_ROOT` (ومدخلٌ صفريّ يسقط)،
+   والمدى غيرُ المحلول يسقط مُغلَقاً، والعتبةُ لا يضعها الدافع (ولا تبديلَ عند العدّ نفسِه)،
+   والخطّافُ لا يحجب على أداةٍ تطويريّة غائبة (فذلك يخلق حافزَ `--no-verify` ويُسقط الأمنَ معه).
 """
 from __future__ import annotations
 
 import hashlib
 import importlib.util
 import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -78,7 +83,7 @@ def test_canonical_collapses_writing_forms_and_ignores_the_sign():
 
 
 def test_no_location_is_exempt(tmp_path, monkeypatch):
-    """**الدرسُ الثاني (القاعدة ١٢):** قناةُ `tests/` مُغلقة — والسمُّ يُشتقّ من المصدر لا يُكتب هنا.
+    """**الدرسُ الثاني (القاعدة ١٦):** قناةُ `tests/` مُغلقة — والسمُّ يُشتقّ من المصدر لا يُكتب هنا.
 
     كان `FIXTURE_PREFIXES = ("tests/", "src/")` إعفاءً بالمسار ⇒ مرّ حقنُ مبلغين حقيقيين.
     **والفرقُ بين سطحِ صناعةٍ وقناةِ تسريبٍ ليس في المجلد بل في القيمة** — وهذا يقيسه على السطحين.
@@ -92,7 +97,7 @@ def test_no_location_is_exempt(tmp_path, monkeypatch):
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(f"الرصيد: {FAKE}\n", encoding="utf-8")
             assert ag.counts_by_file(deny, [surface]) == {surface: 1}, \
-                f"مبلغٌ حقيقيٌّ في `{surface}` لم يُسقط الحارس ⇒ إعفاءٌ بالمسار عاد (القاعدة ١٢)"
+                f"مبلغٌ حقيقيٌّ في `{surface}` لم يُسقط الحارس ⇒ إعفاءٌ بالمسار عاد (القاعدة ١٦)"
         finally:
             if backup is None:
                 p.unlink(missing_ok=True)
@@ -130,7 +135,7 @@ def test_the_fingerprint_is_keyed_and_the_key_is_required(tmp_path, monkeypatch)
 @pytest.mark.skipif(not (ag.KEY_FILE.exists() and ag.MANIFEST.exists()),
                     reason="لا مفتاحَ/مانيفست على سطحٍ عامّ (لا يُنشران بالتصميم)")
 def test_ignore_is_a_measured_fact_not_a_claim():
-    """**الدرسُ الثالث (القاعدة ١٤):** «مُهمَل» تُقاس بـ`git` — والمخفيُّ ثلاثةٌ لا واحداً.
+    """**الدرسُ الثالث (القاعدة ١٦):** «مُهمَل» تُقاس بـ`git` — والمخفيُّ ثلاثةٌ لا واحداً.
 
     (مراجعة ٣٨: خريطةُ التطهير كانت في `SCAN_SKIP` ولا يفحصها `tracking_audit` ولا يمنعها
     حارسُ النشر ⇒ `git add -f` كان يمرّ من الثلاثة، وهي خريطةٌ تربط المُقنَّعَ بالحقيقيّ.)
@@ -154,13 +159,13 @@ def test_the_manifest_is_never_published():
 
 
 def test_json_output_is_never_truncated():
-    """**الدرسُ الرابع (القاعدة ١٣):** العددُ المعلن = طولُ القائمة، دائماً — **والقيمةُ لا تُطبع**."""
+    """**الدرسُ الرابع (القاعدة ١٥):** العددُ المعلن = طولُ القائمة، دائماً — **والقيمةُ لا تُطبع**."""
     r = subprocess.run([sys.executable, "tools/amount_guard.py", "--json"],
                        cwd=str(ROOT), capture_output=True, text=True)
     if not r.stdout.strip().startswith("{"):
         pytest.skip("لا مانيفستَ (سطحٌ عامّ) ⇒ الفحصُ غيرُ قابلٍ للإنفاذ هنا")
     payload = json.loads(r.stdout)
-    assert payload["count"] == len(payload["files"]), "المخرَجُ الآليُّ مقصوصٌ ⇒ نقضُ القاعدة ١٣"
+    assert payload["count"] == len(payload["files"]), "المخرَجُ الآليُّ مقصوصٌ ⇒ نقضُ القاعدة ١٥"
     assert payload["total"] == sum(payload["files"].values())
     assert all(isinstance(v, int) for v in payload["files"].values()), \
         "المخرَجُ الآليُّ يحمل أعداداً لا قِيَماً (لا مبلغَ في مخرَجٍ يُسجَّل)"
@@ -171,11 +176,14 @@ def test_the_ratchet_blocks_an_increase_and_pardons_the_declared_debt():
 
     (بوابةٌ تسقط على دَينٍ قائمٍ لا تمنع شيئاً ⇒ يُتجاوزها `--no-verify`، وهو ما حدث فعلًا.)
     """
-    base = {"tests/a.py": 2, "src/b.py": 1}
-    assert ag.ratchet_violations({"tests/a.py": 2, "src/b.py": 1}, base, "x") == []
-    assert ag.ratchet_violations({"tests/a.py": 2}, base, "x") == []            # نقصانٌ مسموح
-    assert len(ag.ratchet_violations({"tests/a.py": 3}, base, "x")) == 1        # زيادةٌ ⇒ سقوط
-    assert len(ag.ratchet_violations({"tests/c.py": 1}, base, "x")) == 1        # ملفٌّ جديد ⇒ سقوط
+    base = {"tests/a.py": {"count": 2, "commitment": "aa"}, "src/b.py": {"count": 1}}
+    assert ag.ratchet_violations({"tests/a.py": {"count": 2, "commitment": "aa"}}, base, "x") == []
+    assert ag.ratchet_violations({"tests/a.py": {"count": 1, "commitment": "bb"}}, base, "x") == [], \
+        "نقصانٌ مسموح (ولو تبدّلت البصمة: هذا تصحيحٌ لا تبديل)"
+    assert len(ag.ratchet_violations({"tests/a.py": {"count": 3, "commitment": "aa"}}, base, "x")) == 1
+    assert len(ag.ratchet_violations({"tests/c.py": {"count": 1}}, base, "x")) == 1              # ملفٌّ جديد
+    assert len(ag.ratchet_violations({"tests/a.py": {"count": 2, "commitment": "bb"}}, base, "x")) == 1, \
+        "**تبديلُ قيمةٍ بأخرى عند العدّ نفسِه (ثغرةُ ٣٩ رقم ٣ج)** ⇒ ما لا يراه عدّادٌ يقارن الأعدادَ وحدها"
 
 
 def test_without_a_manifest_the_guard_fails_closed_unless_ci_is_declared(tmp_path, monkeypatch, capsys):
@@ -235,7 +243,7 @@ def test_injection_falls_on_both_surfaces_in_a_throwaway_worktree():
 @pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
     "مُنكَرٌ مُعلن — الهدفُ **٤٢ ظهوراً في ١١ ملفّاً** (المقيس بعد تصحيح المطابِق، مراجعة ٣٨)، "
     "وكلُّها أسطحُ صناعة (tests/ · src/) تحتاج إعادةَ كتابةٍ بقيمٍ آمنةٍ مع توقّعاتها "
-    "(القاعدة ١٢: تُغيَّر القيمةُ لا يُعفى الموضع). والسقاطةُ تحرس الطريق: لا زيادةَ حتى تُعاد."))
+    "(القاعدة ١٤: تُغيَّر القيمةُ لا يُعفى الموضع). والسقاطةُ تحرس الطريق: لا زيادةَ حتى تُعاد."))
 def test_the_repository_itself_carries_no_real_amount_in_tracked_text():
     assert ag.counts_by_file(ag.load_deny() or set()) == {}, \
         f"مبالغُ حقيقيّةٌ في ملفّاتٍ مُتتبَّعة: {ag.counts_by_file(ag.load_deny() or set())}"
@@ -244,3 +252,79 @@ def test_the_repository_itself_carries_no_real_amount_in_tracked_text():
 def test_tracked_binaries_under_data_must_be_declared():
     assert ag.DECLARED_BINARIES.exists()
     assert ag.undeclared_binaries() == []
+
+
+# ═══════════ أبوابُ مراجعة ٣٩ الأربعة: كلٌّ منها سقط فعلًا، وكلٌّ منها مُختبَرٌ الآن ═══════════
+
+
+def _skip_without_evidence():
+    if ag.load_deny() is None:
+        pytest.skip("لا مانيفستَ محليّاً ⇒ ما لا يُنشر بالتصميم لا يُختبر هنا (يُعلن ولا يُدَّعى)")
+
+
+def test_the_source_walk_is_root_invariant_and_an_empty_walk_refuses(tmp_path, monkeypatch):
+    """**ثغرةُ ٣٩ رقم ١:** كان المشيُ على `ROOT` ⇒ بناءٌ من worktree أفرغ المانيفست الرئيسيّ.
+
+    والمقياسُ هنا: (أ) المشيُ لا يتغيّر بتغيّر جذر التشغيل، (ب) مدخلٌ صفريّ يسقط ولا يكتب.
+    """
+    _skip_without_evidence()
+    before = ag.source_amounts()
+    monkeypatch.setattr(ag, "ROOT", tmp_path)
+    after = ag.source_amounts()
+    assert (after[1], after[2]) == (before[1], before[2]), \
+        "المشيُ يجب أن يكون واحداً من أيّ جذر: المصدرُ من `DATA_ROOT` لا من `ROOT`"
+    manifest = tmp_path / "m.json"
+    monkeypatch.setattr(ag, "MANIFEST", manifest)
+    monkeypatch.setattr(ag, "_artifacts", lambda globs=("data/**/*",): iter(()))
+    with pytest.raises(SystemExit):
+        ag.build([])
+    assert not manifest.exists(), "صفرُ مدخلٍ ليس نتيجةً: لا يُكتب مانيفستٌ فارغ"
+
+
+def test_an_unresolved_push_range_fails_closed():
+    """**ثغرةُ ٣٩ رقم ٢:** `rev-list` يفشل على رأسٍ بعيدٍ غيرِ مجلوب ⇒ كان يمرّ `rc=0` بلا فحص."""
+    cmd = [sys.executable, str(ROOT / "tools" / "amount_guard.py"), "--pre-push"]
+    bogus = "refs/heads/x " + "1" * 40 + " refs/heads/x " + "2" * 40 + "\n"
+    r = subprocess.run(cmd, input=bogus, capture_output=True, text=True, cwd=ROOT)
+    assert r.returncode == 2 and "BLOCK" in r.stdout, "مدىً غيرُ محلولٍ ليس مدىً نظيفاً"
+    r2 = subprocess.run(cmd, input="", capture_output=True, text=True, cwd=ROOT)
+    assert r2.returncode == 2, "ولا يُقال PASS على لا شيء"
+
+
+def test_the_baseline_cannot_be_raised_by_its_own_debtor(tmp_path, monkeypatch):
+    """**ثغرةُ ٣٩ رقم ٣أ/٣ب:** كان الدافعُ يرفع عتبتَه فيمرّ ⇒ الآن الكتابةُ الزائدة تُرفَض."""
+    _skip_without_evidence()
+    seeded = tmp_path / "b.json"
+    shutil.copy2(ag.BASELINE, seeded)          # نقطةُ انطلاقٍ حقيقيّة (لا ملفٌّ فارغٌ يُقارَن به)
+    monkeypatch.setattr(ag, "BASELINE", seeded)
+    deny = ag.load_deny() or set()
+    assert ag.write_baseline(deny) == 0
+    written = (tmp_path / "b.json").read_text(encoding="utf-8")
+    monkeypatch.setattr(ag, "counts_with_commitment",
+                        lambda d, files=None: {"tests/a.py": {"count": 99, "commitment": "zz"}})
+    assert ag.write_baseline(deny) == 1, "زيادةٌ على خطّ الأساس ⇒ تُرفَض (القاعدة ١٤: لا يُعفى موضع)"
+    assert (tmp_path / "b.json").read_text(encoding="utf-8") == written, "والملفُّ لم يُمَسّ"
+
+
+def test_the_hook_never_blocks_a_push_on_a_missing_dev_tool():
+    """**ثغرةُ ٣٩ رقم ٤:** حجبُ الدفع لغِياب pyflakes يخلق حافزَ `--no-verify` ⇒ ويسقط معه الأمن."""
+    hook = (ROOT / ".githooks" / "pre-push").read_text(encoding="utf-8")
+    i_pub = hook.index("publish_guard")
+    i_amt = hook.index("amount_guard")
+    i_static = hook.index("static_gate.py")
+    assert i_pub < i_static and i_amt < i_static, "حرّاسُ الأمن تُشغَّل قبل أداة التطوير"
+    assert "import pyflakes" in hook and "تخطّى" in hook, "غيابُ pyflakes يُعلَن ولا يحجب"
+    code = "\n".join(l for l in hook.splitlines() if not l.lstrip().startswith("#"))
+    assert "--no-verify" not in code, "ولا يُشير الخطّافُ إلى تجاوزه في كوده (الذكرُ في تعليقٍ تحذيريّ مشروع)"
+
+
+def test_the_ci_baseline_audit_needs_no_key_and_no_evidence():
+    """**ثغرةُ ٣٩ رقم ٣ (سطحُ CI):** القاعدةُ التي لا تحتاج سرّاً ⇒ تُنفَّذ حيث لا مفتاحَ ولا أدلّة."""
+    if subprocess.run(["git", "rev-parse", "--verify", "origin/main"], cwd=ROOT,
+                      capture_output=True).returncode != 0:
+        pytest.skip("لا `origin/main` في هذه النسخة ⇒ لا أساسَ يُقارَن به")
+    env = {k: v for k, v in os.environ.items() if k != "AMOUNT_GUARD_KEY"}
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "amount_guard.py"),
+                        "--baseline-audit", "origin/main"],
+                       capture_output=True, text=True, cwd=ROOT, env=env)
+    assert r.returncode == 0 and "بلا مفتاح" in r.stdout, r.stdout + r.stderr

@@ -2,35 +2,34 @@
 # pre-push hook — the last line of defense (what-if G3).
 # Install once per clone:  git config core.hooksPath .githooks
 #
-# 1) static gate  — names that never resolve / bindings never read. This is the
-#    class that killed a PAID run: pytest cannot see a branch no test executes,
-#    a linter reads the code and sees it for free.
-# 2) publish guard — scans exactly what this push would publish.
-# 3) amount guard  — the same range, against the fingerprint manifest and the
+# 1) publish guard — scans exactly what this push would publish.
+# 2) amount guard  — the same range, against the fingerprint manifest and the
 #    per-file baseline (a ratchet: declared debt passes, any INCREASE fails).
+# 3) static gate   — a dev-tool gate, run LAST and never a blocker on its own:
+#    blocking a push because pyflakes is missing creates the very incentive to
+#    use --no-verify, which would skip the two security guards above. (review 39/4)
 #
-# **stdin is read ONCE.** The refs arrive on stdin and the first child to read
-# them consumes the stream: measured, publish_guard ate it and amount_guard was
-# handed an empty stdin. Capturing into a variable and piping it to each guard
-# is the fix.
+# **stdin is read ONCE.** refs arrive on stdin and the first child to read them
+# consumes the stream (measured: publish_guard ate it). Captured then piped.
 #
-# The checkout is resolved with `git rev-parse --show-toplevel`, so a push from
-# a linked worktree is guarded in THAT worktree; the guard resolves the
-# key/manifest through `git rev-parse --git-common-dir`, so a worktree without
-# `data/` still enforces instead of passing silently (the defect that let two
-# real amounts reach public main).
+# The interpreter is looked up in this worktree, then in the MAIN checkout via
+# `git rev-parse --git-common-dir` — a linked worktree has no .venv of its own.
 cd "$(git rev-parse --show-toplevel)" || exit 1
+COMMON=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
 
-# The gate needs an interpreter with pyflakes; prefer the project venv. If none
-# has it the gate refuses loudly (exit 2) — a gate that cannot run never passes.
-PY=python3
-if [ -x ".venv/bin/python" ] && .venv/bin/python -c "import pyflakes" 2>/dev/null; then
-  PY=.venv/bin/python
-fi
-"$PY" tools/static_gate.py || exit 1
+PY=""
+for cand in ".venv/bin/python" "$COMMON/.venv/bin/python" "python3"; do
+  case "$cand" in /*) [ -x "$cand" ] && { PY="$cand"; break; };;   # مسارٌ مطلقٌ من النسخة الرئيسيّة
+    *) command -v "$cand" >/dev/null 2>&1 && { PY="$cand"; break; };; esac
+done
+[ -n "$PY" ] || PY=python3
 
-# **stdin يُقرأ مرّةً واحدة:** المراجعُ تأتي على stdin، وأوّلُ طفلٍ يقرؤها يستهلكها.
 REFS=$(cat)
-printf '%s\n' "$REFS" | python3 tools/publish_guard.py --pre-push || exit 1
-# الحارسُ يجد المفتاحَ بنفسه عبر `git --git-common-dir` ⇒ لا حاجةَ لتصديره هنا.
-printf '%s\n' "$REFS" | python3 tools/amount_guard.py --pre-push || exit 1
+printf '%s\n' "$REFS" | "$PY" tools/publish_guard.py --pre-push || exit 1
+printf '%s\n' "$REFS" | "$PY" tools/amount_guard.py --pre-push || exit 1
+
+if "$PY" -c "import pyflakes" 2>/dev/null; then
+  "$PY" tools/static_gate.py || exit 1
+else
+  echo "⚠ static_gate تخطّى: لا pyflakes في $PY — أداةُ تطويرٍ غائبةٌ لا تُسقِط حرّاسَ الأمن."
+fi

@@ -222,10 +222,11 @@ def declared_set(path: Path) -> set[str]:
 
 # ═══════════════════════ الاشتقاقُ من المصدر ═══════════════════════
 
-NON_SOURCE = {
-    "data/eval_pack/amount_redaction_map.json",   # خريطةُ التطهير: عمودُها الأيمنُ حقيقيٌّ بالبناء
-    "data/.amount-guard-key",
-}
+NON_SOURCE = {"data/.amount-guard-key", "data/eval_pack/amount_redaction_map.json",
+              "data/eval_pack/amount-manifest.json"}
+# **مخرجاتُنا ليست مصدراً** — المانيفستُ وحدَه يُستثنى (قراءةُ ناتجِنا تُدخل رقمَنا في مصدرنا:
+# قِيس أنّ ذلك أزاغ `source_shape_ok` بـ+5 وجعل المشيَ يتوقّف على جذر التشغيل). أمّا `pack.json`
+# فهو أثرُ قراءةٍ يحمل مبالغَ حقيقيّة ⇒ **يجب** أن يبقى في المدى.
 
 
 def _walk_amounts(obj, out: set[str]) -> None:
@@ -246,11 +247,17 @@ def _walk_amounts(obj, out: set[str]) -> None:
 
 
 def _artifacts(globs: tuple[str, ...] = ("data/**/*",)):
+    """**المصدرُ يُقرأ من `DATA_ROOT` لا من `ROOT` (ثغرةُ مراجعة ٣٩ رقم ١).**
+
+    كان يمشي على `ROOT` ⇒ بناءٌ من worktree مرتبط لا يجد الكوربوسَ ⇒ يكتب **مانيفستاً فارغاً
+    إلى النسخة الرئيسيّة** ويُعلن نجاحاً (`rc=0`) ⇒ كلُّ دفعٍ بعده يمرّ. وهذا بعينه نمطُ
+    العطب الأصليّ: *مصدرٌ أعمى يُنتج صفراً يُقرأ كنجاح*. والقاعدةُ هنا: **صفرُ مدخلٍ ليس نتيجةً**.
+    """
     for pat in globs:
-        for f in sorted(ROOT.glob(pat)):
+        for f in sorted(DATA_ROOT.glob(pat)):
             if not f.is_file() or f.suffix.lower() not in {".json", ".jsonl"}:
                 continue
-            rel = str(f.relative_to(ROOT))
+            rel = str(f.relative_to(DATA_ROOT))
             if rel in NON_SOURCE:
                 continue
             yield f, rel
@@ -314,6 +321,13 @@ def build(_extra: list[str]) -> int:
     if total != len(entered) + ex_trivial + ex_synth:
         raise SystemExit(f"⛔ فجوةٌ غيرُ مُعلَنة: {total} ≠ {len(entered)}+{ex_trivial}+{ex_synth}"
                          " ⇒ البناءُ يسقط (لا يُنشر مانيفستٌ ناقص)")
+    if files == 0:
+        raise SystemExit(
+            f"⛔ صفرُ ملفَّ مصدرٍ في {_shown(DATA_ROOT)} ⇒ البناءُ يسقط ولا يُكتب مانيفست.\n"
+            "   (صفرٌ يُقرأ كانجاحٍ كان يُفرغ الحارسَ صامتاً — القاعدة: صفرُ مدخلٍ ليس نتيجة.)")
+    if not entered:
+        raise SystemExit(
+            f"⛔ صفرُ قيمةٍ داخلةٍ في المدى من {files} ملفّاً ⇒ البناءُ يسقط (لا مانيفستَ فارغ).")
     fps = sorted({fingerprint(a) for a in entered})
     # **بصمةُ المجموعة:** تُكشف تبديلَ قيمةٍ بأخرى (وهو ما لا يراه عدّادٌ يقارن الأعداد وحدها).
     digest = hmac.new(load_key(), "\n".join(fps).encode(), hashlib.sha256).hexdigest()
@@ -417,35 +431,96 @@ def undeclared_binaries() -> list[str]:
 
 # ═══════════════════════ السقاطة (الخطّاف الذي يخضرّ) ═══════════════════════
 
-def read_baseline() -> dict[str, int]:
+def _baseline_norm(obj: dict | None) -> dict[str, dict]:
+    """**القارئُ يطبّع الصيغتين:** العدّادُ المجرّد (ما نُشر سابقاً) و(عدّادٌ + بصمةُ مجموعة)."""
+    out: dict[str, dict] = {}
+    for rel, v in ((obj or {}).get("counts") or {}).items():
+        out[rel] = {"count": int(v)} if isinstance(v, int) else {
+            "count": int(v["count"]), "commitment": v.get("commitment")}
+    return out
+
+
+def baseline_at(rev: str) -> dict[str, dict]:
+    """**العتبةُ من التزامٍ بعينه، لا من الشجرة العاملة (ثغرةُ ٣٩ رقم ٣أ/٣ب).**
+
+    كان `--pre-push` يقرأها من الشجرة ⇒ الدافعُ يرفع عتبتَه فيمرّ. الآن العتبةُ =
+    **المنشورُ على `origin/main`**، وما سينشره الدفعُ يُقارَن به ولا يرفعه.
+    """
+    r = _git("show", f"{rev}:{REL_BASELINE}")
+    if r.returncode != 0:
+        return {}
+    try:
+        return _baseline_norm(json.loads(r.stdout))
+    except (json.JSONDecodeError, TypeError, KeyError):
+        return {}
+
+
+def read_baseline() -> dict[str, dict]:
     if not BASELINE.exists():
         return {}
-    return dict(json.loads(BASELINE.read_text(encoding="utf-8"))["counts"])
+    try:
+        return _baseline_norm(json.loads(BASELINE.read_text(encoding="utf-8")))
+    except (json.JSONDecodeError, TypeError, KeyError):
+        return {}
 
 
-def write_baseline(deny: set[str]) -> int:
-    counts = counts_by_file(deny)
+def _commitment(fps: set[str]) -> str:
+    """**بصمةُ المجموعة** (مُفتَّحةٌ بالمفتاح): تكشف تبديلَ قيمةٍ بأخرى عند العدّاد نفسِه،
+    ولا تُجرَد بلا مفتاح ⇒ يجوز نشرُها في خطّ الأساس العامّ."""
+    return hmac.new(load_key(), "\n".join(sorted(fps)).encode(), hashlib.sha256).hexdigest()[:16]
+
+
+def counts_with_commitment(deny: set[str], files: list[str] | None = None) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for rel in (files if files is not None else tracked_text_files()):
+        txt = _text_of_rel(rel)
+        if txt is None:
+            continue
+        hits = find_in_text(txt, deny)
+        if hits:
+            out[rel] = {"count": len(hits),
+                        "commitment": _commitment({fingerprint(t) for t, _ in hits})}
+    return out
+
+
+def write_baseline(deny: set[str], accept_increase: bool = False) -> int:
+    """**ولا يُرفع أبداً (ثغرةُ ٣٩ رقم ٣):** كتابةٌ تزيد عدداً أو تبدّل بصمةً عند العدّ نفسِه
+    تُرفَض؛ وما عدا ذلك يجوز (التخفيضُ بالتصحيح لا بالمسح)."""
+    counts = counts_with_commitment(deny)
+    cur = read_baseline()
+    raised = ratchet_violations(counts, cur, "كتابةُ خطّ الأساس")
+    if raised and not accept_increase:
+        print("⛔ BLOCK — خطُّ الأساس لا يُرفع (القاعدة ١٤: لا يُعفى موضع، تُغيَّر القيمة):")
+        for b in raised[:25]:
+            print("   " + b)
+        print("   ⇒ وإن كان الرفعُ مقصوداً: --accept-increase \"السبب\" (والخطّافُ يمنع دفعه)")
+        return 1
     BASELINE.parent.mkdir(parents=True, exist_ok=True)
     BASELINE.write_text(json.dumps({
         "what": "خطُّ أساسِ الظهورات — **أعدادٌ فقط**: لا قيمةَ ولا بصمةَ مبلغٍ (فلا يُنشر ما يُجرَد)",
         "how": "python3 tools/amount_guard.py --baseline-write   # يُخفَّض بالتصحيح لا بالمسح",
-        "rule": ("لا يُعفى موضع (القاعدة ١٢) — الخطُّ مؤقّتٌ يُخفَّض بإعادة كتابة القيم، "
+        "rule": ("لا يُعفى موضع (القاعدة ١٦) — الخطُّ مؤقّتٌ يُخفَّض بإعادة كتابة القيم، "
                  "ولا يُرفع أبداً: أداةُ --build لا تلمسه"),
-        "counts": dict(sorted(counts.items())),
-        "total": sum(counts.values()),
+        "counts": {k: v for k, v in sorted(counts.items())},
+        "total": sum(v["count"] for v in counts.values()),
     }, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    print(f"خطُّ الأساس: {sum(counts.values())} ظهوراً في {len(counts)} ملفّاً ⇒ {_shown(BASELINE)}")
+    print(f"خطُّ الأساس: {sum(v['count'] for v in counts.values())} ظهوراً في {len(counts)} ملفّاً ⇒ {_shown(BASELINE)}")
     return 0
 
 
-def ratchet_violations(counts: dict[str, int], base: dict[str, int], where: str) -> list[str]:
-    """**السقاطة:** تسقط عند زيادةٍ أو ملفٍّ جديد، وتخضرّ فيما عداه ⇒ ينتهي حافزُ التجاوز."""
+def ratchet_violations(counts: dict[str, dict], base: dict[str, dict], where: str) -> list[str]:
+    """**السقاطة:** تسقط عند زيادةِ عددٍ · ملفٍّ جديد · **أو تبديلِ قيمةٍ بأخرى عند العدّ نفسِه**
+    (ببصمة المجموعة — وهو ما لا يراه عدّادٌ يقارن الأعدادَ وحدها)، وتخضرّ فيما عدا ذلك."""
     bad: list[str] = []
-    for rel, n in sorted(counts.items(), key=lambda x: -x[1]):
-        if rel not in base:
+    for rel, cur in sorted(counts.items(), key=lambda x: -x[1]["count"]):
+        b = base.get(rel)
+        n, n0 = cur["count"], (b or {}).get("count")
+        if b is None:
             bad.append(f"⛔ ملفٌّ جديدٌ يحمل ظهوراتٍ حقيقيّة: {rel} ({n}) — {where}")
-        elif n > base[rel]:
-            bad.append(f"⛔ زادت الظهوراتُ: {rel} {base[rel]} → {n} — {where}")
+        elif n > n0:
+            bad.append(f"⛔ زادت الظهوراتُ: {rel} {n0} → {n} — {where}")
+        elif n == n0 and b.get("commitment") and cur.get("commitment") != b["commitment"]:
+            bad.append(f"⛔ تبديلُ قيمةٍ بأخرى عند العدد نفسِه: {rel} ({n}) — {where}")
     return bad
 
 
@@ -453,6 +528,14 @@ def ratchet_violations(counts: dict[str, int], base: dict[str, int], where: str)
 
 def _git(*args: str, text: bool = True):
     return subprocess.run(["git", *args], cwd=str(ROOT), capture_output=True, text=text)
+
+
+class UnresolvedRange(RuntimeError):
+    """**ثغرةُ مراجعة ٣٩ رقم ٢:** رأسٌ بعيدٌ غيرُ مجلوب ⇒ `rev-list` يفشل ⇒ كان الخطأُ مُهمَلاً
+    فيمرّ الدفعُ `rc=0` بلا فحص. **مدىً لم أُثبته ليس مدىً نظيفاً.**"""
+
+
+REL_BASELINE = "docs/security/amount-baseline.json"
 
 
 def pushed_revs(refs: str) -> list[str]:
@@ -478,11 +561,23 @@ def pushed_revs(refs: str) -> list[str]:
         else:
             rng = [f"{remote_sha}..{local_sha}"]
         r = _git("rev-list", *rng)
+        if r.returncode != 0:
+            last = (r.stderr.strip().splitlines() or ["rev-list فشل"])[-1][:120]
+            raise UnresolvedRange(f"{' '.join(rng)} :: {last}")
         revs.update(r.stdout.split())
     return sorted(revs)
 
 
-def pushed_counts(deny: set[str], revs: list[str]) -> dict[str, int]:
+def _local_heads(refs: str) -> list[str]:
+    out = []
+    for line in refs.splitlines():
+        p = line.split()
+        if len(p) >= 4 and not set(p[1]) <= {"0"}:
+            out.append(p[1])
+    return out
+
+
+def pushed_counts(deny: set[str], revs: list[str]) -> dict[str, dict]:
     """**كلُّ blob يُدفع** (لا الشجرةُ العاملة): أحدثَ ظهورٍ لكلّ مسار داخل المدى.
 
     والقارئُ **لا يفترض أنّ المدفوعَ نصّ**: أيُّ blobٍ لا يُفكّ بـ`utf-8` يُتخطّى بصمتٍ مقصود
@@ -490,7 +585,7 @@ def pushed_counts(deny: set[str], revs: list[str]) -> dict[str, int]:
     أسقط هذا الحارسَ بـ`UnicodeDecodeError`** لأنّ `text=True` يفترض نصًّا — والخطّافُ منعه
     (fail-closed) فأمسك العطبَ قبل أن يخرج.
     """
-    counts: dict[str, int] = {}
+    counts: dict[str, dict] = {}
     for rev in revs:
         names = _git("diff-tree", "-r", "--no-commit-id", "--name-only", "--root", rev).stdout.split()
         for rel in names:
@@ -503,9 +598,12 @@ def pushed_counts(deny: set[str], revs: list[str]) -> dict[str, int]:
                 txt = r.stdout.decode("utf-8")
             except UnicodeDecodeError:
                 continue
-            n = len(find_in_text(txt, deny))
-            if n:
-                counts[rel] = max(counts.get(rel, 0), n)
+            hits = find_in_text(txt, deny)
+            if hits:
+                cur = {"count": len(hits),
+                       "commitment": _commitment({fingerprint(t) for t, _ in hits})}
+                if rel not in counts or cur["count"] > counts[rel]["count"]:
+                    counts[rel] = cur          # أحدثُ ظهورٍ للمسار داخل المدى
     return counts
 
 
@@ -695,6 +793,10 @@ def main(argv=None) -> int:
     ap.add_argument("--ratchet", action="store_true", help="السقاطةُ على الشجرة (ملفّاً ملفّاً)")
     ap.add_argument("--baseline-write", action="store_true", help="كتابةُ خطّ الأساس (أعدادٌ فقط)")
     ap.add_argument("--tracking-audit", action="store_true", help="فحصُ الإهمال واقعاً (بلا سرّ)")
+    ap.add_argument("--accept-increase", metavar="REASON", default="",
+                    help="رفعُ خطّ الأساس عمداً (يُعلَن؛ والخطّاف يُسقط دفعه)")
+    ap.add_argument("--baseline-audit", metavar="BASE_REF", default="",
+                    help="سطحٌ عامّ بلا أدلّة: خطُّ الأساس المدفوع لا يتجاوز الأساس (بلا مفتاح)")
     ap.add_argument("--probe", metavar="REL", default="", help="فحصُ ملفٍّ واحد بمكانه النسبيّ")
     ap.add_argument("--ci", action="store_true", help="سطحٌ عامٌّ بلا أدلّة **بالبناء** (يُعلن ولا يُخفي)")
     ap.add_argument("--extra", default="")
@@ -734,32 +836,59 @@ def main(argv=None) -> int:
     if args.probe:
         return probe(args.probe, deny)
     if args.baseline_write:
-        return write_baseline(deny)
+        return write_baseline(deny, accept_increase=bool(args.accept_increase))
+    if args.baseline_audit:
+        base = baseline_at(args.baseline_audit)
+        if not base:
+            print(f"⛔ BLOCK — لا أساسَ مقروءاً من {args.baseline_audit} ⇒ لا أُثبت شيئاً "
+                  "(بوّابةٌ لا تستطيع العمل لا تمرّ)")
+            return 2
+        here = read_baseline()
+        bad_rows = ratchet_violations(here, base, f"خطُّ الأساس المدفوع مقابل {args.baseline_audit}")
+        if bad_rows:
+            print(f"⛔ BLOCK — خطُّ الأساس في هذه الشجرة يرفع العتبةَ عن {args.baseline_audit}:")
+            for b in bad_rows[:25]:
+                print("   " + b)
+            return 1
+        print(f"PASS — خطُّ الأساس لا يرفع عتبةً عن {args.baseline_audit} "
+              f"({sum(v['count'] for v in here.values())} ظهوراً مُعلَناً، بلا مفتاحٍ ولا أدلّة)")
+        return 0
     if args.pre_push:
         refs = sys.stdin.read()
-        revs = pushed_revs(refs)
+        try:
+            revs = pushed_revs(refs)
+        except UnresolvedRange as e:
+            print(f"⛔ BLOCK — لم أُثبت نظافةَ المدى ⇒ لا أمرّ (ثغرةُ ٣٩ رقم ٢): {e}")
+            print("   ⇒ `git fetch origin` ثم أعِد الدفع: مدىً غيرُ محلولٍ ليس مدىً نظيفاً.")
+            return 2
         if not revs:
-            print("⚠ لا مراجعَ مدفوعة على stdin ⇒ لا شيءَ يُفحص (ولا يُقال PASS على لا شيء)")
-            return 0
+            print("⛔ BLOCK — لا مراجعَ مدفوعة على stdin ⇒ لا شيءَ أُثبته "
+                  "(ولا يُقال PASS على لا شيء)")
+            return 2
         counts = pushed_counts(deny, revs)
-        bad = ratchet_violations(counts, read_baseline(), f"دفعُ {len(revs)} التزاماً")
+        base = baseline_at("origin/main") or read_baseline()
+        bad = ratchet_violations(counts, base, f"دفعُ {len(revs)} التزاماً مقابل origin/main")
+        for head in _local_heads(refs):
+            pushed_base = baseline_at(head)
+            bad += ratchet_violations(pushed_base, base, f"خطُّ الأساس المنشورُ في {head[:8]}")
         if bad:
             print("⛔ BLOCK — الدفعُ يحمل ظهوراتٍ لمبالغَ حقيقيّة (نصوصٌ لا تُطبع):")
             for b in bad[:25]:
                 print("   " + b)
-            print("   ⇒ صحّح القيمةَ أو خفّض خطَّ الأساس بعد إعادة الكتابة (القاعدة ١٢: لا يُعفى موضع)")
+            print("   ⇒ صحّح القيمةَ أو خفّض خطَّ الأساس بعد إعادة الكتابة (القاعدة ١٤: لا يُعفى موضع)")
             return 1
-        print(f"PASS — مدى الدفع ({len(revs)} التزاماً) لا يزيد ظهوراً واحداً على خطّ الأساس")
+        print(f"PASS — مدى الدفع ({len(revs)} التزاماً) لا يزيد ظهوراً واحداً على خطّ الأساس، "
+              f"ولا بصمةَ مجموعةٍ تبدّلت")
         return 0
     if args.ratchet:
-        counts = counts_by_file(deny)
+        counts = counts_with_commitment(deny)
         bad = ratchet_violations(counts, read_baseline(), "الشجرةُ العاملة")
         if bad:
             print("⛔ BLOCK — الشجرةُ تحمل ظهوراتٍ لمبالغَ حقيقيّة:")
             for b in bad[:25]:
                 print("   " + b)
             return 1
-        print(f"PASS — لا ملفَّ تجاوز خطَّ الأساس ({sum(counts.values())} ظهوراً مُعلَنٌ في "
+        print(f"PASS — لا ملفَّ تجاوز خطَّ الأساس ({sum(v['count'] for v in counts.values())} ظهوراً مُعلَنٌ في "
               f"{len(counts)} ملفّاً كما هو)")
         return 0
 
@@ -772,19 +901,20 @@ def main(argv=None) -> int:
     if stale:
         print(stale)
         return 1
-    hits = counts_by_file(deny)
+    hits = counts_with_commitment(deny)
     if args.json:
-        # **القاعدة ١٣:** المخرَجُ الآليُّ لا يُقصّ أبداً. **والقيمةُ لا تُطبع**: الوحدةُ ملفٌّ+عددها.
-        print(json.dumps({"pass": not hits, "count": len(hits), "total": sum(hits.values()),
-                          "files": dict(sorted(hits.items()))},
+        # **القاعدة ١٥:** المخرَجُ الآليُّ لا يُقصّ أبداً. **والقيمةُ لا تُطبع**: الوحدةُ ملفٌّ+عددها.
+        print(json.dumps({"pass": not hits, "count": len(hits),
+                          "total": sum(v["count"] for v in hits.values()),
+                          "files": {k: v["count"] for k, v in sorted(hits.items())}},
                          ensure_ascii=False, indent=1))
         return 1 if hits else 0
     if hits:
         bad = ratchet_violations(hits, read_baseline(), "الشجرةُ العاملة")
         print("⛔ BLOCK — مبالغُ حقيقيّةٌ في ملفّاتٍ مُتتبَّعة (تُعرض الأعدادُ لا القيم):")
-        for rel, n in sorted(hits.items(), key=lambda x: -x[1])[:25]:
-            print(f"   {rel}  ←  {n} ظهوراً")
-        print(f"المجموع: {sum(hits.values())}")
+        for rel, v in sorted(hits.items(), key=lambda x: -x[1]["count"])[:25]:
+            print(f"   {rel}  ←  {v['count']} ظهوراً")
+        print(f"المجموع: {sum(v['count'] for v in hits.values())}")
         if bad:
             print("   ⇒ وفيها ما تجاوز خطَّ الأساس ⇒ امنع الدفع حتى التصحيح")
         return 1
