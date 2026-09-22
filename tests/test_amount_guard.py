@@ -114,6 +114,8 @@ def test_fingerprints_are_keyed_so_the_published_list_cannot_be_enumerated(tmp_p
         pass
 
 
+@pytest.mark.skipif(not (ag.KEY_FILE.exists() and ag.MANIFEST.exists()),
+                    reason="لا مفتاحَ/مانيفست على سطحٍ عامّ (لا يُنشران بالتصميم)")
 def test_ignore_is_a_measured_fact_not_a_claim(tmp_path, monkeypatch):
     """**الدرسُ الثالث (القاعدة ١٤):** «مُهمَل» تُقاس بـ`git` — المفتاحُ كان مُلتزَماً والمستودعُ عامّ."""
     assert ag.tracking_audit() == [], (f"المفتاحُ/المانيفستُ يجب أن يكونا مُهمَلَين وغيرَ متتبَّعين: "
@@ -144,6 +146,8 @@ def test_json_output_is_never_truncated():
     assert payload["count"] == len(payload["hits"]), "المخرَجُ الآليُّ مقصوصٌ ⇒ نقضُ القاعدة ١٣"
 
 
+@pytest.mark.skipif(not ag.MANIFEST.exists(),
+                    reason="المانيفستُ لا يُنشر بالتصميم ⇒ يُبنى محليًّا فقط")
 def test_the_manifest_derivation_closes():
     """**حارسُ الاشتقاق:** لا يُنشر مانيفستٌ ناقص — الحسابُ يُغلق أو يسقط البناء."""
     data = json.loads(ag.MANIFEST.read_text(encoding="utf-8"))
@@ -158,6 +162,8 @@ def test_the_manifest_is_not_stale():
     assert ag.staleness() is None, ag.staleness() or ""
 
 
+@pytest.mark.skipif(not ag.MANIFEST.exists() and not (ROOT / "data" / "local_sample").exists(),
+                    reason="سطحٌ عامٌّ بلا أدلّة: الحقنُ لا سمَّ له ⇒ لا أُعلن نجاحاً ولا فشلاً")
 def test_injection_falls_on_both_surfaces():
     """**البرهانُ الطبقيّ** (مستدير · كسريّ · سالب · طويل × دليل · صناعة) — يسقط إن نجا أيُّها.
 

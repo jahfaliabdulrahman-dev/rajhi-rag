@@ -246,9 +246,14 @@ def build(_extra: list[str]) -> int:
     return 0
 
 
-def load_deny() -> set[str]:
+def load_deny() -> set[str] | None:
+    """**None = سطحٌ عامٌّ بلا أدلّة** ⇒ يُعلن ولا يمرّ كأنّه فحص.
+
+    (كان يرفع `SystemExit` ⇒ CI الحمراءُ سببُها أنّ المانيفستَ **لا يُنشر بالتصميم**؛
+    فالإنفاذُ محليٌّ حيث توجد `data/`، وCI يفحص ما يُفحَص بلا سرّ: `--tracking-audit`.)
+    """
     if not MANIFEST.exists():
-        raise SystemExit("⛔ لا مانيفست — ابنِه بـ`--build`")
+        return None
     return set(json.loads(MANIFEST.read_text(encoding="utf-8"))["fingerprints"])
 
 
@@ -433,6 +438,14 @@ def main(argv=None) -> int:
     if stale:
         print(stale)
         return 1
+    deny = load_deny()
+    if deny is None:
+        print("⚠ غيرُ قابلٍ للإنفاذ على سطحٍ عامّ: لا مانيفستَ (لا يُنشر بالتصميم — البصماتُ المنشورة "
+              "يستعيدها القاموس). الإنفاذُ محليًّا (data/ موجود) وفي `.githooks/pre-push`.")
+        bad = tracking_audit()
+        for b in bad:
+            print("   " + b)
+        return 1 if bad else 0
     hits = scan()
     if args.json:
         # **درسٌ من هذه الجولة:** عرضٌ يُقصّ عند ٢٥ أخفى ١١ تسريباً عن مُطهِّرٍ يقرأ المخرَج
