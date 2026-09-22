@@ -28,6 +28,13 @@ request, so please treat it as a lower bound). An external audit of those refs f
 **6** carrying the burned secret and at least **9** carrying the published figures. These refs are
 immutable from the client side, so I cannot remove them myself.
 
+**Measured after the rewrite (2026-09-23):** `git clone --mirror` of the repository — which fetches
+`refs/pull/*` as well — still exposes **598** commits, against **266** in the rewritten branch
+history, and an automated scan of that clone finds **123** distinct real financial figures and
+**2** removed paths (`data/.amount-guard-key`, `docs/security/amount-denylist.json`) still
+reachable. A plain `git clone` (branches only) is already clean, so the exposure is limited to
+anyone who explicitly fetches the pull-request refs.
+
 **Request:** please purge or expire the repository's `refs/pull/*` refs, or run a garbage
 collection that makes the pre-rewrite commits unretrievable, and confirm when it is done.
 

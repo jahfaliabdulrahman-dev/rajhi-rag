@@ -440,7 +440,7 @@ def _baseline_norm(obj: dict | None) -> dict[str, dict]:
     return out
 
 
-def baseline_at(rev: str) -> dict[str, dict]:
+def baseline_at(rev: str) -> dict[str, dict] | None:
     """**العتبةُ من التزامٍ بعينه، لا من الشجرة العاملة (ثغرةُ ٣٩ رقم ٣أ/٣ب).**
 
     كان `--pre-push` يقرأها من الشجرة ⇒ الدافعُ يرفع عتبتَه فيمرّ. الآن العتبةُ =
@@ -448,11 +448,11 @@ def baseline_at(rev: str) -> dict[str, dict]:
     """
     r = _git("show", f"{rev}:{REL_BASELINE}")
     if r.returncode != 0:
-        return {}
+        return None                       # غيرُ موجود ⇒ غيرُ مقروء (يُسقط)
     try:
-        return _baseline_norm(json.loads(r.stdout))
+        return _baseline_norm(json.loads(r.stdout))   # **فارغٌ شرعاً ≠ غيرُ مقروء**: {} = صفرُ دَين
     except (json.JSONDecodeError, TypeError, KeyError):
-        return {}
+        return None
 
 
 def read_baseline() -> dict[str, dict]:
@@ -528,6 +528,15 @@ def ratchet_violations(counts: dict[str, dict], base: dict[str, dict], where: st
 
 def _git(*args: str, text: bool = True):
     return subprocess.run(["git", *args], cwd=str(ROOT), capture_output=True, text=text)
+
+
+def _git_here(*args: str):
+    """git في **المستودع الذي أُنفِّذ فيه الأمر** (لا في جذر الأداة).
+
+    (لماذا: مسحُ التاريخ يقيس المستودعَ المقصود؛ ولو مشى على `ROOT` لكان مسحُ مستودعٍ آخر
+    يمرّ كأنّه مسحُ هذا ⇒ **فشلٌ مفتوحٌ صامت**.)
+    """
+    return subprocess.run(["git", *args], capture_output=True, text=True)
 
 
 class UnresolvedRange(RuntimeError):
@@ -794,6 +803,54 @@ def proof_inject() -> int:
 
 # ═══════════════════════ الواجهة ═══════════════════════
 
+def history_forms(deny: set[str] | None = None) -> tuple[int, int]:
+    """**مسحُ كلّ تاريخ المستودع** (`--all --objects`) عن صيغِ مبالغَ حقيقيّة.
+
+    (لماذا: تطهيرُ الملفّات لا يكفي — المفتاحُ وبصماتُه ونسخُ الفيكسترات في *التزاماتٍ سابقة*
+    تبقى قابلةً للاسترجاع ما لم تُكشف الشجرةُ كلُّها. والفرقُ عن `--pre-push` أنّ هذا لا يسأل عن
+    مدى دفعٍ بل عن التاريخ نفسِه ⇒ هو الفحصُ الصالحُ بعد **إعادة كتابة** لا مدى لها.)
+
+    يُعيد (عددُ الـblobs، عددُ الصيغ) — **أعداداً لا نصوصاً**.
+    """
+    deny = load_deny() if deny is None else deny
+    listing = _git_here("rev-list", "--all", "--objects")
+    if listing.returncode != 0:
+        raise UnresolvedRange("rev-list --all --objects فشل ⇒ لا تاريخَ أُثبته")
+    shas = sorted({line.split()[0] for line in listing.stdout.splitlines() if line.split()})
+    batch = subprocess.run(["git", "cat-file", "--batch"], input="\n".join(shas).encode(),
+                           capture_output=True)
+    data, i, nblobs, forms = batch.stdout, 0, 0, set()
+    while i < len(data):
+        nl = data.find(b"\n", i)
+        if nl < 0:
+            break
+        head = data[i:nl].decode("utf-8", "replace").split()
+        if len(head) >= 2 and head[1] == "missing":       # كائنٌ فُقد: يُعلن ولا يُتخطّى بصمت
+            i = nl + 1
+            continue
+        if len(head) < 3:
+            raise UnresolvedRange(f"ترويسةٌ غيرُ متوقَّعة عند {i} ⇒ مسحٌ ناقص ⇒ لا أمرّ")
+        try:
+            size = int(head[2])
+        except ValueError:
+            raise UnresolvedRange(f"مقاسٌ غيرُ مقروء عند {i} ⇒ مسحٌ ناقص ⇒ لا أمرّ") from None
+        body = data[nl + 1:nl + 1 + size]
+        if len(body) != size:                      # جسمٌ مقصوص ⇒ مسحٌ ناقص ⇒ يُسقط (لا فشلَ مفتوح)
+            raise UnresolvedRange(f"جسمٌ مقصوص ({len(body)}/{size}) ⇒ المسحُ غيرُ موثوق ⇒ لا أمرّ")
+        i = nl + 1 + size + 1
+        if head[1] != "blob":                      # commit/tree: له جسمٌ يُتخطّى بالحساب لا بالتخمين
+            continue
+        nblobs += 1
+        try:
+            text = body.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        if deny:
+            for tok, _ in find_in_text(text, deny):
+                forms.add(tok)
+    return nblobs, len(forms)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="حارسُ المبالغ: لا مبلغَ حقيقيّ في مستودعٍ عامّ")
     ap.add_argument("--build", action="store_true")
@@ -806,6 +863,12 @@ def main(argv=None) -> int:
                     help="رفعُ خطّ الأساس عمداً (يُعلَن؛ والخطّاف يُسقط دفعه)")
     ap.add_argument("--baseline-audit", metavar="BASE_REF", default="",
                     help="سطحٌ عامّ بلا أدلّة: خطُّ الأساس المدفوع لا يتجاوز الأساس (بلا مفتاح)")
+    ap.add_argument("--history-audit", action="store_true",
+                    help="مسحُ **كلّ تاريخ المستودع** عن صيغِ مبالغَ حقيقيّة (لا يسأل عن مدى)")
+    ap.add_argument("--history-rewrite", metavar="OLD_SHA", default="",
+                    help="إعادةُ كتابةٍ مُعلَنة: تُثبت الأصلَ في النسخة الاحتياطيّة ثم تمسح التاريخ كلَّه")
+    ap.add_argument("--mirror", metavar="PATH", default="",
+                    help="نسخةٌ مرآتيّةٌ احتياطيّةٌ يُثبَت منها أصلُ إعادة الكتابة")
     ap.add_argument("--probe", metavar="REL", default="", help="فحصُ ملفٍّ واحد بمكانه النسبيّ")
     ap.add_argument("--ci", action="store_true", help="سطحٌ عامٌّ بلا أدلّة **بالبناء** (يُعلن ولا يُخفي)")
     ap.add_argument("--extra", default="")
@@ -850,7 +913,7 @@ def main(argv=None) -> int:
         return write_baseline(deny, accept_increase=bool(args.accept_increase))
     if args.baseline_audit:
         base = baseline_at(args.baseline_audit)
-        if not base:
+        if base is None:
             print(f"⛔ BLOCK — لا أساسَ مقروءاً من {args.baseline_audit} ⇒ لا أُثبت شيئاً "
                   "(بوّابةٌ لا تستطيع العمل لا تمرّ)")
             return 2
@@ -863,6 +926,30 @@ def main(argv=None) -> int:
             return 1
         print(f"PASS — خطُّ الأساس لا يرفع عتبةً عن {args.baseline_audit} "
               f"({sum(v['count'] for v in here.values())} ظهوراً مُعلَناً، بلا مفتاحٍ ولا أدلّة)")
+        return 0
+    if args.history_audit or args.history_rewrite:
+        if args.history_rewrite:
+            if not args.mirror:
+                print("⛔ BLOCK — إعادةُ كتابةٍ مُعلَنةٌ بلا نسخةٍ احتياطيّةٍ أُثبت منها الأصل ⇒ لا أمرّ")
+                return 2
+            proof = _git("-C", args.mirror, "cat-file", "-e", f"{args.history_rewrite}^{{commit}}")
+            if proof.returncode != 0:
+                print(f"⛔ BLOCK — الأصلُ المُعلَن {args.history_rewrite[:12]} غيرُ موجودٍ في النسخة "
+                      f"الاحتياطيّة ⇒ إعادةُ كتابةٍ لا تُثبت أصلَها")
+                return 2
+            print(f"✓ أصلُ إعادة الكتابة مُثبَتٌ في النسخة الاحتياطيّة: {args.history_rewrite[:12]}")
+        if deny is None:
+            if args.ci:
+                print("⚠ سطحٌ عامٌّ بلا أدلّة: مسحُ التاريخ لا يُقاس بلا مفتاح ⇒ **يُعلن ولا يُخفى**")
+                return 0
+            print("⛔ BLOCK — لا أدلّةَ (مفتاح/مانيفست) ⇒ لا أستطيع مسحَ التاريخ ⇒ لا أُثبت شيئاً")
+            return 2
+        nblobs, forms = history_forms(deny)
+        if forms:
+            print(f"⛔ BLOCK — التاريخُ يحمل {forms} صيغةً لمبالغَ حقيقيّة داخل {nblobs} blobاً "
+                  f"(النصوصُ لا تُطبع؛ استعمل `--json` للأعداد فقط)")
+            return 5
+        print(f"PASS — مسحُ كلّ التاريخ: {nblobs} blobاً · ولا صيغةَ مبلغٍ حقيقيّ واحدة")
         return 0
     if args.pre_push:
         refs = sys.stdin.read()
@@ -879,6 +966,12 @@ def main(argv=None) -> int:
         try:
             revs = revs if not refs else pushed_revs(refs)
         except UnresolvedRange as e:
+            declared = os.environ.get("AMOUNT_GUARD_HISTORY_REWRITE", "").strip()
+            if declared:
+                print("⚠ إعادةُ كتابةِ التاريخ **مُعلَنة**: لا مدى لها ⇒ يُفحَص التاريخُ كلُّه بدلاً منه"
+                      " (بإعلانٍ لا بصمت)")
+                return main(["--history-rewrite", declared,
+                             "--mirror", os.environ.get("AMOUNT_GUARD_MIRROR", "")])
             print(f"⛔ BLOCK — لم أُثبت نظافةَ المدى ⇒ لا أمرّ (ثغرةُ ٣٩ رقم ٢): {e}")
             print("   ⇒ `git fetch origin` ثم أعِد الدفع: مدىً غيرُ محلولٍ ليس مدىً نظيفاً.")
             return 2
