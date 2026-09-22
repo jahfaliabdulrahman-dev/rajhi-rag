@@ -457,6 +457,32 @@ def baseline_at(rev: str) -> dict[str, dict] | None:
         return None
 
 
+def baseline_audit(ref: str) -> int:
+    """**مقارنةُ عتبةٍ بمفتاحٍ صفر:** خطُّ الأساس في هذه الشجرة مقابل خطٍّ منشورٍ في `ref`.
+
+    لا مانيفستَ ولا مفتاحَ ولا دفعَ — **ملفّان مُتتبَّعان يُقارَنان**، ولذلك موضعُها في `main()`
+    **قبل** أيّ فرعٍ يعتمد على الأدلّة. وكانت بعدها ⇒ في CI (بلا مانيفست) يخرج البرنامجُ من
+    فرع «السطح العامّ» قبل أن يبلغها، فتُطبع «PASS (بما أُمكن فحصُه)» على عتبةٍ مرفوعة
+    (مراجعة ٤٠، البند ١ — مقيسٌ في السجلّ وفي نسخةٍ نظيفة).
+    """
+    base = baseline_at(ref)
+    if base is None:
+        # عتبةٌ غيرُ مقروءة ⇒ لا أستبدلها بخطّ الشجرة العاملة، ولا أمرّ صامتاً.
+        print(f"⛔ BLOCK — لا أساسَ مقروءاً من {ref} ⇒ لا أُثبت شيئاً "
+              "(بوّابةٌ لا تستطيع العمل لا تمرّ)")
+        return 2
+    here = read_baseline()
+    bad_rows = ratchet_violations(here, base, f"خطُّ الأساس المدفوع مقابل {ref}")
+    if bad_rows:
+        print(f"⛔ BLOCK — خطُّ الأساس في هذه الشجرة يرفع العتبةَ عن {ref}:")
+        for b in bad_rows[:25]:
+            print("   " + b)
+        return 1
+    print(f"PASS — خطُّ الأساس لا يرفع عتبةً عن {ref} "
+          f"({sum(v['count'] for v in here.values())} ظهوراً مُعلَناً، بلا مفتاحٍ ولا أدلّة)")
+    return 0
+
+
 def read_baseline() -> dict[str, dict]:
     if not BASELINE.exists():
         return {}
@@ -492,7 +518,7 @@ def write_baseline(deny: set[str], accept_increase: bool = False) -> int:
     cur = read_baseline()
     raised = ratchet_violations(counts, cur, "كتابةُ خطّ الأساس")
     if raised and not accept_increase:
-        print("⛔ BLOCK — خطُّ الأساس لا يُرفع (القاعدة ١٤: لا يُعفى موضع، تُغيَّر القيمة):")
+        print("⛔ BLOCK — خطُّ الأساس لا يُرفع (القاعدة ١٢: لا يُعفى موضع، تُغيَّر القيمة):")
         for b in raised[:25]:
             print("   " + b)
         print("   ⇒ وإن كان الرفعُ مقصوداً: --accept-increase \"السبب\" (والخطّافُ يمنع دفعه)")
@@ -501,7 +527,7 @@ def write_baseline(deny: set[str], accept_increase: bool = False) -> int:
     BASELINE.write_text(json.dumps({
         "what": "خطُّ أساسِ الظهورات — **أعدادٌ فقط**: لا قيمةَ ولا بصمةَ مبلغٍ (فلا يُنشر ما يُجرَد)",
         "how": "python3 tools/amount_guard.py --baseline-write   # يُخفَّض بالتصحيح لا بالمسح",
-        "rule": ("لا يُعفى موضع (القاعدة ١٦) — الخطُّ مؤقّتٌ يُخفَّض بإعادة كتابة القيم، "
+        "rule": ("لا يُعفى موضع (القاعدة ١٢) — الخطُّ مؤقّتٌ يُخفَّض بإعادة كتابة القيم، "
                  "ولا يُرفع أبداً: أداةُ --build لا تلمسه"),
         "counts": {k: v for k, v in sorted(counts.items())},
         "total": sum(v["count"] for v in counts.values()),
@@ -572,6 +598,11 @@ def pushed_revs(refs: str) -> list[str]:
         else:
             rng = [f"{remote_sha}..{local_sha}"]
         r = _git("rev-list", *rng)
+        if r.returncode != 0 and len(rng) == 1:
+            # **الاحتياطُ من المرجع المدفوع نفسِه** (رأسٌ بعيدٌ مجهولٌ محليّاً):
+            # `--not --remotes` على نفس الالتزام — ولا `HEAD` في أيّ فرعٍ من الحارس.
+            rng = [local_sha, "--not", "--remotes"]
+            r = _git("rev-list", *rng)
         if r.returncode != 0:
             last = (r.stderr.strip().splitlines() or ["rev-list فشل"])[-1][:120]
             raise UnresolvedRange(f"{' '.join(rng)} :: {last}")
@@ -588,13 +619,23 @@ def _local_heads(refs: str) -> list[str]:
     return out
 
 
-def _range_from_git() -> list[str] | None:
-    """**مدى الدفع بلا stdin:** `HEAD --not --remotes` = ما لم يُنشر بعدُ.
-    ويُسقط مُغلَقاً (None) إن فشل `rev-list` نفسه."""
-    r = _git("rev-list", "HEAD", "--not", "--remotes")
-    if r.returncode != 0:
+def _range_from_heads(heads: list[str]) -> list[str] | None:
+    """**المدى من المراجع المدفوعة أنفسِها — لا من `HEAD`** (مراجعة ٤٠، البند ٢).
+
+    كان الاحتياطُ يشترط `rev-list HEAD --not --remotes`: فرعٌ متسرّبٌ يُدفع و`HEAD` يحمل
+    التزاماً نظيفاً ⇒ **فحصَ فرعاً آخر** ومرّ التسرّبُ `rc=0` (مقيسٌ في sandbox). و`HEAD` ليس
+    ما يُدفع؛ والمراجعُ على `stdin` هي المصدرُ الوحيدُ لِما يُدفع ⇒ غيابُها عطبُ سباكةٍ
+    **يُسقَط مُغلَقاً**، لا يُخمَّن له بديل.
+    """
+    if not heads:
         return None
-    return sorted(r.stdout.split())
+    revs: set[str] = set()
+    for sha in heads:
+        r = _git("rev-list", sha, "--not", "--remotes")
+        if r.returncode != 0:
+            return None
+        revs.update(r.stdout.split())
+    return sorted(revs)
 
 
 def pushed_counts(deny: set[str], revs: list[str]) -> dict[str, dict]:
@@ -897,11 +938,15 @@ def main(argv=None) -> int:
         return build([x for x in args.extra.split(",") if x.strip()])
     if args.inject:
         return proof_inject()
+    if args.baseline_audit:
+        # **قبل كلّ ما يعتمد على الأدلّة** (مراجعة ٤٠، البند ١): كانت الكتلةُ **بعد** فرعِ
+        # «السطح العامّ»، وذلك الفرعُ **يُرجِع** في CI (لا مانيفستَ بالتصميم) ⇒ تُطبَع
+        # «PASS (بما أُمكن فحصُه)» بلا أن تُقرأ عتبةٌ أصلاً. وهي لا تحتاج مفتاحاً: **ملفّان
+        # مُتتبَّعان يُقارَنان** ⇒ لا عُذرَ لوقوعها خلف بوابةٍ تعتمد على سرّ.
+        return baseline_audit(args.baseline_audit)
 
     deny = load_deny()
-    # **`--baseline-audit` لا يمرّ من هنا:** لا مبلغَ يفحصه بل عتبةً يقارنها، وموضعُه
-    # في CI حيث لا مانيفستَ (لا يُنشر بالتصميم) ⇒ اشتراطُ سرٍّ له كان يُسقط بوابةَ CI.
-    if deny is None and not args.ci and not args.baseline_audit:
+    if deny is None and not args.ci:
         # **الفشلُ المُغلَق:** غيابُ المانيفست لا يمرّ صامتاً — إلّا بعلَمٍ صريح يعلن السطحَ العامّ.
         print("⛔ " + _manifest_blind().lstrip("⚠ "))
         print("   (وبلا `--ci`: الحارسُ **يسقط مُغلَقاً** — لا يمرّ صامتاً. في CI: `--ci`.)")
@@ -919,22 +964,6 @@ def main(argv=None) -> int:
         return probe(args.probe, deny)
     if args.baseline_write:
         return write_baseline(deny, accept_increase=bool(args.accept_increase))
-    if args.baseline_audit:
-        base = baseline_at(args.baseline_audit)
-        if base is None:
-            print(f"⛔ BLOCK — لا أساسَ مقروءاً من {args.baseline_audit} ⇒ لا أُثبت شيئاً "
-                  "(بوّابةٌ لا تستطيع العمل لا تمرّ)")
-            return 2
-        here = read_baseline()
-        bad_rows = ratchet_violations(here, base, f"خطُّ الأساس المدفوع مقابل {args.baseline_audit}")
-        if bad_rows:
-            print(f"⛔ BLOCK — خطُّ الأساس في هذه الشجرة يرفع العتبةَ عن {args.baseline_audit}:")
-            for b in bad_rows[:25]:
-                print("   " + b)
-            return 1
-        print(f"PASS — خطُّ الأساس لا يرفع عتبةً عن {args.baseline_audit} "
-              f"({sum(v['count'] for v in here.values())} ظهوراً مُعلَناً، بلا مفتاحٍ ولا أدلّة)")
-        return 0
     if args.history_audit or args.history_rewrite:
         if args.history_rewrite:
             if not args.mirror:
@@ -962,17 +991,16 @@ def main(argv=None) -> int:
     if args.pre_push:
         refs = sys.stdin.read()
         if not refs.strip():
-            # **المرجعُ البديل (قِيس حيًّا):** stdin يصل فارغاً في مسارِ دفعٍ حقيقيّ ⇒
-            # الاشتقاقُ من الحالة لا من الافتراض: ما لم يعرفه الريموتُ بعدُ هو ما سيُنشر.
-            revs = _range_from_git()
-            if revs is None:
-                print("⛔ BLOCK — لا مراجعَ ولا حالةَ git أشتقّ منها المدى ⇒ لا أُثبت شيئاً")
-                return 2
-            print(f"⚠ stdin فارغٌ: اشتُقّ المدى من الحالة ({len(revs)} التزاماً لم يعرفها الريموت)"
-                  " — يُعلن ولا يُخفي")
-            refs = ""
+            # **stdin الفارغُ يُسقَط مُغلَقاً** (مراجعة ٤٠، البند ٢): المراجعُ على `stdin` هي
+            # المصدرُ الوحيدُ لِما يُدفع، والاشتقاقُ من `HEAD` **يفحص فرعاً آخرَ** غيرَ المدفوع
+            # (وقِيس: فرعٌ متسرّبٌ + `HEAD` نظيف ⇒ `rc=0`). والدفعُ الحقيقيّ **يمرّر المراجع**
+            # (مقيسٌ: «مدى الدفع (4 التزاماً)») ⇒ الفارغُ عطبُ سباكةٍ لا حالةٌ مشروعة.
+            print("⛔ BLOCK — لا مراجعَ على stdin ⇒ لا أُسمّي ما يُدفع ⇒ لا أُثبت نظافتَه")
+            print("   ⇒ الخطّافُ يمرّر المراجع (مقيسٌ في دفعٍ حقيقيّ)."
+                  " وللفحص بلا دفع: `--ratchet`.")
+            return 2
         try:
-            revs = revs if not refs else pushed_revs(refs)
+            revs = pushed_revs(refs)
         except UnresolvedRange as e:
             declared = os.environ.get("AMOUNT_GUARD_HISTORY_REWRITE", "").strip()
             if declared:
@@ -980,9 +1008,9 @@ def main(argv=None) -> int:
                       " (بإعلانٍ لا بصمت)")
                 return main(["--history-rewrite", declared,
                              "--mirror", os.environ.get("AMOUNT_GUARD_MIRROR", "")])
-            salvaged = _range_from_git()          # سلسلةُ الإرجاع المنصوصة في ٣٩ ⇒ تقليلُ حافز --no-verify
+            salvaged = _range_from_heads(_local_heads(refs))   # المراجعُ المدفوعةُ نفسُها، لا `HEAD`
             if salvaged:
-                print(f"⚠ المراجعُ غيرُ محلولة ({e}) ⇒ اشتُقّ المدى من حالة git "
+                print(f"⚠ المراجعُ غيرُ محلولة ({e}) ⇒ اشتُقّ المدى من المراجع المدفوعة نفسِها "
                       f"({len(salvaged)} التزاماً لم يعرفها الريموت) — يُعلن ولا يُخفى")
                 revs = salvaged
             else:
@@ -990,8 +1018,12 @@ def main(argv=None) -> int:
                 print("   ⇒ `git fetch origin` ثم أعِد الدفع: مدىً غيرُ محلولٍ ليس مدىً نظيفاً.")
                 return 2
         if not revs:
-            print("⛔ BLOCK — المدى فارغٌ ⇒ لا شيءَ أُثبته (ولا يُقال PASS على لا شيء)")
-            return 2
+            # **الفارغُ شرعاً ≠ غيرُ المقروء** (مراجعة ٤٠/٣): مدىً **حُلّ** فارغاً قياسٌ يقول
+            # «لا التزامَ جديداً يُنشر» — فرعٌ جديدٌ عند التزامٍ منشورٍ أصلاً، أو **حذفُ فرع** —
+            # فيُمرّ بإعلانٍ لا بسقوط؛ والسقوطُ يبقى لحالةٍ واحدة: **فشلُ حلّ المدى** (أعلاه).
+            print("PASS — المدى فارغٌ **بالقياس**: لا التزامَ جديداً يُنشر (فرعٌ عند التزامٍ "
+                  "منشورٍ أو حذفُ فرع) ⇒ لا شيءَ يُنشر فلا شيءَ أُثبته")
+            return 0
         counts = pushed_counts(deny, revs)
         base = baseline_at("origin/main")
         if base is None:
@@ -1007,7 +1039,7 @@ def main(argv=None) -> int:
             print("⛔ BLOCK — الدفعُ يحمل ظهوراتٍ لمبالغَ حقيقيّة (نصوصٌ لا تُطبع):")
             for b in bad[:25]:
                 print("   " + b)
-            print("   ⇒ صحّح القيمةَ أو خفّض خطَّ الأساس بعد إعادة الكتابة (القاعدة ١٤: لا يُعفى موضع)")
+            print("   ⇒ صحّح القيمةَ أو خفّض خطَّ الأساس بعد إعادة الكتابة (القاعدة ١٢: لا يُعفى موضع)")
             return 1
         print(f"PASS — مدى الدفع ({len(revs)} التزاماً) لا يزيد ظهوراً واحداً على خطّ الأساس، "
               f"ولا بصمةَ مجموعةٍ تبدّلت")
