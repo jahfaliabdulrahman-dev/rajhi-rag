@@ -21,7 +21,8 @@ for _p in (str(PROJ), str(PROJ / "src")):
         sys.path.insert(0, _p)
 
 from tools.eval_pack import (  # noqa: E402
-    DEFINITIONS, PACK_SIZE, Run, _sha16, build_census, longest_run, main, measure_range, poisons,
+    CLASS_SOURCES, DEFINITIONS, PACK_SIZE, Run, _sha16, build_census, census_classes,
+    longest_run, main, measure_range, poisons,
 )
 
 DOC = "aaaaaaaaaaaaaaaa"
@@ -197,3 +198,49 @@ def test_three_multiples_are_never_adjacent_so_the_structural_bound_is_small():
     assert not any(r - 1 in reserved for r in reserved), "محجوزان متجاوران — القاعدةُ ليست دوريةَ 3"
     free = set(range(1, 630)) - reserved
     assert longest_run(free) <= 3, "مقطعٌ أطولُ من ٣ ينقض الدورية"
+
+
+# ── أصنافُ الإحصاء: تُقاس من القرص، والمُجمَّعُ يُعلن ولا يُخمَّن ─────────────
+def test_every_class_declares_where_it_is_measured():
+    """لا تصنيفَ بلا مُسند: كلُّ صنفٍ يحمل ملفَّه وحقلَه."""
+    assert set(CLASS_SOURCES) == {
+        "بلا إطار", "بلا صفوف", "مرقّمة مطبوعاً", "فجوة", "غير محسومة",
+        "استدراك مرساة", "إعادة قراءة", "تحكيم", "قراءة مستبدلة", "رقمٌ من خارج الصفحة"}
+    for name, src in CLASS_SOURCES.items():
+        assert "results/pg-*.json" in src or "slice_report" in src, f"{name} بلا مُسند"
+
+
+def test_the_classes_are_counted_from_the_pages_that_carry_them():
+    run = _tmpcorpus()
+    # أعلامٌ على القرص: ص3 بلا إطار، ص4 بلا صفوف، وص3 وص4 فيهما إعادةُ قراءة
+    for pg, extra in ((3, {"reread": "جولة"}), (4, {"recovered": "1.00"})):
+        f = run.dir / "results" / f"pg-{pg:03d}.json"
+        d = json.loads(f.read_text(encoding="utf-8"))
+        if pg == 3:
+            d.pop("footer", None)
+        if pg == 4:
+            d["raw_rows"] = []
+        d.update(extra)
+        f.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    comp = census_classes(run)
+    assert comp["classes"]["بلا إطار"]["count"] == 1
+    assert comp["classes"]["بلا صفوف"]["count"] == 1
+    assert comp["classes"]["إعادة قراءة"]["count"] == 1
+    assert comp["classes"]["استدراك مرساة"]["count"] == 1
+    assert comp["classes"]["تحكيم"]["count"] == 0
+
+
+def test_a_class_without_a_page_list_on_disk_is_declared_aggregate_not_zero():
+    """`checked` و`unchecked` مُجمَّعان في التقرير ⇒ يُعلنان، ولا يُحسبان صفراً ولا يُخمَّنان."""
+    run = _tmpcorpus()
+    rep = json.loads((run.dir / "slice_report.json").read_text(encoding="utf-8"))
+    rep.setdefault("page_numbers", {})["checked"] = 7
+    rep.setdefault("footer", {})["unchecked"] = 2
+    (run.dir / "slice_report.json").write_text(json.dumps(rep, ensure_ascii=False), encoding="utf-8")
+    comp = census_classes(run)
+    assert comp["classes"]["مرقّمة مطبوعاً"]["count"] == 7
+    assert comp["classes"]["مرقّمة مطبوعاً"]["listed"] is False
+    assert set(comp["aggregate_only"]) == {"مرقّمة مطبوعاً", "غير محسومة"}, \
+        "المُجمَّعُ بلا قائمةٍ يُعلن نفسَه؛ والصنفُ الفارغُ ليس مُجمَّعاً"
+    assert comp["aggregate_only_upper_bound"] >= comp["structural_union"]
+    assert "المجموعُ" in comp["plan_claim_22"] or "يُعاد" in comp["plan_claim_22"]
