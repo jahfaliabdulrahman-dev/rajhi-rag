@@ -979,7 +979,9 @@ def main(argv=None) -> int:
             print("⛔ BLOCK — المدى فارغٌ ⇒ لا شيءَ أُثبته (ولا يُقال PASS على لا شيء)")
             return 2
         counts = pushed_counts(deny, revs)
-        base = baseline_at("origin/main") or read_baseline()
+        base = baseline_at("origin/main")
+        if base is None:                 # غيرُ مقروءٍ ≠ فارغٍ شرعاً: الفارغُ يعني «صفرَ دَين» فلا يُستبدل
+            base = read_baseline()
         bad = ratchet_violations(counts, base, f"دفعُ {len(revs)} التزاماً مقابل origin/main")
         for head in _local_heads(refs):
             pushed_base = baseline_at(head)
