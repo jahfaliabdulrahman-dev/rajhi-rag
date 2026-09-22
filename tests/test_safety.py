@@ -15,7 +15,7 @@ from statement_qa.chunking import Chunk
 def test_token_style_classifies_both_eras():
     assert token_style("٣٠٠,٠٠") == "old"        # comma decimal (old print)
     assert token_style("9001.00") == "new"      # dot halalas + thousands
-    assert token_style("9001.00") == "lost_dot"  # lost decimal dot
+    assert token_style("٦١,١٦٥١٢") == "lost_dot"  # lost decimal dot
     assert token_style(".,..") == "zero_style"   # printed zero
     assert token_style("٣٠٠") == "plain"
     assert token_style(None) is None

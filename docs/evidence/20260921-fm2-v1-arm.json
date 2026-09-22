@@ -3499,7 +3499,7 @@
      "page": 418,
      "rows_certified": 7,
      "cost_usd": 0.01600125,
-     "error": "RuntimeError: VLM JSON: no JSON in VLM answer: , SA\" -> ARAISH, SA\n            amount: \"٨٢.٠٠\"\n            balance: \"9001.00\"\n\n            Row 5:\n            g"
+     "error": "RuntimeError: VLM JSON: no JSON in VLM answer: , SA\" -> ARAISH, SA\n            amount: \"٨٢.٠٠\"\n            balance: \"٩,٩٠٧٫١٠\"\n\n            Row 5:\n            g"
     },
     {
      "page": 419,

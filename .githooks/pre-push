@@ -18,4 +18,6 @@ fi
 "$PY" tools/static_gate.py || exit 1
 
 python3 tools/publish_guard.py --pre-push || exit 1
+# المفتاحُ من ملفٍّ مُهمَل (data/.amount-guard-key) — الحارسُ يفشل مُغلَقاً بلا مفتاح
+[ -f data/.amount-guard-key ] && export AMOUNT_GUARD_KEY="$(cat data/.amount-guard-key)"
 python3 tools/amount_guard.py --pre-push || exit 1
