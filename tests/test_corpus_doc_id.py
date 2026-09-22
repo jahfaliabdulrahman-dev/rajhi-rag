@@ -176,3 +176,19 @@ def test_a_second_replacement_keeps_the_whole_history(tmp_path, monkeypatch):
     assert [h["previous"] for h in cp["doc_id_history"]] == [
         "aaaaaaaaaaaaaaaa", hashlib.sha256(b"document B").hexdigest()[:16]]
     assert cp["doc_id_previous"] == hashlib.sha256(b"document B").hexdigest()[:16]
+
+def test_a_round_trip_is_not_declared_unchanged(tmp_path, monkeypatch):
+    """⚠️ **حقيقةٌ عادت إلى قيمتها الأولى ليست حقيقةً لم تتغيّر.**
+
+    استبدالٌ ثم رجوعٌ إلى الأصل ⇒ القيمةُ النهائية تُطابق البداية حرفيًّا، والإعلانُ
+    «لا تغيير» على هذا المسار كذبٌ: السجلُّ وحدَه يفضح أنها مرّت بمستندين.
+    """
+    run = _stamped_run(tmp_path, hashlib.sha256(DOC_BYTES).hexdigest()[:16], with_doc=True)
+    _replace(monkeypatch, run, b"document B")
+    _replace(monkeypatch, run, DOC_BYTES)                     # رجوعٌ إلى الأصل
+    cp = _stamp(monkeypatch, run)                             # حارسٌ عادي: الملفُّ == الوسم
+    assert cp["doc_id"] == hashlib.sha256(DOC_BYTES).hexdigest()[:16], "القيمةُ عادت"
+    assert len(cp["doc_id_history"]) == 2
+    # لا نعتمد على حرفٍ مُشكَّلٍ مطبوع (التفخيذُ يكسر المطابقة الحرفيّة)
+    assert "مرّت بـ2" in cp["doc_id_note"] and "لا يعني أن المسارَ لم يتغيّر" in cp["doc_id_note"], (
+        "الرجوعُ إلى القيمة الأولى أُعلن «لا تغيير» — والمسارُ مرّ بمستندين")
