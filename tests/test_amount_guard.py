@@ -339,3 +339,82 @@ def test_the_ci_baseline_audit_needs_no_key_and_no_evidence():
                         "--baseline-audit", "origin/main"],
                        capture_output=True, text=True, cwd=ROOT, env=env)
     assert r.returncode == 0 and "بلا مفتاح" in r.stdout, r.stdout + r.stderr
+
+
+# ── فحصُ **كلّ التاريخ** ومسارُ إعادة الكتابة المُعلَن (بلا مدى) ────────────────────────────
+
+GUARD = ROOT / "tools" / "amount_guard.py"
+
+
+def _git_repo(tmp: Path) -> Path:
+    """مستودعٌ مؤقّتٌ حقيقيّ ⇒ مسحُ تاريخٍ مُقاس لا صندوقَ رملٍ مُصطنع."""
+    tmp.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+    (tmp / ".gitignore").write_text("data/\n", encoding="utf-8")
+    return tmp
+
+
+def _commit(repo: Path, msg: str) -> None:
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", msg],
+                   cwd=repo, check=True)
+
+
+def _guard_in(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, str(GUARD), *args], cwd=repo, capture_output=True, text=True)
+
+
+def _with_evidence(repo: Path) -> None:
+    """يُنقل المانيفستُ والمفتاحُ إلى المستودع المؤقّت (المسارُ النسبيُّ نفسُه) ⇒ الحكمُ حقيقيّ."""
+    _skip_without_evidence()
+    (repo / "data" / "eval_pack").mkdir(parents=True, exist_ok=True)
+    shutil.copy(ROOT / "data" / "eval_pack" / "amount-manifest.json",
+                repo / "data" / "eval_pack" / "amount-manifest.json")
+    shutil.copy(ROOT / "data" / ".amount-guard-key", repo / "data" / ".amount-guard-key")
+
+
+def test_the_whole_history_is_scanned_not_only_the_working_tree(tmp_path):
+    """**تطهيرُ الملفّات لا يكفي:** نسخةُ الالتزام السابق تبقى قابلةً للاسترجاع.
+
+    ⇒ يُلتزَم بمبلغٍ حقيقيّ ثم يُحذَف من الشجرة: الشجرةُ نظيفة و**التاريخُ يجب أن يسقط**.
+    """
+    repo = _git_repo(tmp_path / "r")
+    _with_evidence(repo)
+    real = next(v for _, v in ag.source_amounts()[0].items()) if isinstance(
+        ag.source_amounts()[0], dict) else sorted(ag.source_amounts()[0])[0]
+    (repo / "a.txt").write_text(f"قيمة: {real}\n", encoding="utf-8")
+    _commit(repo, "leak")
+    (repo / "a.txt").write_text("نظيف\n", encoding="utf-8")
+    _commit(repo, "clean")
+    hist = _guard_in(repo, "--history-audit")
+    assert hist.returncode == 5, hist.stdout + hist.stderr
+    assert "التاريخُ يحمل" in hist.stdout
+
+
+def test_a_history_rewrite_without_a_proven_origin_is_blocked(tmp_path):
+    """إعادةُ كتابةٍ لا تُثبت أصلَها من نسخةٍ احتياطيّة = تاريخٌ بلا شهادة ⇒ تُسقط."""
+    repo = _git_repo(tmp_path / "r2")
+    (repo / "a.txt").write_text("x\n", encoding="utf-8")
+    _commit(repo, "i")
+    no_mirror = _guard_in(repo, "--history-rewrite", "HEAD")
+    bad_origin = _guard_in(repo, "--history-rewrite", "0" * 40, "--mirror", str(tmp_path))
+    assert no_mirror.returncode == 2 and "بلا نسخةٍ احتياطيّة" in no_mirror.stdout
+    assert bad_origin.returncode == 2 and "لا تُثبت أصلَها" in bad_origin.stdout
+
+
+def test_a_truncated_batch_stream_fails_closed(monkeypatch):
+    """**قصُّ الحقّ:** قياسٌ ناقصٌ ليس قياساً — تدفّقٌ مقصوصٌ يسقط ولا يمرّ بـ«ما رأيتُه نظيفاً»."""
+    class _Out:
+        def __init__(self, out: bytes) -> None:
+            self.stdout, self.stderr, self.returncode = out, b"", 0
+
+    real_run = subprocess.run
+
+    def fake_run(cmd, *a, **kw):                      # `rev-list` يمرّ، والتدفّقُ يُقصّ
+        if isinstance(cmd, list) and "cat-file" in cmd:
+            return _Out(b"deadbeef blob 5\nabc")
+        return real_run(cmd, *a, **kw)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(ag.UnresolvedRange):
+        ag.history_forms({ag.fingerprint(FAKE)})      # تدفّقٌ مقصوص ⇒ لا مسحَ ناقص
