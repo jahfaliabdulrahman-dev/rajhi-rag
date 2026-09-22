@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -52,6 +53,17 @@ def _corpus(tmp: Path, doc_id: str | None = DOC, pages=PAGES) -> Path:
     return run
 
 
+def _chain(n: int) -> dict:
+    """أرضيةٌ صناعيةٌ بسلسلة أرصدةٍ متّصلة: كلُّ صفحةٍ تُقفل سلاسلَها ⇒ إحصاءٌ مكتمل."""
+    pages, bal, td, tc = {}, 1000, 0, 0
+    for k in range(1, n + 1):
+        c, d = 10 * k, 4 * k                       # دائنٌ ثم مدينٌ ⇒ الاتجاهاتُ من سلسلة الأرصدة
+        pages[k] = ([(f"{c}.00", f"{bal + c}.00"), (f"{d}.00", f"{bal + c - d}.00")],
+                    {"debits": f"{td + d}.00", "credits": f"{tc + c}.00", "balance": f"{bal + c - d}.00"})
+        bal += c - d; td += d; tc += c
+    return pages
+
+
 def _tmpcorpus() -> Run:
     """تشغيلةٌ مؤقّتة لأرضية الاختبار (بلا fixture pytest) — تُنظَّف تلقائياً."""
     import tempfile
@@ -64,7 +76,9 @@ def _capture(tmp: Path, mine=(3,), other=(2,)) -> Path:
         for p in pages:
             d = cap / doc / f"pg-{p:03d}"
             d.mkdir(parents=True)
-            (d / "label.json").write_text(json.dumps({"doc_id": doc, "page": p}), encoding="utf-8")
+            (d / "label.json").write_text(json.dumps(
+                {"doc_id": doc, "page": p, "rows": [{"amount": "1.00"}, {"amount": "2.00"}]},
+                ensure_ascii=False), encoding="utf-8")
     (cap / "index.json").write_text(json.dumps({"documents": [{"doc_id": DOC, "captured": len(list(mine))},
                                                               {"doc_id": OTHER, "captured": len(list(other))}]}),
                                     encoding="utf-8")
@@ -167,22 +181,41 @@ def test_definitions_print_their_source(capsys):
 
 
 # ── ⛔ ضابطُ المجتمع: سمٌّ داخل المجتمع لا يكشف مجتمعاً ناقصاً ────────────────
-def test_the_intersection_gate_counts_the_whole_pack_not_the_ranges_only():
-    """**الحزمةُ = الإحصاء + المديات** ⇒ ومجتمعُ بوابة التقاطع هو هي كلُّها.
+def test_the_population_control_calls_the_real_build_and_falls(tmp_path, capsys):
+    """**شرطُ review-33 §٦/١:** الضابطُ يستدعي البوابةَ نفسَها — لا يُعيد بناء المنطق.
 
-    قِيست هذه العلّة على الحزمة الحيّة: البوابةُ كانت تقيس المديات (150) وحدَها
-    فتُعلن 100 صفحة ثمناً، **والإحصاءُ (50) فيه 33 ملتقطةً خارجَ المجتمع** ⇒
-    الثمنُ الحقيقيّ 133 لا 100 (ناقصٌ بالثلث). والضابطُ: صفحةٌ ملتقطةٌ **من
-    الإحصاء** يجب أن تُسقط البوابة — وسمُّ المديات لا يكشف هذا أبداً.
+    العلّةُ التي أُصلحت: مجتمعُ التقاطع كان المديات وحدَها والإحصاءُ خارجَه. فالضابطُ
+    يبني أرضيةً صفحتُها الملتقَطة **في الإحصاء فقط**، ثم **يُنادي `--build` الحقيقيّ**
+    ويقيس مخرَجَه. ومعيارُ القبول (المُقاس في تحضير التسليم): بإعادة حقن العلّة —
+    `pack_pages = المديات` — **يسقط هذا الاختبار**. وضابطٌ لم يُجرَّب سقوطُه ليس حارساً.
     """
-    run = _tmpcorpus()
-    cap = {"mine": {2}, "other_pages": set(), "other_docs": [], "index": {}}   # ص2 في الإحصاء **وفي الالتقاط**
-    census = [x["page"] for x in build_census(run, 3)["pages"]]
-    assert 2 in census, "الأرضيةُ تفترض ص2 في الإحصاء"
-    ranges = [measure_range(run, 3, 2)]          # المدياتُ [3، 4] — ولا تضمُّ ص2
-    whole = set(census) | {p for m in ranges for p in m["pages"]}
-    assert set(ranges[0]["pages"]) & cap["mine"] == set(), "ليست في المديات — فسمُّ المديات لا يراها"
-    assert whole & cap["mine"] == {2}, "المجتمعُ الكاملُ يجب أن يرى الصفحةَ الملتقَطة"
+    run = _corpus(tmp_path, pages=_chain(630))
+    cap = _capture(tmp_path, mine=(5,), other=(600,))     # ص5 ملتقطة — وهي **في الإحصاء** (1..50)
+    _rc = main(["--build", "--run", str(run), "--capture", str(cap),
+                "--out", str(tmp_path / "out"), "--census", "50", "--capture-mode", "explicit-list"])
+    assert _rc != 0, "الحكمُ يجب أن يكون FAIL بالاسم — والباقي يُقاس في السطر التالي"
+    out = capsys.readouterr().out
+    assert "بوابة التقاطع" in out, "الأمرُ الحقيقيُّ لم يُنادَ — لا مخرَجَ بوابة"
+    assert "إحصاء 50" in out, "المجتمعُ المطبوعُ يجب أن يُشتقّ من المقيس (وفيه الإحصاء)"
+    assert _rc != 0, "صفحةٌ ملتقطةٌ في الإحصاء فقط يجب أن تُسقط بوابةَ التقاطع"
+    assert "intersection" in out, "السقوطُ يجب أن يكون بالاسم على بوابة التقاطع"
+    # والمجتمعُ المطبوعُ = المقيس (فلا يُطبع عددٌ ويُقاس آخر)
+    m = re.search(r"مجتمعُها الحزمةُ كاملةً: (\d+) = إحصاء (\d+) \+ مديات (\d+)", out)
+    assert m, "سلسلةُ المجتمع غير مشتقّة"
+    whole, census_pages, range_pages = (int(x) for x in m.groups())
+    assert whole == census_pages + range_pages == 200, "المجتمعُ المطبوع ≠ مجموع مكوّناته"
+
+
+def test_the_build_runs_the_population_to_the_line_it_prints(tmp_path, capsys):
+    """سمُّ الطباعة: نسبةُ الإحصاء في المجتمع المطبوع تُقاس — لا تُكتب."""
+    run = _corpus(tmp_path, pages=_chain(630))
+    main(["--build", "--run", str(run), "--capture", str(_capture(tmp_path)),   # الحكمُ يُقاس أدناه
+          "--out", str(tmp_path / "out2"), "--census", "50"])
+    out = capsys.readouterr().out
+    m = re.search(r"مجتمعُها الحزمةُ كاملةً: (\d+) = إحصاء (\d+) \+ مديات (\d+)", out)
+    assert m, "المجتمعُ يجب أن يُطبع بالاشتقاق"
+    whole, census_pages, range_pages = (int(x) for x in m.groups())
+    assert whole == census_pages + range_pages, "عددُ المجتمع ≠ مجموع مكوّناته"
 
 
 def test_a_run_of_two_is_measured_as_two():
@@ -244,3 +277,17 @@ def test_a_class_without_a_page_list_on_disk_is_declared_aggregate_not_zero():
         "المُجمَّعُ بلا قائمةٍ يُعلن نفسَه؛ والصنفُ الفارغُ ليس مُجمَّعاً"
     assert comp["aggregate_only_upper_bound"] >= comp["structural_union"]
     assert "المجموعُ" in comp["plan_claim_22"] or "يُعاد" in comp["plan_claim_22"]
+
+
+def test_a_price_with_no_rows_is_declared_unknown_not_zero(tmp_path, capsys):
+    """مقامٌ صفريٌّ ⇒ **مجهولة** لا صفر: عطبُ `ZeroDivisionError` كشفه الضابطُ الحقيقيّ."""
+    run = _corpus(tmp_path, pages=_chain(630))
+    d = tmp_path / "capture" / DOC / "pg-005"
+    d.mkdir(parents=True)
+    (d / "label.json").write_text(json.dumps({"doc_id": DOC, "page": 5}), encoding="utf-8")
+    rc = main(["--build", "--run", str(run), "--capture", str(tmp_path / "capture"),
+               "--out", str(tmp_path / "out3"), "--census", "50", "--capture-mode", "explicit-list"])
+    out = capsys.readouterr().out
+    assert "مجهولة" in out, "نسبةٌ بمقامٍ صفريّ تُعلن مجهولةً"
+    assert rc in (0, 1, 2), "ولا انفجار: المسارُ يكمل إلى الحكم"
+    assert "الحكم" in out, "المسارُ ينتهي بحكمٍ معلن لا بانفجار"

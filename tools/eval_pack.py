@@ -259,6 +259,26 @@ def split_thirds(run: Run, excluded: set[int]) -> list[list[int]]:
     return [free[:q], free[q:q + q], free[q + q:] if r == 0 else free[q + q:]]
 
 
+def price_of_window(length: int, free_all: set[int], lo: int, hi: int) -> dict:
+    """ثمنُ نافذةٍ متّصلةٍ طولُها `length`: أصغرُ عددِ صفحاتٍ يلزم الإفراجُ عنها.
+
+    **يُقاس بالمسح لا بالصيغة**: أوسعُ نافذةٍ حرّةٍ بطول L تُحدِّد الثمن (`L − أوسع`)،
+    وصيغةُ الحجز الدوري `L − ⌈L/3⌉` شاهدٌ لا بديل — وإن اختلفا طُبع الاثنان.
+    وهذا ينقل الحكمَ من «مستحيل» إلى «**مُسعَّر**»: المدى ممكنٌ دائماً، والقرارُ للمالك
+    (نافذةٌ أقصر · عددٌ أقلّ · قاعدةُ حجزٍ أخرى) — ولا يُسلَب خيارُه بغير بيان.
+    """
+    if hi - lo + 1 < length:
+        return {"pages_to_release": None, "why": f"الثُلثُ أقصرُ من النافذة ({hi - lo + 1} < {length})"}
+    widest = 0
+    for start in range(lo, hi - length + 2):
+        widest = max(widest, sum(1 for x in range(start, start + length) if x in free_all))
+    return {"pages_to_release": length - widest, "widest_free_window": widest,
+            "formula": f"L − ⌈L/3⌉ = {length} − {-(-length // 3)} = {length - (-(-length // 3))}",
+            "measured_by": "مسحُ كل النوافذ الممكنة على صفحات التشغيلة",
+            "note": ("المدى **ممكنٌ دائماً** وثمنُه هذا العددُ مُفرَجاً عنه — والاستحالةُ اقتصاديةٌ لا بنيوية"
+                     if length - widest else "النافذةُ مُتاحةٌ بلا إفراج")}
+
+
 def longest_run(pages) -> int:
     """أطولُ مقطعٍ متّصل في قائمة صفحات.
 
@@ -274,9 +294,10 @@ def longest_run(pages) -> int:
     return best
 
 
-def choose_ranges(run: Run, census_size: int, captured: set[int], exclude_capture: bool = True) -> dict:
+def choose_ranges(run: Run, census_size: int, captured: set[int], exclude_capture: bool = True,
+                  pack_size: int = PACK_SIZE) -> dict:
     """من كل ثلثٍ مدًى متّصلٌ طولُه `ceil((200−|الإحصاء|)/3)` يبدأ من أوّل صفحةٍ إطاراها مقروءان."""
-    length = -(-(PACK_SIZE - census_size) // 3)          # ceil
+    length = -(-(pack_size - census_size) // 3)          # ceil
     census = {p["page"] for p in build_census(run, census_size)["pages"]}
     excluded = set(census) | (set(captured) if exclude_capture else set())
     thirds = split_thirds(run, excluded)
@@ -297,19 +318,26 @@ def choose_ranges(run: Run, census_size: int, captured: set[int], exclude_captur
             break
         if picked is None:
             longest = longest_run(third)
+            _pw = price_of_window(length, set(third), third[0] if third else 0,
+                                  third[-1] if third else 0)
             refusals.append({
                 "third": i + 1, "third_size": len(third), "longest_contiguous_free_run": longest,
                 "required_length": length,
                 "why": (f"أطولُ مقطعٍ متّصلٍ حرٍّ = {longest} صفحة والطولُ المطلوب {length} ⇒ "
-                        f"المدى مستحيلٌ بهذا القيد (فرق {length - longest} صفحة). "
-                        "**والعلّةُ بنيوية لا عددية**: حجزٌ بدورية ٣ لا يُجاور محجوزَين، فالمقطعُ الحرُّ "
-                        "محصورٌ بنيوياً بـ٣ (محجوزٌ + جاراه غيرُ المحجوزَين **إن أُفرِج عنهما**) — "
-                        "فلا كوربوسٌ أطولُ يُصلح تناقضَ «دورية 3» مع «مدى متّصل»")})
+                        f"لا مدًى حرّاً بلا إفراج. "
+                        "**والتأطيرُ الصحيح تسعيرٌ لا استحالة** (تصحيحُ المدقّق في review-33 §٣): "
+                        "الحجزُ الدوريُّ لا يمنع المدى، **بل يُسعّره**: مدًى طولُه L يستلزم الإفراجَ عن "
+                        "L − ⌈L/3⌉ صفحةً غيرَ محجوزة (و50 ⇒ 33) — والاستحالةُ **اقتصاديةٌ** لا بنيوية. "
+                        "**وسلبُ المالكِ خيارَه بغير بيانٍ خطأٌ** — فالثمنُ يُطبع مع الرفض، ويُقرّره المالك."
+                        + (f" · **وثمنُ نافذةٍ بطول {length} في هذا الثلث = "
+                           f"{_pw['pages_to_release']} صفحةً مُفرَجاً عنها** "
+                           f"(والصيغةُ {_pw['formula']})" if _pw.get("pages_to_release") is not None else "")),
+                "price_of_a_window": _pw})
         else:
             ranges.append((picked, length))
     total = census_size + sum(l for _, l in ranges)
     return {"length": length, "ranges": ranges, "refusals": refusals, "exclude_capture": exclude_capture,
-            "size_gate": {"value": total, "expected": PACK_SIZE, "pass": total == PACK_SIZE and not refusals},
+            "size_gate": {"value": total, "expected": pack_size, "pass": total == pack_size and not refusals},
             "census_size": census_size}
 
 
@@ -425,7 +453,11 @@ def census_classes(run: Run) -> dict:
         if d.get("page_no_source") or d.get("page_no_note"):
             classes["رقمٌ من خارج الصفحة"]["pages"].add(pg)
     gaps = pn.get("gaps") or []
-    classes["فجوة"]["pages"] = {int(x) for g in gaps for x in (g[-1] if isinstance(g[-1], list) else [])}
+    # والمدى لا الطرفان: قفزةٌ في الترقيم تجعل **كلَّ صفحةٍ في مداها** موضعَ شكّ، لا صفحتين
+    # (تصحيحُ المدقّق: 8 صفحات لا «4 (قفزتان)» — وإلا صار الحدُّ الأدنى للاتحاد أقلَّ من الحقيقة).
+    classes["فجوة"]["pages"] = {int(x) for g in gaps for x in (g[:-1] if isinstance(g, list) else [])}
+    classes["فجوة"]["involved_only"] = sorted({int(x) for g in gaps
+                                              for x in (g[-1] if g and isinstance(g[-1], list) else [])})
     classes["فجوة"]["jumps"] = len(gaps)
     # ولا قائمةَ للطباعة ولا لغير المحسومة على القرص ⇒ يُعلنان مُجمَّعَين (ولا يُخمَّنان)
     classes["مرقّمة مطبوعاً"]["count"] = int(pn.get("checked") or 0)
@@ -437,6 +469,16 @@ def census_classes(run: Run) -> dict:
         if not c["count"]:
             c["count"] = len(c["pages"])
         c["listed"] = bool(c["pages"])
+        c["aggregate"] = bool(c.get("aggregate"))
+    # الاحتواء: «بلا صفوف» ⊂ «بلا إطار» ⇒ جمعُهما يعدّ صفحاتٍ مرتين (وهو الصنفُ المطارد)
+    for name in CLASS_SOURCES:
+        subs = [o for o in CLASS_SOURCES
+                if o != name and classes[name]["listed"] and classes[o]["listed"]
+                and set(classes[name]["pages"]) < set(classes[o]["pages"])]
+        if subs:
+            classes[name]["contained_in"] = subs
+            classes[name]["implication"] = ("تُذكر ولا تُجمع: جمعُها يعدّ صفحاتٍ مرتين "
+                                            f"(⊂ {', '.join(subs)})")
         c.setdefault("aggregate", False)
     structural = set()
     for name in STRUCTURAL_CLASSES:
@@ -445,7 +487,7 @@ def census_classes(run: Run) -> dict:
     for name in READER_CLASSES:
         reader |= set(classes[name]["pages"])
     both = structural & reader
-    agg = [n for n in STRUCTURAL_CLASSES if classes[n]["aggregate"]]
+    agg = [n for n in STRUCTURAL_CLASSES if classes[n].get("aggregate")]
     agg_sum = sum(classes[n]["count"] for n in agg)
     return {
         "classes": classes,
@@ -456,18 +498,25 @@ def census_classes(run: Run) -> dict:
         "all_pages_listed": sorted(structural | reader),
         "aggregate_only": {n: classes[n]["count"] for n in agg},
         "aggregate_only_upper_bound": len(structural) + agg_sum,
-        "why_the_union_is_not_the_sum": ("الاتحادُ ≤ المجموع: الأصنافُ متقاطعة — قِيس المتقاطعُ "
-                                         f"({len(both)}) حيث القوائمُ متاحة، ونُصِّح الاتحادَ الأدنى "
-                                         f"{len(structural)} والأعلى {len(structural) + agg_sum}."),
-        "plan_claim_22": ("لا يُعاد إنتاجه بالضبط: المجموعُ مطابقٌ (4+3+4+2+17 = 30) لكن "
-                          "17 و2 مُجمَّعان بلا قائمةِ صفحات ⇒ المتقاطعُ (8) غيرُ مرئيّ ⇒ "
-                          "الاتحادُ بين 8 و27 · والمقيسُ لا يُخمَّن."),
+        "why_the_union_is_not_the_sum": (
+            "الاتحادُ ≤ المجموع، فالقطعُ مأخوذة: "
+            + " · ".join(f"{n} ⊂ {', '.join(classes[n]['contained_in'])}"
+                         for n in CLASS_SOURCES if classes[n].get("contained_in"))
+            + f" ⇒ المجموعُ الساذج {sum(classes[n]['count'] for n in STRUCTURAL_CLASSES)} "
+              f"يعدّ صفحاتٍ مرتين؛ والمعلومُ يقيناً {len(structural)} صفحة، "
+              f"والمجهولُ {' + '.join(str(classes[n]['count']) for n in agg)} "
+              f"⇒ الاتحادُ بين {len(structural)} و{len(structural) + agg_sum}."),
+        "union_range": f"{len(structural)}..{len(structural) + agg_sum}",
+        "plan_claim_22": ("لا يُعاد إنتاجه: مجموعُ خطتي (30) كان يعدّ «فجوة 4» وهي **8 صفحات** "
+                          "في مداها، و«بلا صفوف 3» ⊂ «بلا إطار 4» (صفحاتٌ مكرّرة) ⇒ فالمعلومُ يقيناً "
+                          "12 والمجهولُ 17 + 2 ⇒ الاتحادُ **12..31** لا 22 جزماً. "
+                          "(تصحيحُ المدقّق في review-33 §٤، مقبولٌ ومُدمج.)"),
     }
 
 
 
 # ── السموم: كلُّ بوابةٍ لها سمٌّ وإلا سقطت الحزمة ──────────────────────────
-def poisons(run: Run, built: dict, cap: dict) -> dict:
+def poisons(run: Run, built: dict, cap: dict, pack_size: int = PACK_SIZE) -> dict:
     out = {}
     r0 = built["ranges"][0] if built["ranges"] else None
     if r0:
@@ -521,7 +570,8 @@ def poisons(run: Run, built: dict, cap: dict) -> dict:
                     "why": ("مدًى من ص٢ بنفس الإرساء **يُغلق الثلاث** ⇒ `%3`-الإرساء هو الخللُ لا المدى، "
                             "والسمُّ والضابطُ متقابلان: ثلاثٌ تسقط بثلاث قيمٍ وثلاثٌ تُغلق")}
         # (٣) بوابة «٢٠٠ بالضبط»: قائمةٌ بـ٢٠١
-    out["size_201"] = {"gate": "size", "value": PACK_SIZE + 1, "falls": ["size"], "why": "٢٠١ ⇒ تسقط البوابة"}
+    out["size_201"] = {"gate": "size", "value": pack_size + 1, "falls": ["size"],
+                       "why": f"{pack_size + 1} ⇒ تسقط البوابة"}
     # (٤) صفحةُ التقاطٍ داخل الحزمة ⇒ تسقط بوابةُ التقاطع بالاسم
     if cap["mine"]:
         page = sorted(cap["mine"])[0]
@@ -590,7 +640,8 @@ def cmd_build(args) -> int:
               else "(الكوربوس ناقصَ الإحصاء والفجوات — نصُّ الخطة §٢؛ والالتقاطُ يدفع الثمنَ ويُقاس)"))
         for size in attempts:
             census = build_census(run, size)
-            built = choose_ranges(run, size, cap["mine"], exclude_capture=(mode == "strict"))
+            built = choose_ranges(run, size, cap["mine"], exclude_capture=(mode == "strict"),
+                                  pack_size=args.pack_size)
             verdict = "✓" if built["size_gate"]["pass"] else "✗"
             print(f"  |الإحصاء|={census['size']:>3} (بصمة {census['fingerprint']}) ⇒ طولُ المدى "
                   f"{built['length']:>3} · مدياتٌ {len(built['ranges'])}/3 · "
@@ -616,9 +667,13 @@ def cmd_build(args) -> int:
     remedy_rows = captured_rows(_path(args.capture), run.identity, remedy)
     train_rows, train_pages = captured_totals(_path(args.capture), run.identity)
     if remedy:
+        # ولا يُقسم على صفر: نسبةٌ بمقامٍ صفريّ **مجهولةٌ** لا صفر — وهذا الحارسُ كشفه
+        # الضابطُ الحقيقيّ (review-33 §٦/١) الذي نادى `--build` على أرضيةٍ بلا صفوف.
+        _share = (f"{remedy_rows / train_rows * 100:.1f}% من {train_rows}"
+                  if train_rows else "**مجهولة** — صفوفُ حزمة الالتقاط 0 (لا يُقدَّر ما لا يُقيس)")
         print(f"\n⚠ ثمنُ العلاج المقيس — **بعمودين**: نقدٌ `$0` (إعادةُ التقاطٍ من الكاش) "
               f"و**بياناتٌ −{remedy_rows} صفّاً من التدريب** "
-              f"({remedy_rows / train_rows * 100:.1f}% من {train_rows}) · "
+              f"({_share}) · "
               f"{len(remedy)} صفحة من {len(pack_pages_all)} في الحزمة · والتدريبُ يبقى "
               f"{train_pages - len(remedy)} صفحة · {train_rows - remedy_rows} صفّاً.")
 
@@ -645,13 +700,21 @@ def cmd_build(args) -> int:
     # (٤) بوابةُ التقاطع + السموم
     pack_pages = pack_pages_all          # المجتمعُ: الإحصاء + المديات = 200 (لا 150)
     inter = sorted(set(pack_pages) & cap["mine"])
+    # المجتمعُ المطبوعُ **يُشتقّ من المقيس**، فلا يُمكن أن يُطبع 200 ويُقاس 150:
+    # «العُرفُ الذي سنّيناه — يُطبع المجتمعُ بجانب الرقم — يصير ضماناً كاذباً لو كان النصُّ ثابتاً»
+    #                                                                (review-33 §٢، حكمُ المدقّق)
+    _census_pages = {x["page"] for x in chosen_census["pages"]}
+    _range_pages = {p for m in measured for p in m["pages"]}
+    assert len(pack_pages) == len(_census_pages | _range_pages), (
+        f"المجتمعُ المقيس ({len(pack_pages)}) يخالف اتحادَ مكوّناته "
+        f"({len(_census_pages | _range_pages)}) — الطباعةُ لا تكذب")
     print(f"\n─ بوابة التقاطع (مجتمعُها الحزمةُ كاملةً: {len(pack_pages)} = "
-          f"إحصاء {len(chosen_census['pages'])} + مديات {sum(m['length'] for m in measured)}) "
+          f"إحصاء {len(_census_pages)} + مديات {len(_range_pages)}) "
           f"∩ الالتقاط ({len(cap['mine'])}) = {len(inter)} "
           f"{'✓' if not inter else '✗ ' + str(inter[:5])}")
     comp = census_classes(run)                      # الأصنافُ — تُقاس مرّةً وتُطبع وتُقيَّد
     pois = poisons(run, {"ranges": measured, "length": measured[0]["length"] if measured else 0,
-                         "census": [x["page"] for x in chosen_census["pages"]]}, cap)
+                         "census": [x["page"] for x in chosen_census["pages"]]}, cap, pack_size=args.pack_size)
     print("─ السموم:")
     for name, info in pois.items():
         if name == "_coverage":
@@ -667,12 +730,14 @@ def cmd_build(args) -> int:
         "capture_mode": mode_used,
         "capture_remedy_price": {
             "pages": len(remedy), "rows": remedy_rows,
-            "share_of_training_rows": round(remedy_rows / train_rows, 4) if train_rows else None,
+            "share_of_training_rows": (round(remedy_rows / train_rows, 4) if train_rows else None),
+            "share_unknown_because": (None if train_rows else "صفوفُ حزمة الالتقاط 0 ⇒ النسبةُ مجهولةٌ لا صفر"),
             "training": {"pages": train_pages, "rows": train_rows},
             "remaining_after_release": {"pages": train_pages - len(remedy), "rows": train_rows - remedy_rows},
             "cash_usd": "0 — إعادةُ التقاطٍ من الكاش",
-            "columns": "يُعرض بعمودين: نقدٌ $0 · وبياناتٌ −{:.1f}% من صفوف التدريب".format(
-                (remedy_rows / train_rows * 100) if train_rows else 0),
+            "columns": ("يُعرض بعمودين: نقدٌ $0 · وبياناتٌ −{:.1f}% من صفوف التدريب".format(
+                remedy_rows / train_rows * 100) if train_rows else
+                "يُعرض بعمودين: نقدٌ $0 · وبياناتٌ −عددُ صفوف (والنسبةُ مجهولة: لا صفوفَ للالتقاط)"),
         },
         "capture_remedy_price_pages": len(remedy),
         "census": chosen_census, "ranges": measured,
@@ -695,9 +760,10 @@ def cmd_build(args) -> int:
           and pois["_coverage"]["every_check_has_a_poison"])
     if comp.get("classes"):
         print("\n── أصنافُ الإحصاء — مقيسةٌ من القرص (شرطُ review-29 §٦/٢: العددُ من الأداة):")
-        print(f"   المجموع 4+3+4+2+17 = {comp['structural_sum']} · والقائمةُ المُعادةُ منه = "
-              f"{comp['structural_union']} (المُجمَّعُ بلا قائمة: {comp['aggregate_only']})")
-        print(f"   ⇒ «22» في الخطة: {comp['plan_claim_22']}")
+        print(f"   المجموعُ الساذج = {comp['structural_sum']} · وبعد طرح المتقاطع = "
+              f"{comp['structural_union']} (مرئيّاً) والمُجمَّعُ بلا قائمة: {comp['aggregate_only']}")
+        print(f"   ⇒ المجموعُ لا يُقدَّم عدداً: {comp['why_the_union_is_not_the_sum']}")
+        print(f"   ⇒ «22» في الخطّة: {comp['plan_claim_22']}")
         for _name, _c in comp["classes"].items():
             _tag = "" if _c["listed"] else "  [مُجمَّعٌ بلا قائمة]"
             print(f"   {_name:>22} : {_c['count']:>3}{_tag}   ← {_c['source']}")
@@ -760,6 +826,9 @@ def main(argv=None) -> int:
     ap.add_argument("--digital", default=DEFAULTS["digital"])
     ap.add_argument("--out", default=DEFAULTS["out"])
     ap.add_argument("--pack", default=f"{DEFAULTS['out']}/pack.json")
+    ap.add_argument("--pack-size", type=int, default=PACK_SIZE,
+                    help="حجمُ الحزمة (200 عرفاً) — ويُصغَّر في الأرضيات الصناعية "
+                         "لأن ضابطاً لا يستدعي الأمرَ الحقيقيّ ليس ضابطاً (review-33 §٦/١)")
     ap.add_argument("--census", type=int, choices=CENSUS_CANDIDATES, default=None,
                     help="حجمُ الإحصاء (والافتراضُ: تُقاس الثلاثة)")
     ap.add_argument("--capture-mode", choices=("strict", "explicit-list"), default=None,
