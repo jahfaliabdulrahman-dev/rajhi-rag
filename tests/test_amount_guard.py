@@ -47,3 +47,17 @@ def test_the_committed_manifest_is_present_and_substantial():
 def test_the_repository_itself_carries_no_real_amount_in_tracked_text():
     hits = ag.scan()
     assert hits == [], f"مبالغُ حقيقيةٌ في ملفّاتٍ مُتتبَّعة: {hits[:5]}"
+
+
+def test_tracked_binaries_under_data_must_be_declared():
+    """الصنفُ الذي لا يراه الحارسُ النصّيّ: مسحٌ ضوئيٌّ مدفوع. الإعلانُ يجعل التتبّعَ قراراً معلناً."""
+    assert ag.DECLARED_BINARIES.exists(), "ملفُّ الإعلان غائب ⇒ لا يعرف أحدٌ لماذا هذا الثنائيُّ مدفوع"
+    assert ag.undeclared_binaries() == [], "ثنائيٌّ مدفوعٌ بلا إعلانٍ بسبب"
+
+
+def test_the_declared_binary_is_the_synthetic_sample_only():
+    import subprocess as sp
+    tracked = sp.run(["git", "ls-files"], cwd=str(ag.PROJ), capture_output=True, text=True).stdout.split()
+    bins = [f for f in tracked if f.startswith(("data/", "digital/"))
+            and f.rsplit(".", 1)[-1].lower() in {"pdf", "png", "jpg", "jpeg", "tif", "tiff"}]
+    assert bins == ["data/sample/statement_sample.pdf"], f"ثنائياتٌ مدفوعةٌ غيرُ متوقَّعة: {bins}"

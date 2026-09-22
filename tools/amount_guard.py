@@ -28,6 +28,8 @@ from pathlib import Path
 
 PROJ = Path(__file__).resolve().parents[1]
 MANIFEST = PROJ / "docs" / "security" / "amount-denylist.json"
+DECLARED_BINARIES = PROJ / "docs" / "security" / "tracked-binaries.txt"
+BINARY_DIRS = ("data/", "digital/")
 SALT = b"rajhi-rag/amount-guard/v1"
 _AR = "0-9\u0660-\u0669\u06f0-\u06f9"
 TOKEN = re.compile(rf"-?[{_AR}][{_AR},٬\u060c٫]*(?:\.[{_AR}]{{1,2}})?")
@@ -115,6 +117,26 @@ def find_in_text(txt: str, deny: set[str]) -> list[tuple[str, str]]:
     return out
 
 
+def undeclared_binaries() -> list[str]:
+    """**الصنفُ الثاني:** ملفٌّ ثنائيٌّ مدفوعٌ تحت `data/` أو `digital/` بلا إعلان.
+
+    القاعدةُ الأولى تحرس **النصّ**؛ وهذه تحرس ما لا يُقرأ كنصّ: مسحٌ ضوئيّ (PDF/PNG) لم يكشفه
+    الحارسُ النصّيُّ لأنّه يتخطّى الثنائيات. ولذلك وُضعت هذه القاعدةُ: لا يُتتبَّع ثنائيٌّ حسّاسٌ
+    إلا بإعلانٍ مكتوبٍ في `docs/security/tracked-binaries.txt` **مع سببٍ** — فيصير التتبّعُ قراراً
+    معلناً لا سهواً. (قِيست مرّةً واحدة على الملفّ الوحيد المدفوع: ترويسةُ المستند نفسُه
+    «كشف حساب بنكي - تجريبي (بيانات اصطناعية)» ⇒ صناعيّ، لكنّ **الإعلانَ** هو ما يجعل ذلك قابلاً للتدقيق.)
+    """
+    declared = set()
+    if DECLARED_BINARIES.exists():
+        for line in DECLARED_BINARIES.read_text(encoding="utf-8").splitlines():
+            line = line.split("#", 1)[0].strip()
+            if line:
+                declared.add(line)
+    out_ = subprocess.run(["git", "ls-files"], cwd=str(PROJ), capture_output=True, text=True).stdout
+    return [f for f in out_.split()
+            if f.startswith(BINARY_DIRS) and Path(f).suffix.lower() in BINARY and f not in declared]
+
+
 def load_deny() -> set[str]:
     if not MANIFEST.exists():
         print("⛔ لا مانيفست — ابنِه بـ`--build` (وإلا فالحارسُ لا يعرف ما يحرس)", file=sys.stderr)
@@ -159,6 +181,12 @@ def main(argv=None) -> int:
             else:
                 target.write_text(backup, encoding="utf-8")
     hits = scan()
+    undeclared = undeclared_binaries()
+    if undeclared:
+        print("⛔ BLOCK — ثنائيٌّ مدفوعٌ تحت data/ أو digital/ بلا إعلان (أعلِنه بسببٍ في docs/security/tracked-binaries.txt):")
+        for f in undeclared[:10]:
+            print(f"   {f}")
+        return 1
     if hits:
         print("⛔ BLOCK — مبالغُ حقيقيةٌ في ملفّاتٍ مُتتبَّعة (يُطهَّر بمبالغَ صناعية، والدليلُ يبقى في data/):")
         for fn, raw, norm in hits[:25]:
