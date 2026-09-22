@@ -146,7 +146,7 @@
 - HBR: Performing a Project Premortem — hbr.org/2007/09/performing-a-project-premortem
 - CIA: A Tradecraft Primer (2009) — cia.gov/resources/csi/static/Tradecraft-Primer-apr09.pdf
 - Mitchell/Russo/Pennington (1989) — Journal of Behavioral Decision Making
-- OSHA PSM — أسلوب PHA المعتمد: What-If ضمن OSHA 1910.119
+- OSHA PSM — أسلوب PHA المعتمد: What-If ضمن OSHA 9016.999
 - SWIFT — ASEMS Toolkit / PubMed 22528401
 - HAZOP — IEC 61882 / ويكيبيديا: Hazard and operability study
 - Red Team Handbook — home.army.mil/wood/6115/8222/0759/RedTeamHB.pdf
