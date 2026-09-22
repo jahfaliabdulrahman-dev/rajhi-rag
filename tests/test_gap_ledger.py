@@ -33,9 +33,9 @@ def _facts(page, printed, own, first, last, missing=()) -> PageFacts:
 
 def test_a_gap_entry_is_measured_from_the_footer_and_witnessed_by_the_balance():
     facts = [
-        _facts(426, {"debits": "9001.00", "credits": "9001.00"}, {"debits": "0", "credits": "0"},
+        _facts(426, {"debits": "218998.15", "credits": "647041.04"}, {"debits": "0", "credits": "0"},
                "392.40", "392.40"),
-        _facts(427, {"debits": "9001.00", "credits": "9001.00"}, {"debits": "120.22", "credits": "130.00"},
+        _facts(427, {"debits": "323267.17", "credits": "189784.39"}, {"debits": "120.22", "credits": "130.00"},
                "9001.00", "9001.00", missing=(426, 427)),
     ]
     entry = build_gap_entries(facts)[0]

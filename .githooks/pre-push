@@ -18,3 +18,4 @@ fi
 "$PY" tools/static_gate.py || exit 1
 
 exec python3 tools/publish_guard.py --pre-push
+exec python3 tools/amount_guard.py --pre-push

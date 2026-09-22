@@ -49,7 +49,7 @@ def test_check_ok_exact():
 
 def test_check_cumulative_semantics():
     """Footer debits/credits are CUMULATIVE-to-date (verified on the real
-    sample: p2 footer 9001.00/9001.00 = p1 650/750 + p2's own 464/600)."""
+    sample: p2 footer 6363.98/5072.62 = p1 650/750 + p2's own 464/600)."""
     prior = {"debits": Decimal("650"), "credits": Decimal("750")}
     rows = [
         {"kind": "txn", "opening": False, "balance": Decimal("236"),

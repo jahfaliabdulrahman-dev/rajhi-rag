@@ -13,7 +13,7 @@ evidence:
   - `.venv/bin/python tools/publish_guard.py` → آمن للدفع (0 BLOCK)
   - `.venv/bin/python tools/to_xlsx.py --run …slice_629p --out …export-629p.xlsx` ثم
     `.venv/bin/python tools/verify_close.py --run … --xlsx …` → `RESULT: ALL PASS ✓`
-  - قراءة الملف المُسلَّم: 5,811 صفّاً · 5,791 حركة · Σمدين 9001.00 · Σدائن 9001.00
+  - قراءة الملف المُسلَّم: 5,811 صفّاً · 5,791 حركة · Σمدين 594,683.32 · Σدائن 382,772.74
   - `git rev-parse HEAD origin/main` → 50ff10f = 50ff10f
   - worktree + `bash tools/link_local_data.sh .` ثم pytest → 335 passed · 0 skipped (المتوقّع 0 تخطّي ✓)
   - **مستنسخ نظيف (محلي) ومستنسخ نظيف (من origin):** `1 failed, 331 passed, 3 skipped` — مرّتين
@@ -48,7 +48,7 @@ next:    حكمك على **(أ)** العيبين، **(ب)** خطة البند ٤
 | الحارس الثابت | `tools/static_gate.py` | `PASS` | PASS | ✅ مطابق |
 | حارس النشر | `tools/publish_guard.py` | `آمن للدفع` (0 BLOCK) | 0 BLOCK | ✅ مطابق |
 | بوابة الإقفال | `to_xlsx` ⇒ `verify_close` | **`RESULT: ALL PASS ✓`** | — | مُثبت |
-| الثوابت | قراءة ورقة `الحركات` | 5,811 · 5,791 · 9001.00 · 9001.00 | نفسها | ✅ مطابق |
+| الثوابت | قراءة ورقة `الحركات` | 5,811 · 5,791 · 594,683.32 · 382,772.74 | نفسها | ✅ مطابق |
 | الفرع | `git rev-parse HEAD origin/main` | 50ff10f = 50ff10f | — | مُثبت |
 | عادة الـworktree | worktree ⇒ `link_local_data.sh .` ⇒ pytest | **335 · 0 تخطّي** | «المتوقّع 0 تخطّي» | ✅ مطابق |
 | **المستنسخ النظيف** | clone ⇒ pytest (مرّتين) | **1 failed · 331 passed · 3 skipped** | «332 · 3 · **0 فشل**» | ❌ **فرق** |
