@@ -20,7 +20,7 @@ from tools.oracle_confirm import (  # noqa: E402
     assert_not_published, compare_footers, rule_of_three, wilson,
 )
 
-PARSED = {"debits": "7754.00", "credits": "13400.00", "balance": "5646.00"}
+PARSED = {"debits": "9944.20", "credits": "85575.74", "balance": "8750.30"}
 
 
 def test_three_printed_cells_matching_are_counted_and_named():
@@ -34,7 +34,7 @@ def test_a_single_field_difference_is_named_not_swallowed():
     got = compare_footers(PARSED, oracle)
     assert got["differ"] == ["balance"] and got["verdict"] == "مختلف" and got["agree"] == 2
     cell = [c for c in got["cells"] if c["field"] == "balance"][0]
-    assert cell["ours"] == "5646.00" and cell["oracle"] == "5647.00"
+    assert cell["ours"] == "8750.30" and cell["oracle"] == "5647.00"
 
 
 def test_an_unreadable_field_is_neither_agreement_nor_difference():
@@ -52,7 +52,7 @@ def test_an_absent_printed_footer_is_declared_absent_not_matched():
 
 def test_arabic_printed_digits_compare_equal_to_latin_parsed_ones():
     """الرقمُ المطبوع عربيٌّ والمقروءُ لدينا لاتينيّ — والمقارنةُ بالأرقام لا بالحروف."""
-    arabic = {"debits": "٧٧٥٤٫٠٠", "credits": "١٣٤٠٠٫٠٠", "balance": "٥٦٤٦٫٠٠"}
+    arabic = {"debits": "٩٩٤٤٫٢٠", "credits": "٨٥٥٧٥٫٧٤", "balance": "٨٧٥٠٫٣٠"}
     got = compare_footers(PARSED, arabic)
     assert got["verdict"] == "مطابق" and got["agree"] == 3
 

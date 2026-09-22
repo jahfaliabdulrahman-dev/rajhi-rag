@@ -418,7 +418,7 @@ def summary_facts(rows: list[dict], report: dict, per_page: dict,
     last_ok = max(ok_pages, key=lambda e: e["page"]) if ok_pages else None
 
     # الإجماليات المطبوعة **تراكمية من بداية الكشف** (قِيست على الصفحات: ص190
-    # مدين 433794.02 وفرقه عن الدائن = الرصيد 24.39؛ ص628 892646.90/893217.49
+    # مدين 632412.24 وفرقه عن الدائن = الرصيد 24.39؛ ص628 594683.32/382772.74
     # وفرقه 570.59 = الرصيد) ⇒ **جمعها عبر الصفحات بلا معنى**، وهو خطأ وقع في
     # نسخة سابقة من هذا الملف. الرقم الصحيح: قيم آخر صفحة مطابقة (إجمالي الكشف).
     printed_debits = printed_credits = last_balance = None
@@ -443,7 +443,7 @@ def summary_facts(rows: list[dict], report: dict, per_page: dict,
 
     # الترتيب على **الحركات المثبتة بالسلسلة** فقط: الصفوف التي لا حركة فيها
     # (سطر إجماليات قرأه القارئ صفّاً — وقع فعلاً في ص190) كانت تتصدّر الترتيب
-    # بـ433,794.02 وهو رقم ليس حركة.
+    # بـ632,412.24 وهو رقم ليس حركة.
     ranked = [(abs(Decimal(str(r["derived_movement"]))), r) for r in rows
               if r["row_state"] == "حركة مثبتة بالسلسلة"
               and _num(r["derived_movement"]) not in (None, 0)]

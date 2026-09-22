@@ -108,7 +108,7 @@ def compare_footers(parsed: dict, oracle: dict) -> dict:
             verdict = "مختلف"
             differs.append(f)
         # ويُحفظ **المطبوعُ كما طُبع** لا كما صار Decimalاً: الشهادةُ يشهد بها نصُّها،
-        # و«5646.0» بدل «5646.00» تغييرٌ لا يلزم — والقيمةُ المُطبَّعةُ في حقلٍ مستقلّ.
+        # و«5646.0» بدل «8750.30» تغييرٌ لا يلزم — والقيمةُ المُطبَّعةُ في حقلٍ مستقلّ.
         cells.append({"field": f, "ours": raw_mine, "oracle": raw_theirs,
                       "ours_value": str(mine) if mine is not None else None,
                       "oracle_value": str(theirs) if theirs is not None else None,

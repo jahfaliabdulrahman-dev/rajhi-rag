@@ -104,9 +104,9 @@ def test_cache_write_is_atomic(tmp_path):
 def _page_with_mismatch(tmp_path: Path) -> Path:
     (tmp_path / "pg-491.json").write_text(json.dumps({
         "pg": 491,
-        "footer": {"debits": "690050.88", "credits": "690058.72",
+        "footer": {"debits": "826432.71", "credits": "868353.27",
                    "balance": "7.84",
-                   "raw": {"debits": "٦٩٠,٠٥٠.٨٨",
+                   "raw": {"debits": "٨٢٦٤٣٢٫٧١",
                            "credits": "٦٩٠,١٥٨.٧٢",
                            "balance": "٧.٨٤"}}}), encoding="utf-8")
     return tmp_path
@@ -119,13 +119,13 @@ def test_unmarked_mismatch_is_a_violation(tmp_path):
 
 def test_arbitration_marks_the_value_and_keeps_the_original(tmp_path):
     res_dir = _page_with_mismatch(tmp_path)
-    af.arbitrate(res_dir, 491, "credits", "690058.72",
+    af.arbitrate(res_dir, 491, "credits", "868353.27",
                  "خطأ قراءة في رقم واحد", "المالك", "suspects_log")
     after = vp.audit(res_dir)
     assert after["unmarked"] == [] and len(after["arbitrated"]) == 1
     data = json.loads((res_dir / "pg-491.json").read_text(encoding="utf-8"))
     f = data["footer"]
-    assert f["credits"] == "690058.72"                    # the decided value
+    assert f["credits"] == "868353.27"                    # the decided value
     assert f["raw"]["credits"] == "٦٩٠,١٥٨.٧٢"            # evidence untouched
     assert f["raw_original"]["credits"] == "٦٩٠,١٥٨.٧٢"
     rec = data["arbitrated_by"][0]
@@ -137,7 +137,7 @@ def test_arbitration_marks_the_value_and_keeps_the_original(tmp_path):
 def test_arbitration_requires_a_written_reason(tmp_path):
     res_dir = _page_with_mismatch(tmp_path)
     try:
-        af.arbitrate(res_dir, 491, "credits", "690058.72", "   ", "المالك")
+        af.arbitrate(res_dir, 491, "credits", "868353.27", "   ", "المالك")
     except ValueError as exc:
         assert "سبب" in str(exc)
     else:                                                  # pragma: no cover

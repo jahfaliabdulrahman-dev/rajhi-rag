@@ -17,7 +17,7 @@ it, and the re-derivation works for anyone again. High-uncertainty, low-volume
 cases only — never a way to edit a number quietly.
 
     python3 tools/arbitrate_footer.py --results <dir> --page 491 \\
-        --field credits --value 690058.72 \\
+        --field credits --value 868353.27 \\
         --why "أثر 100.00 في خانة واحدة — رصده المالك بعينه" \\
         --by "المالك + قراءة إطار طازجة" --evidence docs/suspects_log.md
 
