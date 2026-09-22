@@ -577,6 +577,15 @@ def _local_heads(refs: str) -> list[str]:
     return out
 
 
+def _range_from_git() -> list[str] | None:
+    """**مدى الدفع بلا stdin:** `HEAD --not --remotes` = ما لم يُنشر بعدُ.
+    ويُسقط مُغلَقاً (None) إن فشل `rev-list` نفسه."""
+    r = _git("rev-list", "HEAD", "--not", "--remotes")
+    if r.returncode != 0:
+        return None
+    return sorted(r.stdout.split())
+
+
 def pushed_counts(deny: set[str], revs: list[str]) -> dict[str, dict]:
     """**كلُّ blob يُدفع** (لا الشجرةُ العاملة): أحدثَ ظهورٍ لكلّ مسار داخل المدى.
 
@@ -857,15 +866,24 @@ def main(argv=None) -> int:
         return 0
     if args.pre_push:
         refs = sys.stdin.read()
+        if not refs.strip():
+            # **المرجعُ البديل (قِيس حيًّا):** stdin يصل فارغاً في مسارِ دفعٍ حقيقيّ ⇒
+            # الاشتقاقُ من الحالة لا من الافتراض: ما لم يعرفه الريموتُ بعدُ هو ما سيُنشر.
+            revs = _range_from_git()
+            if revs is None:
+                print("⛔ BLOCK — لا مراجعَ ولا حالةَ git أشتقّ منها المدى ⇒ لا أُثبت شيئاً")
+                return 2
+            print(f"⚠ stdin فارغٌ: اشتُقّ المدى من الحالة ({len(revs)} التزاماً لم يعرفها الريموت)"
+                  " — يُعلن ولا يُخفي")
+            refs = ""
         try:
-            revs = pushed_revs(refs)
+            revs = revs if not refs else pushed_revs(refs)
         except UnresolvedRange as e:
             print(f"⛔ BLOCK — لم أُثبت نظافةَ المدى ⇒ لا أمرّ (ثغرةُ ٣٩ رقم ٢): {e}")
             print("   ⇒ `git fetch origin` ثم أعِد الدفع: مدىً غيرُ محلولٍ ليس مدىً نظيفاً.")
             return 2
         if not revs:
-            print("⛔ BLOCK — لا مراجعَ مدفوعة على stdin ⇒ لا شيءَ أُثبته "
-                  "(ولا يُقال PASS على لا شيء)")
+            print("⛔ BLOCK — المدى فارغٌ ⇒ لا شيءَ أُثبته (ولا يُقال PASS على لا شيء)")
             return 2
         counts = pushed_counts(deny, revs)
         base = baseline_at("origin/main") or read_baseline()

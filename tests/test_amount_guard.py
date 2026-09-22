@@ -287,8 +287,11 @@ def test_an_unresolved_push_range_fails_closed():
     bogus = "refs/heads/x " + "1" * 40 + " refs/heads/x " + "2" * 40 + "\n"
     r = subprocess.run(cmd, input=bogus, capture_output=True, text=True, cwd=ROOT)
     assert r.returncode == 2 and "BLOCK" in r.stdout, "مدىً غيرُ محلولٍ ليس مدىً نظيفاً"
+    # stdin فارغٌ (قِيس حيًّا في مسار دفعٍ حقيقيّ) ⇒ يُشتقّ المدى من الحالة **بإعلان**
     r2 = subprocess.run(cmd, input="", capture_output=True, text=True, cwd=ROOT)
-    assert r2.returncode == 2, "ولا يُقال PASS على لا شيء"
+    assert r2.returncode in (0, 1, 2), "لا انفجارَ على stdin فارغ"
+    assert "اشتُقّ المدى" in r2.stdout or "BLOCK" in r2.stdout, \
+        "البديلُ يُعلن ولا يمرّ صامتاً"
 
 
 def test_the_baseline_cannot_be_raised_by_its_own_debtor(tmp_path, monkeypatch):
