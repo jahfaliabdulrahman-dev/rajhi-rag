@@ -52,3 +52,6 @@ jobs:
             echo "::error::real statement files tracked under data/local_sample/"; exit 1
           fi
           echo "no real-data files tracked — OK"
+
+      - name: Amount-guard — the key/manifest must not be tracked (no secret needed)
+        run: python3 tools/amount_guard.py --tracking-audit
