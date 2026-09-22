@@ -107,37 +107,88 @@ def declared_set(path: Path) -> set[str]:
     return out
 
 
-def source_amounts() -> tuple[set[str], int, int]:
-    """المصدرُ الحقيقيّ: `raw_rows` بكلّ حقولها الماليّة + التذييل (بصيغتَيه) + الشهادة."""
+NON_SOURCE = {
+    "data/eval_pack/amount_redaction_map.json",   # خريطةُ التطهير: عمودُها الأيمنُ صناعيّ بالبناء
+    "data/.amount-guard-key",
+}
+
+
+def _walk_amounts(obj, out: set[str]) -> None:
+    """**لا نُعدّ المفاتيح — نمشي في الأثر.** الجذرُ الذي أسقط الإصدارَ الأول أنّ الاشتقاقَ
+    عرف مفتاحاً (`rows`) غيرَ الذي يحمله الكوربوس (`raw_rows`) ⇒ دار صفرَ مرّة وصار المانيفستُ
+    ناقصاً يُعطي `PASS` كاذباً. والمشيُ في القيمة لا يعرف مفاتيحَ ⇒ لا يُخطئ في مفتاح."""
+    if isinstance(obj, str):
+        if is_amount_shaped(obj):
+            out.add(normalize(obj))
+    elif isinstance(obj, (int, float)) and not isinstance(obj, bool):
+        s = f"{obj}"
+        if is_amount_shaped(s):
+            out.add(normalize(s))
+    elif isinstance(obj, list):
+        for x in obj:
+            _walk_amounts(x, out)
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            _walk_amounts(v, out)
+
+
+def source_amounts() -> tuple[set[str], int, int, dict[str, int]]:
+    """المصدرُ = **اتّحادُ كلّ أثرٍ بياناتيّ محليّ** (والأدلّةُ محفوظةٌ في `data/`).
+
+    وتُقاس التغطية: كلُّ أثرٍ محليٍّ يجب أن تكون مبالغُه **داخل** المانيفست ⇒ فلا يبقى مفتاحٌ
+    مفقودٌ ولا أثرٌ خارجَ الحراسة. (بهذا يُجاب سؤال «هل `raw_rows` آخرُ مفتاح؟» بلا تعداد مفاتيح.)
+    """
     got: set[str] = set()
     files = 0
-    for fp in sorted(PROJ.glob("data/local_sample/*/results/pg-*.json")):
+    per: dict[str, int] = {}
+    for f in sorted(PROJ.glob("data/**/*")):
+        if not f.is_file() or f.suffix.lower() not in {".json", ".jsonl"}:
+            continue
+        rel = str(f.relative_to(PROJ))
+        if rel in NON_SOURCE:
+            continue
+        before = len(got)
+        try:
+            if f.suffix.lower() == ".jsonl":
+                for line in f.read_text(encoding="utf-8").splitlines():
+                    if line.strip():
+                        _walk_amounts(json.loads(line), got)
+            else:
+                _walk_amounts(json.loads(f.read_text(encoding="utf-8")), got)
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            continue
         files += 1
-        d = json.loads(fp.read_text(encoding="utf-8"))
-        for row in (d.get("raw_rows") or []):
-            if isinstance(row, dict):
-                for k, v in row.items():
-                    if v not in (None, "") and is_amount_shaped(v):
-                        got.add(normalize(v))
-        for k, v in (d.get("footer") or {}).items():
-            if k == "raw" and isinstance(v, dict):
-                for vv in v.values():
-                    if vv not in (None, "") and is_amount_shaped(vv):
-                        got.add(normalize(vv))
-            elif isinstance(v, str) and v.strip() and is_amount_shaped(v):
-                got.add(normalize(v))
-    cert = PROJ / "data/eval_pack/oracle-confirmation-629p.json"
-    if cert.exists():
-        for r in json.loads(cert.read_text(encoding="utf-8")).get("pages", []):
-            for c in r.get("cells", []):
-                for k in ("ours", "oracle"):
-                    if c.get(k) and is_amount_shaped(str(c[k])):
-                        got.add(normalize(str(c[k])))
-    return got, files, len(got)
+        per[rel] = len(got) - before
+    return got, files, len(got), per
+
+
+def coverage_gaps(deny: set[str]) -> list[tuple[str, str]]:
+    """**حارسُ التغطية:** أيُّ مبلغٍ في أثرٍ محليٍّ ليس في المانيفست = ثقبٌ في الاشتقاق."""
+    gaps: list[tuple[str, str]] = []
+    for f in sorted(PROJ.glob("data/**/*")):
+        if not f.is_file() or f.suffix.lower() not in {".json", ".jsonl"}:
+            continue
+        rel = str(f.relative_to(PROJ))
+        if rel in NON_SOURCE:
+            continue
+        vals: set[str] = set()
+        try:
+            if f.suffix.lower() == ".jsonl":
+                for line in f.read_text(encoding="utf-8").splitlines():
+                    if line.strip():
+                        _walk_amounts(json.loads(line), vals)
+            else:
+                _walk_amounts(json.loads(f.read_text(encoding="utf-8")), vals)
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            continue
+        for v in vals:
+            if is_significant(v) and fingerprint(v) not in deny:
+                gaps.append((rel, v))
+    return gaps
 
 
 def build(_extra: list[str]) -> int:
-    src, files, total = source_amounts()
+    src, files, total, per = source_amounts()
     synth = declared_set(SYNTHETIC)
     significant = {a for a in src if is_significant(a)}
     ex_trivial = total - len(significant)
@@ -146,7 +197,8 @@ def build(_extra: list[str]) -> int:
     if entered | (significant & synth) != significant or entered & synth:
         raise SystemExit("⛔ اشتقاقٌ غيرُ مُغلق: التصنيفُ لا يُجمَع")
     derivation = {
-        "page_files": files, "source_shape_ok": total, "entered": len(entered),
+        "artifact_files": files, "source_shape_ok": total, "entered": len(entered),
+        "top_artifacts": dict(sorted(per.items(), key=lambda x: -x[1])[:6]),
         "excluded_trivial": ex_trivial, "excluded_synthetic": ex_synth,
         "rule": "significant = ≥4 خاناتٍ صحيحة وكسرٌ غيرُ صفريّ التمييز؛ والسالبُ ما أُعلن صناعيّاً",
     }
@@ -160,7 +212,14 @@ def build(_extra: list[str]) -> int:
         "keyed": True, "count": len(entered), "derivation": derivation,
         "fingerprints": sorted({fingerprint(a) for a in entered}),
     }, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    print(f"المانيفست: {len(entered)} بصمةً · الاشتقاق: {total} = {len(entered)} + {ex_trivial} تافهة + {ex_synth} صناعية · {files} ملفَّ صفحة")
+    print(f"المانيفست: {len(entered)} بصمةً · الاشتقاق: {total} = {len(entered)} + {ex_trivial} تافهة + {ex_synth} صناعية · {files} أثراً")
+    gaps = coverage_gaps({fingerprint(a) for a in entered})
+    if gaps:
+        print(f"⛔ فجوةُ تغطية: {len(gaps)} مبلغاً في أثرٍ محليٍّ خارجَ المانيفست ⇒ الاشتقاقُ ناقص:")
+        for rel, v in gaps[:8]:
+            print(f"   {rel} ← {v}")
+        return 1
+    print("تغطية ✓ — كلُّ مبلغٍ في آثار data/ داخلَ المانيفست (لا مفتاحَ مفقود)")
     return 0
 
 
@@ -208,7 +267,7 @@ def scan() -> list[tuple[str, str, str]]:
 
 def proof_inject() -> int:
     """**برهانُ السقوط بسُمٍّ من المصدر لا من المانيفست** — ويخرج بغير الصفر عند العمى."""
-    src, _, _ = source_amounts()
+    src, _, _, _ = source_amounts()
     sig = sorted({a for a in src if is_significant(a)})
     if not sig:
         print("⛔ لا مصدرَ محليّ ⇒ تعذّر البرهان (لا أُعلن نجاحاً بلا سمّ)", file=sys.stderr)
