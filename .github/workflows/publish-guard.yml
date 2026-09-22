@@ -22,10 +22,10 @@ jobs:
           fetch-depth: 0   # full history for the forensic scan
       - name: PII / real-data guard (tree + history + commit messages)
         run: python3 tools/publish_guard.py --tree --history --ci
-      - name: Real-amount guard (keyed fingerprints; tracked + untracked; Arabic/Persian too)
+      - name: Real-amount guard — a public surface without the manifest (declares what it checked)
         env:
           AMOUNT_GUARD_KEY: ${{ secrets.AMOUNT_GUARD_KEY }}
-        run: python3 tools/amount_guard.py
+        run: python3 tools/amount_guard.py --ci
       # Static gate: undefined names / dead bindings. Pinned engine so the
       # verdict cannot drift with a version bump; a dev tool, never a runtime
       # dependency.
@@ -48,10 +48,13 @@ jobs:
                            tests/test_gate_bites.py -q
       - name: Real-data files must never be tracked
         run: |
-          if git ls-files | grep -q '^data/local_sample/'; then
-            echo "::error::real statement files tracked under data/local_sample/"; exit 1
+          bad=$(git ls-files | grep -E '^data/(local_sample|training|eval_pack)/' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::real-data files tracked (local_sample/training/eval_pack):"
+            echo "$bad"
+            exit 1
           fi
-          echo "no real-data files tracked — OK"
+          echo "no real-data files tracked under local_sample/training/eval_pack — OK"
 
       - name: Amount-guard — the key/manifest must not be tracked (no secret needed)
         run: python3 tools/amount_guard.py --tracking-audit

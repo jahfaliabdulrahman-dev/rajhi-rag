@@ -1,0 +1,18 @@
+{
+ "what": "خطُّ أساسِ الظهورات — **أعدادٌ فقط**: لا قيمةَ ولا بصمةَ مبلغٍ (فلا يُنشر ما يُجرَد)",
+ "how": "python3 tools/amount_guard.py --baseline-write   # يُخفَّض بالتصحيح لا بالمسح",
+ "rule": "لا يُعفى موضع (القاعدة ١٢) — الخطُّ مؤقّتٌ يُخفَّض بإعادة كتابة القيم، ولا يُرفع أبداً: أداةُ --build لا تلمسه",
+ "counts": {
+  "src/statement_qa/footer_oracle.py": 1,
+  "src/statement_qa/legacy/arabic_digit_parser.py": 4,
+  "src/statement_qa/qa_tools.py": 1,
+  "tests/test_chain.py": 9,
+  "tests/test_gap_ledger.py": 4,
+  "tests/test_parser.py": 9,
+  "tests/test_qa_tools.py": 9,
+  "tests/test_row_audit.py": 1,
+  "tests/test_safety.py": 2,
+  "tests/test_scope_gate.py": 1
+ },
+ "total": 41
+}

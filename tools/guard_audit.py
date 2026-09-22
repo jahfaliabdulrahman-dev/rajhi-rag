@@ -72,6 +72,18 @@ CASES: list[dict] = [
         "tests": ["tests/test_eval_pack.py::test_the_census_is_a_frozen_list_and_its_fingerprint_moves_with_it"],
         "why": "العطبُ المطارد: بصمةٌ ثابتة ⇒ القائمةُ تتحرّك والبصمةُ لا ⇒ «جمّد القائمة» يصير زينةً",
     },
+    {
+        "gate": "حارسُ المبالغ · المدى والكشف",
+        "file": "tools/amount_guard.py",
+        "old": "    return _decimal_printed(tok)",
+        "new": "    return False   # الحقن: يُفرغ المدى ⇒ لا يرى الحارسُ مبلغاً أبداً",
+        "tests": ["tests/test_amount_guard.py::test_no_location_is_exempt",
+                  "tests/test_amount_guard.py::test_scope_is_length_plus_a_decimal_never_the_roundness",
+                  "tests/test_amount_guard.py::test_the_repository_itself_carries_no_real_amount_in_tracked_text"],
+        "why": ("العطبُ الذي طارده المدقّق: مدىً يقبل الصيغةَ الحديثةَ وحدَها (فمرّت الفاصلةُ العتيقةُ "
+                "والإشارةُ المقلوبة). وحين يُفرَغ المدى يصير الفحصُ فارغاً في XPASS اختبارِ الدَّين ⇒ "
+                "`xfail(strict=True)` يقلبه سقوطاً"),
+    },
 ]
 
 

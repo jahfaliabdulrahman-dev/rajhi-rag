@@ -1,24 +1,31 @@
-"""حارسُ المبالغ — الإصدار الثاني: الاشتقاقُ نفسُه صار محروساً.
+"""حارسُ المبالغ — الإصدارُ الثالث: **الإنفاذُ نفسُه صار محروساً**.
 
-**ما كان مكسوراً في الإصدار الأول (أثبته المدقّق):** المانيفست كان يقرأ `d.get("rows")` —
-والكوربوس يخزّن الحركات في **`raw_rows`** ⇒ الحلقةُ دارت **صفرَ مرّة**، فدخل ١,٣٣٤ بصمةً من
-التذييلات وحدَها وبقي **٤,١٠٠ مبلغاً مصدريًّا خارجه** — ومرّت معها أرقامُ حركاتٍ حقيقية.
-والدرسُ (القاعدة العاشرة): **حارسٌ بقائمةِ منعٍ مُشتقّة، صحّتُه صحّةُ اشتقاقِها لا صحّةُ منطقِه.**
+**ما أسقطه المدقّق في الإصدار الثاني (مراجعة ٣٨)، وأثبتُّه بنفسي بالأمر قبل أن أكتب هنا:**
 
-**وما كان مكسوراً ثانياً:** الحقنُ كان يسحب سمَّه **من المانيفست** ⇒ يُثبت أنّ الآلية تعضّ،
-ولا يقول شيئاً عمّا لم يدخلها. الآن الحقنُ يسحب من **المصدر**، ويخرج **بغير الصفر** عند العمى:
-أداةُ برهانٍ تُعلن الفشلَ وتخرج بنجاحٍ ليست بوابة.
+1. **لا نقطةَ إنفاذ.** `--pre-push` كان «اسمًا مستعارًا للفحص» يمشي على **الشجرة العاملة** لا على
+   المدفوع (صفرُ قراءةٍ من `stdin`)، وبلا مانيفست صار يرجع `rc=0` (**فشلٌ مُغلَقٌ انقلب مفتوحاً**) ⇒
+   فالتزامان من الجولة نفسِها (`aa8b70c` · `376f2d1`) نشرا مبلغاً حقيقيًّا إلى `main` العامّ و CI أخضر.
+2. **بوابةٌ حمراءُ دائماً ليست بوابة.** كانت تسقط على ٣٩ ظهورًا قائمةً **لا علاقةَ لأيٍّ منها بالدفع**
+   ⇒ حافزٌ دائمٌ لتجاوزها (`--no-verify`). العلاجُ **سقاطة** (`docs/security/amount-baseline.json`):
+   عددٌ لكلّ ملفّ، بلا قيمٍ ولا بصمات ⇒ يسقط عند أيّ زيادةٍ أو ملفٍّ جديد، ويخضرّ فيما عداه.
+3. **المطابِقُ كان أعمى عن ترقيمَين يكتب بهما الكشف:** الفاصلةُ العشريّةُ العتيقة (`N,dd`) لأنّ
+   `normalize` كان يحذف كلَّ فاصلة، والإشارةُ لأنّ `canonical` كان يحتفظ بها. المقيس: الحقيقيُّ
+   **٤٢ لا ٣٩**، والقيمةُ صارت تُقرأ بـ`norm_num` **الموروث** لا بنسخةٍ ثانية (والقاعدةُ في
+   `vlm_reader._parse_amount`: *never re-implement; inherit*).
+4. **خريطةُ التطهير كانت بلا حارس:** `SCAN_SKIP` كان يُعفيها بالاسم، و`tracking_audit` لا يفحصها،
+   و`publish_guard` يمنع `data/local_sample/` وحدَه ⇒ `git add -f` كان يمرّ من الثلاثة.
 
-**وحدُّ الصدق (أشدُّ ممّا قلناه):** البصماتُ صارت **مُفتَّحةً بمفتاحٍ سِرّيّ** (`AMOUNT_GUARD_KEY`)
-⇒ البصمةُ المنشورة **لا تُجرَد** بغير المفتاح. وبلا المفتاح **يفشل الحارسُ مُغلَقاً** لا صامتاً.
-
-**والاشتقاقُ مُعلنُ الأرقام:** المانيفستُ يحمل `derivation`:
-`source_shape_ok = entered + excluded_trivial + excluded_synthetic` — ويُوقف البناءَ إن لم تُغلق.
+**وحدُّ الصدق:** البصماتُ **مُفتَّحةٌ بمفتاحٍ سِرّيّ** (`AMOUNT_GUARD_KEY`) ⇒ لا تُجرَد بغير المفتاح.
+**وغيابُ المانيفست فشلٌ مُغلَق** (لا يمرّ صامتاً) إلّا بعلَمٍ صريح `--ci` يعلن أنّ السطحَ العامَّ
+بلا أدلّةٍ **بالبناء** فيطبع ما فحصه وما لم يفحصه.
 
     export AMOUNT_GUARD_KEY=...        # أو ضعه في data/.amount-guard-key (مُهمَل)
-    python3 tools/amount_guard.py --build          # يشتقّ من الكوربوس ويُراجع الحساب
-    python3 tools/amount_guard.py                  # الفحص (مُتتبَّع + غيرُ متتبَّع)
-    python3 tools/amount_guard.py --inject         # يسحب السمَّ من المصدر ويثبت السقوط
+    python3 tools/amount_guard.py --build            # يشتقّ من الكوربوس ويُراجع الحساب
+    python3 tools/amount_guard.py                    # الفحص (مُتتبَّع + غيرُ متتبَّع)
+    python3 tools/amount_guard.py --ratchet           # السقاطة على الشجرة (ملفّاً ملفّاً)
+    python3 tools/amount_guard.py --baseline-write    # يكتب خطَّ الأساس (أعدادٌ فقط)
+    printf '%s\\n' "$REFS" | python3 tools/amount_guard.py --pre-push   # المدفوع نفسُه
+    python3 tools/amount_guard.py --inject            # برهانُ السقوط (سمٌّ من المصدر · سطحان)
 """
 from __future__ import annotations
 
@@ -28,16 +35,49 @@ import hmac
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
-from decimal import Decimal, InvalidOperation
+import tempfile
+from decimal import Decimal
 from pathlib import Path
 
-PROJ = Path(__file__).resolve().parents[1]
-MANIFEST = PROJ / "data" / "eval_pack" / "amount-manifest.json"   # **غيرُ منشور** (مُهمَل)
-DECLARED_BINARIES = PROJ / "docs" / "security" / "tracked-binaries.txt"
+ROOT = Path(os.environ.get("AMOUNT_GUARD_ROOT") or Path(__file__).resolve().parents[1])
+sys.path.insert(0, str(ROOT / "src"))
+
+
+def _data_root() -> Path:
+    """**جذرُ الأدلّة (`data/`)**: يُحلّ عبر `git --git-common-dir` فيراه **كلُّ worktree**.
+
+    كان الجذرُ = مكانَ الملفّ ⇒ الدفعُ من worktree (أو من نسخةِ مراجعة) لا يجد المانيفست
+    ⇒ `rc=0` صامتًا (وهذا بعينه ما سمح لدفعتين بنشر مبلغٍ حقيقيّ). **والشرطُ يُقاس على
+    المانيفست/المفتاح لا على وجود مجلّد `data/`**: نسخةُ العمل فيها `data/sample/` (فيّكسترةٌ
+    مُتتبَّعة) ⇒ فحصُ المجلّد وحده كان يوقف التحويل عندها ويُسقط الحارسَ مُغلَقاً بلا داع.
+    """
+    if _has_evidence(ROOT):
+        return ROOT
+    r = subprocess.run(["git", "rev-parse", "--git-common-dir"],
+                       cwd=str(ROOT), capture_output=True, text=True)
+    if r.returncode == 0:
+        gd = Path(r.stdout.strip())
+        gd = gd if gd.is_absolute() else (ROOT / gd)
+        if gd.name == ".git" and _has_evidence(gd.parent):
+            return gd.parent
+    return ROOT
+
+
+def _has_evidence(root: Path) -> bool:
+    return (root / "data" / "eval_pack" / "amount-manifest.json").exists() or \
+           (root / "data" / ".amount-guard-key").exists()
+
+
+DATA_ROOT = _data_root()
 KEY_ENV = "AMOUNT_GUARD_KEY"
-KEY_FILE = PROJ / "data" / ".amount-guard-key"
+MANIFEST = DATA_ROOT / "data" / "eval_pack" / "amount-manifest.json"   # **غيرُ منشور** (مُهمَل)
+KEY_FILE = DATA_ROOT / "data" / ".amount-guard-key"                    # **غيرُ منشور** (مُهمَل)
+REDACTION_MAP = DATA_ROOT / "data" / "eval_pack" / "amount_redaction_map.json"
+BASELINE = ROOT / "docs" / "security" / "amount-baseline.json"         # **منشور**: أعدادٌ فقط
+DECLARED_BINARIES = ROOT / "docs" / "security" / "tracked-binaries.txt"
 BINARY_DIRS = ("data/", "digital/")
 BINARY = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".zip", ".xlsx", ".docx"}
 
@@ -45,9 +85,19 @@ _DIGITS = {**{chr(0x0660 + i): str(i) for i in range(10)},
            **{chr(0x06F0 + i): str(i) for i in range(10)}}
 _AR = "0-9\u0660-\u0669\u06f0-\u06f9"
 TOKEN = re.compile(rf"-?[{_AR}][{_AR},٬\u060c٫]*(?:\.[{_AR}]{{1,2}})?")
+#: خاناتُ ما بعد الفاصلة الأخيرة. قاعدةُ الكوربوس (وهي قاعدةُ `norm_num` نفسُها):
+#: خانتان = عشريّة · ثلاثٌ = فاصلُ آلاف · أكثرُ من ثلاث = النقطةُ ضاعت · خانةٌ واحدة = عشريّةٌ ناقصة.
+FRACTION = re.compile(r"[.,](\d+)-?$")
+#: خانةٌ واحدةٌ بعد الفاصلة: تُعاد كتابتُها **بخانتين** فيقرأها المُحلِّل الموروث (لا مُحلِّلٌ ثانٍ).
+_ONE_DECIMAL = re.compile(rf"^(-?[{_AR}][{_AR},٬\u060c٫٫.]*[.,٫])([{_AR}])(-?)$")
 
-# مفتاحُ الحارس: بيئة ⇒ ملفٌّ مُهمَل ⇒ فشلٌ مُغلَق
+from statement_qa.legacy.arabic_digit_parser import norm_num   # noqa: E402  (الموروث: لا نسخةَ ثانية)
+
+
+# ═══════════════════════════ المفتاح ═══════════════════════════
+
 def load_key() -> bytes:
+    """مفتاحُ الحارس: بيئة ⇒ ملفٌّ مُهمَل ⇒ **فشلٌ مُغلَق** (لا يمرّ صامتاً)."""
     k = os.environ.get(KEY_ENV, "").strip()
     if not k and KEY_FILE.exists():
         k = KEY_FILE.read_text(encoding="utf-8").strip()
@@ -60,59 +110,103 @@ def load_key() -> bytes:
 
 
 def _shown(path: Path) -> str:
-    """**درسٌ تكرّر:** تنسيقُ مسارٍ قد يكون خارج المستودع ⇒ `relative_to` ترفع ValueError.
-    (وقعنا فيه في الطباعة، ثم في رسالة المفتاح ⇒ فالعطبُ صنفٌ لا حالة.)"""
-    try:
-        return str(path.relative_to(PROJ))
-    except ValueError:
-        return str(path)
+    """**درسٌ تكرّر:** تنسيقُ مسارٍ قد يكون خارج المستودع ⇒ `relative_to` ترفع ValueError."""
+    for base in (ROOT, DATA_ROOT):
+        try:
+            return str(path.relative_to(base))
+        except ValueError:
+            continue
+    return str(path)
 
+
+# ═══════════════════════ القيمةُ والبصمة (الموروث) ═══════════════════════
 
 def normalize(tok: str) -> str:
+    """تطبيعٌ **نصّيّ** (للقراءة والبناء الكلّيّ) — لا يُبنى عليه حكمُ مبلغ."""
     s = "".join(_DIGITS.get(c, c) for c in str(tok))
     return s.replace("٫", ".").replace("٬", "").replace("،", "").replace(",", "").strip()
 
 
-def canonical(amount: str) -> str:
-    """**الصيغةُ المرجعيّة** (للبصمة وحدها): تُلغي فروقَ الكتابة ⇒ `8642.0 ≡ 8642.00 ≡ 8,642.00`.
+def _pad_fraction(tok: str) -> str:
+    """`7777.0` ⇒ `7777.00` — إعادةُ كتابةٍ لا مُحلِّلٌ ثانٍ، والقراءةُ تبقى للموروث."""
+    m = _ONE_DECIMAL.match(str(tok))
+    return f"{m.group(1)}{m.group(2)}0{m.group(3)}" if m else str(tok)
 
-    **والنطاقُ يبقى نصّيًّا** (`normalize`): لأنّ **وجودَ الكسر** شرطُ المدى — وخلطُهما مرّةً
-    أفرغ الشرطَ صامتاً (عاد عطبُ مراجعة ٣٦ من بابٍ آخر: «البناءُ نفسه أمسكه»).
+
+def parsed_value(tok: str):
+    """قيمةُ الرقم **بالمُحلِّل الموروث** (`norm_num`) — وإعادةُ الكتابة عند الخانة الواحدة.
+
+    **وحدُّ المُحلِّل المعلن (قيس هنا ولم يكن معروفاً):** `norm_num` يرفع `ValueError` على أشكالٍ
+    مشوّهة (بترَ الأخيرتين فارغاً، مثل `,12345`) — والحارسُ **لا يسقط على بيانات**: يعدّها
+    «ليست مبلغاً» ويُعلن عدّها (والعطبُ في المُحلِّل المجمَّد، فيُعلن ولا يُصلح من هنا).
     """
-    s = normalize(amount)
-    if not re.fullmatch(r"-?\d+(?:\.\d+)?", s):
-        return s
-    try:
-        return f"{Decimal(s).normalize():f}"
-    except (InvalidOperation, ValueError):
-        return s
+    for cand in (tok, _pad_fraction(tok)):
+        try:
+            v = norm_num(cand)
+        except (ValueError, TypeError, IndexError):
+            _PARSER_ERRORS.add(str(tok))
+            return None
+        if v is not None:
+            return v
+    return None
+
+
+#: أشكالٌ رفع فيها المُحلِّلُ الموروث استثناءً — تُعلن بأعدادها ولا تُسقط الحارس
+_PARSER_ERRORS: set[str] = set()
+
+
+def canonical(amount: str) -> str:
+    """**الصيغةُ المرجعيّة للبصمة:** المقدارُ (بالإشارة المطلقة) بخانتين — والقيمةُ من `norm_num`.
+
+    **تصحيحُ مراجعة ٣٨ (وهو عطبٌ حاجب):** كان `canonical` يحتفظ بالإشارة ⇒ `X` و`-X` بصمتان،
+    وكان `normalize` يحذف الفاصلةَ العشريّةَ العتيقة فيقرأ `300,00` **٣٠٠٠٠** ⇒ المطابِقُ أعمى عن
+    ‎`N,dd` وعن الإشارة المقلوبة. **والقيمةُ تُقرأ الآن بالمُحلِّل الموروث** الذي يقرأ الفاصلتين
+    ويُعلن الشكّ (`None`) بدل أن يُخمّن — والمقيسُ بعد التصحيح: **٤٢ لا ٣٩**.
+    """
+    v = parsed_value(amount)
+    if v is None:
+        return normalize(amount)
+    return f"{abs(Decimal(str(v))):.2f}"
 
 
 def fingerprint(amount: str) -> str:
     return hmac.new(load_key(), canonical(amount).encode(), hashlib.sha256).hexdigest()[:32]
 
 
-def is_amount_shaped(tok: str) -> bool:
-    v = normalize(tok)
-    if not re.fullmatch(r"-?\d+(?:\.\d+)?", v):
-        return False
-    return len(v.lstrip("-").split(".")[0]) >= 4
+def _decimal_printed(tok: str) -> bool:
+    """هل كُتب الرقمُ **بكسرٍ عشريّ**؟ (عددُ خانات آخر مجموعة ≠ ٣ — فالثلاثُ فاصلُ آلاف).
 
-
-def is_significant(v: str) -> bool:   # noqa: D401
-    """**المدى: كلُّ مبلغٍ له ≥٤ خاناتٍ صحيحة — بلا شرطٍ على الكسر.**
-
-    **تصحيحٌ من مراجعة ٣٦ (وكان عطباً حاجباً):** كان المُصفّي يستثني الكسرَ الصفريّ
-    (`.00`) — و**الاستدارةُ صفةُ المبلغ لا دليلُ صناعيّته**؛ والمبالغُ المستديرة هي **أكثرُ
-    الحركات المصرفية شيوعاً** ⇒ كان **٢٤٦ مبلغاً مصدريًّا (٧.٩٪) خارج الحماية**، و**٣١ ظهوراً
-    في ١٩ ملفاً مُتتبَّعاً** — ومنها تفكيكُ مجاميع البنك الكلّية من ص٦٢٩.
-
-    القاعدةُ الصحيحة: **الطولُ يصنع المدى** (فالمبالغُ القصيرةُ تتصادم مع أيّ رقم في أيّ نصّ)
-    **والاستثناءُ يُعلَن لا يُخمَّن شكلُه** (`synthetic-amounts.txt`).
+    المُثبتُ مقيس: `300,00` و`543210.99` نعم · `1,234` (آلافٌ) لا · `61,16512` (نقطةٌ ضائعةٌ) نعم.
     """
-    v = normalize(v)
-    ip, _, fp = v.lstrip("-").partition(".")
-    return len(ip) >= 4 and bool(fp)   # الكسرُ يشترط وجودُه لا قيمتُه
+    s = "".join(_DIGITS.get(c, c) for c in str(tok)).replace("٫", ".")
+    m = FRACTION.search(s)
+    return bool(m) and len(m.group(1)) != 3
+
+
+def is_amount_shaped(tok: str) -> bool:
+    """**شكلٌ لا قراءة:** الرقمُ كاملٌ من أرقامٍ وفواصل — والقراءةُ للمُحلِّل بعد ذلك.
+
+    **عطبٌ أمسكتُه في هذه الجولة قبل أن يخرج:** أوّلُ صياغةٍ لهذا الشرط استدعت `norm_num` مباشرةً
+    ⇒ ومُحلِّلُ البطاقات **يحذف كلَّ ما ليس رقماً** (وهو صحيحٌ لخليّةٍ مقروءة) ⇒ فصار **كلُّ معرّفٍ
+    يحمل ٤ أرقام مبلغاً**: المصدرُ قفز من **11,028 إلى 27,309** قيمة. فالشكلُ يُفحَص نصّاً هنا،
+    والقيمةُ تُقرأ بالمُحلِّل بعده — **الاثنان معاً، وكلٌّ في موضعه.**
+    """
+    s = normalize(tok)
+    if not re.fullmatch(r"-?\d+(?:\.\d+)?", s):
+        return False
+    return len(s.lstrip("-").split(".")[0]) >= 4
+
+
+def is_significant(tok: str) -> bool:
+    """**المدى:** ≥٤ خاناتٍ صحيحة **+ كسرٌ عشريّ مقروء** — والقيمةُ يقرّرها `norm_num`.
+
+    (≥٤ خانات: المبالغُ القصيرةُ تتصادم مع أيّ رقم؛ والكسرُ: يفصل المبلغَ عن عدّادٍ أو سنة.
+    والاستدارةُ **ليست** شرطًا — القاعدة ١٦.)
+    """
+    v = parsed_value(tok)
+    if v is None or abs(v) < 1000:
+        return False
+    return _decimal_printed(tok)
 
 
 def declared_set(path: Path) -> set[str]:
@@ -126,16 +220,16 @@ def declared_set(path: Path) -> set[str]:
     return out
 
 
+# ═══════════════════════ الاشتقاقُ من المصدر ═══════════════════════
+
 NON_SOURCE = {
-    "data/eval_pack/amount_redaction_map.json",   # خريطةُ التطهير: عمودُها الأيمنُ صناعيّ بالبناء
+    "data/eval_pack/amount_redaction_map.json",   # خريطةُ التطهير: عمودُها الأيمنُ حقيقيٌّ بالبناء
     "data/.amount-guard-key",
 }
 
 
 def _walk_amounts(obj, out: set[str]) -> None:
-    """**لا نُعدّ المفاتيح — نمشي في الأثر.** الجذرُ الذي أسقط الإصدارَ الأول أنّ الاشتقاقَ
-    عرف مفتاحاً (`rows`) غيرَ الذي يحمله الكوربوس (`raw_rows`) ⇒ دار صفرَ مرّة وصار المانيفستُ
-    ناقصاً يُعطي `PASS` كاذباً. والمشيُ في القيمة لا يعرف مفاتيحَ ⇒ لا يُخطئ في مفتاح."""
+    """**لا نُعدّ المفاتيح — نمشي في الأثر** (الجذرُ الذي أسقط الإصدارَ الأوّل: مفتاحٌ مخمَّن)."""
     if isinstance(obj, str):
         if is_amount_shaped(obj):
             out.add(normalize(obj))
@@ -151,31 +245,42 @@ def _walk_amounts(obj, out: set[str]) -> None:
             _walk_amounts(v, out)
 
 
-def source_amounts() -> tuple[set[str], int, int, dict[str, int]]:
-    """المصدرُ = **اتّحادُ كلّ أثرٍ بياناتيّ محليّ** (والأدلّةُ محفوظةٌ في `data/`).
+def _artifacts(globs: tuple[str, ...] = ("data/**/*",)):
+    for pat in globs:
+        for f in sorted(ROOT.glob(pat)):
+            if not f.is_file() or f.suffix.lower() not in {".json", ".jsonl"}:
+                continue
+            rel = str(f.relative_to(ROOT))
+            if rel in NON_SOURCE:
+                continue
+            yield f, rel
 
-    وتُقاس التغطية: كلُّ أثرٍ محليٍّ يجب أن تكون مبالغُه **داخل** المانيفست ⇒ فلا يبقى مفتاحٌ
-    مفقودٌ ولا أثرٌ خارجَ الحراسة. (بهذا يُجاب سؤال «هل `raw_rows` آخرُ مفتاح؟» بلا تعداد مفاتيح.)
-    """
+
+def _artifact_values(path: Path) -> set[str]:
+    vals: set[str] = set()
+    try:
+        if path.suffix.lower() == ".jsonl":
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    _walk_amounts(json.loads(line), vals)
+        else:
+            _walk_amounts(json.loads(path.read_text(encoding="utf-8")), vals)
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+        pass
+    return vals
+
+
+def source_amounts() -> tuple[set[str], int, int, dict[str, int]]:
+    """المصدرُ = **اتّحادُ كلّ أثرٍ بياناتيّ محليّ** (والأدلّةُ محفوظةٌ في `data/`)."""
     got: set[str] = set()
     files = 0
     per: dict[str, int] = {}
-    for f in sorted(PROJ.glob("data/**/*")):
-        if not f.is_file() or f.suffix.lower() not in {".json", ".jsonl"}:
-            continue
-        rel = str(f.relative_to(PROJ))
-        if rel in NON_SOURCE:
+    for f, rel in _artifacts():
+        vals = _artifact_values(f)
+        if not vals:
             continue
         before = len(got)
-        try:
-            if f.suffix.lower() == ".jsonl":
-                for line in f.read_text(encoding="utf-8").splitlines():
-                    if line.strip():
-                        _walk_amounts(json.loads(line), got)
-            else:
-                _walk_amounts(json.loads(f.read_text(encoding="utf-8")), got)
-        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
-            continue
+        got |= vals
         files += 1
         per[rel] = len(got) - before
     return got, files, len(got), per
@@ -184,23 +289,8 @@ def source_amounts() -> tuple[set[str], int, int, dict[str, int]]:
 def coverage_gaps(deny: set[str]) -> list[tuple[str, str]]:
     """**حارسُ التغطية:** أيُّ مبلغٍ في أثرٍ محليٍّ ليس في المانيفست = ثقبٌ في الاشتقاق."""
     gaps: list[tuple[str, str]] = []
-    for f in sorted(PROJ.glob("data/**/*")):
-        if not f.is_file() or f.suffix.lower() not in {".json", ".jsonl"}:
-            continue
-        rel = str(f.relative_to(PROJ))
-        if rel in NON_SOURCE:
-            continue
-        vals: set[str] = set()
-        try:
-            if f.suffix.lower() == ".jsonl":
-                for line in f.read_text(encoding="utf-8").splitlines():
-                    if line.strip():
-                        _walk_amounts(json.loads(line), vals)
-            else:
-                _walk_amounts(json.loads(f.read_text(encoding="utf-8")), vals)
-        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
-            continue
-        for v in vals:
+    for f, rel in _artifacts():
+        for v in _artifact_values(f):
             if is_significant(v) and fingerprint(v) not in deny:
                 gaps.append((rel, v))
     return gaps
@@ -209,116 +299,232 @@ def coverage_gaps(deny: set[str]) -> list[tuple[str, str]]:
 def build(_extra: list[str]) -> int:
     src, files, total, per = source_amounts()
     significant = {a for a in src if is_significant(a)}
+    entered = significant
     ex_trivial = total - len(significant)   # قصيرةٌ/بلا كسر ⇒ خارجُ المدى بالبناء
     ex_synth = 0
-    entered = significant
-    # **إلغاءُ قائمة «الصناعيّ المُعلَن» (قياسٌ قضى عليها):** قيمُ المولّد التجريبيّ
-    # (`2105.13` · `8424.03` · `8236.36` · `53853.71`) **موجودةٌ فعلًا في الكشف الحقيقيّ**
-    # ⇒ فالإعلانُ عنها صناعيّةً كان **يُخرج مبالغَ حقيقيةٍ من الحماية**. والاستثناءُ بالمصدر
-    # لا بالاسم: كلُّ قيمةٍ ماليّةٍ في أثرٍ حقيقيٍّ تُحمى؛ وأمثلةُ المولّد تُطهَّر كغيرها.
     derivation = {
         "artifact_files": files, "source_shape_ok": total, "entered": len(entered),
         "top_artifacts": dict(sorted(per.items(), key=lambda x: -x[1])[:6]),
         "excluded_trivial": ex_trivial, "excluded_synthetic": ex_synth,
         "published": False,
-        "published_because": "البصماتُ لا تُنشر: فضاءُ المبلغ ~١٠⁸ ⇒ القاموسُ يستعيدها في دقائق",
-        "scope": "كلُّ قيمةٍ ماليّةٍ لها ≥٤ خاناتٍ صحيحة **وكسرٌ عشريّ** — والاستثناءُ بالإعلان أُلغيَ (ثبت أنّه يحمي مبالغَ حقيقية)",
-        "rule": "الاستدارةُ صفةُ المبلغ لا دليلُ صناعيّته (تصحيح مراجعة ٣٦)",
+        "published_because": "البصماتُ لا تُنشر: الجردُ يحتاج المفتاح، ونشرُها دفاعٌ في العمق لا ضرورة",
+        "scope": "≥٤ خاناتٍ صحيحة + كسرٌ عشريّ مقروء (فاصلةٌ عتيقةٌ أو نقطة) — والقيمةُ من norm_num",
+        "rule": "الاستدارةُ صفةُ المبلغ لا دليلُ صناعيّته (تصحيح مراجعة ٣٦) · المقدارُ لا الإشارة (٣٨)",
     }
     if total != len(entered) + ex_trivial + ex_synth:
         raise SystemExit(f"⛔ فجوةٌ غيرُ مُعلَنة: {total} ≠ {len(entered)}+{ex_trivial}+{ex_synth}"
                          " ⇒ البناءُ يسقط (لا يُنشر مانيفستٌ ناقص)")
+    fps = sorted({fingerprint(a) for a in entered})
+    # **بصمةُ المجموعة:** تُكشف تبديلَ قيمةٍ بأخرى (وهو ما لا يراه عدّادٌ يقارن الأعداد وحدها).
+    digest = hmac.new(load_key(), "\n".join(fps).encode(), hashlib.sha256).hexdigest()
     MANIFEST.parent.mkdir(parents=True, exist_ok=True)
     MANIFEST.write_text(json.dumps({
-        "what": "بصماتُ مبالغَ حقيقية — مُفتَّحةٌ بمفتاحٍ سِرّيّ (خارج الشجرة) ⇒ لا تُجرَد",
+        "what": "بصماتُ مبالغَ حقيقية — مُفتَّحةٌ بمفتاحٍ سِرّيّ (خارج الشجرة) ⇒ لا تُجرَد بلا مفتاح",
         "how": "AMOUNT_GUARD_KEY=… python3 tools/amount_guard.py --build",
-        "keyed": True, "count": len(entered), "derivation": derivation,
-        "fingerprints": sorted({fingerprint(a) for a in entered}),
+        "keyed": True,
+        "count": len(fps),                 # البصماتُ الفريدة (المقاسُ الحقيقيّ)
+        "source_formats": len(entered),    # صيغُ المصدر الداخلة (قد تتعدّد للقيمة الواحدة)
+        "set_digest": digest,
+        "derivation": derivation,
+        "fingerprints": fps,
     }, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    print(f"المانيفست: {len(entered)} بصمةً · الاشتقاق: {total} = {len(entered)} + {ex_trivial} تافهة + {ex_synth} صناعية · {files} أثراً")
+    print(f"المانيفست: {len(entered)} صيغةً ⇒ {len(fps)} بصمةً فريدة · "
+          f"الاشتقاق: {total} = {len(entered)} + {ex_trivial} تافهة + {ex_synth} صناعية · {files} أثراً")
     gaps = coverage_gaps({fingerprint(a) for a in entered})
     if gaps:
         print(f"⛔ فجوةُ تغطية: {len(gaps)} مبلغاً في أثرٍ محليٍّ خارجَ المانيفست ⇒ الاشتقاقُ ناقص:")
         for rel, v in gaps[:8]:
-            print(f"   {rel} ← {v}")
+            print(f"   {rel} ← {_mask(v)}")
         return 1
     print("تغطية ✓ — كلُّ مبلغٍ في آثار data/ داخلَ المانيفست (لا مفتاحَ مفقود)")
     return 0
 
 
-def load_deny() -> set[str] | None:
-    """**None = سطحٌ عامٌّ بلا أدلّة** ⇒ يُعلن ولا يمرّ كأنّه فحص.
+def _mask(v) -> str:
+    """**لا يُطبع مبلغٌ حقيقيّ** في أيّ مخرَجٍ يمكن أن يُقرأ أو يُلتقط في سجلّ."""
+    s = str(v)
+    return s[0] + "#" * (len(s) - 1) if s else ""
 
-    (كان يرفع `SystemExit` ⇒ CI الحمراءُ سببُها أنّ المانيفستَ **لا يُنشر بالتصميم**؛
-    فالإنفاذُ محليٌّ حيث توجد `data/`، وCI يفحص ما يُفحَص بلا سرّ: `--tracking-audit`.)
-    """
+
+def load_deny() -> set[str] | None:
+    """**None = سطحٌ عامٌّ بلا أدلّة** ⇒ يُعلن **ويسقط مُغلَقاً**، إلّا بعلَمٍ صريح `--ci`."""
     if not MANIFEST.exists():
         return None
     return set(json.loads(MANIFEST.read_text(encoding="utf-8"))["fingerprints"])
 
 
+def _manifest_blind() -> str:
+    return ("⚠ سطحٌ عامٌّ بلا أدلّة: لا مانيفستَ (لا يُنشر بالتصميم — بصمةٌ منشورةٌ معها سِرٌّ "
+            "تُجرَد). الإنفاذُ محليٌّ: في `.githooks/pre-push` حيث توجد `data/`.")
+
+
+# ═══════════════════════ الفحص ═══════════════════════
+
 def find_in_text(txt: str, deny: set[str]) -> list[tuple[str, str]]:
-    out = []
+    """**المدى شرطُ المطابقة، والبصمةُ تتولّى فروقَ الكتابة** — و`deny` يُمرَّر صريحاً.
+
+    (كان `scan()` يُعيد قراءة المانيفست داخلَه، ويمرّره إلى هنا **None** عند السطح العامّ
+    ⇒ `TypeError` غامض. صار المعاملُ إلزاميًّا: لا مسارَ صامتَ إلى `None`.)
+    """
+    out: list[tuple[str, str]] = []
     for m in TOKEN.finditer(txt):
-        # **المدى نفسُه شرطُ المطابقة:** كان الفحصُ يقبل `is_amount_shaped` (≥٤ خاناتٍ بلا شرطِ
-        # الكسر) ⇒ وبعد أن صارت البصمةُ مرجعيّةً (تُلغي فروقَ الكتابة) صار **كلُّ عددٍ صحيحٍ**
-        # في التوثيق إصابةً كاذبة (**٣٧٤** قِيست). الشرطُ الصحيح: `is_significant` — فلا يُطابَق
-        # إلّا ما هو داخلُ المدى (≥٤ خاناتٍ **مع كسرٍ عشريّ**)، والبصمةُ تتولّى فروقَ الكتابة.
-        if not is_significant(m.group(0)):
+        t = m.group(0)
+        if not is_significant(t):
             continue
-        if fingerprint(m.group(0)) in deny:
-            out.append((m.group(0), normalize(m.group(0))))
+        if fingerprint(t) in deny:
+            out.append((t, canonical(t)))
     return out
 
 
 def tracked_text_files() -> list[str]:
     """المُتتبَّع **وغيرُ المتتبَّع غيرُ المُهمَل**: الحارسُ يحرس ما على وشك أن يُدفع."""
     out = subprocess.run(["git", "ls-files", "-co", "--exclude-standard"],
-                         cwd=str(PROJ), capture_output=True, text=True).stdout
+                         cwd=str(ROOT), capture_output=True, text=True).stdout
     return [f for f in out.split() if Path(f).suffix.lower() not in BINARY]
+
+
+def tracked_files() -> list[str]:
+    return subprocess.run(["git", "ls-files"], cwd=str(ROOT),
+                          capture_output=True, text=True).stdout.split()
+
+
+def _text_of_rel(rel: str) -> str | None:
+    try:
+        return (ROOT / rel).read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        return None
+
+
+def counts_by_file(deny: set[str], files: list[str] | None = None) -> dict[str, int]:
+    """عددُ الظهورات **ملفّاً ملفّاً** — لا قيمةَ ولا بصمة. هذا هو ما تُقارنه السقاطة."""
+    counts: dict[str, int] = {}
+    for rel in (files if files is not None else tracked_text_files()):
+        txt = _text_of_rel(rel)
+        if txt is None:
+            continue
+        n = len(find_in_text(txt, deny))
+        if n:
+            counts[rel] = n
+    return counts
 
 
 def undeclared_binaries() -> list[str]:
     declared = declared_set(DECLARED_BINARIES)
-    out = subprocess.run(["git", "ls-files"], cwd=str(PROJ), capture_output=True, text=True).stdout
+    out = subprocess.run(["git", "ls-files"], cwd=str(ROOT), capture_output=True, text=True).stdout
     return [f for f in out.split()
             if f.startswith(BINARY_DIRS) and Path(f).suffix.lower() in BINARY and f not in declared]
 
 
-SCAN_SKIP = {_shown(MANIFEST), "data/eval_pack/amount_redaction_map.json"}
-# **أسطحُ الصناعة** (يُخترع فيها المبلغ للاختبار) ⇒ لا تُمنع، **وتُنبَّه بأعدادها**: فالاستثناءُ
-# بسببِ السطح لا بسببِ شكل المبلغ. وهذا يميّز بين **دليلٍ يُنقل** و**مثالٍ يُخترع** — وهو الشرط
-# الذي طلبه المدقّق: «أبقِ الطول، احذف شرطَ الكسر، ومرّر الضجيجَ المستديرَ بإعلانٍ معلَّل».
-def scan() -> list[tuple[str, str, str]]:
-    deny = load_deny()
-    hits: list[tuple[str, str, str]] = []
-    for fn in tracked_text_files():
-        if fn in SCAN_SKIP:
-            continue   # بصماتٌ سداسية/خريطةُ تطهير: تُشبه المبالغ ولا تسرّب (عطبٌ كاذب مقيس)
-        try:
-            txt = (PROJ / fn).read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
+# ═══════════════════════ السقاطة (الخطّاف الذي يخضرّ) ═══════════════════════
+
+def read_baseline() -> dict[str, int]:
+    if not BASELINE.exists():
+        return {}
+    return dict(json.loads(BASELINE.read_text(encoding="utf-8"))["counts"])
+
+
+def write_baseline(deny: set[str]) -> int:
+    counts = counts_by_file(deny)
+    BASELINE.parent.mkdir(parents=True, exist_ok=True)
+    BASELINE.write_text(json.dumps({
+        "what": "خطُّ أساسِ الظهورات — **أعدادٌ فقط**: لا قيمةَ ولا بصمةَ مبلغٍ (فلا يُنشر ما يُجرَد)",
+        "how": "python3 tools/amount_guard.py --baseline-write   # يُخفَّض بالتصحيح لا بالمسح",
+        "rule": ("لا يُعفى موضع (القاعدة ١٢) — الخطُّ مؤقّتٌ يُخفَّض بإعادة كتابة القيم، "
+                 "ولا يُرفع أبداً: أداةُ --build لا تلمسه"),
+        "counts": dict(sorted(counts.items())),
+        "total": sum(counts.values()),
+    }, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    print(f"خطُّ الأساس: {sum(counts.values())} ظهوراً في {len(counts)} ملفّاً ⇒ {_shown(BASELINE)}")
+    return 0
+
+
+def ratchet_violations(counts: dict[str, int], base: dict[str, int], where: str) -> list[str]:
+    """**السقاطة:** تسقط عند زيادةٍ أو ملفٍّ جديد، وتخضرّ فيما عداه ⇒ ينتهي حافزُ التجاوز."""
+    bad: list[str] = []
+    for rel, n in sorted(counts.items(), key=lambda x: -x[1]):
+        if rel not in base:
+            bad.append(f"⛔ ملفٌّ جديدٌ يحمل ظهوراتٍ حقيقيّة: {rel} ({n}) — {where}")
+        elif n > base[rel]:
+            bad.append(f"⛔ زادت الظهوراتُ: {rel} {base[rel]} → {n} — {where}")
+    return bad
+
+
+# ═══════════════════════ المدفوعُ نفسُه ═══════════════════════
+
+def _git(*args: str, text: bool = True):
+    return subprocess.run(["git", *args], cwd=str(ROOT), capture_output=True, text=text)
+
+
+def pushed_revs(refs: str) -> list[str]:
+    """**مراجعُ الدفع من `stdin`** — والنمطُ هو نمطُ `publish_guard` نفسُه حتى لا يرى حارسان مجموعتين.
+
+    (وهنا كان العطبُ: `--pre-push` في الإصدار الثاني **لا يقرأ `stdin` إطلاقاً** ⇒ لا يرى التزاماً
+    وسيطًا مثل `e819e65` الذي حمل المبلغ.)
+    """
+    revs: set[str] = set()
+    for line in refs.splitlines():
+        parts = line.split()
+        if len(parts) < 4:
             continue
-        hits += [(fn, raw, norm) for raw, norm in find_in_text(txt, deny)]
-    return hits
+        local_sha, remote_sha = parts[1], parts[3]
+        if set(local_sha) <= {"0"}:
+            continue                                  # حذفُ فرع
+        if set(remote_sha) <= {"0"}:
+            # **فرعٌ جديد: المدى = ما لا يعرفه الريموت، لا كلُّ التاريخ.**
+            # `rev-list <sha>` وحدَه يعيد ١٤٠٧ التزاماتٍ هنا ⇒ يُفحَص تاريخٌ **منشورٌ سلفاً**
+            # ⇒ يتحوّل الدَّينُ المُعلَن في التزاماتٍ قديمةٍ إلى **منعٍ دائم**. و`--not --remotes`
+            # هو التعريفُ الصحيح لِـ«ما يُنشَر جديداً» (وما يعرفه الريموت منشورٌ بالفعل).
+            rng = [local_sha, "--not", "--remotes"]
+        else:
+            rng = [f"{remote_sha}..{local_sha}"]
+        r = _git("rev-list", *rng)
+        revs.update(r.stdout.split())
+    return sorted(revs)
 
 
+def pushed_counts(deny: set[str], revs: list[str]) -> dict[str, int]:
+    """**كلُّ blob يُدفع** (لا الشجرةُ العاملة): أحدثَ ظهورٍ لكلّ مسار داخل المدى.
+
+    والقارئُ **لا يفترض أنّ المدفوعَ نصّ**: أيُّ blobٍ لا يُفكّ بـ`utf-8` يُتخطّى بصمتٍ مقصود
+    (كما يفعل `publish_guard` مع الثنائيّات غيرِ القابلة للفكّ). وقِيس ذلك حيًّا: **الدفعُ الحقيقيّ
+    أسقط هذا الحارسَ بـ`UnicodeDecodeError`** لأنّ `text=True` يفترض نصًّا — والخطّافُ منعه
+    (fail-closed) فأمسك العطبَ قبل أن يخرج.
+    """
+    counts: dict[str, int] = {}
+    for rev in revs:
+        names = _git("diff-tree", "-r", "--no-commit-id", "--name-only", "--root", rev).stdout.split()
+        for rel in names:
+            if Path(rel).suffix.lower() in BINARY:
+                continue
+            r = _git("show", f"{rev}:{rel}", text=False)
+            if r.returncode != 0:
+                continue
+            try:
+                txt = r.stdout.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            n = len(find_in_text(txt, deny))
+            if n:
+                counts[rel] = max(counts.get(rel, 0), n)
+    return counts
+
+
+# ═══════════════════════ حارسُ الإهمال ═══════════════════════
 
 def tracking_audit() -> list[str]:
     """**الحارسُ الذي كان غائباً:** الإهمالُ **واقعٌ يُقاس** لا اعتقادٌ يُكتب.
 
-    ١) المفتاحُ والمانيفست **غيرُ متتبَّعين** · ٢) و`git check-ignore` **يُهملهما فعلاً** ·
-    ٣) **وقيمةُ المفتاح لا تظهر في أيّ ملفٍّ متتبَّع** (البحثُ داخل العملية بلا سطر أوامر ⇒ لا تسرّب
-    إلى السجلّات) · ٤) **ولا بصماتٍ منشورة** (ملفٌّ متتبَّعٌ يحمل ≥٢٠ بصمةً من المانيفست ⇒ نقض).
+    ١) المفتاحُ والمانيفستُ **وخريطةُ التطهير** غيرُ متتبَّعة · ٢) و`git check-ignore` يُهملها فعلاً ·
+    ٣) **وقيمةُ المفتاح لا تظهر في أيّ ملفٍّ متتبَّع** · ٤) **ولا بصماتٍ منشورة** — **ويُعلن ما لم يُفحَص**.
     """
     bad: list[str] = []
-    for path in (KEY_FILE, MANIFEST):
+    for path in (KEY_FILE, MANIFEST, REDACTION_MAP):
         rel = _shown(path)
         if subprocess.run(["git", "ls-files", "--error-unmatch", "--", rel],
-                          cwd=str(PROJ), capture_output=True, text=True).returncode == 0:
+                          cwd=str(ROOT), capture_output=True, text=True).returncode == 0:
             bad.append(f"⛔ متتبَّعٌ في git: {rel} — أخرِجه بـ`git rm --cached` (والملفُّ باقٍ محليًّا)")
         if subprocess.run(["git", "check-ignore", "-q", "--", rel],
-                          cwd=str(PROJ), capture_output=True, text=True).returncode != 0:
+                          cwd=str(ROOT), capture_output=True, text=True).returncode != 0:
             bad.append(f"⛔ `git check-ignore` لا يُهمله: {rel} — «مُهمَل» في التوثيق ليست واقعةً")
     key = os.environ.get(KEY_ENV, "").strip()
     if not key and KEY_FILE.exists():
@@ -327,7 +533,7 @@ def tracking_audit() -> list[str]:
     if MANIFEST.exists():
         fps = set(json.loads(MANIFEST.read_text(encoding="utf-8"))["fingerprints"])
     for rel in tracked_files():
-        p = PROJ / rel
+        p = ROOT / rel
         if p.suffix.lower() in BINARY:
             continue
         try:
@@ -337,85 +543,165 @@ def tracking_audit() -> list[str]:
         if key and key in txt:
             bad.append(f"⛔ قيمةُ المفتاح ظاهرةٌ في ملفٍّ متتبَّع: {rel} ⇒ المفتاحُ محروقٌ (دوّرْه)")
         if fps and sum(1 for f in fps if f in txt) >= 20:
-            bad.append(f"⛔ البصماتُ منشورةٌ في {rel} (≥٢٠ بصمة) ⇒ تُجرَد بالقاموس ⇒ احتفظ بالمانيفست داخل data/")
+            bad.append(f"⛔ البصماتُ منشورةٌ في {rel} (≥٢٠ بصمة) ⇒ تُجرَد بمن يملك المفتاح ⇒ احتفظ بها داخل data/")
     return bad
 
 
-def tracked_files() -> list[str]:
-    return subprocess.run(["git", "ls-files"], cwd=str(PROJ),
-                          capture_output=True, text=True).stdout.split()
+def tracking_audit_message() -> str:
+    """**لا يُدَّعى فحصٌ لم يُجرَ:** كانت الرسالةُ تقول «ولا بصماتٍ منشورة» في CI حيث لا مانيفست."""
+    if MANIFEST.exists():
+        return "PASS — المفتاحُ والمانيفستُ وخريطةُ التطهير غيرُ متتبَّعة ومُهمَلة واقعاً، ولا بصماتٍ منشورة"
+    return ("PASS (بما أُمكن فحصُه) — الثلاثةُ غيرُ متتبَّعة ومُهمَلة واقعاً · "
+            "**والبصماتُ لم تُفحَص: لا مانيفستَ على هذا السطح**")
 
+
+# ═══════════════════════ التعفّن ═══════════════════════
 
 def staleness() -> str | None:
-    """**المانيفستُ يتعفّن:** إن تغيّر المصدرُ ولم يُبِن أحدٌ ⇒ المانيفستُ يكذب ⇒ الفحصُ يسقط."""
+    """**المانيفستُ يتعفّن:** إن تغيّر المصدرُ ولم يُبِن أحدٌ ⇒ الفحصُ يسقط.
+
+    **تصحيحُ مراجعة ٣٨:** كان يقارن العددين وحدَهما ⇒ **تبديلُ قيمةٍ بأخرى يمرّ** (٤,٢٧٢ = ٤,٢٧٢).
+    صار يقارن **بصمةَ المجموعة المرتّبة** كذلك، وهي تكشف أيَّ تبديل.
+    """
     if not MANIFEST.exists():
         return None
+    data = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    want = data["derivation"]["source_shape_ok"]
     src, _, total, _ = source_amounts()
     if total == 0:
         return None
-    want = json.loads(MANIFEST.read_text(encoding="utf-8"))["derivation"]["source_shape_ok"]
     if total != want:
         return (f"⛔ المانيفستُ متعفّن: المصدرُ اليوم {total} قيمةً والمانيفستُ يقول {want} ⇒ أعِد البناءَ")
+    fps = sorted(data["fingerprints"])
+    digest = hmac.new(load_key(), "\n".join(fps).encode(), hashlib.sha256).hexdigest()
+    if digest != data.get("set_digest"):
+        return "⛔ المانيفستُ متعفّن: بصمةُ المجموعة لا تطابق نفسها ⇒ العددُ ثابتٌ والمحتوى تبدّل ⇒ أعِد البناءَ"
     return None
 
 
-def proof_inject() -> int:
-    """**برهانٌ طبقيّ:** إن نجا **أيُّ** صنفٍ داخلَ المدى فالحارسُ يسقط بغير الصفر.
+# ═══════════════════════ برهانُ السقوط (سطحان · worktree مؤقّت) ═══════════════════════
 
-    الأصنافُ مقيسةٌ من المصدر لا مُختارة: مستديرٌ · كسريّ · سالبٌ · طويل. و«قصيرٌ/بلا كسر»
-    **خارجُ المدى بإعلان** (يتصادم مع تواريخ وعدّادات) ويُطبع صريحاً فلا يمرّ ساكتاً.
+#: **السطحان** اللذان يُدَّعى سقوطُ الحقن عليهما: سطحُ دليل (`docs/`) وسطحُ صناعة (`tests/`).
+PROBE_SURFACES = ("docs/SECURITY_PROBE.md", "tests/SECURITY_PROBE.py")
+
+
+def _strata(in_scope: list[str]) -> dict[str, str | None]:
+    """الأصنافُ **مقيسةٌ من المصدر** لا مُختارة: ستُّ طبقات، منها طبقتا مراجعة ٣٨."""
+    rounds = [v for v in in_scope if v.split(".")[-1] in ("00", "0")]
+    fracs = [v for v in in_scope if v.split(".")[-1] not in ("00", "0")]
+    negs = [v for v in in_scope if v.startswith("-")]
+    poss = [v for v in in_scope if not v.startswith("-")]
+    #: فاصلةٌ عشريّةٌ عتيقة: القيمةُ نفسُها مكتوبةً بـ`N,dd` — الصيغةُ التي كان المطابِقُ يجهلها
+    comma = f"{rounds[0].lstrip('-').split('.')[0]},00" if rounds else None
+    #: إشارةٌ مقلوبة: قيمةٌ موجبةٌ في المصدر تُكتب سالبةً (والبصمةُ للمقدار ⇒ يجب أن تسقط)
+    flipped = f"-{poss[0]}" if poss else None
+    return {
+        "مستدير": rounds[0] if rounds else None,
+        "كسريّ": fracs[0] if fracs else None,
+        "سالب": negs[0] if negs else None,
+        "طويل": max(in_scope, key=lambda v: len(v.split(".")[0])) if in_scope else None,
+        "فاصلةٌ عشريّة": comma,
+        "إشارةٌ مقلوبة": flipped,
+    }
+
+
+def probe(rel: str, deny: set[str]) -> int:
+    """يفحص **ملفًّا واحدًا** بمكانه النسبيّ — تستعمله حزمةُ الحقن داخل نسخةٍ مؤقّتة."""
+    txt = _text_of_rel(rel)
+    if txt is None:
+        print(f"⛔ لا ملفَّ للفحص: {rel}", file=sys.stderr)
+        return 5
+    hits = find_in_text(txt, deny)
+    if hits:
+        print(f"   سقط ✓ [{len(hits)} ظهوراً] · {rel}")
+        return 1
+    print(f"   ⛔ نجا (لم يُطابَق) · {rel}", file=sys.stderr)
+    return 0
+
+
+def proof_inject() -> int:
+    """**برهانٌ طبقيّ على سطحين، داخل worktree مؤقّت** — فلا يُكتب سمٌّ حقيقيّ في شجرةٍ مشتركة.
+
+    (كان يكتب في `docs/SECURITY_PROBE.md` **غيرِ المُهمَل** داخل الشجرة التي يعمل عليها عدّةُ وكلاء
+    ⇒ `git add -A` متزامنٌ أو قتلٌ قبل `finally` يُدرجه. صار الحقنُ في نسخةٍ مؤقّتةٍ تُحذف كاملةً.)
     """
+    deny = load_deny()
+    if deny is None:
+        print("⚠ لا مانيفستَ ⇒ البرهانُ الطبقيُّ غيرُ قابلٍ للتنفيذ هنا (يُعلن ولا يُدَّعى)", file=sys.stderr)
+        return 5
     src, _, _, _ = source_amounts()
     in_scope = sorted({a for a in src if is_significant(a)})
     if not in_scope:
         print("⛔ لا مصدرَ محليّ ⇒ تعذّر البرهان (لا أُعلن نجاحاً بلا سمّ)", file=sys.stderr)
         return 5
-    strata = {
-        "مستدير": next((v for v in in_scope if v.split(".")[-1] in ("00", "0")), None),
-        "كسريّ": next((v for v in in_scope if v.split(".")[-1] not in ("00", "0")), None),
-        "سالب": next((v for v in in_scope if v.startswith("-")), None),
-        "طويل": max(in_scope, key=lambda v: len(v.split(".")[0])),
-    }
-    target = PROJ / "docs" / "SECURITY_PROBE.md"
-    backup = target.read_text(encoding="utf-8") if target.exists() else None
-    survivors, missed, out_of_scope = [], [], [v for v in src if not is_significant(v)][:1]
+    strata = _strata(in_scope)
+    if any(v is None for v in strata.values()):
+        missing = [k for k, v in strata.items() if v is None]
+        print(f"⛔ لا سمَّ لصنف: {missing}", file=sys.stderr)
+        return 5
+    wt = Path(tempfile.mkdtemp(prefix="amount-probe-", dir=str(ROOT.parent)))
+    survivors: list[str] = []
     try:
-        for name, poison in strata.items():
-            if poison is None:
-                missed.append(name)
-                continue
-            head = backup or "# مسبار"
-            target.write_text(head + chr(10) + "الرصيد: " + poison + chr(10), encoding="utf-8")
-            if [h for h in scan() if h[0].endswith("SECURITY_PROBE.md")]:
-                print(f"   سقط ✓ [{name}] · {poison}")
+        r = _git("worktree", "add", "--detach", str(wt), "HEAD")
+        if r.returncode != 0:
+            print(f"⛔ تعذّر إنشاءُ النسخة المؤقّتة: {r.stderr.strip()[:120]}", file=sys.stderr)
+            return 5
+        (wt / "data" / "eval_pack").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(MANIFEST, wt / "data" / "eval_pack" / "amount-manifest.json")
+        # المفتاحُ يُكتب من الذاكرة: لا نفترض وجودَ ملفّ (قد يأتي من البيئة في CI)
+        (wt / "data" / ".amount-guard-key").write_text(load_key().decode() + "\n", encoding="utf-8")
+        # **درسٌ دُفع ثمنُه قبل هذه الجولة:** نسخةٌ مؤقّتةٌ مبنيةٌ من `HEAD` تقيس **ما التُزم** لا
+        # ما هو على وشك أن يكون ⇒ تنسخ شجرةُ العمل نفسُها فوقها (وقيس: أوّلُ تشغيلٍ حقن ١٢ سمًّا
+        # على نسخةٍ قديمةٍ فـ«نجت» كلُّها، لأنّ `--probe` لم يكن بعدُ في الملفّ المُلتزَم).
+        for d in ("tools", "src"):
+            if (ROOT / d).exists():
+                shutil.copytree(ROOT / d, wt / d, dirs_exist_ok=True,
+                                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        env = {**os.environ, "AMOUNT_GUARD_ROOT": str(wt), KEY_ENV: load_key().decode()}
+        for surface in PROBE_SURFACES:
+            target = wt / surface
+            backup = target.read_text(encoding="utf-8") if target.exists() else None
+            for name, poison in strata.items():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text((backup or "# مسبار\n") + "\nالرصيد: " + str(poison) + "\n",
+                                  encoding="utf-8")
+                p = subprocess.run([sys.executable, "tools/amount_guard.py", "--probe", surface],
+                                   cwd=str(wt), capture_output=True, text=True, env=env)
+                tag = f"{surface} × {name}"
+                print(f"   {'سقط ✓' if p.returncode == 1 else 'نجا ⛔'} [{name}] · {surface}")
+                if p.returncode != 1:
+                    survivors.append(tag)
+            if backup is None:
+                target.unlink(missing_ok=True)
             else:
-                survivors.append(f"{name} ({poison})")
+                target.write_text(backup, encoding="utf-8")
     finally:
-        if backup is None:
-            target.unlink(missing_ok=True)
-        else:
-            target.write_text(backup, encoding="utf-8")
-    if out_of_scope:
-        print(f"   خارجُ المدى بإعلان (لا كسرَ/قصير): {out_of_scope[0]} — لا يُحقَن، ويُعلن")
+        _git("worktree", "remove", "--force", str(wt))
+        shutil.rmtree(wt, ignore_errors=True)
     if survivors:
         print(f"⛔ أصنافٌ نجت: {survivors} ⇒ الحارسُ ليس حارساً", file=sys.stderr)
         return 5
-    if missed:
-        print(f"⛔ لا سمَّ لصنف: {missed}", file=sys.stderr)
-        return 5
-    print("سقطت كلُّ الأصناف ✓ (مستدير · كسريّ · سالب · طويل)")
+    print(f"سقطت كلُّ الأصناف ✓ ({' · '.join(strata)}) على سطحين: {' · '.join(PROBE_SURFACES)}")
     return 0
 
+
+# ═══════════════════════ الواجهة ═══════════════════════
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="حارسُ المبالغ: لا مبلغَ حقيقيّ في مستودعٍ عامّ")
     ap.add_argument("--build", action="store_true")
-    ap.add_argument("--pre-push", action="store_true", help="اسمٌ مستعارٌ للفحص")
+    ap.add_argument("--pre-push", action="store_true",
+                    help="فحصُ المدفوع نفسِه: المراجعُ من stdin ⇒ rev-list <local> --not --remotes")
+    ap.add_argument("--ratchet", action="store_true", help="السقاطةُ على الشجرة (ملفّاً ملفّاً)")
+    ap.add_argument("--baseline-write", action="store_true", help="كتابةُ خطّ الأساس (أعدادٌ فقط)")
     ap.add_argument("--tracking-audit", action="store_true", help="فحصُ الإهمال واقعاً (بلا سرّ)")
+    ap.add_argument("--probe", metavar="REL", default="", help="فحصُ ملفٍّ واحد بمكانه النسبيّ")
+    ap.add_argument("--ci", action="store_true", help="سطحٌ عامٌّ بلا أدلّة **بالبناء** (يُعلن ولا يُخفي)")
     ap.add_argument("--extra", default="")
-    ap.add_argument("--inject", action="store_true", help="برهانُ السقوط (سمٌّ من المصدر)")
+    ap.add_argument("--inject", action="store_true", help="برهانُ السقوط (سمٌّ من المصدر · سطحان)")
     ap.add_argument("--json", action="store_true", help="المخرَجُ الآليُّ الكامل (لا يُقصّ)")
     args = ap.parse_args(argv)
+
     if args.tracking_audit:
         bad = tracking_audit()
         if bad:
@@ -423,12 +709,60 @@ def main(argv=None) -> int:
             for b in bad:
                 print("   " + b)
             return 1
-        print("PASS — المفتاحُ والمانيفستُ غيرُ متتبَّعين ومُهمَلان واقعاً، ولا بصماتٍ منشورة")
+        print(tracking_audit_message())
         return 0
     if args.build:
         return build([x for x in args.extra.split(",") if x.strip()])
     if args.inject:
         return proof_inject()
+
+    deny = load_deny()
+    if deny is None and not args.ci:
+        # **الفشلُ المُغلَق:** غيابُ المانيفست لا يمرّ صامتاً — إلّا بعلَمٍ صريح يعلن السطحَ العامّ.
+        print("⛔ " + _manifest_blind().lstrip("⚠ "))
+        print("   (وبلا `--ci`: الحارسُ **يسقط مُغلَقاً** — لا يمرّ صامتاً. في CI: `--ci`.)")
+        return 2
+    if deny is None:
+        # السطحُ العامُّ **بالبناء**: يُعلن ما فُحص وما لم يُفحَص (لا يُدَّعى إنفاذٌ غيرُ ممكن).
+        print(_manifest_blind())
+        bad = tracking_audit()
+        for b in bad:
+            print("   " + b)
+        print("   " + tracking_audit_message())
+        return 1 if bad else 0
+
+    if args.probe:
+        return probe(args.probe, deny)
+    if args.baseline_write:
+        return write_baseline(deny)
+    if args.pre_push:
+        refs = sys.stdin.read()
+        revs = pushed_revs(refs)
+        if not revs:
+            print("⚠ لا مراجعَ مدفوعة على stdin ⇒ لا شيءَ يُفحص (ولا يُقال PASS على لا شيء)")
+            return 0
+        counts = pushed_counts(deny, revs)
+        bad = ratchet_violations(counts, read_baseline(), f"دفعُ {len(revs)} التزاماً")
+        if bad:
+            print("⛔ BLOCK — الدفعُ يحمل ظهوراتٍ لمبالغَ حقيقيّة (نصوصٌ لا تُطبع):")
+            for b in bad[:25]:
+                print("   " + b)
+            print("   ⇒ صحّح القيمةَ أو خفّض خطَّ الأساس بعد إعادة الكتابة (القاعدة ١٢: لا يُعفى موضع)")
+            return 1
+        print(f"PASS — مدى الدفع ({len(revs)} التزاماً) لا يزيد ظهوراً واحداً على خطّ الأساس")
+        return 0
+    if args.ratchet:
+        counts = counts_by_file(deny)
+        bad = ratchet_violations(counts, read_baseline(), "الشجرةُ العاملة")
+        if bad:
+            print("⛔ BLOCK — الشجرةُ تحمل ظهوراتٍ لمبالغَ حقيقيّة:")
+            for b in bad[:25]:
+                print("   " + b)
+            return 1
+        print(f"PASS — لا ملفَّ تجاوز خطَّ الأساس ({sum(counts.values())} ظهوراً مُعلَنٌ في "
+              f"{len(counts)} ملفّاً كما هو)")
+        return 0
+
     if undeclared_binaries():
         print("⛔ BLOCK — ثنائيٌّ مدفوعٌ تحت data/ أو digital/ بلا إعلان:")
         for f in undeclared_binaries()[:10]:
@@ -438,30 +772,21 @@ def main(argv=None) -> int:
     if stale:
         print(stale)
         return 1
-    deny = load_deny()
-    if deny is None:
-        print("⚠ غيرُ قابلٍ للإنفاذ على سطحٍ عامّ: لا مانيفستَ (لا يُنشر بالتصميم — البصماتُ المنشورة "
-              "يستعيدها القاموس). الإنفاذُ محليًّا (data/ موجود) وفي `.githooks/pre-push`.")
-        bad = tracking_audit()
-        for b in bad:
-            print("   " + b)
-        return 1 if bad else 0
-    hits = scan()
+    hits = counts_by_file(deny)
     if args.json:
-        # **درسٌ من هذه الجولة:** عرضٌ يُقصّ عند ٢٥ أخفى ١١ تسريباً عن مُطهِّرٍ يقرأ المخرَج
-        # ⇒ المخرَجُ الآليُّ يُعطي المجموعةَ كاملةً دائماً؛ القصُّ للعين وحدها.
-        # **القاعدة ١٣:** المخرَجُ الآليُّ لا يُقصّ أبداً (كان يعرض ٢٠ ويُعلن ٤٠ ⇒ نقضُ قاعدتنا).
-        print(json.dumps({"pass": not hits, "count": len(hits),
-                          "hits": [{"file": f, "token": r, "normalized": n} for f, r, n in hits]},
+        # **القاعدة ١٣:** المخرَجُ الآليُّ لا يُقصّ أبداً. **والقيمةُ لا تُطبع**: الوحدةُ ملفٌّ+عددها.
+        print(json.dumps({"pass": not hits, "count": len(hits), "total": sum(hits.values()),
+                          "files": dict(sorted(hits.items()))},
                          ensure_ascii=False, indent=1))
         return 1 if hits else 0
     if hits:
-        print("⛔ BLOCK — مبالغُ حقيقيةٌ في ملفّاتٍ مُتتبَّعة:")
-        for fn, raw, norm in hits[:25]:
-            print(f"   {fn}  ←  {raw}")
-        if len(hits) > 25:
-            print(f"   … والباقي {len(hits)-25} (استعمل --json للمجموعة الكاملة)")
-        print(f"المجموع: {len(hits)}")
+        bad = ratchet_violations(hits, read_baseline(), "الشجرةُ العاملة")
+        print("⛔ BLOCK — مبالغُ حقيقيّةٌ في ملفّاتٍ مُتتبَّعة (تُعرض الأعدادُ لا القيم):")
+        for rel, n in sorted(hits.items(), key=lambda x: -x[1])[:25]:
+            print(f"   {rel}  ←  {n} ظهوراً")
+        print(f"المجموع: {sum(hits.values())}")
+        if bad:
+            print("   ⇒ وفيها ما تجاوز خطَّ الأساس ⇒ امنع الدفع حتى التصحيح")
         return 1
     print("PASS — لا مبلغَ حقيقيٌّ في أيّ ملفٍّ مُتتبَّعٍ أو غيرِ مُهمَل (بلا إعفاءٍ بالمسار)")
     return 0

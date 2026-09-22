@@ -105,10 +105,16 @@ OPAQUE_EXTS = {".zip", ".xlsx", ".xlsm", ".xls", ".docx", ".doc", ".pptx",
                ".ppt", ".sqlite", ".db", ".tar", ".gz", ".tgz", ".7z", ".rar",
                ".pickle", ".pkl", ".bin", ".ttf", ".otf", ".woff", ".woff2"}
 
+# **ثلاثةُ مستودعاتٍ للبيانات الحقيقيّة، لا واحد** (مراجعة ٣٨): `.gitignore` يعلن
+# `data/local_sample/` و`data/training/` و`data/eval_pack/` بياناتٍ حقيقيّة — وكان هذا الحارس
+# يمنع الأوّلَ وحدَه ⇒ `git add -f` يمرّ على الاثنين الآخرين، وفيهما خريطةُ التطهير التي تربط
+# كلَّ قيمةٍ مُقنَّعةٍ بأصلها الحقيقيّ.
+REAL_DATA_DIRS = ("data/local_sample", "data/training", "data/eval_pack")
+
 PATH_RULES = [
     ("local_data", "BLOCK",
-     lambda p: p == "data/local_sample" or p.startswith("data/local_sample/"),
-     "ملف بيانات حقيقية — ممنوع رفعه نهائياً"),
+     lambda p: any(p == d or p.startswith(d + "/") for d in REAL_DATA_DIRS),
+     "ملف بيانات حقيقية (لقطات/تدريب/تقييم/خريطة تطهير) — ممنوع رفعه نهائياً"),
     ("env_file", "BLOCK", lambda p: Path(p).name == ".env", "ملف اسرار"),
     ("media_file", "BLOCK",
      lambda p: Path(p).suffix.lower() in MEDIA_EXTS
@@ -565,7 +571,8 @@ def scan_pre_push(findings, entries, seen) -> int:
         if set(local_sha) <= {"0"}:
             continue  # branch deletion
         if set(remote_sha) <= {"0"}:
-            revs.update(_git("rev-list", local_sha).split())
+            # مدى الدفع لكامل القائمة الحالية: نطبعها لكل مرجع على حدة.
+            revs.update(_git("rev-list", local_sha, "--not", "--remotes").split())
         else:
             revs.update(_git("rev-list", f"{remote_sha}..{local_sha}").split())
     # No sampling: a commit that carried PII and was later rewritten is
