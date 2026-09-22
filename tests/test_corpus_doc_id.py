@@ -65,3 +65,79 @@ def test_a_missing_document_is_declared_unknown_not_guessed(tmp_path, monkeypatc
     cp = _stamp(monkeypatch, _run(tmp_path, with_doc=False))
     assert cp["doc_id"] is None
     assert "غير موجود" in cp["doc_id_note"], "المفقودُ يُسمّى، والوسمُ لا يُخمَّن"
+
+
+# ── عدم التدهور: الحالةُ السابقة جزءٌ من المُدخَل لا خارجٌ عنه ────────────────
+# الاختبارُ السابق يُثبت «فارغ → null» وهو صحيح، لكنه **لا يرى الانتقالَ من حالةٍ
+# ممتلئة** — وهو الانتقالُ الذي كان يمحو هويةً مُثبتة بخروجٍ ناجح.
+def _stamped_run(tmp_path, doc_id: str | None, with_doc: bool = False) -> Path:
+    run = _run(tmp_path, with_doc=with_doc)
+    report = json.loads((run / "slice_report.json").read_text(encoding="utf-8"))
+    report["corpus_provenance"] = {"reader": None, "legacy_unstamped_pages": 629,
+                                   "doc_id": doc_id, "doc_file": "slice_629p.pdf",
+                                   "custom_declaration": "تصريحٌ سابق يجب ألا يُمحى"}
+    (run / "slice_report.json").write_text(json.dumps(report, ensure_ascii=False))
+    return run
+
+
+def test_an_established_identity_is_not_demoted_by_a_missing_document(tmp_path, monkeypatch):
+    """⚠️ العطبُ الذي كشفه المدقّق: غيابُ الملفّ كان يمحو `doc_id` مُثبتاً ويُبدّله بـnull."""
+    run = _stamped_run(tmp_path, "3e2d360a665c88aa", with_doc=False)
+    _stamp(monkeypatch, run)
+    report = json.loads((run / "slice_report.json").read_text(encoding="utf-8"))
+    cp = report["corpus_provenance"]
+    assert cp["doc_id"] == "3e2d360a665c88aa", "هويةٌ مُثبتة دُهوِرت بغياب ملفّ"
+    assert cp["custom_declaration"] == "تصريحٌ سابق يجب ألا يُمحى", \
+        "الكتابةُ استبدلت التصريحَ السابق بدل أن تدمجه"
+
+
+def test_the_demotion_guard_is_held_at_the_unit_level():
+    """القاعدة نفسها على مستوى الدالّة: هويةٌ مُثبتة + ملفٌّ غائب ⇒ `kept` لا `null`."""
+    from tools.backfill_reader_stamp import resolve_doc_id
+    cp = {"doc_id": "3e2d360a665c88aa"}
+    status = resolve_doc_id(cp, Path("/قطعيًّا/غير-موجود.pdf"))
+    assert status == "kept" and cp["doc_id"] == "3e2d360a665c88aa"
+    assert "محفوظة" in cp["doc_id_note"], "الحفاظُ على الهوية يُعلن لا يُسكَت عنه"
+
+
+def test_a_matching_document_leaves_the_identity_unchanged(tmp_path, monkeypatch):
+    """ملفٌّ يطابق الوسمَ المُثبت ⇒ لا تغيير، والاستدراكُ لا يُعاد."""
+    run = _run(tmp_path)
+    cp = _stamp(monkeypatch, run)                    # يُختم أولاً
+    assert cp["doc_id"]
+    again = _stamp(monkeypatch, run)                 # ثم يُعاد على الحالة الممتلئة
+    assert again["doc_id"] == cp["doc_id"]
+    assert "لا تغيير" in again["doc_id_note"]
+
+
+def test_a_conflicting_document_stops_by_name(tmp_path, monkeypatch):
+    """مستندٌ مخالف لا يُستبدل به وسمٌ مُثبت صامتاً: يقف بالاسم."""
+    run = _stamped_run(tmp_path, "deadbeefdeadbeef", with_doc=True)
+    try:
+        _stamp(monkeypatch, run)
+    except SystemExit as exc:
+        assert "تخالف" in str(exc)
+    else:
+        raise AssertionError("وسمٌ مُثبت استُبدل بمستندٍ مخالف بلا إعلان إرادة")
+
+
+def test_an_explicitly_missing_document_stops_by_name(tmp_path, monkeypatch):
+    """ملفٌّ مطلوبٌ صراحةً وغير موجود ⇒ خروجٌ بخطأ يسمّي السبب لا صمتٌ بنجاح."""
+    run = _run(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["x", "--run", str(run), "--doc",
+                                      str(tmp_path / "not-there.pdf")])
+    try:
+        main()
+    except SystemExit as exc:
+        assert "غير موجود" in str(exc)
+    else:
+        raise AssertionError("ملفٌّ مطلوبٌ غائب مرّ بنجاح")
+
+
+def test_an_unknown_identity_is_upgraded_when_the_document_appears(tmp_path, monkeypatch):
+    """الممنوعُ التدهورُ لا الترقية: مجهولٌ يصير مُثبتاً متى وُجد الملفّ."""
+    run = _stamped_run(tmp_path, None, with_doc=False)
+    assert _stamp(monkeypatch, run)["doc_id"] is None
+    (run / "slice_629p.pdf").write_bytes(DOC_BYTES)
+    cp = _stamp(monkeypatch, run)
+    assert cp["doc_id"] == hashlib.sha256(DOC_BYTES).hexdigest()[:16]
