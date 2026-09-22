@@ -296,11 +296,9 @@ def test_an_unresolved_push_range_fails_closed():
     bogus = "refs/heads/x " + "1" * 40 + " refs/heads/x " + "2" * 40 + "\n"
     r = subprocess.run(cmd, input=bogus, capture_output=True, text=True, cwd=ROOT)
     assert r.returncode == 2 and "BLOCK" in r.stdout, "مدىً غيرُ محلولٍ ليس مدىً نظيفاً"
-    # stdin فارغٌ (قِيس حيًّا في مسار دفعٍ حقيقيّ) ⇒ يُشتقّ المدى من الحالة **بإعلان**
-    r2 = subprocess.run(cmd, input="", capture_output=True, text=True, cwd=ROOT)
-    assert r2.returncode in (0, 1, 2), "لا انفجارَ على stdin فارغ"
-    assert "اشتُقّ المدى" in r2.stdout or "BLOCK" in r2.stdout, \
-        "البديلُ يُعلن ولا يمرّ صامتاً"
+    # **حالةُ stdin الفارغ أُزيلت من هنا** (مقعدُ البنية، ٤١): كانت تؤكّد `rc in (0,1,2)`
+    # أو نصَّين متضادّين ⇒ **لا تستطيع أن تسقط**، وهو نفاقٌ في ملفّ اختبارات حارسٍ أمنيّ.
+    # وحالاتُها الثلاثُ مُغطّاةٌ اليومَ في `test_an_empty_stdin_and_an_empty_range_are_not_the_same_failure`.
 
 
 def test_the_baseline_cannot_be_raised_by_its_own_debtor(tmp_path, monkeypatch):
@@ -431,14 +429,51 @@ def test_an_empty_stdin_and_an_empty_range_are_not_the_same_failure():
         pytest.skip("بلا أدلّة ⇒ السقوطُ المُغلَق (غيابُ المانيفست) يسبق مسار المدى")
     head = _rev(ROOT)
     zeros = "0" * 40
-    for refs, why in ((f"refs/heads/x {head} refs/heads/x {head}\n", "فرعٌ عند التزامٍ منشور"),
+    for refs, why in ((f"refs/heads/x {head} refs/heads/x {head}\n", "فرعٌ تعرف الوجهةُ أساسَه"),
                       (f"refs/heads/x {zeros} refs/heads/x {head}\n", "حذفُ فرع")):
         r = subprocess.run([sys.executable, str(GUARD), "--pre-push"], cwd=ROOT,
                            capture_output=True, text=True, input=refs)
-        assert r.returncode == 0 and "المدى فارغٌ **بالقياس**" in r.stdout, (why, r.stdout, r.stderr)
-    r = subprocess.run([sys.executable, str(GUARD), "--pre-push"], cwd=ROOT,
-                       capture_output=True, text=True, input="")
-    assert r.returncode == 2 and "لا مراجعَ على stdin" in r.stdout, (r.stdout, r.stderr)
+        assert r.returncode == 0 and "المدى فارغٌ **بالقياس" in r.stdout, (why, r.stdout, r.stderr)
+    # **فارغٌ شرعاً:** دفعٌ لا يُحدّث مرجعاً (مقيسٌ: git يُنفّذ الخطّاف وbytes=0) ⇒ PASS بإعلان،
+    # لا سقوط (كان rc=2 ⇒ حافزُ `--no-verify` لعملٍ روتينيّ — مراجعة ٤٠/٣).
+    empty = subprocess.run([sys.executable, str(GUARD), "--pre-push"], cwd=ROOT,
+                           capture_output=True, text=True, input="")
+    assert empty.returncode == 0 and "لا مراجعَ على stdin" in empty.stdout, (empty.stdout, empty.stderr)
+    # **ولم أقرأه ⇒ سقوطٌ مُغلَق** (القاعدة ١٩): المجرى المقصوص لا يُقرأ «لا شيءَ يُنشر».
+    for junk, why in (("refs/heads/x " + head + "\n", "سطرٌ بحقلين"),
+                      ("refs/heads/x " + head[:20] + " refs/heads/x " + head + "\n", "sha مقصوص"),
+                      ("not-a-ref\n", "سطرٌ لا مرجعَ فيه")):
+        r = subprocess.run([sys.executable, str(GUARD), "--pre-push"], cwd=ROOT,
+                           capture_output=True, text=True, input=junk)
+        assert r.returncode == 2 and "لم أُقرأ منه مرجعاً" in r.stdout, (why, r.stdout, r.stderr)
+
+
+def test_a_second_remote_does_not_empty_the_destination_range(tmp_path, monkeypatch):
+    """**إغلاقُ الفتح (مقعدا البنية والمواصفة، ٤١):** `--not --remotes` تطرح مراجعَ **كلّ** ريموت ⇒
+
+    التزامٌ تعرفه نسخةٌ احتياطيّة يُقرأ «منشوراً»، والدفعُ إلى `origin` ينشره ⇒ `PASS` كاذب.
+    فالفراغُ يُقاس **مقابل وجهة الدفع**: بلا وجهةٍ يفرغ المدى (العطبُ، مُثبتٌ هنا)، وبه يظهر
+    الالتزامُ غيرُ المنشور إلى الوجهة.
+    """
+    repo = _git_repo(tmp_path / "r")
+    monkeypatch.setattr(ag, "ROOT", repo)
+    for name in ("origin.git", "backup.git"):
+        subprocess.run(["git", "init", "-q", "--bare", str(tmp_path / name)], check=True)
+    for name in ("origin", "backup"):
+        subprocess.run(["git", "remote", "add", name, str(tmp_path / f"{name}.git")],
+                       cwd=repo, capture_output=True)
+    (repo / "base.txt").write_text("أساس\n", encoding="utf-8")
+    _commit(repo, "base")
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:refs/heads/other"], cwd=repo, check=True)
+    subprocess.run(["git", "fetch", "-q", "origin"], cwd=repo, check=True)   # ⇒ مراجعُ الوجهة معروفة
+    (repo / "leak.txt").write_text("قيمة\n", encoding="utf-8")
+    _commit(repo, "leak")
+    subprocess.run(["git", "push", "-q", "backup", "HEAD:refs/heads/main"], cwd=repo, check=True)
+    subprocess.run(["git", "fetch", "-q", "backup"], cwd=repo, check=True)
+    sha = _rev(repo)
+    line = f"refs/heads/main {sha} refs/heads/main {'0' * 40}\n"
+    assert ag.pushed_revs(line, "origin") == [sha], "وجهةُ origin لا تعرف الالتزام ⇒ يجب أن يظهر"
+    assert ag.pushed_revs(line) == [], "بلا وجهةٍ تُطرح كلُّ الريموتات ⇒ فارغٌ — وهو الفتحُ المُغلَق"
 
 
 def _guard_in(repo: Path, *args: str) -> subprocess.CompletedProcess:

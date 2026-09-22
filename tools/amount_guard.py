@@ -575,66 +575,110 @@ class UnresolvedRange(RuntimeError):
 REL_BASELINE = "docs/security/amount-baseline.json"
 
 
-def pushed_revs(refs: str) -> list[str]:
+# ── طبقةٌ واحدةٌ لسؤالٍ واحد: **ما يُنشَر؟** (مُحلِّلٌ واحد · وجهةٌ واحدة · قرارٌ واحد) ──
+HEX = set("0123456789abcdef")
+
+
+def _is_sha(s: str) -> bool:
+    return len(s) == 40 and set(s.lower()) <= HEX
+
+
+def _zero(s: str) -> bool:
+    return set(s) <= {"0"}
+
+
+def parse_refs(stream: str) -> tuple[list[tuple[str, str]], int]:
+    """`stdin` مرّةً واحدة ⇒ (مراجعُ (محلي, بعيد), عددُ الأسطر التي **لم أقرأها**).
+
+    **«لم أقرأ» ≠ «لا شيءَ يُدفع»:** شكلُ سطر `pre-push` أربعةُ حقولٍ بالضبط، فكلُّ سطرٍ آخر
+    (مقصوصٌ أو مبتور) **يُعَدّ** فاسداً لا مُهمَلاً — ومجرى مقصوص (القاعدة ١٩) يُسقَط مُغلَقاً
+    لا أن يمرّ بمدىً فارغٍ يُقرأ «لا شيءَ يُنشر». ومُحلِّلٌ واحدٌ يعني أنّ `pushed_revs` و
+    `_local_heads` لا يمكن أن يفترقا على الحالة نفسها. (مقعدا المواصفة والبنية، مراجعة ٤١.)
+    """
+    pairs: list[tuple[str, str]] = []
+    bad = 0
+    for line in stream.splitlines():
+        if not line.strip():
+            continue
+        p = line.split()
+        if len(p) != 4 or not p[0].startswith("refs/") or not _is_sha(p[1]) or not _is_sha(p[3]):
+            bad += 1
+            continue
+        pairs.append((p[1], p[3]))
+    return pairs, bad
+
+
+def _rev_list(args: list[str], what: str) -> list[str]:
+    r = _git("rev-list", *args)
+    if r.returncode != 0:
+        last = (r.stderr.strip().splitlines() or ["rev-list فشل"])[-1][:120]
+        raise UnresolvedRange(f"{what} :: {' '.join(args)} :: {last}")
+    return r.stdout.split()
+
+
+def _unpublished(local_sha: str, remote_sha: str, remote: str | None) -> list[str]:
+    """ما يُنشَر من مرجعٍ واحد: **مقيساً مقابل وجهة الدفع** لا مقابل كلّ الريموتات.
+
+    (هذا إغلاقُ فتحٍ أدخلته هذه الجولة: `--not --remotes` **تطرح مراجعَ كلِّ ريموت**، فالتزامٌ
+    يعرفه ريموتٌ ثانٍ — نسخةٌ احتياطيّة — يُقرأ «منشوراً» ⇒ `PASS` بينما الدفعُ إلى `origin`
+    ينشره. الفراغُ يجب أن يُقاس مقابل **الوجهة** وحدَها. مقعدُ البنية، مراجعة ٤١.)
+
+    وكلُّ اشتقاقٍ متدهورٍ يُعلَن بجملة — لا صمتٌ: العدّادُ في سطر النجاح لا يجوز أن يوصف
+    بأنّه «ما فُحص» إن كان مدىً مُستبدَلاً. (مقعدُ المعايير، ٤١.)
+    """
+    if _zero(local_sha):
+        return []                                    # حذفُ فرع: لا شيءَ يُنشَر
+    if not _zero(remote_sha):
+        r = _git("rev-list", f"{remote_sha}..{local_sha}")
+        if r.returncode == 0:
+            return r.stdout.split()                  # الوجهةُ تعرف الأساس ⇒ المدى مضبوطٌ بالتعريف
+    if remote:
+        # **بدون نجمة:** `rev-list <sha> --not refs/remotes/R/*` **لا يوسّع النجمةَ كمرجع**
+        # (تُقرأ `pathspec` ⇒ مدىً فارغٌ كاذب — مقيسٌ في sandbox) ⇒ تُعدَّد مراجعُ الوجهة صراحةً.
+        tracked = _git("for-each-ref", "--format=%(objectname)", f"refs/remotes/{remote}/").stdout.split()
+        if tracked:
+            return _rev_list([local_sha, "--not", *tracked], f"ما لم تعرفه وجهةُ الدفع `{remote}`")
+        # **وجهةٌ لا أعرف مراجعَها ⇒ لا أُثبت المدى.** والتقريبُ الصامتُ هنا (`--not --remotes`)
+        # هو **الفتحُ نفسُه**: يطرح مراجعَ ريموتٍ آخر (نسخةٌ احتياطيّة) فيُفرغ المدى ⇒ `PASS`
+        # بينما الدفعُ إلى الوجهة ينشر. مدىً لم أُثبته ليس مدىً نظيفاً (ثغرةُ ٣٩ رقم ٢، والقاعدة ١٩).
+        raise UnresolvedRange(f"مراجعُ وجهة الدفع `{remote}` غيرُ محلولةٍ محليّاً ({local_sha[:8]})")
+    return _rev_list([local_sha, "--not", "--remotes"], "احتياطُ --not --remotes (بلا وجهةٍ مُعلَنة)")
+
+
+def pushed_revs(refs: str, remote: str | None = None) -> list[str]:
     """**مراجعُ الدفع من `stdin`** — والنمطُ هو نمطُ `publish_guard` نفسُه حتى لا يرى حارسان مجموعتين.
 
     (وهنا كان العطبُ: `--pre-push` في الإصدار الثاني **لا يقرأ `stdin` إطلاقاً** ⇒ لا يرى التزاماً
-    وسيطًا مثل `e819e65` الذي حمل المبلغ.)
+    وسيطًا مثل `e819e65` الذي حمل المبلغ. وكان سؤالُ «ما لم يعرفه الريموت» **ثلاثَ نسخٍ جزئيّة**
+    بعباراتٍ مختلفة ⇒ أُعيد إلى طبقةٍ واحدة: `parse_refs` ثم `_unpublished` لكلّ مرجع.)
     """
+    pairs, _bad = parse_refs(refs)
     revs: set[str] = set()
-    for line in refs.splitlines():
-        parts = line.split()
-        if len(parts) < 4:
-            continue
-        local_sha, remote_sha = parts[1], parts[3]
-        if set(local_sha) <= {"0"}:
-            continue                                  # حذفُ فرع
-        if set(remote_sha) <= {"0"}:
-            # **فرعٌ جديد: المدى = ما لا يعرفه الريموت، لا كلُّ التاريخ.**
-            # `rev-list <sha>` وحدَه يعيد ١٤٠٧ التزاماتٍ هنا ⇒ يُفحَص تاريخٌ **منشورٌ سلفاً**
-            # ⇒ يتحوّل الدَّينُ المُعلَن في التزاماتٍ قديمةٍ إلى **منعٍ دائم**. و`--not --remotes`
-            # هو التعريفُ الصحيح لِـ«ما يُنشَر جديداً» (وما يعرفه الريموت منشورٌ بالفعل).
-            rng = [local_sha, "--not", "--remotes"]
-        else:
-            rng = [f"{remote_sha}..{local_sha}"]
-        r = _git("rev-list", *rng)
-        if r.returncode != 0 and len(rng) == 1:
-            # **الاحتياطُ من المرجع المدفوع نفسِه** (رأسٌ بعيدٌ مجهولٌ محليّاً):
-            # `--not --remotes` على نفس الالتزام — ولا `HEAD` في أيّ فرعٍ من الحارس.
-            rng = [local_sha, "--not", "--remotes"]
-            r = _git("rev-list", *rng)
-        if r.returncode != 0:
-            last = (r.stderr.strip().splitlines() or ["rev-list فشل"])[-1][:120]
-            raise UnresolvedRange(f"{' '.join(rng)} :: {last}")
-        revs.update(r.stdout.split())
+    for local_sha, remote_sha in pairs:
+        revs.update(_unpublished(local_sha, remote_sha, remote))
     return sorted(revs)
 
 
 def _local_heads(refs: str) -> list[str]:
-    out = []
-    for line in refs.splitlines():
-        p = line.split()
-        if len(p) >= 4 and not set(p[1]) <= {"0"}:
-            out.append(p[1])
-    return out
+    return [local for local, _ in parse_refs(refs)[0] if not _zero(local)]
 
 
-def _range_from_heads(heads: list[str]) -> list[str] | None:
+def _range_from_heads(heads: list[str], remote: str | None = None) -> list[str] | None:
     """**المدى من المراجع المدفوعة أنفسِها — لا من `HEAD`** (مراجعة ٤٠، البند ٢).
 
     كان الاحتياطُ يشترط `rev-list HEAD --not --remotes`: فرعٌ متسرّبٌ يُدفع و`HEAD` يحمل
     التزاماً نظيفاً ⇒ **فحصَ فرعاً آخر** ومرّ التسرّبُ `rc=0` (مقيسٌ في sandbox). و`HEAD` ليس
     ما يُدفع؛ والمراجعُ على `stdin` هي المصدرُ الوحيدُ لِما يُدفع ⇒ غيابُها عطبُ سباكةٍ
-    **يُسقَط مُغلَقاً**، لا يُخمَّن له بديل.
+    **يُسقَط مُغلَقاً**، لا يُخمَّن له بديل. والمدى هنا يُقاس **مقابل وجهة الدفع** كذلك.
     """
     if not heads:
         return None
     revs: set[str] = set()
     for sha in heads:
-        r = _git("rev-list", sha, "--not", "--remotes")
-        if r.returncode != 0:
+        try:
+            revs.update(_unpublished(sha, "0" * 40, remote))
+        except UnresolvedRange:
             return None
-        revs.update(r.stdout.split())
     return sorted(revs)
 
 
@@ -923,6 +967,9 @@ def main(argv=None) -> int:
     ap.add_argument("--extra", default="")
     ap.add_argument("--inject", action="store_true", help="برهانُ السقوط (سمٌّ من المصدر · سطحان)")
     ap.add_argument("--json", action="store_true", help="المخرَجُ الآليُّ الكامل (لا يُقصّ)")
+    ap.add_argument("--remote", default=None,
+                    help="اسمُ وجهة الدفع كما يمرّرها الخطّاف من `$1` — المدى يُقاس مقابلها لا "
+                         "مقابل كلّ الريموتات؛ وغيابُها يُعلَن تقريباً لا يُخفى.")
     args = ap.parse_args(argv)
 
     if args.tracking_audit:
@@ -991,16 +1038,23 @@ def main(argv=None) -> int:
     if args.pre_push:
         refs = sys.stdin.read()
         if not refs.strip():
-            # **stdin الفارغُ يُسقَط مُغلَقاً** (مراجعة ٤٠، البند ٢): المراجعُ على `stdin` هي
-            # المصدرُ الوحيدُ لِما يُدفع، والاشتقاقُ من `HEAD` **يفحص فرعاً آخرَ** غيرَ المدفوع
-            # (وقِيس: فرعٌ متسرّبٌ + `HEAD` نظيف ⇒ `rc=0`). والدفعُ الحقيقيّ **يمرّر المراجع**
-            # (مقيسٌ: «مدى الدفع (4 التزاماً)») ⇒ الفارغُ عطبُ سباكةٍ لا حالةٌ مشروعة.
-            print("⛔ BLOCK — لا مراجعَ على stdin ⇒ لا أُسمّي ما يُدفع ⇒ لا أُثبت نظافتَه")
-            print("   ⇒ الخطّافُ يمرّر المراجع (مقيسٌ في دفعٍ حقيقيّ)."
-                  " وللفحص بلا دفع: `--ratchet`.")
+            # **فارغٌ شرعاً:** git يُنفّذ `pre-push` و`stdin` فارغٌ حين لا مرجعَ يُحدَّث (دفعٌ
+            # لفرعٍ متزامن — مقيسٌ: bytes=0). فلا شيءَ يُنشر ⇒ لا شيءَ أُثبته، **ويُعلَن**.
+            # (كان يسقط `rc=2` ⇒ حافزُ `--no-verify` لعملٍ روتينيّ — وهو الصنفُ الذي حذّرت منه
+            # المراجعةُ في البند ٣. المقعدُ يمنع سقوطاً كاذباً، والمقعدُ الآخر يمنع مروراً كاذباً
+            # ⇒ والفصلُ بين الحالتين هو الجواب: **الفرقُ بين «لا شيءَ» و«لم أقرأ»**.)
+            print("PASS — لا مراجعَ على stdin ⇒ دفعٌ لا يُحدّث مرجعاً ⇒ لا شيءَ يُنشر (يُعلن)")
+            return 0
+        _pairs, _bad = parse_refs(refs)
+        if _bad or not _pairs:
+            print(f"⛔ BLOCK — stdin غيرُ فارغٍ ولم أُقرأ منه مرجعاً ({_bad} سطراً خارج شكل"
+                  f" `pre-push` رباعيّ الحقول) ⇒ «لم أقرأ» ليست «لا شيءَ يُنشر»"
+                  f" (القاعدة ١٩: المجرى المقصوص يُسقَط مُغلَقاً)")
+            print("   ⇒ الخطّافُ يمرّر أربعةَ حقولٍ في السطر (مقيسٌ في دفعٍ حقيقيّ):"
+                  " أعد الدفع، أو `--ratchet` للفحص بلا دفع.")
             return 2
         try:
-            revs = pushed_revs(refs)
+            revs = pushed_revs(refs, args.remote)
         except UnresolvedRange as e:
             declared = os.environ.get("AMOUNT_GUARD_HISTORY_REWRITE", "").strip()
             if declared:
@@ -1008,10 +1062,10 @@ def main(argv=None) -> int:
                       " (بإعلانٍ لا بصمت)")
                 return main(["--history-rewrite", declared,
                              "--mirror", os.environ.get("AMOUNT_GUARD_MIRROR", "")])
-            salvaged = _range_from_heads(_local_heads(refs))   # المراجعُ المدفوعةُ نفسُها، لا `HEAD`
+            salvaged = _range_from_heads(_local_heads(refs), args.remote)  # المراجعُ نفسُها، لا `HEAD`
             if salvaged:
                 print(f"⚠ المراجعُ غيرُ محلولة ({e}) ⇒ اشتُقّ المدى من المراجع المدفوعة نفسِها "
-                      f"({len(salvaged)} التزاماً لم يعرفها الريموت) — يُعلن ولا يُخفى")
+                      f"({len(salvaged)} التزاماً لم تعرفها وجهةُ الدفع) — يُعلن ولا يُخفى")
                 revs = salvaged
             else:
                 print(f"⛔ BLOCK — لم أُثبت نظافةَ المدى ⇒ لا أمرّ (ثغرةُ ٣٩ رقم ٢): {e}")
@@ -1021,8 +1075,8 @@ def main(argv=None) -> int:
             # **الفارغُ شرعاً ≠ غيرُ المقروء** (مراجعة ٤٠/٣): مدىً **حُلّ** فارغاً قياسٌ يقول
             # «لا التزامَ جديداً يُنشر» — فرعٌ جديدٌ عند التزامٍ منشورٍ أصلاً، أو **حذفُ فرع** —
             # فيُمرّ بإعلانٍ لا بسقوط؛ والسقوطُ يبقى لحالةٍ واحدة: **فشلُ حلّ المدى** (أعلاه).
-            print("PASS — المدى فارغٌ **بالقياس**: لا التزامَ جديداً يُنشر (فرعٌ عند التزامٍ "
-                  "منشورٍ أو حذفُ فرع) ⇒ لا شيءَ يُنشر فلا شيءَ أُثبته")
+            print("PASS — المدى فارغٌ **بالقياس مقابل وجهة الدفع**: لا التزامَ جديداً يُنشر "
+                  "(فرعٌ تعرف الوجهةُ أساسَه، أو حذفُ فرع) ⇒ لا شيءَ يُنشر فلا شيءَ أُثبته")
             return 0
         counts = pushed_counts(deny, revs)
         base = baseline_at("origin/main")

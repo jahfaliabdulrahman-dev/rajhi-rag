@@ -26,7 +26,8 @@ done
 
 REFS=$(cat)
 printf '%s\n' "$REFS" | "$PY" tools/publish_guard.py --pre-push || exit 1
-printf '%s\n' "$REFS" | "$PY" tools/amount_guard.py --pre-push || exit 1
+# `$1` = وجهةُ الدفع (اسمُ ريموت أو رابط): يمرّرها الحارسُ ليَقيس «ما يُنشر» مقابلها لا مقابل كلّ الريموتات.
+printf '%s\n' "$REFS" | "$PY" tools/amount_guard.py --pre-push --remote "$1" || exit 1
 
 if "$PY" -c "import pyflakes" 2>/dev/null; then
   "$PY" tools/static_gate.py || exit 1
