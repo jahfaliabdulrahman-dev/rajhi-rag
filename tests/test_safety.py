@@ -14,7 +14,7 @@ from statement_qa.chunking import Chunk
 
 def test_token_style_classifies_both_eras():
     assert token_style("٣٠٠,٠٠") == "old"        # comma decimal (old print)
-    assert token_style("9001.00") == "new"      # dot halalas + thousands
+    assert token_style("٩,٠٠٦.٠٠") == "new"      # dot halalas + thousands
     assert token_style("٦١,١٦٥١٢") == "lost_dot"  # lost decimal dot
     assert token_style(".,..") == "zero_style"   # printed zero
     assert token_style("٣٠٠") == "plain"
@@ -24,7 +24,7 @@ def test_token_style_classifies_both_eras():
 def test_page_fingerprint_majority_and_mixed():
     old = page_fingerprint(["٣٠٠,٠٠", "١٠٠,٠٠", "٢٠٠,٠٠", ".,.."])
     assert old["style"] == "old" and old["counts"]["zero_style"] == 1
-    new = page_fingerprint(["9001.00", "١٠٠.٠٠", "٢٠٠.٠٠"])
+    new = page_fingerprint(["٩,٠٠٦.٠٠", "١٠٠.٠٠", "٢٠٠.٠٠"])
     assert new["style"] == "new"
     mixed = page_fingerprint(["٣٠٠,٠٠", "١٠٠.٠٠"])  # 1-1, no 3:1 margin
     assert mixed["style"] == "mixed"

@@ -12,7 +12,7 @@ Filters (all optional, combinable):
   "سحب صراف آلي", "تحويل صادر", "تحويل وارد", "إيداع نقدي (صراف آلي)",
   "مشتريات (نقاط بيع)", "فواتير ومدفوعات سداد", …
 - keyword: substring of the description.
-- amount: exact riyal amount after 2dp rounding (accepts 1000 / "9001.00").
+- amount: exact riyal amount after 2dp rounding (accepts 1000 / "9,001.00").
 
 An optional `trace` list (server-side only) records which rows each non-empty
 call selected: {"tool": name, "row_nos": [...]}. The evidence panel is built

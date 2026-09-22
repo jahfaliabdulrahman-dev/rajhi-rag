@@ -2,47 +2,6 @@
  "what": "خطُّ أساسِ الظهورات — **أعدادٌ فقط**: لا قيمةَ ولا بصمةَ مبلغٍ (فلا يُنشر ما يُجرَد)",
  "how": "python3 tools/amount_guard.py --baseline-write   # يُخفَّض بالتصحيح لا بالمسح",
  "rule": "لا يُعفى موضع (القاعدة ١٦) — الخطُّ مؤقّتٌ يُخفَّض بإعادة كتابة القيم، ولا يُرفع أبداً: أداةُ --build لا تلمسه",
- "counts": {
-  "src/statement_qa/footer_oracle.py": {
-   "count": 1,
-   "commitment": "d964159e575a333b"
-  },
-  "src/statement_qa/legacy/arabic_digit_parser.py": {
-   "count": 4,
-   "commitment": "5c9dc00b6d527287"
-  },
-  "src/statement_qa/qa_tools.py": {
-   "count": 1,
-   "commitment": "4d004a283eef83aa"
-  },
-  "tests/test_chain.py": {
-   "count": 9,
-   "commitment": "482b36a79205b361"
-  },
-  "tests/test_gap_ledger.py": {
-   "count": 4,
-   "commitment": "bf77f2d6d5b2f643"
-  },
-  "tests/test_parser.py": {
-   "count": 9,
-   "commitment": "2eee632444bbd3b9"
-  },
-  "tests/test_qa_tools.py": {
-   "count": 9,
-   "commitment": "0481d473839d3f82"
-  },
-  "tests/test_row_audit.py": {
-   "count": 1,
-   "commitment": "4d004a283eef83aa"
-  },
-  "tests/test_safety.py": {
-   "count": 2,
-   "commitment": "62601d21e20115b7"
-  },
-  "tests/test_scope_gate.py": {
-   "count": 1,
-   "commitment": "4d004a283eef83aa"
-  }
- },
- "total": 41
+ "counts": {},
+ "total": 0
 }

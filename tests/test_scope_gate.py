@@ -85,7 +85,8 @@ def test_an_absent_amount_is_answered_from_the_rows():
 
 
 def test_an_existing_amount_passes_through_to_the_tools():
-    assert _kind("هل يوجد تحويل بمبلغ 1000؟") == "in_scope"
+    # المبالغُ في هذا الملفّ **صناعيّةٌ محجوزة** (9xxx) — لا مبلغَ حقيقيّ في المستودع.
+    assert _kind("هل يوجد تحويل بمبلغ 9001؟") == "in_scope"
 
 
 def test_thresholds_are_not_existence_questions():

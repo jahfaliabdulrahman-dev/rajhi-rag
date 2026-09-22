@@ -5,7 +5,10 @@
 
   ١) تسريبٌ مباشر            → يجب أن يُسقط الدفع.
   ٢) تسريبٌ + رفعُ خطّ الأساس في الدفعة نفسِها → يجب أن يُسقط.
-  ٣) تبديلُ قيمةٍ بأخرى في ملفٍّ مُعلَن (العدّ نفسُه) → يجب أن يُسقط (بصمةُ المجموعة).
+  ٣) ضابطٌ موجب: قيمةٌ صناعيّةٌ محجوزة → **يجب أن تمرّ** (وإلا كانت البوابةُ تُسقط أعمى).
+     (وبصمةُ المجموعة التي تكشف التبديل عند العدّ نفسِه مُختبَرةٌ وحديّاً في
+     `tests/test_amount_guard.py` — وهي لا تُقاس نهايةً إلى نهاية إلّا في وجود دَينٍ مُعلَن،
+     وقَد انتهى الدَّين ⇒ كلُّ ظهورٍ اليوم يُسقط.)
   ٤) الخطّافُ من نسخةٍ بلا `.venv` → **لا** يُسقط على `static_gate`، وحرّاسُ الأمن تعمل.
 
 المفتاحُ والمانيفست يُنسخان إلى النسخة المؤقّتة، ثم تُحذف النسخةُ كاملةً في `finally`.
@@ -29,15 +32,19 @@ def _run(*a: str, cwd: Path, env: dict | None = None, inp: str = "") -> subproce
                           input=inp, env={**os.environ, **(env or {})})
 
 
-def _real_values(deny: set[str], surface: str, need: int = 2) -> list[str]:
-    """قيمٌ حقيقيّة **من ملفٍّ مُعلَنٍ سلفاً في خطّ الأساس** — لا نُكتب قيمةً في ملفّ متتبَّع هنا."""
+def _real_values(deny: set[str], need: int = 2) -> list[str]:
+    """قيمٌ حقيقيّة **من الكوربوس المحليّ** (`DATA_ROOT`) لا من ملفٍّ متتبَّع.
+
+    (كان يقرؤها من `tests/test_parser.py`؛ ولمّا عُوِّض الدَّين المُعلَن بقيمٍ آمنة اختفت من
+    الشجرة ⇒ صار المصدرُ هو الأدلّةَ نفسَها: لا قيمةَ حقيقيّةً في متتبَّع، والبرهانُ يبقى.)
+    """
     sys.path.insert(0, str(ROOT))
     import tools.amount_guard as ag                                   # noqa: PLC0415
-    txt = (ROOT / surface).read_text(encoding="utf-8")
-    found = [t for t, _ in ag.find_in_text(txt, deny)]
-    if len(found) < need:
-        raise SystemExit(f"⛔ السطحُ {surface} لا يحمل {need} قيمتين ⇒ لا برهان (يُعلن ولا يُدَّعى)")
-    return found[:need]
+    src, _, _, _ = ag.source_amounts()
+    vals = sorted({a for a in src if ag.is_significant(a) and ag.fingerprint(a) in deny})
+    if len(vals) < need:
+        raise SystemExit(f"⛔ الكوربوسُ لا يحمل {need} قيمتين ⇒ لا برهان (يُعلن ولا يُدَّعى)")
+    return vals[:need]
 
 
 def main() -> int:
@@ -47,7 +54,7 @@ def main() -> int:
     if deny is None:
         print("⚠ لا مانيفست ⇒ البرهانُ غيرُ قابلٍ للتنفيذ هنا (يُعلن ولا يُدَّعى)")
         return 5
-    vals = _real_values(deny, "tests/test_parser.py")
+    vals = _real_values(deny)
     tmp = Path(tempfile.mkdtemp(prefix="ratchet-proof-"))
     results: list[tuple[str, bool, str]] = []
     try:
@@ -95,18 +102,16 @@ def main() -> int:
         r = _run(PY, "tools/amount_guard.py", "--pre-push", cwd=clone, inp=push_refs(new2))
         results.append(("٢) تسريبٌ + رفعُ الأساس معه", r.returncode != 0, f"rc={r.returncode}"))
 
-        # ٣) تبديلُ قيمةٍ بأخرى في ملفٍّ مُعلَن (العدّ نفسُه)
-        _run("git", "checkout", "-q", head, "--", "tests/test_parser.py", cwd=clone)
-        swapped = base.replace(vals[0], vals[1], 1) if vals[0] in base else base
-        if swapped == base:
-            results.append(("٣) تبديلُ قيمةٍ بأخرى", False, "تعذّر التبديل (القيمةُ ليست في الملفّ)"))
-        else:
-            target.write_text(swapped, encoding="utf-8")
-            _run("git", "add", "-A", cwd=clone)
-            _run("git", "commit", "-q", "-m", "proof: swap", cwd=clone)
-            new3 = _run("git", "rev-parse", "HEAD", cwd=clone).stdout.strip()
-            r = _run(PY, "tools/amount_guard.py", "--pre-push", cwd=clone, inp=push_refs(new3))
-            results.append(("٣) تبديلُ قيمةٍ بأخرى (العدّ ثابت)", r.returncode != 0, f"rc={r.returncode}"))
+        # ٣) **ضابطٌ موجب:** قيمةٌ صناعيّةٌ محجوزة تمرّ — البوابةُ لا تُسقط كلَّ شيء
+        _run("git", "reset", "--hard", "-q", head, cwd=clone)
+        (clone / "tests").mkdir(exist_ok=True)
+        target.write_text(base + "\n# 9876.00\n", encoding="utf-8")
+        _run("git", "add", "-A", cwd=clone)
+        _run("git", "commit", "-q", "-m", "proof: safe value", cwd=clone)
+        new3 = _run("git", "rev-parse", "HEAD", cwd=clone).stdout.strip()
+        r = _run(PY, "tools/amount_guard.py", "--pre-push", cwd=clone, inp=push_refs(new3))
+        results.append(("٣) ضابط: قيمةٌ صناعيّةٌ تمرّ (لا إسقاطَ أعمى)", r.returncode == 0,
+                        f"rc={r.returncode}"))
 
         # ٤) الخطّافُ من نسخةٍ بلا `.venv` (pyflakes غائبٌ بالمحاكاة) — على شجرةٍ **نظيفة**
         _run("git", "reset", "--hard", "-q", head, cwd=clone)   # تُطرَح التزاماتُ البرهان: المدى = النظيفُ وحده

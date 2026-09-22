@@ -29,30 +29,30 @@ def _mk_csv_text(rows: list[str]) -> str:
 def test_parse_western_rows():
     text = _mk_csv_text([
         "[PAGE 1]",
-        "01/01/2026 رصيد افتتاحي 9001.00",
-        "02/01/2026 تحويل صادر مطعم ب 120.50 9879.50",
+        "01/01/2026 رصيد افتتاحي 9011.00",
+        "02/01/2026 تحويل صادر مطعم ب 120.50 8890.50",
     ])
     df = parse_text(text)
     assert df.height == 2
-    assert df["balance"][1] == Decimal("9879.50")
+    assert df["balance"][1] == Decimal("8890.50")   # 9011.00 − 120.50
     assert df["debit"][1] == Decimal("120.50")
 
 
 def test_parse_arabic_indic_rows():
-    # ٠١/٠١/٢٠٢٦  رصيد افتتاحي  9001.00
+    # ٠١/٠١/٢٠٢٦  رصيد افتتاحي  ٩٠١١.٠٠
     text = _mk_csv_text([
-        "٠١/٠١/٢٠٢٦ رصيد افتتاحي 9001.00",
-        "٠٢/٠١/٢٠٢٦ تحويل وارد شركة أ 9001.00 ١9001.00",
+        "٠١/٠١/٢٠٢٦ رصيد افتتاحي ٩٠١١.٠٠",
+        "٠٢/٠١/٢٠٢٦ تحويل وارد شركة أ ٩٠٠٢.٥٥ ١٨٠١٣.٥٥",
     ])
     df = parse_text(text)
     assert df.height == 2
-    # Chain arbitration (load_statement contract): 10000+1500=11500 ✓ → credit.
+    # Chain arbitration: 9011.00 + 9002.55 = 18013.55 ✓ → credit.
     # parse_text returns the raw debit-default; fix_sides_by_chain flips it.
     from statement_qa.parser import fix_sides_by_chain
     fixed = fix_sides_by_chain(df)
-    assert fixed["credit"][1] == Decimal("9001.00")
+    assert fixed["credit"][1] == Decimal("9002.55")
     assert fixed["debit"][1] == Decimal("0.00")
-    assert fixed["balance"][1] == Decimal("19001.00")
+    assert fixed["balance"][1] == Decimal("18013.55")
 
 
 def test_parse_empty():
@@ -80,9 +80,9 @@ def _rows(balances, debits, credits):
 
 def test_verify_chain_ok():
     text = _rows(
-        ["9001.00", "9879.50", "11379.50"],
+        ["9011.00", "8890.50", "17893.05"],
         ["120.50", "0.00"],
-        ["0.00", "9001.00"],
+        ["0.00", "9002.55"],
     )
     rep = verify_statement(parse_text(text))
     assert rep["balance_ok"] is True
@@ -92,9 +92,9 @@ def test_verify_chain_ok():
 
 def test_verify_chain_broken_flags_suspect():
     text = _rows(
-        ["9001.00", "9879.50", "11379.60"],   # last balance corrupted (OCR error)
+        ["9011.00", "8890.50", "17893.15"],   # last balance corrupted (OCR error)
         ["120.50", "0.00"],
-        ["0.00", "9001.00"],
+        ["0.00", "9002.55"],
     )
     rep = verify_statement(parse_text(text))
     assert rep["balance_chain_ok"] is False
