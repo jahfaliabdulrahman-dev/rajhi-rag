@@ -22,6 +22,7 @@ jobs:
           fetch-depth: 0   # full history for the forensic scan
       - name: PII / real-data guard (tree + history + commit messages)
         run: python3 tools/publish_guard.py --tree --history --ci
+        run: python3 tools/amount_guard.py --tree --history --ci
       # Static gate: undefined names / dead bindings. Pinned engine so the
       # verdict cannot drift with a version bump; a dev tool, never a runtime
       # dependency.
