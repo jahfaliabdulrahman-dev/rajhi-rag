@@ -141,3 +141,38 @@ def test_an_unknown_identity_is_upgraded_when_the_document_appears(tmp_path, mon
     (run / "slice_629p.pdf").write_bytes(DOC_BYTES)
     cp = _stamp(monkeypatch, run)
     assert cp["doc_id"] == hashlib.sha256(DOC_BYTES).hexdigest()[:16]
+
+
+# ── البابُ المعلن يُسجّل من عبَر: الاستبدالُ الصريح لا يمحو أثرَه ────────────
+# `doc_id` مفتاحُ بوابة التقاطع، فحزمةٌ استُبدلت هويتُها تحتها تمرّ البوابةَ لأن
+# الطرفين تحرّكا معاً — صنفُ «الشاهدُ يتحرّك مع المشهود له».
+def _replace(monkeypatch, run: Path, doc_bytes: bytes) -> dict:
+    (run / "slice_629p.pdf").write_bytes(doc_bytes)
+    monkeypatch.setattr(sys, "argv", ["x", "--run", str(run), "--replace-doc-id"])
+    main()
+    return json.loads((run / "slice_report.json").read_text(encoding="utf-8"))["corpus_provenance"]
+
+
+def test_an_explicit_replacement_records_what_it_replaced(tmp_path, monkeypatch):
+    """الاستبدالُ الصريح يُقيَّد: ما استُبدل، ومتى، وبأي سبب — والملاحظةُ لا تكذب."""
+    run = _stamped_run(tmp_path, "3e2d360a665c88aa", with_doc=True)
+    cp = _replace(monkeypatch, run, b"document B")
+    new = hashlib.sha256(b"document B").hexdigest()[:16]
+    assert cp["doc_id"] == new
+    assert cp["doc_id_previous"] == "3e2d360a665c88aa", "الاستبدالُ بلا أثرٍ لما استُبدل"
+    assert "استبدال" in cp["doc_id_note"] and "3e2d360a665c88aa" in cp["doc_id_note"], \
+        "الملاحظةُ تحكي الختمَ الأول وتُخفي الاستبدال"
+    h = cp["doc_id_history"][-1]
+    assert (h["previous"], h["replaced_by"]) == ("3e2d360a665c88aa", new)
+    assert h["at"] == cp["doc_id_replaced_at"] and "صريح" in h["reason"], \
+        "سجلُّ الاستبدال بلا وقتٍ أو بلا سببٍ معلن"
+
+
+def test_a_second_replacement_keeps_the_whole_history(tmp_path, monkeypatch):
+    """سجلٌّ تراكميّ لا حقلُ «آخر استبدال»: من استُبدل مرّتين يظهر مرّتين."""
+    run = _stamped_run(tmp_path, "aaaaaaaaaaaaaaaa", with_doc=True)
+    _replace(monkeypatch, run, b"document B")
+    cp = _replace(monkeypatch, run, b"document C")
+    assert [h["previous"] for h in cp["doc_id_history"]] == [
+        "aaaaaaaaaaaaaaaa", hashlib.sha256(b"document B").hexdigest()[:16]]
+    assert cp["doc_id_previous"] == hashlib.sha256(b"document B").hexdigest()[:16]

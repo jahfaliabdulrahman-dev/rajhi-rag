@@ -48,6 +48,7 @@ def resolve_doc_id(cp: dict, doc: Path, *, explicit: bool = False,
     قبل أن تكتب، وتُعيد ماذا فعلت (`stamped` · `unchanged` · `kept` · `unknown`).
     """
     previous = cp.get("doc_id")
+    today = date.today().isoformat()
     if doc.exists():
         computed = sha256_16(doc)
         if previous and previous != computed and not replace:
@@ -59,15 +60,31 @@ def resolve_doc_id(cp: dict, doc: Path, *, explicit: bool = False,
             cp["doc_id_note"] = ("الهويةُ مُثبتةٌ سابقاً وتطابق الملفّ المعطى — لا تغيير "
                                  "(الاستدراكُ لا يُعاد).")
             return "unchanged"
+        # **البابُ المعلن يُسجّل من عبَر:** استبدالُ هويةٍ مُثبتة يُقيَّد بما استُبدل،
+        # بسجلٍّ تراكميّ لا بحقلِ آخرِ استبدالٍ فقط. و`doc_id` مفتاحُ بوابة التقاطع،
+        # فحزمةٌ استُبدلت هويتُها تحتها **تمرّ البوابة لأن الطرفين تحرّكا معاً** —
+        # وهو صنفُ «الشاهدُ يتحرّك مع المشهود له»، أخطرُ من المحو لأن المحوَ يُرى.
+        replaced = bool(previous) and previous != computed
+        if replaced:
+            cp["doc_id_previous"] = previous
+            cp["doc_id_replaced_at"] = today
+            cp["doc_id_history"] = list(cp.get("doc_id_history") or []) + [{
+                "previous": previous, "replaced_by": computed, "at": today,
+                "reason": "استبدالٌ صريح بـ--replace-doc-id (إعلانُ إرادةٍ لا صمت)",
+            }]
         cp.update({
             "doc_id": computed,
             "doc_file": doc.name,
             "doc_id_method": DOC_ID_METHOD,
-            "doc_id_note": ("ختمُ استدراك: الصفحاتُ قُرئت قبل تسجيل الهوية، والوسمُ من "
-                            "الملف نفسه لا من قراءةٍ جديدة."),
-            "doc_id_backfilled_at": date.today().isoformat(),
+            "doc_id_note": (
+                f"ختمٌ صريحٌ باستبدال: من {previous} إلى {computed} في {today} — "
+                "الملفُّ المعطى مخالفٌ للوسم السابق، والاستبدالُ بطلبٍ صريح."
+                if replaced else
+                "ختمُ استدراك: الصفحاتُ قُرئت قبل تسجيل الهوية، والوسمُ من "
+                "الملف نفسه لا من قراءةٍ جديدة."),
+            "doc_id_backfilled_at": today,
         })
-        return "stamped"
+        return "replaced" if replaced else "stamped"
     if explicit:
         raise SystemExit(f"ملفُّ الأصل المعطى غير موجود ({doc}) — لا وسمَ بلا ملفّ.")
     if previous:
