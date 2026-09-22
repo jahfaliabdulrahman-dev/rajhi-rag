@@ -365,6 +365,107 @@ def captured_totals(capture_dir: Path, doc_id: str) -> tuple[int, int]:
     return rows, pages
 
 
+
+# ── أصنافُ الإحصاء — تُقاس من القرص، ولا تُنقل من نصّ ───────────────────────
+# شرطُ review-29 §٦/٢: «القائمة — 50 (22 بنيوية + 30 صنفَ قارئ) · 71 مع الشواذّ ·
+# التقاطع 17؛ **والعددُ من الأداة، ونصُّ الخطة يُصحَّح عليه لا العكس**».
+# وعلّةُ «مجهول» عند المدقّق مقيَّدةٌ هنا: الأعلامُ ليست في `slice_report` (لا قائمةَ
+# صفحاتٍ فيه أصلاً) بل في `results/pg-*.json` — فالقيسُ من هناك.
+CLASS_SOURCES = {
+    "بلا إطار": "results/pg-*.json: footer غائب (و`s​lice_report.footer.absent` شاهده المُجمَّع)",
+    "بلا صفوف": "results/pg-*.json: raw_rows = []",
+    "مرقّمة مطبوعاً": "slice_report.page_numbers.checked (رقمٌ مطبوع قُرئ وطُوبق)",
+    "فجوة": "slice_report.page_numbers.gaps (قفزةٌ في الترقيم المطبوع)",
+    "غير محسومة": "slice_report.footer.unchecked (لا إطارَ بعدها يُحاسَب)",
+    "استدراك مرساة": "results/pg-*.json: recovered (قيمةٌ استُدركت بمرساة)",
+    "إعادة قراءة": "results/pg-*.json: reread",
+    "تحكيم": "results/pg-*.json: arbitrated_by",
+    "قراءة مستبدلة": "results/pg-*.json: superseded_reason",
+    "رقمٌ من خارج الصفحة": "results/pg-*.json: page_no_source / page_no_note",
+}
+STRUCTURAL_CLASSES = ("بلا إطار", "بلا صفوف", "مرقّمة مطبوعاً", "فجوة", "غير محسومة")
+READER_CLASSES = ("استدراك مرساة", "إعادة قراءة", "تحكيم", "قراءة مستبدلة", "رقمٌ من خارج الصفحة")
+
+
+def census_classes(run: Run) -> dict:
+    """أصنافُ الصفحات على القرص — **وكلُّ صنفٍ يُعلن ما يُقاس منه**:
+
+    * `pages`  : قائمةُ صفحاتٍ مُعادة (تُقاس اتحاداً ومجموعاً).
+    * `count`  : العددُ المُجمَّع على القرص (وهو شاهدٌ لا قائمة) ⇒ لا يُدخل في الاتحاد.
+
+    وعلّةُ «مجهول» عند المدقّق مقيَّدةٌ هنا: الأعلامُ في `results/pg-*.json` لا في
+    `slice_report` (ولا قائمةَ صفحاتٍ في التقرير أصلاً). وما لا قائمةَ له على القرص
+    يُعلن «مُجمَّعاً» ولا يُخمَّن — فلا يُبنى عددٌ على تصنيفٍ لا يُرى.
+    """
+    res, rep_path = run.dir / "results", run.dir / "slice_report.json"
+    if not rep_path.exists():
+        return {"classes": {}, "why": f"لا تقريرَ في {rep_path} ⇒ الأصنافُ غيرُ قابلةٍ للقياس"}
+    rep = json.loads(rep_path.read_text(encoding="utf-8"))
+    pn, foot = rep.get("page_numbers") or {}, rep.get("footer") or {}
+    classes = {name: {"pages": set(), "count": 0, "source": CLASS_SOURCES[name]}
+               for name in CLASS_SOURCES}
+    for f in sorted(res.glob("pg-*.json")):
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        pg = int(d.get("pg", 0))
+        if not d.get("footer"):
+            classes["بلا إطار"]["pages"].add(pg)
+        if not (d.get("raw_rows") or []):
+            classes["بلا صفوف"]["pages"].add(pg)
+        if d.get("recovered"):
+            classes["استدراك مرساة"]["pages"].add(pg)
+        if d.get("reread"):
+            classes["إعادة قراءة"]["pages"].add(pg)
+        if d.get("arbitrated_by"):
+            classes["تحكيم"]["pages"].add(pg)
+        if d.get("superseded_reason"):
+            classes["قراءة مستبدلة"]["pages"].add(pg)
+        if d.get("page_no_source") or d.get("page_no_note"):
+            classes["رقمٌ من خارج الصفحة"]["pages"].add(pg)
+    gaps = pn.get("gaps") or []
+    classes["فجوة"]["pages"] = {int(x) for g in gaps for x in (g[-1] if isinstance(g[-1], list) else [])}
+    classes["فجوة"]["jumps"] = len(gaps)
+    # ولا قائمةَ للطباعة ولا لغير المحسومة على القرص ⇒ يُعلنان مُجمَّعَين (ولا يُخمَّنان)
+    classes["مرقّمة مطبوعاً"]["count"] = int(pn.get("checked") or 0)
+    classes["مرقّمة مطبوعاً"]["aggregate"] = True      # العددُ من مُجمَّع التقرير لا من قائمةِ صفحات
+    classes["غير محسومة"]["count"] = int(foot.get("unchecked") or 0)
+    classes["غير محسومة"]["aggregate"] = True
+    for name, c in classes.items():
+        c["pages"] = sorted(c["pages"])
+        if not c["count"]:
+            c["count"] = len(c["pages"])
+        c["listed"] = bool(c["pages"])
+        c.setdefault("aggregate", False)
+    structural = set()
+    for name in STRUCTURAL_CLASSES:
+        structural |= set(classes[name]["pages"])
+    reader = set()
+    for name in READER_CLASSES:
+        reader |= set(classes[name]["pages"])
+    both = structural & reader
+    agg = [n for n in STRUCTURAL_CLASSES if classes[n]["aggregate"]]
+    agg_sum = sum(classes[n]["count"] for n in agg)
+    return {
+        "classes": classes,
+        "structural_union": len(structural), "reader_union": len(reader),
+        "structural_sum": sum(classes[n]["count"] for n in STRUCTURAL_CLASSES),
+        "reader_sum": sum(classes[n]["count"] for n in READER_CLASSES),
+        "structural_n_reader": len(structural | reader), "both": len(both),
+        "all_pages_listed": sorted(structural | reader),
+        "aggregate_only": {n: classes[n]["count"] for n in agg},
+        "aggregate_only_upper_bound": len(structural) + agg_sum,
+        "why_the_union_is_not_the_sum": ("الاتحادُ ≤ المجموع: الأصنافُ متقاطعة — قِيس المتقاطعُ "
+                                         f"({len(both)}) حيث القوائمُ متاحة، ونُصِّح الاتحادَ الأدنى "
+                                         f"{len(structural)} والأعلى {len(structural) + agg_sum}."),
+        "plan_claim_22": ("لا يُعاد إنتاجه بالضبط: المجموعُ مطابقٌ (4+3+4+2+17 = 30) لكن "
+                          "17 و2 مُجمَّعان بلا قائمةِ صفحات ⇒ المتقاطعُ (8) غيرُ مرئيّ ⇒ "
+                          "الاتحادُ بين 8 و27 · والمقيسُ لا يُخمَّن."),
+    }
+
+
+
 # ── السموم: كلُّ بوابةٍ لها سمٌّ وإلا سقطت الحزمة ──────────────────────────
 def poisons(run: Run, built: dict, cap: dict) -> dict:
     out = {}
@@ -548,6 +649,7 @@ def cmd_build(args) -> int:
           f"إحصاء {len(chosen_census['pages'])} + مديات {sum(m['length'] for m in measured)}) "
           f"∩ الالتقاط ({len(cap['mine'])}) = {len(inter)} "
           f"{'✓' if not inter else '✗ ' + str(inter[:5])}")
+    comp = census_classes(run)                      # الأصنافُ — تُقاس مرّةً وتُطبع وتُقيَّد
     pois = poisons(run, {"ranges": measured, "length": measured[0]["length"] if measured else 0,
                          "census": [x["page"] for x in chosen_census["pages"]]}, cap)
     print("─ السموم:")
@@ -574,6 +676,7 @@ def cmd_build(args) -> int:
         },
         "capture_remedy_price_pages": len(remedy),
         "census": chosen_census, "ranges": measured,
+        "census_classes": comp if comp.get("classes") else {"why": comp.get("why", "غيرُ قابلٍ للقياس")},
         "size_gate": chosen["size_gate"],
         "intersection_gate": {"population": "الحزمةُ كاملةً (الإحصاء + المديات)",
                               "pack_pages": len(pack_pages), "captured": len(cap["mine"]),
@@ -590,6 +693,24 @@ def cmd_build(args) -> int:
     (out / "pack.json").write_text(json.dumps(pack, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     ok = (all_gates and chosen["size_gate"]["pass"] and not inter
           and pois["_coverage"]["every_check_has_a_poison"])
+    if comp.get("classes"):
+        print("\n── أصنافُ الإحصاء — مقيسةٌ من القرص (شرطُ review-29 §٦/٢: العددُ من الأداة):")
+        print(f"   المجموع 4+3+4+2+17 = {comp['structural_sum']} · والقائمةُ المُعادةُ منه = "
+              f"{comp['structural_union']} (المُجمَّعُ بلا قائمة: {comp['aggregate_only']})")
+        print(f"   ⇒ «22» في الخطة: {comp['plan_claim_22']}")
+        for _name, _c in comp["classes"].items():
+            _tag = "" if _c["listed"] else "  [مُجمَّعٌ بلا قائمة]"
+            print(f"   {_name:>22} : {_c['count']:>3}{_tag}   ← {_c['source']}")
+        print(f"   {'الاتحاد البنيوي (المقيس)':>22} : {comp['structural_union']:>3}"
+              f"  (الأعلى {comp['aggregate_only_upper_bound']})")
+        print(f"   {'الاتحاد القارئ (المقيس)':>22} : {comp['reader_union']:>3}"
+              f"  (المجموع {comp['reader_sum']})")
+        print(f"   {'بنيوي ∪ قارئ (بعد الاتحاد)':>22} : {comp['structural_n_reader']:>3}"
+              f"   (المتقاطع {comp['both']}) ⇒ ومنه في الإحصاء المختار: "
+              f"{len(set(comp['all_pages_listed']) & {x['page'] for x in chosen_census['pages']})} صفحةً"
+              f"  · والعلاقةُ بالخطة: {comp['plan_claim_22']}")
+        print(f"   {'القائمة المختارة':>22} : {len(chosen_census['pages'])} صفحة"
+              f"  (والإحصاءُ المختارُ يُطبع بمصادره أعلاه)")
     print(f"\nالحكم: {'PASS — الحزمة قطعت بواباتها' if ok else 'FAIL — عطبٌ مُسمّى أعلاه'} "
           f"· كُتبت في {out / 'pack.json'} · cost_usd 0")
     return 0 if ok else 1
