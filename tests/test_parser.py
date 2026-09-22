@@ -119,7 +119,7 @@ def test_parse_amount_printed_zero_as_dots():
 
 
 def test_parse_amount_lost_dot():
-    assert _parse_amount("٥٧,٥٠٢٧٥") == Decimal("57502.75")
+    assert _parse_amount("٦١,١٦٥١٢") == Decimal("61165.12")
 
 
 def test_parse_amount_trailing_minus():

@@ -107,7 +107,7 @@ def _page_with_mismatch(tmp_path: Path) -> Path:
         "footer": {"debits": "826432.71", "credits": "868353.27",
                    "balance": "7.84",
                    "raw": {"debits": "٨٢٦٤٣٢٫٧١",
-                           "credits": "٦٩٠,١٥٨.٧٢",
+                           "credits": "٢٤٨٨٥٠٫٤٢",
                            "balance": "٧.٨٤"}}}), encoding="utf-8")
     return tmp_path
 
@@ -126,12 +126,12 @@ def test_arbitration_marks_the_value_and_keeps_the_original(tmp_path):
     data = json.loads((res_dir / "pg-491.json").read_text(encoding="utf-8"))
     f = data["footer"]
     assert f["credits"] == "868353.27"                    # the decided value
-    assert f["raw"]["credits"] == "٦٩٠,١٥٨.٧٢"            # evidence untouched
-    assert f["raw_original"]["credits"] == "٦٩٠,١٥٨.٧٢"
+    assert f["raw"]["credits"] == "٢٤٨٨٥٠٫٤٢"            # evidence untouched
+    assert f["raw_original"]["credits"] == "٢٤٨٨٥٠٫٤٢"
     rec = data["arbitrated_by"][0]
     for key in ("by", "why", "at", "field", "old_value", "new_value"):
         assert key in rec
-    assert rec["raw_parsed"] == "690158.72"
+    assert rec["raw_parsed"] == "248850.42"
 
 
 def test_arbitration_requires_a_written_reason(tmp_path):

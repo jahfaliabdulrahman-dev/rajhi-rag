@@ -1,26 +1,32 @@
-"""حارسُ المبالغ — **الطبقةُ الغائبة** التي جعلت مستودعاً عامّاً يمرّ ومعه ١٢٦ ظهوراً لمبالغ حقيقية.
+"""حارسُ المبالغ — الإصدار الثاني: الاشتقاقُ نفسُه صار محروساً.
 
-**الجذرُ المُثبت:** `publish_guard` له قاعدةُ «سلسلة أرقام طويلة» تشترط عشرَ خاناتٍ متّصلة —
-والنقطةُ العشرية تكسر السلسلة ⇒ `543210.99` تمرّ. فالحارسُ لم يُخطئ، **بل لم يكن يعرف أنه يجب
-أن ينظر** ⇒ وخضرتُه تُقرأ شهادةَ خلوّ. (والأخطرُ: مبالغُ الكوربوس بالعربية `٦٩٠,١٥٨.٧٢` تمشي
-حتى على قاعدةٍ لاتينية.)
+**ما كان مكسوراً في الإصدار الأول (أثبته المدقّق):** المانيفست كان يقرأ `d.get("rows")` —
+والكوربوس يخزّن الحركات في **`raw_rows`** ⇒ الحلقةُ دارت **صفرَ مرّة**، فدخل ١,٣٣٤ بصمةً من
+التذييلات وحدَها وبقي **٤,١٠٠ مبلغاً مصدريًّا خارجه** — ومرّت معها أرقامُ حركاتٍ حقيقية.
+والدرسُ (القاعدة العاشرة): **حارسٌ بقائمةِ منعٍ مُشتقّة، صحّتُه صحّةُ اشتقاقِها لا صحّةُ منطقِه.**
 
-**والقياسُ لا النمط:** المجموعةُ المصدرية **تُشتقّ من الكوربوس** (`results/pg-*.json` + الشهادة)
-لا من قائمةٍ يدوية — فالقاعدةُ تعرف ما يجب أن تحرسه. والمانيفستُ المدفوع يحمل **بصماتٍ فقط**.
+**وما كان مكسوراً ثانياً:** الحقنُ كان يسحب سمَّه **من المانيفست** ⇒ يُثبت أنّ الآلية تعضّ،
+ولا يقول شيئاً عمّا لم يدخلها. الآن الحقنُ يسحب من **المصدر**، ويخرج **بغير الصفر** عند العمى:
+أداةُ برهانٍ تُعلن الفشلَ وتخرج بنجاحٍ ليست بوابة.
 
-⚠ **حدُّ الصدق المُعلن:** البصمةُ **كاشفٌ لا تعمية** — فضاءُ المبالغ يُعدّ بالجَرد (وقد سجّلناه
-تصحيحاً على أنفسنا سابقاً). فالحمايةُ الحقيقية غيابُ النصّ الصريح، والمانيفستُ يجعل العطبَ
-**يُكشف قبل الدفع** لا أن يجعل المبلغ سِرّاً.
+**وحدُّ الصدق (أشدُّ ممّا قلناه):** البصماتُ صارت **مُفتَّحةً بمفتاحٍ سِرّيّ** (`AMOUNT_GUARD_KEY`)
+⇒ البصمةُ المنشورة **لا تُجرَد** بغير المفتاح. وبلا المفتاح **يفشل الحارسُ مُغلَقاً** لا صامتاً.
 
-    python3 tools/amount_guard.py --build     # يبني المانيفست من الكوربوس (يحتاج data/ — محليّ)
-    python3 tools/amount_guard.py             # يفحص الشجرة المُتتبَّعة (يعمل في CI: بصمات فقط)
-    python3 tools/amount_guard.py --inject 543210.99   # إثباتُ أنه يسقط (معيار: احقن وأرِ السقوط)
+**والاشتقاقُ مُعلنُ الأرقام:** المانيفستُ يحمل `derivation`:
+`source_shape_ok = entered + excluded_trivial + excluded_synthetic` — ويُوقف البناءَ إن لم تُغلق.
+
+    export AMOUNT_GUARD_KEY=...        # أو ضعه في data/.amount-guard-key (مُهمَل)
+    python3 tools/amount_guard.py --build          # يشتقّ من الكوربوس ويُراجع الحساب
+    python3 tools/amount_guard.py                  # الفحص (مُتتبَّع + غيرُ متتبَّع)
+    python3 tools/amount_guard.py --inject         # يسحب السمَّ من المصدر ويثبت السقوط
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
+import os
 import re
 import subprocess
 import sys
@@ -29,85 +35,142 @@ from pathlib import Path
 PROJ = Path(__file__).resolve().parents[1]
 MANIFEST = PROJ / "docs" / "security" / "amount-denylist.json"
 DECLARED_BINARIES = PROJ / "docs" / "security" / "tracked-binaries.txt"
+SYNTHETIC = PROJ / "docs" / "security" / "synthetic-amounts.txt"
+KEY_ENV = "AMOUNT_GUARD_KEY"
+KEY_FILE = PROJ / "data" / ".amount-guard-key"
 BINARY_DIRS = ("data/", "digital/")
-SALT = b"rajhi-rag/amount-guard/v1"
-_AR = "0-9\u0660-\u0669\u06f0-\u06f9"
-TOKEN = re.compile(rf"-?[{_AR}][{_AR},٬\u060c٫]*(?:\.[{_AR}]{{1,2}})?")
+BINARY = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".zip", ".xlsx", ".docx"}
+
 _DIGITS = {**{chr(0x0660 + i): str(i) for i in range(10)},
            **{chr(0x06F0 + i): str(i) for i in range(10)}}
-BINARY = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".zip", ".xlsx", ".docx"}
+_AR = "0-9\u0660-\u0669\u06f0-\u06f9"
+TOKEN = re.compile(rf"-?[{_AR}][{_AR},٬\u060c٫]*(?:\.[{_AR}]{{1,2}})?")
+
+# مفتاحُ الحارس: بيئة ⇒ ملفٌّ مُهمَل ⇒ فشلٌ مُغلَق
+def load_key() -> bytes:
+    k = os.environ.get(KEY_ENV, "").strip()
+    if not k and KEY_FILE.exists():
+        k = KEY_FILE.read_text(encoding="utf-8").strip()
+    if not k:
+        raise SystemExit(
+            f"⛔ لا مفتاحَ لِـ{KEY_ENV} ⇒ الحارسُ يفشل مُغلَقاً (لا يمرّ صامتاً).\n"
+            f"   ضعه في البيئة أو في {_shown(KEY_FILE)} (مُهمَل)، وفي CI في أسرار المستودع."
+        )
+    return k.encode()
+
+
+def _shown(path: Path) -> str:
+    """**درسٌ تكرّر:** تنسيقُ مسارٍ قد يكون خارج المستودع ⇒ `relative_to` ترفع ValueError.
+    (وقعنا فيه في الطباعة، ثم في رسالة المفتاح ⇒ فالعطبُ صنفٌ لا حالة.)"""
+    try:
+        return str(path.relative_to(PROJ))
+    except ValueError:
+        return str(path)
 
 
 def normalize(tok: str) -> str:
-    s = "".join(_DIGITS.get(c, c) for c in tok)
+    s = "".join(_DIGITS.get(c, c) for c in str(tok))
     return s.replace("٫", ".").replace("٬", "").replace("،", "").replace(",", "").strip()
 
 
 def fingerprint(amount: str) -> str:
-    return hashlib.sha256(SALT + normalize(amount).encode()).hexdigest()[:32]
+    return hmac.new(load_key(), normalize(amount).encode(), hashlib.sha256).hexdigest()[:32]
 
 
 def is_amount_shaped(tok: str) -> bool:
-    """رقمٌ له أربعُ خاناتٍ صحيحةٌ أو أكثر (وكسرٌ اختياريّ) — فضاءُ المبالغ الحقيقية."""
     v = normalize(tok)
-    ip = v.lstrip("-").split(".")[0]
-    if not ip.isdigit():
+    if not re.fullmatch(r"-?\d+(?:\.\d+)?", v):
         return False
-    return len(ip) >= 4 and (v.count(".") <= 1)
+    return len(v.lstrip("-").split(".")[0]) >= 4
 
 
-def build(extra: list[str]) -> int:
-    """يبني المانيفستَ من الكوربوس الحيّ (المبالغُ الحقيقية) + ما يُمرَّر صريحاً."""
-    amounts: set[str] = set()
-    run = PROJ / "data/local_sample/slice_629p/results"
-    for f in run.glob("pg-*.json"):
-        d = json.loads(f.read_text(encoding="utf-8"))
-        for row in (d.get("rows") or []):
-            for k in ("amount", "debit", "credit", "balance", "running"):
-                if row.get(k):
-                    amounts.add(normalize(str(row[k])))
+def is_significant(v: str) -> bool:
+    """**مُصفّي الأهمية (مقيسٌ لا مُقدَّر):** قيمةٌ يقلّ تصادمُها.
+
+    القياس: بلا هذا المُصفّي تُطابق المجموعةُ ٤٣٠ ظهوراً في ١٢٩ ملفاً — أكثرُها تصادمٌ مع
+    أرقام إصدارات (`requirements.lock`) وقيمٍ ذهبية (`0.44`) وأمثالٍ صناعية مُعلنة.
+    ومعه: **٢١ ظهوراً في ١٤ ملفاً** — كلُّها مواضعُ بياناتٍ حقيقية. فالحدُّ: ≥٤ خاناتٍ صحيحة
+    **وكسرٌ غيرُ صفريّ التمييز** (`.00` ونظائرُها تُستثنى).
+    """
+    ip, _, fp = normalize(v).lstrip("-").partition(".")
+    return len(ip) >= 4 and fp not in ("", "0", "00", "000")
+
+
+def declared_set(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    out = set()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line:
+            out.add(normalize(line))
+    return out
+
+
+def source_amounts() -> tuple[set[str], int, int]:
+    """المصدرُ الحقيقيّ: `raw_rows` بكلّ حقولها الماليّة + التذييل (بصيغتَيه) + الشهادة."""
+    got: set[str] = set()
+    files = 0
+    for fp in sorted(PROJ.glob("data/local_sample/*/results/pg-*.json")):
+        files += 1
+        d = json.loads(fp.read_text(encoding="utf-8"))
+        for row in (d.get("raw_rows") or []):
+            if isinstance(row, dict):
+                for k, v in row.items():
+                    if v not in (None, "") and is_amount_shaped(v):
+                        got.add(normalize(v))
         for k, v in (d.get("footer") or {}).items():
-            if isinstance(v, str) and v.strip():
-                amounts.add(normalize(v))
+            if k == "raw" and isinstance(v, dict):
+                for vv in v.values():
+                    if vv not in (None, "") and is_amount_shaped(vv):
+                        got.add(normalize(vv))
+            elif isinstance(v, str) and v.strip() and is_amount_shaped(v):
+                got.add(normalize(v))
     cert = PROJ / "data/eval_pack/oracle-confirmation-629p.json"
     if cert.exists():
-        ev = json.loads(cert.read_text(encoding="utf-8"))
-        for r in ev.get("pages", []):
+        for r in json.loads(cert.read_text(encoding="utf-8")).get("pages", []):
             for c in r.get("cells", []):
-                v = c.get("ours") or c.get("oracle")
-                if v:
-                    amounts.add(normalize(str(v)))
-    amounts |= {normalize(a) for a in extra}
-    amounts = {a for a in amounts if is_amount_shaped(a)}
+                for k in ("ours", "oracle"):
+                    if c.get(k) and is_amount_shaped(str(c[k])):
+                        got.add(normalize(str(c[k])))
+    return got, files, len(got)
+
+
+def build(_extra: list[str]) -> int:
+    src, files, total = source_amounts()
+    synth = declared_set(SYNTHETIC)
+    significant = {a for a in src if is_significant(a)}
+    ex_trivial = total - len(significant)
+    ex_synth = len(significant & synth)
+    entered = significant - synth
+    if entered | (significant & synth) != significant or entered & synth:
+        raise SystemExit("⛔ اشتقاقٌ غيرُ مُغلق: التصنيفُ لا يُجمَع")
+    derivation = {
+        "page_files": files, "source_shape_ok": total, "entered": len(entered),
+        "excluded_trivial": ex_trivial, "excluded_synthetic": ex_synth,
+        "rule": "significant = ≥4 خاناتٍ صحيحة وكسرٌ غيرُ صفريّ التمييز؛ والسالبُ ما أُعلن صناعيّاً",
+    }
+    if total != len(entered) + ex_trivial + ex_synth:
+        raise SystemExit(f"⛔ فجوةٌ غيرُ مُعلَنة: {total} ≠ {len(entered)}+{ex_trivial}+{ex_synth}"
+                         " ⇒ البناءُ يسقط (لا يُنشر مانيفستٌ ناقص)")
     MANIFEST.parent.mkdir(parents=True, exist_ok=True)
     MANIFEST.write_text(json.dumps({
-        "what": "بصماتُ مبالغَ حقيقية — كاشفٌ للمنع، لا تعمية (انظر توثيق الأداة)",
-        "how": "python3 tools/amount_guard.py --build",
-        "count": len(amounts),
-        "fingerprints": sorted({fingerprint(a) for a in amounts}),
+        "what": "بصماتُ مبالغَ حقيقية — مُفتَّحةٌ بمفتاحٍ سِرّيّ (خارج الشجرة) ⇒ لا تُجرَد",
+        "how": "AMOUNT_GUARD_KEY=… python3 tools/amount_guard.py --build",
+        "keyed": True, "count": len(entered), "derivation": derivation,
+        "fingerprints": sorted({fingerprint(a) for a in entered}),
     }, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    try:
-        shown = MANIFEST.relative_to(PROJ)
-    except ValueError:
-        shown = MANIFEST
-    print(f"المانيفست: {shown} · {len(amounts)} مبلغاً (بصماتٍ فقط)")
+    print(f"المانيفست: {len(entered)} بصمةً · الاشتقاق: {total} = {len(entered)} + {ex_trivial} تافهة + {ex_synth} صناعية · {files} ملفَّ صفحة")
     return 0
 
 
-def tracked_text_files() -> list[str]:
-    """المُتتبَّع **وغيرُ المتتبَّع غيرُ المُهمَل**: الحارسُ يحرس ما على وشك أن يُدفع.
-
-    الاعتمادُ على `git ls-files` وحدَه كان يجعل الحارس أعمى عن الملفّ الذي لم يُضَف بعد —
-    وهو **بالضبط** وقتُ الحاجة إليه (قبل `git add`). وقد كشف ذلك الحقنُ نفسُه: ملفٌّ فيه مبلغٌ
-    حقيقيٌّ لم يسقط الحارسُ عليه لأنه غيرُ متتبَّع ⇒ الحارسُ الذي لا يسقط عند حقنِ عطبٍ **لم يُثبت أنه حارس**.
-    """
-    out = subprocess.run(["git", "ls-files", "-co", "--exclude-standard"],
-                         cwd=str(PROJ), capture_output=True, text=True).stdout
-    return [f for f in out.split() if Path(f).suffix.lower() not in BINARY]
+def load_deny() -> set[str]:
+    if not MANIFEST.exists():
+        raise SystemExit("⛔ لا مانيفست — ابنِه بـ`--build`")
+    return set(json.loads(MANIFEST.read_text(encoding="utf-8"))["fingerprints"])
 
 
 def find_in_text(txt: str, deny: set[str]) -> list[tuple[str, str]]:
-    """النواةُ القابلةُ للاختبار: كلُّ مبلغٍ حقيقيٍّ في نصّ — بالمقارنة المُقنَّنة."""
     out = []
     for m in TOKEN.finditer(txt):
         if not is_amount_shaped(m.group(0)):
@@ -117,83 +180,92 @@ def find_in_text(txt: str, deny: set[str]) -> list[tuple[str, str]]:
     return out
 
 
+def tracked_text_files() -> list[str]:
+    """المُتتبَّع **وغيرُ المتتبَّع غيرُ المُهمَل**: الحارسُ يحرس ما على وشك أن يُدفع."""
+    out = subprocess.run(["git", "ls-files", "-co", "--exclude-standard"],
+                         cwd=str(PROJ), capture_output=True, text=True).stdout
+    return [f for f in out.split() if Path(f).suffix.lower() not in BINARY]
+
+
 def undeclared_binaries() -> list[str]:
-    """**الصنفُ الثاني:** ملفٌّ ثنائيٌّ مدفوعٌ تحت `data/` أو `digital/` بلا إعلان.
-
-    القاعدةُ الأولى تحرس **النصّ**؛ وهذه تحرس ما لا يُقرأ كنصّ: مسحٌ ضوئيّ (PDF/PNG) لم يكشفه
-    الحارسُ النصّيُّ لأنّه يتخطّى الثنائيات. ولذلك وُضعت هذه القاعدةُ: لا يُتتبَّع ثنائيٌّ حسّاسٌ
-    إلا بإعلانٍ مكتوبٍ في `docs/security/tracked-binaries.txt` **مع سببٍ** — فيصير التتبّعُ قراراً
-    معلناً لا سهواً. (قِيست مرّةً واحدة على الملفّ الوحيد المدفوع: ترويسةُ المستند نفسُه
-    «كشف حساب بنكي - تجريبي (بيانات اصطناعية)» ⇒ صناعيّ، لكنّ **الإعلانَ** هو ما يجعل ذلك قابلاً للتدقيق.)
-    """
-    declared = set()
-    if DECLARED_BINARIES.exists():
-        for line in DECLARED_BINARIES.read_text(encoding="utf-8").splitlines():
-            line = line.split("#", 1)[0].strip()
-            if line:
-                declared.add(line)
-    out_ = subprocess.run(["git", "ls-files"], cwd=str(PROJ), capture_output=True, text=True).stdout
-    return [f for f in out_.split()
+    declared = declared_set(DECLARED_BINARIES)
+    out = subprocess.run(["git", "ls-files"], cwd=str(PROJ), capture_output=True, text=True).stdout
+    return [f for f in out.split()
             if f.startswith(BINARY_DIRS) and Path(f).suffix.lower() in BINARY and f not in declared]
-
-
-def load_deny() -> set[str]:
-    if not MANIFEST.exists():
-        print("⛔ لا مانيفست — ابنِه بـ`--build` (وإلا فالحارسُ لا يعرف ما يحرس)", file=sys.stderr)
-        raise SystemExit(2)
-    return set(json.loads(MANIFEST.read_text(encoding="utf-8"))["fingerprints"])
 
 
 def scan() -> list[tuple[str, str, str]]:
     deny = load_deny()
     hits: list[tuple[str, str, str]] = []
     for fn in tracked_text_files():
-        p = PROJ / fn
         try:
-            txt = p.read_text(encoding="utf-8")
+            txt = (PROJ / fn).read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
         hits += [(fn, raw, norm) for raw, norm in find_in_text(txt, deny)]
     return hits
 
 
+def proof_inject() -> int:
+    """**برهانُ السقوط بسُمٍّ من المصدر لا من المانيفست** — ويخرج بغير الصفر عند العمى."""
+    src, _, _ = source_amounts()
+    sig = sorted({a for a in src if is_significant(a)})
+    if not sig:
+        print("⛔ لا مصدرَ محليّ ⇒ تعذّر البرهان (لا أُعلن نجاحاً بلا سمّ)", file=sys.stderr)
+        return 5
+    poison = sig[len(sig) // 2]          # قيمةٌ حقيقيّةٌ من قلب الكوربوس
+    target = PROJ / "docs" / "SECURITY_PROBE.md"
+    backup = target.read_text(encoding="utf-8") if target.exists() else None
+    try:
+        head = backup or "# مسبار"
+        target.write_text(head + chr(10) + "الرصيد: " + poison + chr(10), encoding="utf-8")
+        hits = [h for h in scan() if h[0].endswith("SECURITY_PROBE.md")]
+        if hits:
+            print(f"سقط ✓ (سمٌّ من المصدر: {poison} — رآه الحارس)")
+            return 0
+        print(f"⛔ لم يسقط — الحارسُ أعمى عن سمٍّ من المصدر ({poison}) ⇒ الحارسُ ليس حارساً", file=sys.stderr)
+        return 5
+    finally:
+        if backup is None:
+            target.unlink(missing_ok=True)
+        else:
+            target.write_text(backup, encoding="utf-8")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="حارسُ المبالغ: لا مبلغَ حقيقيّ في مستودعٍ عامّ")
-    ap.add_argument("--build", action="store_true", help="يبني المانيفستَ من الكوربوس")
-    ap.add_argument("--pre-push", action="store_true",
-                    help="اسمٌ مستعارٌ للفحص (اتّساقاً مع publish_guard)")
-    ap.add_argument("--extra", default="", help="مبالغُ تُضاف صريحاً (مفصولةً بفاصلة)")
-    ap.add_argument("--inject", default="", help="مبلغٌ يُحقَن مؤقّتاً في ملفٍّ لإثبات السقوط")
+    ap.add_argument("--build", action="store_true")
+    ap.add_argument("--pre-push", action="store_true", help="اسمٌ مستعارٌ للفحص")
+    ap.add_argument("--extra", default="")
+    ap.add_argument("--inject", action="store_true", help="برهانُ السقوط (سمٌّ من المصدر)")
+    ap.add_argument("--json", action="store_true", help="المخرَجُ الآليُّ الكامل (لا يُقصّ)")
     args = ap.parse_args(argv)
     if args.build:
         return build([x for x in args.extra.split(",") if x.strip()])
     if args.inject:
-        target = PROJ / "docs" / "SECURITY_PROBE.md"
-        backup = target.read_text(encoding="utf-8") if target.exists() else None
-        try:
-            target.write_text((backup or "") + f"\nمبلغٌ محقون: {args.inject}\n", encoding="utf-8")
-            hits = scan()
-            print("سقط ✓ (الحارسُ رأى المبلغ)" if hits else "⛔ لم يسقط — الحارسُ أعمى عن المحقون")
-            return 1 if hits else 0
-        finally:
-            if backup is None:
-                target.unlink(missing_ok=True)
-            else:
-                target.write_text(backup, encoding="utf-8")
-    hits = scan()
-    undeclared = undeclared_binaries()
-    if undeclared:
-        print("⛔ BLOCK — ثنائيٌّ مدفوعٌ تحت data/ أو digital/ بلا إعلان (أعلِنه بسببٍ في docs/security/tracked-binaries.txt):")
-        for f in undeclared[:10]:
+        return proof_inject()
+    if undeclared_binaries():
+        print("⛔ BLOCK — ثنائيٌّ مدفوعٌ تحت data/ أو digital/ بلا إعلان:")
+        for f in undeclared_binaries()[:10]:
             print(f"   {f}")
         return 1
+    hits = scan()
+    if args.json:
+        # **درسٌ من هذه الجولة:** عرضٌ يُقصّ عند ٢٥ أخفى ١١ تسريباً عن مُطهِّرٍ يقرأ المخرَج
+        # ⇒ المخرَجُ الآليُّ يُعطي المجموعةَ كاملةً دائماً؛ القصُّ للعين وحدها.
+        print(json.dumps({"pass": not hits, "count": len(hits),
+                          "hits": [{"file": f, "token": r, "normalized": n} for f, r, n in hits]},
+                         ensure_ascii=False, indent=1))
+        return 1 if hits else 0
     if hits:
-        print("⛔ BLOCK — مبالغُ حقيقيةٌ في ملفّاتٍ مُتتبَّعة (يُطهَّر بمبالغَ صناعية، والدليلُ يبقى في data/):")
+        print("⛔ BLOCK — مبالغُ حقيقيةٌ في ملفّاتٍ مُتتبَّعة:")
         for fn, raw, norm in hits[:25]:
             print(f"   {fn}  ←  {raw}")
+        if len(hits) > 25:
+            print(f"   … والباقي {len(hits)-25} (استعمل --json للمجموعة الكاملة)")
         print(f"المجموع: {len(hits)}")
         return 1
-    print("PASS — لا مبلغَ حقيقيٌّ في ملفّاتٍ مُتتبَّعة (بالمقارنة المُقنَّنة: لاتينيةٌ وعربيةٌ وفارسية)")
+    print("PASS — لا مبلغَ حقيقيٌّ في ملفّاتٍ مُتتبَّعة (مقارنةٌ مُقنَّنة، وبصماتٌ مُفتَّحة)")
     return 0
 
 
