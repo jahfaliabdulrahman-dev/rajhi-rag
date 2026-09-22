@@ -138,6 +138,8 @@ def scan() -> list[tuple[str, str, str]]:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="حارسُ المبالغ: لا مبلغَ حقيقيّ في مستودعٍ عامّ")
     ap.add_argument("--build", action="store_true", help="يبني المانيفستَ من الكوربوس")
+    ap.add_argument("--pre-push", action="store_true",
+                    help="اسمٌ مستعارٌ للفحص (اتّساقاً مع publish_guard)")
     ap.add_argument("--extra", default="", help="مبالغُ تُضاف صريحاً (مفصولةً بفاصلة)")
     ap.add_argument("--inject", default="", help="مبلغٌ يُحقَن مؤقّتاً في ملفٍّ لإثبات السقوط")
     args = ap.parse_args(argv)
