@@ -387,5 +387,47 @@
   },
   "cash_usd": "0 — إعادةُ التقاطٍ من الكاش",
   "columns": "يُعرض بعمودين: نقدٌ $0 · وبياناتٌ −32.6% من صفوف التدريب"
+ },
+ "review_29_6_2_census_classes": {
+  "what": "أصنافُ الإحصاء تُقاس من القرص وتُطبع بمصادرها (لا من نصّ)",
+  "classes": {
+   "بلا إطار": 4,
+   "بلا صفوف": 3,
+   "مرقّمة مطبوعاً": 17,
+   "فجوة": 4,
+   "غير محسومة": 2,
+   "استدراك مرساة": 23,
+   "إعادة قراءة": 23,
+   "تحكيم": 3,
+   "قراءة مستبدلة": 9,
+   "رقمٌ من خارج الصفحة": 18
+  },
+  "sources": {
+   "بلا إطار": "results/pg-*.json: footer غائب (و`s​lice_report.footer.absent` شاهده المُجمَّع)",
+   "بلا صفوف": "results/pg-*.json: raw_rows = []",
+   "مرقّمة مطبوعاً": "slice_report.page_numbers.checked (رقمٌ مطبوع قُرئ وطُوبق)",
+   "فجوة": "slice_report.page_numbers.gaps (قفزةٌ في الترقيم المطبوع)",
+   "غير محسومة": "slice_report.footer.unchecked (لا إطارَ بعدها يُحاسَب)",
+   "استدراك مرساة": "results/pg-*.json: recovered (قيمةٌ استُدركت بمرساة)",
+   "إعادة قراءة": "results/pg-*.json: reread",
+   "تحكيم": "results/pg-*.json: arbitrated_by",
+   "قراءة مستبدلة": "results/pg-*.json: superseded_reason",
+   "رقمٌ من خارج الصفحة": "results/pg-*.json: page_no_source / page_no_note"
+  },
+  "structural_sum": 30,
+  "structural_union_listed": 8,
+  "aggregate_only": {
+   "مرقّمة مطبوعاً": 17,
+   "غير محسومة": 2
+  },
+  "aggregate_only_upper_bound": 27,
+  "reader_union": 68,
+  "reader_sum": 76,
+  "both_classes_union": 70,
+  "intersection_with_chosen_census": 2,
+  "plan_claim_22": "لا يُعاد إنتاجه بالضبط: المجموعُ مطابقٌ (4+3+4+2+17 = 30) لكن 17 و2 مُجمَّعان بلا قائمةِ صفحات ⇒ المتقاطعُ (8) غيرُ مرئيّ ⇒ الاتحادُ بين 8 و27 · والمقيسُ لا يُخمَّن.",
+  "reader_claim_30": "لا يُعاد إنتاجه: المقيسُ 68 صفحة (مجموع 76)",
+  "the_key_finding": "الإحصاء (50) ليس اتحادَ الطبقتين: قاعدةُ الإحصاء ميكانيكيةٌ (إقفال السلسلة) وقاعدةُ الأصناف عَرَضية ⇒ مجتمعان مختلفان، وتقاطعُهما صفحتان",
+  "why_the_reviewer_saw_unknown": "الأعلامُ في results/pg-*.json لا في slice_report (ولا قائمةَ صفحاتٍ في التقرير)"
  }
 }
