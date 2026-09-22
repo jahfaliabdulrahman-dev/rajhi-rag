@@ -17,5 +17,5 @@ if [ -x ".venv/bin/python" ] && .venv/bin/python -c "import pyflakes" 2>/dev/nul
 fi
 "$PY" tools/static_gate.py || exit 1
 
-exec python3 tools/publish_guard.py --pre-push
-exec python3 tools/amount_guard.py --pre-push
+python3 tools/publish_guard.py --pre-push || exit 1
+python3 tools/amount_guard.py --pre-push || exit 1
