@@ -259,6 +259,21 @@ def split_thirds(run: Run, excluded: set[int]) -> list[list[int]]:
     return [free[:q], free[q:q + q], free[q + q:] if r == 0 else free[q + q:]]
 
 
+def longest_run(pages) -> int:
+    """أطولُ مقطعٍ متّصل في قائمة صفحات.
+
+    ولا تُبنى بمقاطعَ مُشارَكة (append لنفس الكائن ثم `clear`) — فذلك يُنجح الحسابَ
+    ويُصفّر المقاطع: عطبُ تسميةٍ أعطى «1» بدل «2» على قرصٍ حقيقيّ.
+    """
+    best = cur = 0
+    prev = None
+    for n in sorted(pages):
+        cur = cur + 1 if prev is not None and n == prev + 1 else 1
+        best = max(best, cur)
+        prev = n
+    return best
+
+
 def choose_ranges(run: Run, census_size: int, captured: set[int], exclude_capture: bool = True) -> dict:
     """من كل ثلثٍ مدًى متّصلٌ طولُه `ceil((200−|الإحصاء|)/3)` يبدأ من أوّل صفحةٍ إطاراها مقروءان."""
     length = -(-(PACK_SIZE - census_size) // 3)          # ceil
@@ -281,16 +296,15 @@ def choose_ranges(run: Run, census_size: int, captured: set[int], exclude_captur
             picked = start
             break
         if picked is None:
-            runs, cur = [], []
-            for n in third:
-                (cur.append(n) if (cur and n == cur[-1] + 1) else (runs.append(cur) if cur else None, cur.clear(), cur.append(n)))
-            runs.append(cur)
-            longest = max((len(r) for r in runs), default=0)
+            longest = longest_run(third)
             refusals.append({
                 "third": i + 1, "third_size": len(third), "longest_contiguous_free_run": longest,
                 "required_length": length,
                 "why": (f"أطولُ مقطعٍ متّصلٍ حرٍّ = {longest} صفحة والطولُ المطلوب {length} ⇒ "
-                        f"المدى مستحيلٌ بهذا القيد (فرق {length - longest} صفحة)")})
+                        f"المدى مستحيلٌ بهذا القيد (فرق {length - longest} صفحة). "
+                        "**والعلّةُ بنيوية لا عددية**: حجزٌ بدورية ٣ لا يُجاور محجوزَين، فالمقطعُ الحرُّ "
+                        "محصورٌ بنيوياً بـ٣ (محجوزٌ + جاراه غيرُ المحجوزَين **إن أُفرِج عنهما**) — "
+                        "فلا كوربوسٌ أطولُ يُصلح تناقضَ «دورية 3» مع «مدى متّصل»")})
         else:
             ranges.append((picked, length))
     total = census_size + sum(l for _, l in ranges)
@@ -318,6 +332,37 @@ def captured_pages(capture_dir: Path, identity: str, digital_dir: Path) -> dict:
     digital = set(per_doc) - {identity}
     return {"mine": mine, "other_docs": sorted(digital), "other_pages": others,
             "index": per_doc}
+
+
+def captured_rows(capture_dir: Path, doc_id: str, pages) -> int:
+    """صفوفُ التدريب التي تحملها صفحاتٌ بعينها — تُقاس من `label.json` لا تُقدَّر.
+
+    وثمنُ العلاج **صفوفٌ لا صفحات**: صفحةٌ واحدة قد تحمل صفّاً أو أحدَ عشرَ — فالقرارُ
+    يمسّ البيانات، والرقمُ الذي يُعرض على المالك يجب أن يكون ببياناته.
+    """
+    want, total = set(pages), 0
+    for lab in capture_dir.rglob("label.json"):
+        try:
+            d = json.loads(lab.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if d.get("doc_id") == doc_id and int(d.get("page", 0)) in want:
+            total += len(d.get("rows") or [])
+    return total
+
+
+def captured_totals(capture_dir: Path, doc_id: str) -> tuple[int, int]:
+    """(صفوفُ التدريب كلُّها · صفحاتُه) للمستند — من القرص."""
+    rows = pages = 0
+    for lab in capture_dir.rglob("label.json"):
+        try:
+            d = json.loads(lab.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if d.get("doc_id") == doc_id:
+            rows += len(d.get("rows") or [])
+            pages += 1
+    return rows, pages
 
 
 # ── السموم: كلُّ بوابةٍ لها سمٌّ وإلا سقطت الحزمة ──────────────────────────
@@ -461,12 +506,20 @@ def cmd_build(args) -> int:
                       "ولا تُصلحه بتخمين، وتطبع الأرقامَ المقيسة أعلاه.")
 
     # ثمنُ العلاج: ما يجب أن يُحرّره الالتقاطُ صراحةً (قائمةٌ لا صيغة) — يُقاس لا يُقدَّر
-    pack_pages_pre = sorted({x for s, l in chosen["ranges"] for x in range(s, s + l)})
-    remedy = sorted(set(pack_pages_pre) & cap["mine"])
-    if mode_used == "explicit-list" and remedy:
-        print(f"\n⚠ ثمنُ العلاج المقيس: قاعدةُ `%3` أحالت {len(remedy)} صفحةً من هذه المديات إلى "
-              f"الالتقاط ⇒ **تُستثنى بقائمةٍ صريحة** (نصُّ الخطة v2.1: «القاعدة تُستبدل بقائمةٍ صريحة») "
-              f"· وتكلفتُها $0 (إعادةُ التقاطٍ من الكاش).")
+    # **الحزمةُ = الإحصاء + المديات** (وهي ٢٠٠ ببوابة الحجم) ⇒ فمجتمعُ بوابة التقاطع هو هي
+    # كلُّها. وقياسُ المديات وحدَها كان **مجتمعاً ناقصاً**: بوابةٌ تعمل على فلترٍ لا على الحزمة،
+    # وثمنُ العلاج المُعلن ناقصٌ بالثلث (قِيس: 100 مقابل 133).
+    pack_pages_all = sorted({x["page"] for x in chosen_census["pages"]}
+                            | {x for s, l in chosen["ranges"] for x in range(s, s + l)})
+    remedy = sorted(set(pack_pages_all) & cap["mine"])
+    remedy_rows = captured_rows(_path(args.capture), run.identity, remedy)
+    train_rows, train_pages = captured_totals(_path(args.capture), run.identity)
+    if remedy:
+        print(f"\n⚠ ثمنُ العلاج المقيس — **بعمودين**: نقدٌ `$0` (إعادةُ التقاطٍ من الكاش) "
+              f"و**بياناتٌ −{remedy_rows} صفّاً من التدريب** "
+              f"({remedy_rows / train_rows * 100:.1f}% من {train_rows}) · "
+              f"{len(remedy)} صفحة من {len(pack_pages_all)} في الحزمة · والتدريبُ يبقى "
+              f"{train_pages - len(remedy)} صفحة · {train_rows - remedy_rows} صفّاً.")
 
     # (٣) المديات ببواباتها
     print("\n─ المديات ببواباتها الثلاث (بالإرساء المطبوع) ─")
@@ -489,9 +542,11 @@ def cmd_build(args) -> int:
     all_gates = all(m["gates"]["identity"]["pass"] and m["gates"]["frame"]["pass"] for m in measured)
 
     # (٤) بوابةُ التقاطع + السموم
-    pack_pages = sorted({p for m in measured for p in m["pages"]})
+    pack_pages = pack_pages_all          # المجتمعُ: الإحصاء + المديات = 200 (لا 150)
     inter = sorted(set(pack_pages) & cap["mine"])
-    print(f"\n─ بوابة التقاطع: صفحاتُ الحزمة ({len(pack_pages)}) ∩ الالتقاط ({len(cap['mine'])}) = {len(inter)} "
+    print(f"\n─ بوابة التقاطع (مجتمعُها الحزمةُ كاملةً: {len(pack_pages)} = "
+          f"إحصاء {len(chosen_census['pages'])} + مديات {sum(m['length'] for m in measured)}) "
+          f"∩ الالتقاط ({len(cap['mine'])}) = {len(inter)} "
           f"{'✓' if not inter else '✗ ' + str(inter[:5])}")
     pois = poisons(run, {"ranges": measured, "length": measured[0]["length"] if measured else 0,
                          "census": [x["page"] for x in chosen_census["pages"]]}, cap)
@@ -508,10 +563,20 @@ def cmd_build(args) -> int:
         "identity_history": run.history,
         "identity_source": f"{args.run}/slice_report.json → corpus_provenance.doc_id",
         "capture_mode": mode_used,
+        "capture_remedy_price": {
+            "pages": len(remedy), "rows": remedy_rows,
+            "share_of_training_rows": round(remedy_rows / train_rows, 4) if train_rows else None,
+            "training": {"pages": train_pages, "rows": train_rows},
+            "remaining_after_release": {"pages": train_pages - len(remedy), "rows": train_rows - remedy_rows},
+            "cash_usd": "0 — إعادةُ التقاطٍ من الكاش",
+            "columns": "يُعرض بعمودين: نقدٌ $0 · وبياناتٌ −{:.1f}% من صفوف التدريب".format(
+                (remedy_rows / train_rows * 100) if train_rows else 0),
+        },
         "capture_remedy_price_pages": len(remedy),
         "census": chosen_census, "ranges": measured,
         "size_gate": chosen["size_gate"],
-        "intersection_gate": {"pack_pages": len(pack_pages), "captured": len(cap["mine"]),
+        "intersection_gate": {"population": "الحزمةُ كاملةً (الإحصاء + المديات)",
+                              "pack_pages": len(pack_pages), "captured": len(cap["mine"]),
                               "intersection": inter, "pass": not inter,
                               "key": "(doc_id, page) — لا page"},
         "poisons": pois,
@@ -544,7 +609,8 @@ def cmd_verify(args) -> int:
                       "**HISTORY_MOVED** — الطرفان تحرّكا معاً، فالتحقّقُ لا يعني شيئاً. البناءُ من جديد.")
     print(f"مطابقة ✓ ({pack['identity']})")
     cap = captured_pages(_path(args.capture), run.identity, _path(args.digital))
-    pack_pages = sorted({pg for m in pack["ranges"] for pg in m["pages"]})
+    pack_pages = sorted({x["page"] for x in pack["census"]["pages"]}      # المجتمعُ: الإحصاء + المديات
+                        | {pg for m in pack["ranges"] for pg in m["pages"]})
     inter = sorted(set(pack_pages) & cap["mine"])
     frozen_fp = _sha16(json.dumps([x["page"] for x in pack["census"]["pages"]]))
     print(f"الإحصاء: {pack['census']['size']} صفحة · بصمةٌ محفوظة {pack['census']['fingerprint']} · "

@@ -21,7 +21,7 @@ for _p in (str(PROJ), str(PROJ / "src")):
         sys.path.insert(0, _p)
 
 from tools.eval_pack import (  # noqa: E402
-    DEFINITIONS, PACK_SIZE, Run, _sha16, build_census, main, measure_range, poisons,
+    DEFINITIONS, PACK_SIZE, Run, _sha16, build_census, longest_run, main, measure_range, poisons,
 )
 
 DOC = "aaaaaaaaaaaaaaaa"
@@ -49,6 +49,12 @@ def _corpus(tmp: Path, doc_id: str | None = DOC, pages=PAGES) -> Path:
         (run / "results" / f"pg-{n:03d}.json").write_text(
             json.dumps({"pg": n, "raw_rows": rows, "footer": footer}, ensure_ascii=False), encoding="utf-8")
     return run
+
+
+def _tmpcorpus() -> Run:
+    """تشغيلةٌ مؤقّتة لأرضية الاختبار (بلا fixture pytest) — تُنظَّف تلقائياً."""
+    import tempfile
+    return Run(_corpus(Path(tempfile.mkdtemp(prefix="eval-pack-")), doc_id=DOC))
 
 
 def _capture(tmp: Path, mine=(3,), other=(2,)) -> Path:
@@ -157,3 +163,37 @@ def test_definitions_print_their_source(capsys):
     out = capsys.readouterr().out
     assert all(name in out and src in out for name, _text, src in DEFINITIONS)
     assert "git ls-tree -r" in out, "أمرُ العدّ يُطبع مع الرقم (فالغرضُ إظهارُ شمول البحث)"
+
+
+# ── ⛔ ضابطُ المجتمع: سمٌّ داخل المجتمع لا يكشف مجتمعاً ناقصاً ────────────────
+def test_the_intersection_gate_counts_the_whole_pack_not_the_ranges_only():
+    """**الحزمةُ = الإحصاء + المديات** ⇒ ومجتمعُ بوابة التقاطع هو هي كلُّها.
+
+    قِيست هذه العلّة على الحزمة الحيّة: البوابةُ كانت تقيس المديات (150) وحدَها
+    فتُعلن 100 صفحة ثمناً، **والإحصاءُ (50) فيه 33 ملتقطةً خارجَ المجتمع** ⇒
+    الثمنُ الحقيقيّ 133 لا 100 (ناقصٌ بالثلث). والضابطُ: صفحةٌ ملتقطةٌ **من
+    الإحصاء** يجب أن تُسقط البوابة — وسمُّ المديات لا يكشف هذا أبداً.
+    """
+    run = _tmpcorpus()
+    cap = {"mine": {2}, "other_pages": set(), "other_docs": [], "index": {}}   # ص2 في الإحصاء **وفي الالتقاط**
+    census = [x["page"] for x in build_census(run, 3)["pages"]]
+    assert 2 in census, "الأرضيةُ تفترض ص2 في الإحصاء"
+    ranges = [measure_range(run, 3, 2)]          # المدياتُ [3، 4] — ولا تضمُّ ص2
+    whole = set(census) | {p for m in ranges for p in m["pages"]}
+    assert set(ranges[0]["pages"]) & cap["mine"] == set(), "ليست في المديات — فسمُّ المديات لا يراها"
+    assert whole & cap["mine"] == {2}, "المجتمعُ الكاملُ يجب أن يرى الصفحةَ الملتقَطة"
+
+
+def test_a_run_of_two_is_measured_as_two():
+    """عطبُ تسمية: بناءُ المقاطع بكائنٍ مُشارَك أعطى «1» بدل «2» على قرصٍ حقيقيّ."""
+    assert longest_run([3, 6, 9]) == 1
+    assert longest_run([171, 172, 180, 181, 182]) == 3
+    assert longest_run([171, 172]) == 2, "المقاطعُ لا تُبنى بكائنٍ يُفرَّغ بعد الإضافة"
+
+
+def test_three_multiples_are_never_adjacent_so_the_structural_bound_is_small():
+    """العلّةُ بنيوية: حجزٌ بدورية ٣ لا يجاور محجوزَين ⇒ المقطعُ الحرُّ محصورٌ بثلاثة."""
+    reserved = set(range(3, 630, 3))
+    assert not any(r - 1 in reserved for r in reserved), "محجوزان متجاوران — القاعدةُ ليست دوريةَ 3"
+    free = set(range(1, 630)) - reserved
+    assert longest_run(free) <= 3, "مقطعٌ أطولُ من ٣ ينقض الدورية"
