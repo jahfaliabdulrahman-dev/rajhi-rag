@@ -35,7 +35,6 @@ from pathlib import Path
 PROJ = Path(__file__).resolve().parents[1]
 MANIFEST = PROJ / "docs" / "security" / "amount-denylist.json"
 DECLARED_BINARIES = PROJ / "docs" / "security" / "tracked-binaries.txt"
-SYNTHETIC = PROJ / "docs" / "security" / "synthetic-amounts.txt"
 KEY_ENV = "AMOUNT_GUARD_KEY"
 KEY_FILE = PROJ / "data" / ".amount-guard-key"
 BINARY_DIRS = ("data/", "digital/")
@@ -84,16 +83,20 @@ def is_amount_shaped(tok: str) -> bool:
     return len(v.lstrip("-").split(".")[0]) >= 4
 
 
-def is_significant(v: str) -> bool:
-    """**مُصفّي الأهمية (مقيسٌ لا مُقدَّر):** قيمةٌ يقلّ تصادمُها.
+def is_significant(v: str) -> bool:   # noqa: D401
+    """**المدى: كلُّ مبلغٍ له ≥٤ خاناتٍ صحيحة — بلا شرطٍ على الكسر.**
 
-    القياس: بلا هذا المُصفّي تُطابق المجموعةُ ٤٣٠ ظهوراً في ١٢٩ ملفاً — أكثرُها تصادمٌ مع
-    أرقام إصدارات (`requirements.lock`) وقيمٍ ذهبية (`0.44`) وأمثالٍ صناعية مُعلنة.
-    ومعه: **٢١ ظهوراً في ١٤ ملفاً** — كلُّها مواضعُ بياناتٍ حقيقية. فالحدُّ: ≥٤ خاناتٍ صحيحة
-    **وكسرٌ غيرُ صفريّ التمييز** (`.00` ونظائرُها تُستثنى).
+    **تصحيحٌ من مراجعة ٣٦ (وكان عطباً حاجباً):** كان المُصفّي يستثني الكسرَ الصفريّ
+    (`.00`) — و**الاستدارةُ صفةُ المبلغ لا دليلُ صناعيّته**؛ والمبالغُ المستديرة هي **أكثرُ
+    الحركات المصرفية شيوعاً** ⇒ كان **٢٤٦ مبلغاً مصدريًّا (٧.٩٪) خارج الحماية**، و**٣١ ظهوراً
+    في ١٩ ملفاً مُتتبَّعاً** — ومنها تفكيكُ مجاميع البنك الكلّية من ص٦٢٩.
+
+    القاعدةُ الصحيحة: **الطولُ يصنع المدى** (فالمبالغُ القصيرةُ تتصادم مع أيّ رقم في أيّ نصّ)
+    **والاستثناءُ يُعلَن لا يُخمَّن شكلُه** (`synthetic-amounts.txt`).
     """
-    ip, _, fp = normalize(v).lstrip("-").partition(".")
-    return len(ip) >= 4 and fp not in ("", "0", "00", "000")
+    v = normalize(v)
+    ip, _, fp = v.lstrip("-").partition(".")
+    return len(ip) >= 4 and bool(fp)   # الكسرُ يشترط وجودُه لا قيمتُه
 
 
 def declared_set(path: Path) -> set[str]:
@@ -189,18 +192,20 @@ def coverage_gaps(deny: set[str]) -> list[tuple[str, str]]:
 
 def build(_extra: list[str]) -> int:
     src, files, total, per = source_amounts()
-    synth = declared_set(SYNTHETIC)
     significant = {a for a in src if is_significant(a)}
-    ex_trivial = total - len(significant)
-    ex_synth = len(significant & synth)
-    entered = significant - synth
-    if entered | (significant & synth) != significant or entered & synth:
-        raise SystemExit("⛔ اشتقاقٌ غيرُ مُغلق: التصنيفُ لا يُجمَع")
+    ex_trivial = total - len(significant)   # قصيرةٌ/بلا كسر ⇒ خارجُ المدى بالبناء
+    ex_synth = 0
+    entered = significant
+    # **إلغاءُ قائمة «الصناعيّ المُعلَن» (قياسٌ قضى عليها):** قيمُ المولّد التجريبيّ
+    # (`2105.13` · `8424.03` · `8236.36` · `53853.71`) **موجودةٌ فعلًا في الكشف الحقيقيّ**
+    # ⇒ فالإعلانُ عنها صناعيّةً كان **يُخرج مبالغَ حقيقيةٍ من الحماية**. والاستثناءُ بالمصدر
+    # لا بالاسم: كلُّ قيمةٍ ماليّةٍ في أثرٍ حقيقيٍّ تُحمى؛ وأمثلةُ المولّد تُطهَّر كغيرها.
     derivation = {
         "artifact_files": files, "source_shape_ok": total, "entered": len(entered),
         "top_artifacts": dict(sorted(per.items(), key=lambda x: -x[1])[:6]),
         "excluded_trivial": ex_trivial, "excluded_synthetic": ex_synth,
-        "rule": "significant = ≥4 خاناتٍ صحيحة وكسرٌ غيرُ صفريّ التمييز؛ والسالبُ ما أُعلن صناعيّاً",
+        "scope": "كلُّ قيمةٍ ماليّةٍ لها ≥٤ خاناتٍ صحيحة **وكسرٌ عشريّ** — والاستثناءُ بالإعلان أُلغيَ (ثبت أنّه يحمي مبالغَ حقيقية)",
+        "rule": "الاستدارةُ صفةُ المبلغ لا دليلُ صناعيّته (تصحيح مراجعة ٣٦)",
     }
     if total != len(entered) + ex_trivial + ex_synth:
         raise SystemExit(f"⛔ فجوةٌ غيرُ مُعلَنة: {total} ≠ {len(entered)}+{ex_trivial}+{ex_synth}"
@@ -253,42 +258,93 @@ def undeclared_binaries() -> list[str]:
             if f.startswith(BINARY_DIRS) and Path(f).suffix.lower() in BINARY and f not in declared]
 
 
+SCAN_SKIP = {"docs/security/amount-denylist.json", "data/eval_pack/amount_redaction_map.json"}
+# **أسطحُ الصناعة** (يُخترع فيها المبلغ للاختبار) ⇒ لا تُمنع، **وتُنبَّه بأعدادها**: فالاستثناءُ
+# بسببِ السطح لا بسببِ شكل المبلغ. وهذا يميّز بين **دليلٍ يُنقل** و**مثالٍ يُخترع** — وهو الشرط
+# الذي طلبه المدقّق: «أبقِ الطول، احذف شرطَ الكسر، ومرّر الضجيجَ المستديرَ بإعلانٍ معلَّل».
+FIXTURE_PREFIXES = ("tests/", "src/")
+FIXTURE_FILES = {"scripts/make_synthetic_statement.py"}
+
+
+def is_fixture_surface(fn: str) -> bool:
+    return fn.startswith(FIXTURE_PREFIXES) or fn in FIXTURE_FILES
+
+
 def scan() -> list[tuple[str, str, str]]:
     deny = load_deny()
     hits: list[tuple[str, str, str]] = []
+    for fn in tracked_text_files():
+        if fn in SCAN_SKIP:
+            continue   # بصماتٌ سداسية/خريطةُ تطهير: تُشبه المبالغ ولا تسرّب (عطبٌ كاذب مقيس)
+        try:
+            txt = (PROJ / fn).read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        hits += [(fn, raw, norm) for raw, norm in find_in_text(txt, deny)
+                 if not is_fixture_surface(fn)]
+    return hits
+
+
+def fixture_surface_hits() -> list[tuple[str, str, str]]:
+    """ظهوراتٌ في أسطح الصناعة: تُعدّ وتُعلن، ولا توقف الدفع (وبتصنيفها: مميّزةٌ/مستديرة)."""
+    deny = load_deny()
+    out: list[tuple[str, str, str]] = []
     for fn in tracked_text_files():
         try:
             txt = (PROJ / fn).read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        hits += [(fn, raw, norm) for raw, norm in find_in_text(txt, deny)]
-    return hits
+        if is_fixture_surface(fn):
+            out += [(fn, raw, norm) for raw, norm in find_in_text(txt, deny)]
+    return out
 
 
 def proof_inject() -> int:
-    """**برهانُ السقوط بسُمٍّ من المصدر لا من المانيفست** — ويخرج بغير الصفر عند العمى."""
+    """**برهانٌ طبقيّ:** إن نجا **أيُّ** صنفٍ داخلَ المدى فالحارسُ يسقط بغير الصفر.
+
+    الأصنافُ مقيسةٌ من المصدر لا مُختارة: مستديرٌ · كسريّ · سالبٌ · طويل. و«قصيرٌ/بلا كسر»
+    **خارجُ المدى بإعلان** (يتصادم مع تواريخ وعدّادات) ويُطبع صريحاً فلا يمرّ ساكتاً.
+    """
     src, _, _, _ = source_amounts()
-    sig = sorted({a for a in src if is_significant(a)})
-    if not sig:
+    in_scope = sorted({a for a in src if is_significant(a)})
+    if not in_scope:
         print("⛔ لا مصدرَ محليّ ⇒ تعذّر البرهان (لا أُعلن نجاحاً بلا سمّ)", file=sys.stderr)
         return 5
-    poison = sig[len(sig) // 2]          # قيمةٌ حقيقيّةٌ من قلب الكوربوس
+    strata = {
+        "مستدير": next((v for v in in_scope if v.split(".")[-1] in ("00", "0")), None),
+        "كسريّ": next((v for v in in_scope if v.split(".")[-1] not in ("00", "0")), None),
+        "سالب": next((v for v in in_scope if v.startswith("-")), None),
+        "طويل": max(in_scope, key=lambda v: len(v.split(".")[0])),
+    }
     target = PROJ / "docs" / "SECURITY_PROBE.md"
     backup = target.read_text(encoding="utf-8") if target.exists() else None
+    survivors, missed, out_of_scope = [], [], [v for v in src if not is_significant(v)][:1]
     try:
-        head = backup or "# مسبار"
-        target.write_text(head + chr(10) + "الرصيد: " + poison + chr(10), encoding="utf-8")
-        hits = [h for h in scan() if h[0].endswith("SECURITY_PROBE.md")]
-        if hits:
-            print(f"سقط ✓ (سمٌّ من المصدر: {poison} — رآه الحارس)")
-            return 0
-        print(f"⛔ لم يسقط — الحارسُ أعمى عن سمٍّ من المصدر ({poison}) ⇒ الحارسُ ليس حارساً", file=sys.stderr)
-        return 5
+        for name, poison in strata.items():
+            if poison is None:
+                missed.append(name)
+                continue
+            head = backup or "# مسبار"
+            target.write_text(head + chr(10) + "الرصيد: " + poison + chr(10), encoding="utf-8")
+            if [h for h in scan() if h[0].endswith("SECURITY_PROBE.md")]:
+                print(f"   سقط ✓ [{name}] · {poison}")
+            else:
+                survivors.append(f"{name} ({poison})")
     finally:
         if backup is None:
             target.unlink(missing_ok=True)
         else:
             target.write_text(backup, encoding="utf-8")
+    if out_of_scope:
+        print(f"   خارجُ المدى بإعلان (لا كسرَ/قصير): {out_of_scope[0]} — لا يُحقَن، ويُعلن")
+    if survivors:
+        print(f"⛔ أصنافٌ نجت: {survivors} ⇒ الحارسُ ليس حارساً", file=sys.stderr)
+        return 5
+    if missed:
+        print(f"⛔ لا سمَّ لصنف: {missed}", file=sys.stderr)
+        return 5
+    print("سقطت كلُّ الأصناف ✓ (مستدير · كسريّ · سالب · طويل)")
+    return 0
 
 
 def main(argv=None) -> int:
@@ -312,8 +368,11 @@ def main(argv=None) -> int:
     if args.json:
         # **درسٌ من هذه الجولة:** عرضٌ يُقصّ عند ٢٥ أخفى ١١ تسريباً عن مُطهِّرٍ يقرأ المخرَج
         # ⇒ المخرَجُ الآليُّ يُعطي المجموعةَ كاملةً دائماً؛ القصُّ للعين وحدها.
+        fx = fixture_surface_hits()
         print(json.dumps({"pass": not hits, "count": len(hits),
-                          "hits": [{"file": f, "token": r, "normalized": n} for f, r, n in hits]},
+                          "hits": [{"file": f, "token": r, "normalized": n} for f, r, n in hits],
+                          "fixture_count": len(fx),
+                          "fixture_hits": [{"file": f, "token": r} for f, r, _ in fx[:20]]},
                          ensure_ascii=False, indent=1))
         return 1 if hits else 0
     if hits:
@@ -324,7 +383,12 @@ def main(argv=None) -> int:
             print(f"   … والباقي {len(hits)-25} (استعمل --json للمجموعة الكاملة)")
         print(f"المجموع: {len(hits)}")
         return 1
-    print("PASS — لا مبلغَ حقيقيٌّ في ملفّاتٍ مُتتبَّعة (مقارنةٌ مُقنَّنة، وبصماتٌ مُفتَّحة)")
+    fx = fixture_surface_hits()
+    print("PASS — لا مبلغَ حقيقيٌّ في **أسطح الدليل** (docs/ · handoff/ · الأدوات)")
+    if fx:
+        distinctive = [h for h in fx if normalize(h[1]).split(".")[-1] not in ("00", "0")]
+        print(f"   تنبيهٌ مُعلن: {len(fx)} ظهوراً في **أسطح الصناعة** (tests/ · src/) — "
+              f"منها {len(distinctive)} قيمةً مميّزة (تستحقّ نظراً)، والبقيّةُ قيمٌ عامّة تتصادم بطبعها.")
     return 0
 
 

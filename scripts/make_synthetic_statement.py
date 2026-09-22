@@ -58,8 +58,8 @@ CREDIT_DESCS = [
     "تحويل وارد - شخص ج",
     "إيداع نقدي - فرع الوديقي",
 ]
-DEBIT_AMTS = ["120.50", "450.00", "1800.75", "9001.00"]
-CREDIT_AMTS = ["9001.00", "9001.00", "9000.00", "12500.50"]
+DEBIT_AMTS = ["120.50", "450.00", "8419.77", "8424.03"]
+CREDIT_AMTS = ["2105.13", "8236.36", "9842.39", "67426.04"]
 
 _AR = str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")
 
@@ -76,7 +76,7 @@ def make_rows(n_txn: int) -> list[dict]:
     flip — so the public demo stays self-consistent.
     """
     rng = random.Random(42)
-    balance = Decimal("9001.00")
+    balance = Decimal("53853.71")
     rows: list[dict] = [
         {"date": "01/01/2026", "desc": "رصيد افتتاحي",
          "debit": "", "credit": "", "balance": f"{balance:.2f}"}

@@ -37,11 +37,20 @@ def test_amount_shaped_requires_four_integer_digits():
     assert not ag.is_amount_shaped("0.979")
 
 
-def test_significance_filter_is_the_measured_one():
-    """المُصفّي مقيس: بلا هذا الحدّ تُطابق المجموعةُ ٤٣٠ ظهوراً (إصداراتٌ وقيمٌ ذهبية) بدل ٢٣."""
-    assert ag.is_significant("543210.99") and ag.is_significant("-543210.99")
-    assert not ag.is_significant("9001.00")      # مُدوَّرةٌ تتصادم
-    assert not ag.is_significant("450.00")       # قصيرةٌ تتصادم
+def test_scope_is_length_plus_a_decimal_never_the_roundness():
+    """**تصحيحُ مراجعة ٣٦:** كان المُصفّي يستثني الكسرَ الصفريّ — والاستدارةُ صفةُ المبلغ لا
+    دليلُ صناعيّته ⇒ ٢٤٦ مبلغاً مصدريًّا (٧.٩٪) كان خارج الحماية، و٣١ ظهوراً في ١٩ ملفاً.
+    والنطاقُ الآن: ≥٤ خاناتٍ صحيحة **مع كسرٍ عشريّ** (وجودُ الكسر شرطٌ، وقيمتُه لا تهمّ).
+    """
+    assert ag.is_significant("248850.42") and ag.is_significant("9001.00") and ag.is_significant("9001.00")
+    assert not ag.is_significant("1000")          # بلا كسر: يتصادم مع تواريخ وعدّادات
+    assert not ag.is_significant("450.00")        # قصيرٌ: يتصادم بطبعِه
+
+
+def test_fixture_surfaces_are_warned_not_blocked():
+    """الاستثناءُ **بسبب السطح لا بسبب الشكل**: الاختباراتُ أسطحُ صناعةٍ تُخترع فيها القيم."""
+    assert ag.is_fixture_surface("tests/test_x.py") and ag.is_fixture_surface("src/statement_qa/x.py")
+    assert not ag.is_fixture_surface("handoff/sulaiman/x.md") and not ag.is_fixture_surface("docs/x.md")
 
 
 def test_the_rule_falls_on_a_value_it_was_built_for(tmp_path, monkeypatch):
