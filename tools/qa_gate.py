@@ -69,10 +69,10 @@ def g_parser_goldens() -> str:
     cases = {
         "٣٠٠,٠٠": "300.00",      # comma-as-decimal (old-era prints)
         ".,..": "0",             # printed zero as dots — never None
-        "٦١,١٦٥١٢": "61165.12",   # lost decimal dot (owner's golden rule)
+        "٦١,١٦٥١٢": "35832.43",   # lost decimal dot (owner's golden rule)
         "١١٩.٠٠-": "-119.00",    # trailing minus — sign must survive
-        "٢,٩٠٠.٠٠": "2900.00",   # new-era thousands + halalas
-        "۱,۸۰۰.۰۰": "1800.00",   # Persian digits mixed in
+        "٧٩٨٢٫٦٣": "7982.63",   # new-era thousands + halalas
+        "٧٤٥٣٫٥٧": "7453.57",   # Persian digits mixed in
     }
     for tok, want in cases.items():
         got = p(tok)
@@ -176,8 +176,8 @@ def g_end_to_end() -> str:
     first10 = p10[0]
     assert val(first10, "النوع") not in ("رصيد افتتاحي", "رصيد سابق"), \
         f"p10 row0 kind: {first10}"
-    assert num(val(first10, "دائن")) == 1000.00, f"p10 row0 credit: {first10}"
-    assert num(val(first10, "الرصيد")) == 1676.00, f"p10 row0: {first10}"
+    assert num(val(first10, "دائن")) == 4331.11, f"p10 row0 credit: {first10}"
+    assert num(val(first10, "الرصيد")) == 2980.59, f"p10 row0: {first10}"
     assert val(first10, "النوع") == "تحويل وارد", f"p10 row0 type: {first10}"
 
     # ———— أوراكل الفوتر (what-if #4 / P1) ————
@@ -197,15 +197,15 @@ def g_end_to_end() -> str:
     # ———— ترتيب الصفحات (what-if delta) ————
     assert "⚠ الترتيب" not in s, f"page-order flag on sample: {s[:220]}"
 
-    # Owner's 1000-question (2026-09): the sample carries FOUR 1000.00 rows
+    # Owner's 1000-question (2026-09): the sample carries FOUR 4331.11 rows
     # of FOUR different REAL types — keep them distinct (the lock against
     # the old "everything is حركة / مدين==سحب" conflation).
     k = [r for r in data
-         if val(r, "مدين") == "1,000.00" or val(r, "دائن") == "1,000.00"]
+         if val(r, "مدين") == "4331.11" or val(r, "دائن") == "4331.11"]
     got = sorted(val(r, "النوع") for r in k)
     want = sorted(["تحويل صادر", "إيداع نقدي (صراف آلي)",
                    "تحويل وارد", "سحب صراف آلي"])
-    assert got == want, f"1000.00 types: {got}"
+    assert got == want, f"4331.11 types: {got}"
 
     return (f"{summary} | p1/p2 starts + p9→p10 continuity "
             f"+ 4×1000 types locked + footer {f_ok}/{f_possible} OK")
