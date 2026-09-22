@@ -23,7 +23,7 @@ for _p in (str(PROJ), str(PROJ / "src")):
 
 from tools.eval_pack import (  # noqa: E402
     CLASS_SOURCES, DEFINITIONS, PACK_SIZE, Run, _sha16, build_census, census_classes,
-    longest_run, main, measure_range, poisons,
+    longest_run, main, measure_range, poisons, classify_verdict,
 )
 
 DOC = "aaaaaaaaaaaaaaaa"
@@ -291,3 +291,13 @@ def test_a_price_with_no_rows_is_declared_unknown_not_zero(tmp_path, capsys):
     assert "مجهولة" in out, "نسبةٌ بمقامٍ صفريّ تُعلن مجهولةً"
     assert rc in (0, 1, 2), "ولا انفجار: المسارُ يكمل إلى الحكم"
     assert "الحكم" in out, "المسارُ ينتهي بحكمٍ معلن لا بانفجار"
+
+
+def test_the_verdict_separates_an_owner_condition_from_our_own_defect():
+    """التصنيفُ نافعٌ فقط إن منع العطبَ من التخفّي في «شرطيٌّ» — وهذا هو الاختبار."""
+    assert classify_verdict(ok=True, inter=[], blockers=[], remedy_rows=0).startswith("PASS")
+    only_condition = classify_verdict(ok=False, inter=[52, 53], blockers=[], remedy_rows=1253)
+    assert "شرطيٌّ" in only_condition and "1253" in only_condition
+    with_defect = classify_verdict(ok=False, inter=[52], blockers=["بواباتُ المديات"], remedy_rows=9)
+    assert "عطبٌ" in with_defect and "شرطيٌّ" not in with_defect
+    assert "غيرُ مُصنَّف" in classify_verdict(ok=False, inter=[], blockers=[], remedy_rows=0)
