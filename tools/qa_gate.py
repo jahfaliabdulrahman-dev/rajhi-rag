@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import http.client
 import re
+import os
 import subprocess
 import sys
 from decimal import Decimal
@@ -49,9 +50,14 @@ def gate(name: str, fn) -> None:
 
 
 def g_tests() -> str:
+    # **العلّةُ مُثبتة:** بيئةُ التشغيل تحمل `PYTHONPATH=…/.hermes/hermes-agent` وفيه مجلدُ
+    # `tools/`؛ وكان `tools` عندنا حزمةَ namespace فيُخزَّن بمسار الطرف الآخر ⇒
+    # `ModuleNotFoundError: No module named 'tools.eval_pack'` (9 أخطاء جمع). والعلاجُ من
+    # طبقتين: `tools/__init__.py` (حزمةٌ نظامية) **وتنقيةُ بيئة الأبناء هنا**.
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     out = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/", "-q"],
-        cwd=PROJ, capture_output=True, text=True, timeout=180)
+        cwd=PROJ, capture_output=True, text=True, timeout=180, env=env)
     tail = out.stdout.strip().splitlines()[-1] if out.stdout.strip() else "no output"
     assert out.returncode == 0, f"pytest failed: {tail}"
     return tail

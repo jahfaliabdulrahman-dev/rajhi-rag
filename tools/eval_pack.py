@@ -40,6 +40,8 @@ GAP_PASSAGES = (426, 427, 428, 625, 626, 627)
 #: بوابة «٢٠٠ بالضبط» — الخطة v2 §٤
 PACK_SIZE = 200
 #: أحجامُ الإحصاء المرشَّحة — تُقاس، ولا يُختار أحدُها نصًّا
+CENSUS_SIZES_FOR_SURFACE = (17, 50, 71)
+RANGE_LENGTHS_FOR_SURFACE = (20, 30, 50)
 CENSUS_CANDIDATES = (50, 71, 17)
 
 DEFINITIONS = (
@@ -619,6 +621,69 @@ def _identity_block(run: Run) -> None:
         print("السجلّ: لا استبدالَ مسجَّل.")
 
 
+def cmd_price_surface(args) -> int:
+    """سطحُ التسعير — الخيارُ يُبنى ويُقاس، ولا يُقدَّر بجدولٍ في رسالة.
+
+    الثمنُ الذي يدفعه المالك ليس رقماً واحداً بل **سطحاً**: حجمُ الإحصاء يزيد الصفحاتَ الملتقَطة
+    داخل الحزمة، وطولُ المدى يزيد **العبورَ بين الصفحات** (حيث سكن العطبُ المقيس: 8 من 50).
+    فالخيارُ يُعرض مُسعَّراً، والتوصيةُ واحدة — ويبقى للمالك **سقفٌ** يُعلنه، لا قائمةُ قرارات.
+    """
+    import itertools, shutil, tempfile
+    root = Path(tempfile.mkdtemp(prefix="price-surface-"))
+    rows = []
+    try:
+        for census_size, length in itertools.product(CENSUS_SIZES_FOR_SURFACE, RANGE_LENGTHS_FOR_SURFACE):
+            sub = argparse.Namespace(**{**vars(args), "out": root / f"c{census_size}-l{length}",
+                                        "census": census_size, "pack_size": census_size + 3 * length,
+                                        "capture_mode": "explicit-list", "quiet": True,
+                                        "price_surface": False})
+            sub.out.mkdir(parents=True, exist_ok=True)
+            cmd_build(sub)
+            pack = json.loads((sub.out / "pack.json").read_text(encoding="utf-8"))
+            price = pack["capture_remedy_price"]
+            rows.append({"census": census_size, "range_length": length,
+                         "pack_size": census_size + 3 * length,
+                         "released_pages": price["pages"], "released_rows": price["rows"],
+                         "share": price["share_of_training_rows"],
+                         "remaining": price["remaining_after_release"],
+                         "ranges": sum(1 for m in pack["ranges"] if m.get("measurable")),
+                         "size_gate": pack["size_gate"]["pass"],
+                         "crossings": 3 * (length - 1)})
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    rows.sort(key=lambda r: (r["share"] or 0))
+    print("═══ سطحُ التسعير — (حجمُ الإحصاء × طولُ المدى) · كلُّ صفٍّ مُبنىً ومقيس ═══")
+    print(f"  {'إحصاء':>6}{'المدى':>6}{'الحزمة':>7}{'أُفرِج':>7}{'صفوفاً':>8}{'من التدريب':>11}"
+          f"{'يبقى':>11}{'عبورُ حدّ':>10}{'البوابات':>9}")
+    for r in rows:
+        print(f"  {r['census']:>6}{r['range_length']:>6}{r['pack_size']:>7}{r['released_pages']:>7}"
+              f"{r['released_rows']:>8}{100*(r['share'] or 0):>10.1f}%{r['remaining']['pages']:>7} صفحة"
+              f"{r['crossings']:>10}{('✓' if r['size_gate'] and r['ranges']==3 else '✗'):>9}")
+    print("\n  العرفُ: الثمنُ يدفعه **حجمُ الإحصاء** أوّلاً، وطولُ المدى يشتري **عبورَ الحدّ**.")
+    print("  ⇒ والتوصية: إبقاءُ الإحصاء 50 وتقصيرُ المدى — ويُقرَّر **سقفٌ** لا قائمة.")
+    return 0
+
+
+def classify_verdict(*, ok: bool, inter: list, blockers: list, remedy_rows: int) -> str:
+    """حكمٌ مُصنَّف — لأن «FAIL» كلمةٌ واحدة لحالتين مختلفتين، والفرقُ بينهما كلُّ المعنى.
+
+    * **شرطيٌّ** (لا عطبَ، وقرارُ المالك): البوابةُ المفتوحةُ هي التقاطعُ مع الالتقاط، والمخرجُ
+      منها **ثمنٌ** يُدفع بقرارٍ لا ببرمجة.
+    * **عطبٌ** (عندنا، يُصلَح): أيُّ محرّكِ بواباتٍ سقط.
+
+    والحرسُ المهمّ: وجودُ عطبٍ **يُبطل** وصفَ «شرطيٌّ» — وإلا صار الاسمُ ممرَّ عبورٍ يُخفي عطباً
+    خلف عذرٍ إداريّ (وهو صنفُ «الاستبدال الصامت» في §٦).
+    """
+    if ok:
+        return "PASS — الحزمة قطعت بواباتها"
+    if blockers:
+        return f"FAIL — عطبٌ مُسمّى أعلاه ({' · '.join(blockers)})"
+    if inter:
+        return (f"FAIL **شرطيٌّ** — لا عطبَ عندنا: الحزمةُ مشروعةٌ بشرطِ إفراجٍ مُسعَّر عن "
+                f"{len(inter)} صفحة ({remedy_rows} صفّاً من التدريب) — والقرارُ للمالك")
+    return "FAIL — غيرُ مُصنَّف (لا عطبَ مُسمّى ولا شرطَ مُسعَّر): يُراجَع"
+
+
 def cmd_build(args) -> int:
     run = Run(_path(args.run))
     print("═" * 78)
@@ -777,8 +842,15 @@ def cmd_build(args) -> int:
               f"  · والعلاقةُ بالخطة: {comp['plan_claim_22']}")
         print(f"   {'القائمة المختارة':>22} : {len(chosen_census['pages'])} صفحة"
               f"  (والإحصاءُ المختارُ يُطبع بمصادره أعلاه)")
-    print(f"\nالحكم: {'PASS — الحزمة قطعت بواباتها' if ok else 'FAIL — عطبٌ مُسمّى أعلاه'} "
-          f"· كُتبت في {out / 'pack.json'} · cost_usd 0")
+    blockers = []
+    if not all_gates:
+        blockers.append("بواباتُ المديات")
+    if not chosen["size_gate"]["pass"]:
+        blockers.append("بوابةُ الحجم")
+    if not pois["_coverage"]["every_check_has_a_poison"]:
+        blockers.append("تغطيةُ السموم")
+    verdict = classify_verdict(ok=ok, inter=inter, blockers=blockers, remedy_rows=remedy_rows)
+    print(f"\nالحكم: {verdict} · كُتبت في {out / 'pack.json'} · cost_usd 0")
     return 0 if ok else 1
 
 
@@ -820,6 +892,8 @@ def main(argv=None) -> int:
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--build", action="store_true", help="يُبني الحزمة من القرص")
     mode.add_argument("--verify", action="store_true", help="يقابل هويةَ الحزمة بهوية التشغيلة الآن")
+    mode.add_argument("--price-surface", action="store_true", dest="price_surface",
+                      help="سطحُ التسعير: ثمنُ (حجم الإحصاء × طول المدى) — كلُّ خيارٍ يُبنى ويُقاس")
     mode.add_argument("--print-definitions", action="store_true", help="يطبع الاصطلاحات ومصادرها")
     ap.add_argument("--run", default=DEFAULTS["run"])
     ap.add_argument("--capture", default=DEFAULTS["capture"])
@@ -835,6 +909,8 @@ def main(argv=None) -> int:
                     help="strict: الالتقاطُ محجوبٌ عن المديات · explicit-list: قائمةٌ صريحة (البديلُ المُعلن)")
     args = ap.parse_args(argv)
     try:
+        if args.price_surface:
+            return cmd_price_surface(args)
         if args.print_definitions:
             return cmd_definitions()
         if args.build:
