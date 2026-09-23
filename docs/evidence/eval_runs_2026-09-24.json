@@ -1,0 +1,127 @@
+{
+ "date": "2026-09-24",
+ "spec": "docs/eval_pack/questions.json",
+ "spec_sha": "4facf540abd4",
+ "command": ".venv/bin/python tools/eval_questions.py --execute --timeout 90 --budget 0.6 --out <arm>.json ⇒ ثمّ --rescore --out <arm>.json (إعادةُ حكمٍ بمصحِّحٍ مُصلَح، بلا صرف)",
+ "compare_command": ".venv/bin/python tools/eval_run_compare.py --spec docs/eval_pack/questions.json A.json B.json C.json D.json",
+ "concurrency": {
+  "A,B,C": "متزامنة (تنازعُ موارد)",
+  "D": "منفردة (خطُّ أساسٍ نظيف)"
+ },
+ "per_arm": {
+  "A": {
+   "records": 50,
+   "stamped": 50,
+   "timeouts": 2,
+   "cost_usd": 0.6737,
+   "metrics": {
+    "number": {
+     "ok": 19,
+     "n": 30
+    },
+    "citation": {
+     "ok": 2,
+     "n": 10
+    },
+    "abstain": {
+     "ok": 9,
+     "n": 10
+    }
+   },
+   "total": 30
+  },
+  "B": {
+   "records": 50,
+   "stamped": 50,
+   "timeouts": 8,
+   "cost_usd": 2.2823,
+   "metrics": {
+    "number": {
+     "ok": 18,
+     "n": 30
+    },
+    "citation": {
+     "ok": 1,
+     "n": 10
+    },
+    "abstain": {
+     "ok": 8,
+     "n": 10
+    }
+   },
+   "total": 27
+  },
+  "C": {
+   "records": 50,
+   "stamped": 50,
+   "timeouts": 3,
+   "cost_usd": 0.9122,
+   "metrics": {
+    "number": {
+     "ok": 17,
+     "n": 30
+    },
+    "citation": {
+     "ok": 2,
+     "n": 10
+    },
+    "abstain": {
+     "ok": 9,
+     "n": 10
+    }
+   },
+   "total": 28
+  },
+  "D": {
+   "records": 50,
+   "stamped": 50,
+   "timeouts": 4,
+   "cost_usd": 0.4891,
+   "metrics": {
+    "number": {
+     "ok": 19,
+     "n": 30
+    },
+    "citation": {
+     "ok": 1,
+     "n": 10
+    },
+    "abstain": {
+     "ok": 9,
+     "n": 10
+    }
+   },
+   "total": 29
+  }
+ },
+ "range_total": [
+  27,
+  30
+ ],
+ "flaky": [
+  "num-04",
+  "num-08",
+  "cnt-06",
+  "chn-02",
+  "chn-04",
+  "cit-02",
+  "abs-06"
+ ],
+ "latency_s": {
+  "median_s": 8.2,
+  "p95_s": 90.0,
+  "worst5_s": [
+   90.1,
+   90.1,
+   90.1,
+   90.1,
+   90.1
+  ],
+  "n": 168
+ },
+ "invariants": {
+  "records_never_truncated": true,
+  "no_unpublishable_arm": true
+ },
+ "total_cost_usd": 4.3573
+}
