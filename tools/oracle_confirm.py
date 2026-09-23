@@ -33,10 +33,16 @@ for _p in (str(PROJ), str(PROJ / "src")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-CORPUS_PDF = PROJ / "data/local_sample/slice_629p/slice_629p.pdf"
-RUN = PROJ / "data/local_sample/slice_629p"
-CAPTURE = PROJ / "data/training/3e2d360a665c88aa"
-PACK = PROJ / "data/eval_pack/pack.json"
+# **الأدلّةُ من الجذر المشترك لا من موضع الأداة** (بوّابةُ التسليم · المقعد الثاني): كانت مساراتُ
+# الشاهد مثبَّتةً على `PROJ` ⇒ في شجرةِ عملٍ منفصلة تشير إلى شجرةٍ بلا `data/` **فتختفي الحزمةُ
+# صامتةً** ويُشهد بلا استثناء — وهي بعينها علّةُ R45-2 (والقارئُ نفسُه `pack_io`، والقاعدةُ واحدة).
+from tools.pack_io import data_root as _data_root  # noqa: E402
+
+_DATA = _data_root()
+CORPUS_PDF = _DATA / "data/local_sample/slice_629p/slice_629p.pdf"
+RUN = _DATA / "data/local_sample/slice_629p"
+CAPTURE = _DATA / "data/training/3e2d360a665c88aa"
+PACK = _DATA / "data/eval_pack/pack.json"
 # **الشهادةُ تحتوي تذييلاتٍ مطبوعةً لصفحات كشفٍ مصرفيّ** ⇒ لا يجوز أن تُدفَع إلى مستودعٍ عامّ.
 # فالمخرَجُ الافتراضي داخل `data/eval_pack/` المُهمَل في `.gitignore`، ويُرفض غيره.
 DEFAULT_OUT_DIR = PROJ / "data/eval_pack"

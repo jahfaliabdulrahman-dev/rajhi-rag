@@ -26,6 +26,7 @@ from pathlib import Path
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.pack_io import data_root as _data_root, pack_facts as _pack_facts, pack_path as _pack_path  # noqa: E402
+from tools.pack_io import repo_root as _repo_root  # noqa: E402 — **الكتابةُ في الشجرة الجاريّة** (S-1)
 
 PROJ = Path(__file__).resolve().parents[1]
 for _p in (str(PROJ), str(PROJ / "src"), str(PROJ / "tools")):
@@ -115,7 +116,7 @@ def main() -> None:
                     help=("من أين تُسحَب الصفحات: `holdout` لقياسٍ لا يُنفق مجموعة "
                           "التدريب · و`training` للمقارنة الكاملة **بلا إنفاق الحجز** "
                           "(قرارٌ يُتّخذ على الحجز يُنفقه — فالحجز للنموذج)."))
-    ap.add_argument("--out", type=Path, default=_data_root() / "docs" / "evidence")
+    ap.add_argument("--out", type=Path, default=_repo_root() / "docs" / "evidence")
     ap.add_argument("--out-name", default="20260921-fm2-prompt-comparison.json",
                     help="اسمُ ملف النتيجة — فيُكتب كلُّ ذراعٍ في ملفّه ولا يُبطل ما قبله")
     args = ap.parse_args()
