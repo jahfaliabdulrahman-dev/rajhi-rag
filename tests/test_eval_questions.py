@@ -64,7 +64,8 @@ def test_every_metric_and_every_kind_has_coverage(spec):
 def test_every_abstention_declares_a_reason(spec):
     for q in spec["questions"]:
         if q["metric"] == "abstain":
-            assert q["derive"]["kind"] == "absent" or q["expect"] == "ambiguous", \
+            assert (q["derive"]["kind"] == "absent" or q["expect"] == "ambiguous"
+                    or q.get("absent_reason")), \
                 f"{q['id']}: امتناعٌ بلا سببٍ معلَن"
 
 

@@ -322,7 +322,9 @@ def rescore(a, qs: list[dict], c: Corpus, pack: dict, spec: dict, rows: list[dic
         if q is not None:
             truth_val, _ = truth(q, c, pack)
             ok, why = score_answer(q, truth_val, rec.get("answer", ""), _Trace(rec), rows)
-            rec = {**rec, "ok": ok, "why": why}
+            # **تحديثُ الوصف من المصدر الحاليّ**: إعادةُ الحكم تُصحّح التصنيفَ أيضًا (لا تبقى حقولٌ قديمة)
+            rec = {**rec, "ok": ok, "why": why, "metric": q["metric"], "expect": q["expect"],
+                   "cat": q["cat"], "kind": q["derive"]["kind"], "q": q["q"]}
         results.append(rec)
         print(f"{rec['id']:9s} {'✅' if rec.get('ok') else '❌'} {rec.get('why', '')}")
     data["results"] = results
@@ -428,8 +430,9 @@ def _print_metrics(results: list[dict]) -> None:
         n_ok = sum(1 for r in sel if r.get("ok"))
         print(f"{label:26s} {n_ok:2d}/{len(sel):2d}  {'█' * n_ok}{'·' * (len(sel) - n_ok)}")
     print(f"{'المجموع':26s} {sum(1 for r in results if r.get('ok')):2d}/{len(results):2d}")
+    n_abs = sum(1 for r in results if r.get("metric") == "abstain")
     invented = sum(1 for r in results if r.get("metric") == "abstain" and not r.get("ok"))
-    print(f"\n⛔ الامتناعاتُ الساقطة (خطرُ الاختراع): {invented}/8")
+    print(f"\n⛔ الامتناعاتُ الساقطة (خطرُ الاختراع): {invented}/{n_abs}")   # المقامُ يُشتقّ لا يُكتب بيد
     by_kind: dict[str, list[bool]] = {}
     for r in results:
         by_kind.setdefault(r.get("kind") or "?", []).append(bool(r.get("ok")))
