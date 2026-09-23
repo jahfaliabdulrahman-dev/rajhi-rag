@@ -27,7 +27,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from tools import pack_io  # noqa: E402
+from tools import eval_stamp, pack_io  # noqa: E402
 
 ARABIC_INDIC = "٠١٢٣٤٥٦٧٨٩"
 PERSIAN = "۰۱۲۳۴۵۶۷۸۹"
@@ -79,9 +79,10 @@ class Corpus:
         self._cache: dict[int, dict | None] = {}
 
     def page(self, p: int) -> dict | None:
+        # **قارئٌ واحد**: المحصَّنُ في `pack_io.run_page` — لا منطقٌ ثانٍ يخالف قارئ الحزمة (مراجعة المقاعد).
+        # وملفٌّ تالفٌ يُسمّى «غائباً» بدل أن يُفجّر Traceback بلا حكم (وR47 كان في المدى نفسِه).
         if p not in self._cache:
-            f = self.dir / "results" / f"pg-{p:03d}.json"
-            self._cache[p] = json.loads(f.read_text()) if f.exists() else None
+            self._cache[p] = pack_io.run_page(self.dir, p)
         return self._cache[p]
 
     def rows(self, p: int) -> list[dict]:
@@ -95,14 +96,9 @@ class Corpus:
         return p in self.pages and self.page(p) is not None
 
     def raw_rows(self, page: int) -> list[dict]:
-        """**الصفوفُ المطبوعةُ الخامّة** — لا تُسقِط صفًّا بلا رصيد (وإسقاطُها كان يُخفي صفحةَ ٦٢٩ كلَّها)."""
-        p = self.dir / "results" / f"pg-{page:03d}.json"
-        if not p.exists():
-            return []
-        try:
-            return list(json.loads(p.read_text()).get("raw_rows") or [])
-        except (OSError, json.JSONDecodeError):
-            return []
+        """**الصفوفُ المطبوعةُ الخامّة** — لا تُسقِط صفًّا بلا رصيد (وإسقاطُها كان يُخفي صفحةَ ٦٢٩ كلَّها).
+        وتقرأ من القارئ الواحد/الكاش نفسه ⇒ لا قراءتان لملفٍّ واحد في تشغيلةٍ واحدة."""
+        return list((self.page(page) or {}).get("raw_rows") or [])
 
     def corpus_pages(self) -> int:
         return len(list((self.dir / "results").glob("pg-*.json")))
@@ -240,7 +236,26 @@ def _is_neg(ans: str) -> bool:
     return bool(_NEG_RE.search(ans)) or any(w in ans for w in _NEG)
 
 
+def _polarity(ans: str) -> tuple[bool, bool]:
+    """(إيجاب، نفي) — **يُزال النفيُ أوّلاً ثم يُبحث عن الإيجاب**: «لا يساوي» **تحتوي** «يساوي»، فأشعلت
+    العلمَين معاً فيسقط الشرط `neg and not pos` على جوابٍ صحيح (قِيس بالتنفيذ في مراجعة المقاعد)."""
+    t = ans or ""
+    stripped = t
+    for w in _NEG:
+        stripped = stripped.replace(w, " ")
+    stripped = _NEG_RE.sub(" ", stripped)
+    return any(w in stripped for w in _POS), _is_neg(t)
+
+
 _AMOUNT_TOK = re.compile(r"\d[\d,٬]*(?:[.٫]\d{1,2})\b")   # مبلغٌ لا رقمُ صفحة: الفاصلةُ العشريّةُ شرط
+_ROW_IDX_RE = re.compile(r"(?:الصف|صف|سطر|السطر)[\u064b-\u0652]*\s*(?:رقم[\u064b-\u0652]*\s*)?([0-9٠-٩۰-۹]+)")
+
+
+def _claimed_row_index(ans: str) -> int | None:
+    """رقمُ الصفّ الذي **يسمّيه** الجواب — «مبلغٌ» ليس فهرساً (قِيس أنّ الحُكم كان يمرّر فهرساً خاطئاً)."""
+    m = _ROW_IDX_RE.search(ans or "")
+    v = num(m.group(1)) if m else None
+    return int(v) if v is not None else None
 
 
 def _claimed_amounts(ans: str) -> list[float]:
@@ -287,15 +302,18 @@ def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[b
     if m == "number":
         if q["expect"] == "chain":
             t = truth_val if isinstance(truth_val, dict) else {}
-            pos, neg = any(w in ans for w in _POS), _is_neg(ans)
+            if not t:
+                # **عطبُ مرسًى لا يُقرأ حُكماً على النظام** (قياسُ غيابٍ لا يساوي فشلَ النظام).
+                return False, "عطبُ مرسًى: لا سلسلةَ مُشتقّة (لا يُحكم على النظام)"
+            pos, neg = _polarity(ans)
             if t.get("equal"):
                 near = any(abs(v - 0.0) < 0.05 for v in nums)
                 return (pos and not neg and near), f"متساويان: إيجابٌ {'✓' if pos else '✗'} · فرقٌ صفريٌّ {'✓' if near else '✗'}"
-            near = any(abs(v - float(t.get("diff") or -1)) < 0.05 for v in nums)
+            near = any(abs(v - float(t.get("diff"))) < 0.05 for v in nums)
             return (neg and not pos and near), \
                 f"غيرُ متساويين: نفيٌ {'صريح' if neg else 'غائب/مضادّ'} · الفرقُ {'مذكور' if near else 'غيرُ مذكور'}"
         if q["expect"] == "boolean":
-            pos, neg = any(w in ans for w in _POS), _is_neg(ans)
+            pos, neg = _polarity(ans)
             if truth_val is True:
                 return (pos and not neg), f"إيجابٌ {'موجود' if pos else 'غائب'}{' ونفيٌ مضادّ' if neg else ''}"
             # السلسلةُ لا تتّصل: الجوابُ الصحيحُ نفيٌ صريح
@@ -335,10 +353,22 @@ def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[b
             return False, f"لا قمةَ مُشتقّةً للصفحة {need} (صفحةٌ بلا مبالغ)"
         floor = float(amt)
         names = any(abs(float(mv) - floor) < 0.05 for mv in cands)  # **مبلغٌ بمبلغ لا فهرسٌ بمبلغ**
+        # **والفهرسُ يُقابَل بالفهرس**: `expect: row_index` يطلب صفّاً بعينه، وقياسُ الأثر وحده لا يقيسه.
+        # ويُقبَل الصيغتان — فهرسٌ عامٌّ في `tops` أو ترتيبُ الصفّ داخل صفحته — لأنّ نصَّ السؤال يحتملهما.
+        claimed_idx = _claimed_row_index(ans)
+        tops_g = {int(x) for x in (t.get("tops") or [])}
+        local_top = None
+        if 1 <= want <= len(rows):
+            page_rows = [r for r in rows if r["page"] == need]
+            local_top = next((i for i, r in enumerate(page_rows, 1)
+                              if r.get("movement") is not None and abs(float(r["movement"]) - floor) < 0.05), None)
+        idx_ok = claimed_idx is not None and (claimed_idx in tops_g or claimed_idx == local_top)
         tie_ok = (not t.get("tie")) or _declares_tie(ans)
-        ok = bool(names and tie_ok)
+        ok = bool(names and tie_ok and idx_ok)
         why = (f"{'ذكر' if names else 'لم يذكر'} قمةَ الصفحة {need} ({len(cands)} صفًّا مُستشهَداً)"
-               + ("" if tie_ok else " · **ولم يُعلن التعادل** وهو متعادل"))
+               + ("" if tie_ok else " · **ولم يُعلن التعادل** وهو متعادل")
+               + (f" · الفهرسُ {claimed_idx} ✓" if idx_ok
+                  else f" · الفهرسُ {'غيرُ مذكور' if claimed_idx is None else f'{claimed_idx} خطأ'} ✗"))
         return ok, why
 
     if m == "abstain":
@@ -352,9 +382,13 @@ def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[b
         unsupported = [v for v in claimed if not any(abs(v - s) < 0.005 for s in sup)]
         gated = getattr(res, "scope", "in_scope") != "in_scope" or bool(getattr(res, "refused", False))
         declared = any(w in ans for w in _ABSENCE)
+        # **عدّادان لا عدّادٌ واحد**: «ادّعى مبلغاً بلا سند» ≠ «لم يُعلن امتناعاً» — وخلطُهما رفع الرقمَ
+        # المنشور بواحد (قِيس: ثلاثُ اختراعاتٍ فعليّة + سقوطٌ واحدٌ سببُه عدمُ إعلان التعادل).
         why = ("بوّابةُ النطاق منعته قبل النموذج ✓" if gated
-               else "امتناعٌ نصّيّ بلا مبلغٍ مُخترع ✓" if (not unsupported and declared)
-               else f"ادّعى {len(unsupported)} مبلغاً بلا سند في الأثر ✗")
+               else f"امتناعٌ نصّيّ بلا مبلغٍ مُخترع ✓ ({len(claimed)} مبلغاً مُدّعى، كلُّه مسنود)"
+               if (not unsupported and declared)
+               else f"**اختراع**: ادّعى {len(unsupported)} مبلغاً بلا سند في الأثر ✗" if unsupported
+               else "**لم يُعلن امتناعاً** نصّيّاً ✗ (ولا ادّعى مبلغاً)")
         return (gated or (not unsupported and declared)), why
     return False, f"مقياسٌ مجهول: {m}"
 
@@ -398,7 +432,7 @@ def rescore(a, qs: list[dict], c: Corpus, pack: dict, spec: dict, rows: list[dic
             # **لا يُكتب فوق نصّ السؤال المحفوظ**: الملفُّ شاهدٌ على ما طُلب فعلاً (كان يُستبدل فيُفقد الشاهد)
             rec = {**rec, "ok": ok, "why": why, "metric": q["metric"], "expect": q["expect"],
                    "cat": q["cat"], "kind": q["derive"]["kind"]}
-            if rec.get("spec_sha") not in (None, cur_sha):
+            if not eval_stamp.is_publishable(rec, cur_sha):
                 stale += 1
         results.append(rec)
         print(f"{rec['id']:9s} {'✅' if rec.get('ok') else '❌'} {rec.get('why', '')}")
@@ -407,6 +441,13 @@ def rescore(a, qs: list[dict], c: Corpus, pack: dict, spec: dict, rows: list[dic
     if stale:
         print(f"\n⚠️ {stale} سجلاً كُتب **قبل** بصمةِ الأسئلة الحاليّة ({cur_sha}) ⇒ نصُّ السؤال في السجل قد يخالف "
               f"ما طُلب فعلاً. الأصلُ: إعادةُ الطرح. **ولا يُنشر رقمٌ من سجلاتٍ غيرِ مطابقةِ البصمة.**")
+    good, why = eval_stamp.publishable_or_why(results, cur_sha)
+    if not good and not getattr(a, "allow_stale", False):
+        print(f"\n{why}\n   ⇒ **لا تُطبع مقاييسُ من سجلٍّ لا شاهدَ له على السؤال المطروح** — "
+              f"للتشخيص وحده: `--allow-stale`.")
+        return 3
+    if not good:
+        print(f"\n{why}\n   ⇒ تُطبع الآن **تشخيصيّاً** ويُمنع نشرُها.")
     _print_metrics(results)
     return 0
 
@@ -439,8 +480,11 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
             prev_all = {r["id"]: r for r in json.loads(out.read_text()).get("results", [])}
         except (OSError, json.JSONDecodeError, KeyError):
             prev_all = {}
+    curent = _spec_sha()
     done = {k: v for k, v in prev_all.items()
-            if not str(v.get("answer") or "").startswith("<")}   # **النائبُ ليس جواباً** ⇒ يُعاد سؤالُه
+            # **النائبُ ليس جواباً** ⇒ يُعاد سؤالُه · **وجوابُ نصٍّ آخر ليس جواباً لهذا السؤال** (قِيس:
+            # أربعُ إعاداتِ صياغةٍ في مدىً واحد ⇒ كان يُعاد استخدامُ جوابِ النصّ القديم صامتاً).
+            if not str(v.get("answer") or "").startswith("<") and eval_stamp.is_publishable(v, curent)}
     todo = [q for q in qs if q["id"] not in done]
     if a.budget:                       # **سقفٌ يُعلن ويُقاس**: بمعدّلٍ مُقنَّعٍ من نقطتين مقيسَتين (٠٫٠٠٦–٠٫٠١٠ للسؤال)
         cap = max(0, int(float(a.budget) / 0.01))
@@ -520,8 +564,12 @@ def _print_metrics(results: list[dict]) -> None:
         print(f"{label:26s} {n_ok:2d}/{len(sel):2d}  {'█' * n_ok}{'·' * (len(sel) - n_ok)}")
     print(f"{'المجموع':26s} {sum(1 for r in results if r.get('ok')):2d}/{len(results):2d}")
     n_abs = sum(1 for r in results if r.get("metric") == "abstain")
-    invented = sum(1 for r in results if r.get("metric") == "abstain" and not r.get("ok"))
-    print(f"\n⛔ الامتناعاتُ الساقطة (خطرُ الاختراع): {invented}/{n_abs}")   # المقامُ يُشتقّ لا يُكتب بيد
+    fell = [r for r in results if r.get("metric") == "abstain" and not r.get("ok")]
+    invented = sum(1 for r in fell if "**اختراع**" in (r.get("why") or ""))
+    silent = sum(1 for r in fell if "لم يُعلن" in (r.get("why") or ""))
+    # المقامُ يُشتقّ لا يُكتب بيد — **والصنفان يُفصَلان** (وإلّا قرأ القارئُ صنفاً وقيس غيرُه)
+    print(f"\n⛔ الامتناعاتُ الساقطة: {len(fell)}/{n_abs} — منها **اختراعُ مبلغٍ بلا سند {invented}** "
+          f"· **عدمُ إعلان الامتناع {silent}**")
     by_kind: dict[str, list[bool]] = {}
     for r in results:
         by_kind.setdefault(r.get("kind") or "?", []).append(bool(r.get("ok")))
@@ -547,6 +595,9 @@ def main(argv=None) -> int:
     ap.add_argument("--model", help="اسمُ النموذج على OpenRouter (وإلّا فالافتراضيّ في `build_llm`)")
     ap.add_argument("--out", type=pathlib.Path, help="ملفُّ الأجوبة (افتراضيّه `data/eval_pack/answers.json`)")
     ap.add_argument("--budget", type=float, help="سقفُ الصرف بالدولار — يُوقف الجدولةَ ويُعلن التغطية")
+    ap.add_argument("--force", action="store_true", help="تجاوزُ حاجبِ المراسي (يُعلن في الخرج أنّه تجاوز)")
+    ap.add_argument("--allow-stale", action="store_true",
+                    help="طبعُ مقاييسَ من سجلاتٍ لا تطابق بصمةَ الأسئلة — **تشخيصٌ فقط، لا للنشر**")
     ap.add_argument("--only", help="إعادةُ سؤالِ معرّفاتٍ بعينها (مفصولةً بفاصلة) رغم الحفظ التدريجيّ")
     ap.add_argument("--timeout", type=int, default=150,
                     help="مهلةُ كلّ سؤالٍ بالثواني (بلا مهلةٍ يعلَق التشغيلُ أبدًا — قِيس)")
@@ -593,6 +644,12 @@ def main(argv=None) -> int:
         rows, _ = build_rows(a.run)
         return rescore(a, qs, c, pack, spec, rows)
 
+    if bad and (a.execute or a.rescore) and not a.force:
+        # **حاجبٌ في المسار المدفوع لا في المجّانيّ وحده**: جولةٌ تُصرف فوق مراسٍ لا تُقاس هي بالضبط ما
+        # أنتج الأرقامَ المسحوبة (صفحتان «غائبتان» وهما موجودتان · «سنةٌ غائبة» فيها ٨٦٢ صفًّا).
+        print(f"⛔ {len(bad)} عطباً في المراسي ⇒ لا طرحَ مدفوعاً ولا إعادةَ حكمٍ فوق ما لا يُقاس "
+              f"(تجاوزٌ صريح: --force). القائمةُ مطبوعةٌ أعلاه.", file=sys.stderr)
+        return 2
     if a.execute:
         sel = qs[: a.limit] if a.limit else qs
         return run_questions(a, sel, c, pack, spec)

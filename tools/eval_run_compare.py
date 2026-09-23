@@ -22,6 +22,9 @@ import pathlib
 import statistics
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+from tools import eval_stamp  # noqa: E402
+
 
 def _spec_sha(path: pathlib.Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()[:12]
@@ -41,10 +44,8 @@ def compare(spec_path: pathlib.Path, arms: list[pathlib.Path]) -> dict:
     for name, d in data.items():
         recs = {r["id"]: r for r in d.get("results", [])}
         per_arm[name] = recs
-        # **بلا بصمةٍ لا يُنشر**: الغيابُ أسوأُ من بصمةٍ قديمة (‏«المجهولُ لا يُعدّ اتفاقاً»)
-        stale = sorted(i for i, r in recs.items()
-                       if i in qs and r.get("spec_sha") not in (None, "") and r.get("spec_sha") != want)
-        unstamped = sorted(i for i, r in recs.items() if i in qs and r.get("spec_sha") in (None, ""))
+        # **قاعدةٌ واحدة** (`tools/eval_stamp.py`): ما يُقبل هنا يُقبل في `--rescore` والعكس — وإلّا انقسمت.
+        _ok_ids, unstamped, stale = eval_stamp.classify([r for i, r in recs.items() if i in qs], want)
         if stale or unstamped:
             mismatched[name] = {"stale": stale, "unstamped": unstamped}
 

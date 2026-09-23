@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""قاعدةُ النشر الواحدة للبصمة — موضعٌ واحد تستدعيه كلُّ أداةٍ تقرأ سجلات تقييم.
+
+**الدرسُ المدفوع (مراجعةُ المقاعد الثلاثة، ٢٠٢٦-٠٩-٢٤):** أداتان في المستودع نفسِه كانتا تقولان **العكس**:
+`--rescore` في `tools/eval_questions.py` كان يعدّ البصمةَ **الغائبة** مطابقةً (`not in (None, cur)`)،
+و`tools/eval_run_compare.py` يعدّها متقادمة (`unstamped` ⇒ `rc=1`). فقاعدةٌ مكتوبةٌ في موضعين تنقسم.
+
+**والقاعدة:** الغيابُ **لا يُعدّ اتفاقاً**. سجلٌّ بلا بصمةٍ أسوأُ من سجلٍّ ببصمةٍ قديمة: الأولُ لا يُثبت أنّه
+أُجيب عن نصٍّ بعينه أصلاً، والثاني يُثبت أنّه أُجيب عن نصٍّ آخر. وكلاهما **لا يُنشر رقمُه**.
+"""
+
+from __future__ import annotations
+
+PLACEHOLDER = "؟"          # `_spec_sha` تُرجعه عند تعذّر التقطيع ⇒ لا يصلح بصمةً
+
+
+def is_publishable(rec: dict, cur_sha: str) -> bool:
+    """**مطابقةٌ حرفيّةٌ وحسب**: بلا بصمةٍ (أو ببصمةٍ بديلة) ⇐ غيرُ قابلةٍ للنشر."""
+    return bool(cur_sha) and cur_sha != PLACEHOLDER and rec.get("spec_sha") == cur_sha
+
+
+def classify(records: list[dict], cur_sha: str) -> tuple[list[str], list[str], list[str]]:
+    """(المطابقة، البلا-بصمة، المخالفة) — **ثلاثةُ أصنافٍ لا صنفان**: البلا-بصمة يُعدّ ويُسمّى، فلا يُدمج."""
+    ok: list[str] = []
+    unstamped: list[str] = []
+    stale: list[str] = []
+    for r in records:
+        if is_publishable(r, cur_sha):
+            ok.append(str(r.get("id")))
+        elif r.get("spec_sha") in (None, "", PLACEHOLDER):
+            unstamped.append(str(r.get("id")))
+        else:
+            stale.append(str(r.get("id")))
+    return ok, unstamped, stale
+
+
+def publishable_or_why(records: list[dict], cur_sha: str) -> tuple[list[dict], str]:
+    """قائمةُ السجلات القابلةِ للنشر، أو (`[]`، سببٌ صريح) — **السببُ يُطبع لا يُخفى**."""
+    ok, unstamped, stale = classify(records, cur_sha)
+    if unstamped or stale:
+        return [], (f"⛔ {len(unstamped)} سجلاً **بلا بصمة** · {len(stale)} **ببصمةٍ مخالفة** "
+                    f"(المطلوب {cur_sha}) ⇒ **لا يُنشر رقمٌ منها** — أعِد الطرح.")
+    return [r for r in records if is_publishable(r, cur_sha)], f"{len(ok)} سجلاً مطابقاً للبصمة {cur_sha}"
