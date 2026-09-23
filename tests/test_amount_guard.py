@@ -420,10 +420,12 @@ def _rev(repo: Path) -> str:
 
 
 def test_an_empty_stdin_and_an_empty_range_are_not_the_same_failure():
-    """**مراجعة ٤٠/٣:** «الفارغُ شرعاً ≠ غيرُ المقروء» — والحارسُ يجب أن يفرّق بينهما.
+    """**مراجعة ٤٠/٣ + مقعدا ٤١:** ثلاثُ حالاتٍ **مفصولة** (والخلطُ بينها أفتحُ عطبٍ):
 
-    * مدىً **حُلّ** فارغاً (فرعٌ عند التزامٍ منشورٍ أو حذفُ فرع) ⇒ **PASS بإعلان**: لا شيءَ يُنشر.
-    * و`stdin` فارغٌ (لا مراجعَ ⇒ لا أعرف ما يُدفع) ⇒ **سقوطٌ مُغلَق** `rc=2`، ولا اشتقاقَ من `HEAD`.
+    * `stdin` فارغٌ (دفعٌ لا يُحدّث مرجعاً — مقيسٌ عند git: `bytes=0`) ⇒ **PASS بإعلان**، لا سقوط
+      كاذبٍ على عملٍ روتينيّ (والسقوطُ الكاذبُ يخلق حافزَ `--no-verify`).
+    * مراجعُ قُرئت وحُلّت ومداها فارغٌ (فرعٌ تعرف الوجهةُ أساسَه، أو **حذفُ فرع**) ⇒ **PASS بإعلان**.
+    * و`stdin` **غيرُ فارغٍ ولا يُقرأ** (مجرى مقصوص) ⇒ **سقوطٌ مُغلَق** `rc=2`: «لم أقرأ» ≠ «لا شيء».
     """
     if ag.load_deny() is None:
         pytest.skip("بلا أدلّة ⇒ السقوطُ المُغلَق (غيابُ المانيفست) يسبق مسار المدى")
@@ -475,7 +477,65 @@ def test_the_four_forms_git_actually_sends_are_all_read(tmp_path):
         assert ag._zero(local) == (why == "--delete x"), why
     # والحذفُ: لا شيءَ يُنشر ⇒ مدىً فارغٌ شرعاً (وهو الادّعاءُ الذي سقط وأُعيد إثباتُه بالشكل الحقيقيّ)
     assert ag.pushed_revs(forms["--delete x"], "origin") == []
-    assert ag.pushed_revs(forms["HEAD:refs/heads/x"], "origin"), "وغيرُ الحذف يعطي مدىً (لا فارغٌ كاذب)"
+    # **ولا تأكيدَ على «غيرِ الحذف» هنا:** مدى الفرع في **clone نظيف** فارغٌ قياساً (HEAD منشورٌ
+    # على الوجهة) فيسقط الاختبارُ هناك بلا عطبٍ — والفرقُ البيئيُّ لا يُحرس بثابتٍ (مقعدُ المعايير، ٤١/٢).
+    # ومدى الوجهة مقابل كلّ الريموتات يُقاس في `test_a_second_remote_does_not_empty_the_destination_range`.
+    assert ag._is_sha("a" * 64), "sha256 (٦٤ خانة) يُرسله git على مستودع --object-format=sha256"
+
+def test_git_itself_sends_the_four_stdin_shapes(tmp_path):
+    """**الدليلُ قابلٌ لإعادة الإنتاج داخل المستودع** (القاعدةُ الحديديّة ٦): git هو من ينتج الأسطر،
+
+    لا جدولٌ نسختُه بيدي. خطّافٌ حقيقيٌّ يلقط `stdin`، وأربعُ دفعاتٍ حقيقيّةٍ إلى مستودعٍ مجرّدٍ محلّيّ.
+    (سببُ وجوده: مقعدا المعايير والبنية قاسا أنّ الجدولَ في الاختبار المجاور **مُستنسخٌ** لا مُشتقّ.)
+    """
+    remote = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    repo = _git_repo(tmp_path / "r")
+    (repo / ".githooks").mkdir()
+    probe = repo / ".githooks" / "pre-push"
+    probe.write_text('#!/bin/sh\ncat > "$(dirname "$0")/stdin.seen"\n', encoding="utf-8")
+    probe.chmod(0o755)
+    subprocess.run(["git", "config", "core.hooksPath", ".githooks"], cwd=repo, check=True)
+    subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=repo, capture_output=True)
+    (repo / "a.txt").write_text("x\n", encoding="utf-8")
+    _commit(repo, "one")
+    sha, seen = _rev(repo), repo / ".githooks" / "stdin.seen"
+
+    def push(*args: str) -> str:
+        seen.write_text("", encoding="utf-8")
+        subprocess.run(["git", "push", "-q", *args], cwd=repo, capture_output=True)
+        return seen.read_text(encoding="utf-8").strip()
+
+    cases = {
+        "دفعٌ بـHEAD:refs/heads/…": (push("origin", "HEAD:refs/heads/x"), "HEAD"),
+        "دفعٌ بالـsha:refs/heads/…": (push("origin", f"{sha}:refs/heads/y"), sha),
+        "دفعٌ بمرجعٍ كامل": (push("origin", "HEAD:refs/heads/z"), "HEAD"),
+        "حذفُ فرع": (push("origin", "--delete", "x"), "(delete)"),
+    }
+    for why, (line, first) in cases.items():
+        assert line, f"الخطّافُ لم يلقط stdin: {why}"
+        pairs, bad = ag.parse_refs(line)
+        assert bad == 0 and len(pairs) == 1, f"شكلٌ حقيقيٌّ مرفوض: {why} ⇒ {line!r}"
+        assert line.split()[0] == first, f"{why}: الحقلُ الأول {line.split()[0]!r} ≠ {first!r}"
+    assert ag.pushed_revs("(delete) " + "0" * 40 + " refs/heads/x " + sha + "\n", "origin") == []
+
+
+def test_the_hook_flag_probe_discriminates(tmp_path):
+    """**عطبٌ أمسكه مقعدان (مراجعة ٤١/٣):** `--help | grep -q -- '--remote'` **لا يفصل** — يطابق
+
+    `--not --remotes` في نصّ المساعدة ⇒ يمرّ كذباً على أداةٍ لا تعرف العلَم، فيرفض argparse دفعاً
+    مشروعاً (وهو ما وقع فعلاً). فالفحصُ يُقرأ من **المصدر** — وهذا الاختبارُ يحرس السطرَ نفسَه.
+    """
+    hook = (ROOT / ".githooks" / "pre-push").read_text(encoding="utf-8")
+    assert 'add_argument("--remote"' in hook, "الفحصُ لم يعُد يقرأ العَلَمَ من المصدر"
+    assert "grep -q -- '--remote'" not in hook, "عاد الفحصُ الذي يطابق `--remotes`"
+    older = tmp_path / "older.py"
+    older.write_text("# --pre-push: rev-list <sha> --not --remotes\n", encoding="utf-8")
+    probe = "grep -q -- 'add_argument(\"--remote\"'"
+    assert subprocess.run(["sh", "-c", f"{probe} {older}"], capture_output=True).returncode != 0, \
+        "الفحصُ يمرّ على أداةٍ لا تعرف --remote"
+    assert subprocess.run(["sh", "-c", f"{probe} tools/amount_guard.py"], cwd=ROOT,
+                          capture_output=True).returncode == 0, "الفحصُ يرفض أداتنا الحاليّة"
 
 def test_a_second_remote_does_not_empty_the_destination_range(tmp_path, monkeypatch):
     """**إغلاقُ الفتح (مقعدا البنية والمواصفة، ٤١):** `--not --remotes` تطرح مراجعَ **كلّ** ريموت ⇒
@@ -502,7 +562,9 @@ def test_a_second_remote_does_not_empty_the_destination_range(tmp_path, monkeypa
     sha = _rev(repo)
     line = f"refs/heads/main {sha} refs/heads/main {'0' * 40}\n"
     assert ag.pushed_revs(line, "origin") == [sha], "وجهةُ origin لا تعرف الالتزام ⇒ يجب أن يظهر"
-    assert ag.pushed_revs(line) == [], "بلا وجهةٍ تُطرح كلُّ الريموتات ⇒ فارغٌ — وهو الفتحُ المُغلَق"
+    # **وبلا وجهةٍ:** التقريبُ يبقى (طرحُ كلّ الريموتات) لكنه **يُعلَن** اليومَ بجملة، ولا يعود
+    # `PASS` صامتاً؛ والدقّةُ تأتي من تمرير الوجهة — وهو ما يفعله الخطّاف. (الحدُّ مقيسٌ ومُعلَن.)
+    assert ag.pushed_revs(line) == [], "الاحتياطُ يطرح كلّ الريموتات — ويُعلن ذلك ولا يصمت"
 
 
 def _guard_in(repo: Path, *args: str) -> subprocess.CompletedProcess:
