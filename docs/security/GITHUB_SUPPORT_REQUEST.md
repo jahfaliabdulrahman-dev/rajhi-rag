@@ -70,8 +70,23 @@ jahfaliabdulrahman-dev (repository owner)
   بزرعٍ من الكوربوس + **ضبطٌ سالب** (وهميٌّ يمرّ). وبعد الإصلاح: **١٢٣ صيغةً في ١٣٣٤ blobاً**.
 - **ما لا يُصلحه هذا:** النسخُ المُفرَّعة (forks)، والكاش، وأيّ نسخةٍ سُحبت قبل التنقية. **التدويرُ هو
   العلاجُ الفعليّ**، والطلبُ تنظيفٌ لنسخةٍ واحدةٍ عند منصّةٍ واحدة.
-- **حالةُ الطلب (2026-09-23):** أُرسل من حساب المالك عبر مسار «المستودعات ← cached views»، والردُّ الحرفيّ:
-  «**Ticket created, we'll update you once we've clear the cached views**». وعُرِض عليه الخياران فاختير
-  **Remove the pull request(s)** (‏#91–#108) مع طلبِ إبقاء الصفحات إن أمكن إبطالُ المراجع وحدها.
+- **حالةُ الطلب — مُحدَّثة (تذكرة `4785819`):** أُرسل من حساب المالك عبر مسار «المستودعات ← cached views»
+  (فُتحت ١١:٤٣ UTC). وردُّ الدعم (Finch · ١٢:٤٠ UTC): أداتُهم وجدت مراجعَ للالتزام الحسّاس في
+  **`pr_numbers = [101..108]`**، و«To remove the sensitive data from pull requests, we'll need to delete
+  the pull requests entirely» — وإزالةُ المراجع وحدها «requires significant backend processing, time and
+  effort» ⇒ **القرارُ المطلوبُ من المالك: الموافقةُ على حذف ١٠١–١٠٨**.
+  (وكلُّها **مدمجة** — لا كودَ يُفقد؛ ومحتوى نقاشاتها مُلتزمٌ كملفّاتٍ في `handoff/claude/` و`handoff/sulaiman/`
+  ⇒ الحذفُ لا يُفقد شيئاً ذا قيمة، وهو ما صرّح به الطلبُ الأصليّ.)
+- **الانكشافُ المقيسُ قبل تنفيذهم (2026-09-23 · `tools/refs_exposure_probe.py`):** `⛔ STILL EXPOSED` —
+  `refs/pull/*` = **١٢٢** · التزاماتُ المرآة **٦٤٩** مقابل `main` المعاد كتابتِه **٢٣١** ·
+  **١٢٣ صيغةَ مبلغٍ حقيقيّةً داخل ١٤٤٠ blobاً مرئيّةٌ عبر المرآة** · وثلاثةُ التزاماتِ ما قبل التنقية
+  (`aa8b70cb2e` · `17f5daca92` · `d3dbf2af26`) تُرجع **HTTP 200**.
+  ⇒ **الانكشافُ اليومَ ليس المفتاحَ وحدَه بل مبالغَ الكشف أيضاً** — وهذا هو وزنُ الموافقة.
+- **نصُّ الردّ المُقترح (يُرسله المالك):** «Thanks Finch — please proceed with deleting pull requests
+  #101–#108. All eight are already merged (their changes are in `main`), and every artifact we need from
+  those threads is already committed as files inside the repository, so nothing of value is lost.
+  One request while you are in there: **the refs still resolve — please expire them** (and the cached
+  views for the pre-rewrite commits) so the old commits are no longer retrievable through `refs/pull/*`.
+  The credential was rotated and is considered burned.»
 - **القياسُ بعدهم (لا يُغلق البند بوعد):** `python3 tools/refs_exposure_probe.py` ⇒ `PURGED` (rc=0) أو
   `STILL EXPOSED` (rc=1) أو `UNMEASURED` (rc=2: تعذّر الجلب ⇒ **فشلٌ مُغلَق**).
