@@ -151,3 +151,13 @@ def test_pack_path_is_not_derived_from_file_location():
     """رائحةُ العلّة: المسارُ لا يُبنى من موضع ملفّ الأداة بل من الجذر المشترك."""
     assert pack_io.pack_path() == pack_io.data_root() / "data/eval_pack/pack.json"
     assert pack_io.pack_path() == PACK
+
+
+# ───────────────── (R45-3) الساحبُ الذي أنفق الحزمة صار يستثنيها ─────────────────
+
+def test_compare_prompts_excludes_pack_pages():
+    """الأداةُ التي سحبت عيّنة FM-2 صارت تُسقط صفحاتِ الحزمة — **والدالّةُ نقيّةٌ تُختبَر**."""
+    from tools.compare_prompts import excluding_pack
+    assert excluding_pack([1, 2, 3, 4], {2, 4}) == [1, 3]
+    assert excluding_pack([7, 8], {7, 8}) == []
+    assert excluding_pack([5], set()) == [5]

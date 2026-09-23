@@ -33,10 +33,11 @@ git fetch origin && git rebase origin/main                   # فرعٌ متأخ
 
 **التشغيل (البيئةُ جاهزة، لا تُنشئ واحدة):**
 ```bash
-.venv/bin/python -m pytest -q                    # السويت كاملة (المقياس اليوم: 424 passed)
-.venv/bin/python tools/qa_gate.py --quick        # بوابات بلا خدمة: tests + parser goldens + wiring
-.venv/bin/python tools/amount_guard.py --pre-push   # حارس المبالغ (يُشغّله الخطّاف تلقائياً)
-.venv/bin/python tools/refs_exposure_probe.py    # حالةُ المراجع المحذوفة (STILL EXPOSED/PURGED)
+MAIN=$(git rev-parse --path-format=absolute --git-common-dir | xargs dirname)   # الشجرةُ الأمّ
+$MAIN/.venv/bin/python -m pytest -q                    # السويت كاملة (المقياس اليوم: 424 passed)
+$MAIN/.venv/bin/python tools/qa_gate.py --quick        # بوابات بلا خدمة: tests + parser goldens + wiring
+$MAIN/.venv/bin/python tools/amount_guard.py --pre-push   # حارس المبالغ (يُشغّله الخطّاف تلقائياً)
+$MAIN/.venv/bin/python tools/refs_exposure_probe.py    # حالةُ المراجع المحذوفة (STILL EXPOSED/PURGED)
 ```
 
 **الدفع (وكيف يُرفض):** الدفعُ يمرّ بـ`.githooks/pre-push` **حيًّا** — يفحص المبالغ والثابت والبصمات.
@@ -52,7 +53,7 @@ git push -u origin <branch>        # ⛔ ممنوع --no-verify: إن حجبَك
 ووسمَه (`مُثبت`/`مرجّح`/`مجهول`) · وسطر **«ما لم يُثبت»**.
 
 **الأمانُ في المخرجات:** لا تُطبع قيمةَ مبلغٍ حقيقيّة أبداً — الوحدةُ **ملفٌّ + عددُه** (القاعدة ١٤ في السلسلة الموحَّدة للبروتوكول؛ و«١٣» في الترقيم القديم).
-والأدلّةُ الثقيلة (الحزمة/الالتقاط/المفتاح) **خارج git** ⇒ في نسخةٍ نظيفةٍ تُتخطّى اختباراتُها **وهذا مقصود**،
+والأدلّةُ الثقيلة (الحزمة/الالتقاط/المفتاح) **خارج git** ⇒ في نسخةٍ نظيفةٍ تُتخطّى اختباراتُها **وهذا مقصود** (المقيس من شجرة عملٍ منفصلة: **٣ تُخطّى** — ويُقاس ولا يُقدَّر،)،
 لا تُعدّه فشلاً. **والقياسُ يسبق الشرط:** أشكالُ البيانات في هذا المستودع خادعة (مثالٌ واقعيّ:
 `pack.json` فيه `identity` **نصٌّ** و`doc_id` غائب — اختبارٌ افترض قاموساً فسقط).
 

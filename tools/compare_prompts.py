@@ -12,9 +12,6 @@
 
 from __future__ import annotations
 
-import sys as _sys
-_sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tools.pack_io import pack_facts as _pack_facts, pack_path as _pack_path  # noqa: E402
 
 import argparse
 import json
@@ -26,6 +23,9 @@ import time
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tools.pack_io import data_root as _data_root, pack_facts as _pack_facts, pack_path as _pack_path  # noqa: E402
 
 PROJ = Path(__file__).resolve().parents[1]
 for _p in (str(PROJ), str(PROJ / "src"), str(PROJ / "tools")):
@@ -89,6 +89,15 @@ def measure_page(run: Path, pg: int, prompt: str) -> dict:
     return stamp
 
 
+def excluding_pack(pool: list[int], pack_pages: set[int]) -> list[int]:
+    """يُسقط صفحاتِ الحزمة المجمّدة من مجموعة السحب — **قرارٌ نقيٌّ يمسّه اختبارٌ مباشرةً**.
+
+    (R45-3): هذه الأداةُ هي التي سحبت عيّنةَ FM-2 فأنفقت ١٣٣ صفحةً من الحزمة قبل ختمها،
+    ولم تكن تعرف بوجود الحزمة أصلاً. والقرارُ هنا لا داخل `main()` كي لا يمرّ حذفُه بصمت.
+    """
+    return [p for p in pool if p not in pack_pages]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True, type=Path)
@@ -106,12 +115,12 @@ def main() -> None:
                     help=("من أين تُسحَب الصفحات: `holdout` لقياسٍ لا يُنفق مجموعة "
                           "التدريب · و`training` للمقارنة الكاملة **بلا إنفاق الحجز** "
                           "(قرارٌ يُتّخذ على الحجز يُنفقه — فالحجز للنموذج)."))
-    ap.add_argument("--out", type=Path, default=PROJ / "docs" / "evidence")
+    ap.add_argument("--out", type=Path, default=_data_root() / "docs" / "evidence")
     ap.add_argument("--out-name", default="20260921-fm2-prompt-comparison.json",
                     help="اسمُ ملف النتيجة — فيُكتب كلُّ ذراعٍ في ملفّه ولا يُبطل ما قبله")
     args = ap.parse_args()
 
-    run = args.run if args.run.is_absolute() else PROJ / args.run
+    run = args.run if args.run.is_absolute() else _data_root() / args.run
     pages = sorted(int(p.stem.split("-")[1]) for p in (run / "results").glob("pg-*.json"))
     divisible = [p for p in pages if p % args.holdout_mod == 0]
     pool = divisible if args.set == "holdout" else [p for p in pages if p not in divisible]
@@ -119,7 +128,7 @@ def main() -> None:
     # سحبت عيّنةَ FM-2 فسبّبت SPEC-1 — فصارت تسأل الحزمةَ أوّلًا، وتُعلن ما استثنته، وتقف إن عمِيت.
     _facts = _pack_facts(_pack_path())
     _before = len(pool)
-    pool = [p for p in pool if p not in _facts["pages"]]
+    pool = excluding_pack(pool, _facts["pages"])
     print(f"استثناءُ الحزمة: {_before - len(pool)} صفحةً من {_before} · "
           f"(حزمةٌ معلَنة: {_facts['file']} · {len(_facts['pages'])} صفحة)")
     if not pool:
