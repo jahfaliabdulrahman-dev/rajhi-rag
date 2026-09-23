@@ -22,8 +22,8 @@ published by mistake: a secret I have since rotated and consider burned, and a l
 financial figures. The rewrite cleaned the branch history, and `git filter-repo` removed the
 remote, so the old commits are no longer reachable from `refs/heads/*`.
 
-They **are** still reachable from the pull-request refs. `git ls-remote` reports **104**
-`refs/pull/*` refs on the remote (measured 2026-09-23; the count grows by one for every pull
+They **are** still reachable from the pull-request refs. `git ls-remote` reports **113**
+`refs/pull/*` refs on the remote (measured 2026-09-23, later the same day: 113; the count grows by one for every pull
 request, so please treat it as a lower bound). An external audit of those refs found at least
 **6** carrying the burned secret and at least **9** carrying the published figures. These refs are
 immutable from the client side, so I cannot remove them myself.
@@ -52,7 +52,7 @@ Thank you,
 ## ملاحظات (لا تُنسخ مع الطلب)
 
 - **لا سِرَّ في الطلب:** لا يذكر المفتاحَ ولا أيّ رقمٍ ماليّ — يُسمّي الصنفَ لا القيمة.
-- **مصدرُ الأرقام:** `git ls-remote origin 'refs/pull/*' | wc -l` ⇒ **104** في 2026-09-23 (وكان 101
+- **مصدرُ الأرقام:** `git ls-remote origin 'refs/pull/*' | wc -l` ⇒ **113** في 2026-09-23 (وكان 101
   قبل الدمجات الثلاثة لهذه الجولة). ومَن أجرى فحصَ المحتوى هو **مدقّقٌ خارجيّ** في مراجعاتٍ سابقة
   (٦ مراجع بالمفتاح المحروق · ٩ بالقائمة المنشورة) — والطلبُ يذكرها بصيغة «at least» لأنّي لا أستطيع
   إعادةَ قياس المحتوى اليوم (المفتاحُ أُبطل ودُوِّر).

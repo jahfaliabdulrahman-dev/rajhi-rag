@@ -4,9 +4,9 @@
 
 **والدروسُ التي دُمِّرت هنا مرّات، وكلُّ درسٍ مُجرَّبُ السقوط لا مُدَّعى:**
 ١) المدى = ≥٤ خاناتٍ صحيحة **+ كسرٌ عشريّ مقروء** (الاستدارةُ صفةُ المبلغ لا دليلُ صناعيّته).
-٢) **لا يُعفى موضع، يُعفى قيمة (القاعدة ١٦).**
-٣) **الإهمالُ واقعٌ يُقاس (القاعدة ١٦)** — والمفتاحُ والخريطةُ والمانيفستُ ثلاثةٌ لا واحد.
-٤) **المخرَجُ الآليُّ لا يُقصّ (القاعدة ١٥)** — والقيمةُ لا تُطبع أصلاً.
+٢) **لا يُعفى موضع، يُعفى قيمة (القاعدة ١٢).**
+٣) **الإهمالُ واقعٌ يُقاس (القاعدة ١٤)** — والمفتاحُ والخريطةُ والمانيفستُ ثلاثةٌ لا واحد.
+٤) **المخرَجُ الآليُّ لا يُقصّ (القاعدة ١٣)** — والقيمةُ لا تُطبع أصلاً.
 ٥) **القيمةُ تُقرأ بالمُحلِّل الموروث (مراجعة ٣٨):** البصمةُ **للمقدار** (فالإشارةُ ليست هويّة)،
    والمدى يراه **بفاصلةٍ عتيقة** (`N,dd`) كما يراه بنقطةٍ حديثة ⇒ المقيسُ **٤٢ لا ٣٩**.
 ٦) **السقاطةُ بدل «أحمرَ دائماً» (مراجعة ٣٨):** بوابةٌ تسقط على دَينٍ مُعلَنٍ لا تمنع شيئاً
@@ -17,10 +17,11 @@
 """
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib.util
+import inspect
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -83,7 +84,7 @@ def test_canonical_collapses_writing_forms_and_ignores_the_sign():
 
 
 def test_no_location_is_exempt(tmp_path, monkeypatch):
-    """**الدرسُ الثاني (القاعدة ١٦):** قناةُ `tests/` مُغلقة — والسمُّ يُشتقّ من المصدر لا يُكتب هنا.
+    """**الدرسُ الثاني (القاعدة ١٢):** قناةُ `tests/` مُغلقة — والسمُّ يُشتقّ من المصدر لا يُكتب هنا.
 
     كان `FIXTURE_PREFIXES = ("tests/", "src/")` إعفاءً بالمسار ⇒ مرّ حقنُ مبلغين حقيقيين.
     **والفرقُ بين سطحِ صناعةٍ وقناةِ تسريبٍ ليس في المجلد بل في القيمة** — وهذا يقيسه على السطحين.
@@ -97,7 +98,7 @@ def test_no_location_is_exempt(tmp_path, monkeypatch):
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(f"الرصيد: {FAKE}\n", encoding="utf-8")
             assert ag.counts_by_file(deny, [surface]) == {surface: 1}, \
-                f"مبلغٌ حقيقيٌّ في `{surface}` لم يُسقط الحارس ⇒ إعفاءٌ بالمسار عاد (القاعدة ١٦)"
+                f"مبلغٌ حقيقيٌّ في `{surface}` لم يُسقط الحارس ⇒ إعفاءٌ بالمسار عاد (القاعدة ١٢)"
         finally:
             if backup is None:
                 p.unlink(missing_ok=True)
@@ -135,7 +136,7 @@ def test_the_fingerprint_is_keyed_and_the_key_is_required(tmp_path, monkeypatch)
 @pytest.mark.skipif(not (ag.KEY_FILE.exists() and ag.MANIFEST.exists()),
                     reason="لا مفتاحَ/مانيفست على سطحٍ عامّ (لا يُنشران بالتصميم)")
 def test_ignore_is_a_measured_fact_not_a_claim():
-    """**الدرسُ الثالث (القاعدة ١٦):** «مُهمَل» تُقاس بـ`git` — والمخفيُّ ثلاثةٌ لا واحداً.
+    """**الدرسُ الثالث (القاعدة ١٤):** «مُهمَل» تُقاس بـ`git` — والمخفيُّ ثلاثةٌ لا واحداً.
 
     (مراجعة ٣٨: خريطةُ التطهير كانت في `SCAN_SKIP` ولا يفحصها `tracking_audit` ولا يمنعها
     حارسُ النشر ⇒ `git add -f` كان يمرّ من الثلاثة، وهي خريطةٌ تربط المُقنَّعَ بالحقيقيّ.)
@@ -159,7 +160,7 @@ def test_the_manifest_is_never_published():
 
 
 def test_json_output_is_never_truncated():
-    """**الدرسُ الرابع (القاعدة ١٥):** العددُ المعلن = طولُ القائمة، دائماً — **والقيمةُ لا تُطبع**."""
+    """**الدرسُ الرابع (القاعدة ١٣):** العددُ المعلن = طولُ القائمة، دائماً — **والقيمةُ لا تُطبع**."""
     r = subprocess.run([sys.executable, "tools/amount_guard.py", "--json"],
                        cwd=str(ROOT), capture_output=True, text=True)
     if not r.stdout.strip().startswith("{"):
@@ -295,11 +296,9 @@ def test_an_unresolved_push_range_fails_closed():
     bogus = "refs/heads/x " + "1" * 40 + " refs/heads/x " + "2" * 40 + "\n"
     r = subprocess.run(cmd, input=bogus, capture_output=True, text=True, cwd=ROOT)
     assert r.returncode == 2 and "BLOCK" in r.stdout, "مدىً غيرُ محلولٍ ليس مدىً نظيفاً"
-    # stdin فارغٌ (قِيس حيًّا في مسار دفعٍ حقيقيّ) ⇒ يُشتقّ المدى من الحالة **بإعلان**
-    r2 = subprocess.run(cmd, input="", capture_output=True, text=True, cwd=ROOT)
-    assert r2.returncode in (0, 1, 2), "لا انفجارَ على stdin فارغ"
-    assert "اشتُقّ المدى" in r2.stdout or "BLOCK" in r2.stdout, \
-        "البديلُ يُعلن ولا يمرّ صامتاً"
+    # **حالةُ stdin الفارغ أُزيلت من هنا** (مقعدُ البنية، ٤١): كانت تؤكّد `rc in (0,1,2)`
+    # أو نصَّين متضادّين ⇒ **لا تستطيع أن تسقط**، وهو نفاقٌ في ملفّ اختبارات حارسٍ أمنيّ.
+    # وحالاتُها الثلاثُ مُغطّاةٌ اليومَ في `test_an_empty_stdin_and_an_empty_range_are_not_the_same_failure`.
 
 
 def test_the_baseline_cannot_be_raised_by_its_own_debtor(tmp_path, monkeypatch):
@@ -329,16 +328,71 @@ def test_the_hook_never_blocks_a_push_on_a_missing_dev_tool():
     assert "--no-verify" not in code, "ولا يُشير الخطّافُ إلى تجاوزه في كوده (الذكرُ في تعليقٍ تحذيريّ مشروع)"
 
 
-def test_the_ci_baseline_audit_needs_no_key_and_no_evidence():
-    """**ثغرةُ ٣٩ رقم ٣ (سطحُ CI):** القاعدةُ التي لا تحتاج سرّاً ⇒ تُنفَّذ حيث لا مفتاحَ ولا أدلّة."""
+def test_the_ci_baseline_audit_compares_without_any_evidence(monkeypatch, capsys):
+    """**مراجعة ٤٠ البند ١:** بلا أدلّة (حالُ CI) يجب أن **يقارن** العتبةَ لا أن يخرج من فرع السطح العامّ.
+
+    والاختبارُ السابق (المسمّى بهذه الحالة) كان يحذف **المفتاحَ وحدَه** ويُبقي المانيفست ⇒ يمرّ في
+    النسخة الرئيسيّة ويسقط في البيئة التي سُمّي بها. هذا يُزيل **الأدلّةَ كلَّها** (كما في CI)،
+    ويقيس الاتّجاهين: عتبةٌ مطابقة ⇒ `0`، وعتبةٌ مرفوعةٌ بظهورٍ واحد ⇒ `1`.
+    """
     if subprocess.run(["git", "rev-parse", "--verify", "origin/main"], cwd=ROOT,
                       capture_output=True).returncode != 0:
         pytest.skip("لا `origin/main` في هذه النسخة ⇒ لا أساسَ يُقارَن به")
-    env = {k: v for k, v in os.environ.items() if k != "AMOUNT_GUARD_KEY"}
-    r = subprocess.run([sys.executable, str(ROOT / "tools" / "amount_guard.py"),
-                        "--baseline-audit", "origin/main"],
-                       capture_output=True, text=True, cwd=ROOT, env=env)
-    assert r.returncode == 0 and "بلا مفتاح" in r.stdout, r.stdout + r.stderr
+    base = ag.baseline_at("origin/main")
+    assert base is not None
+    monkeypatch.setattr(ag, "load_deny", lambda: None)          # لا مانيفستَ ولا مفتاح (حالُ CI)
+    monkeypatch.setattr(ag, "read_baseline", lambda: dict(base))
+    assert ag.main(["--baseline-audit", "origin/main"]) == 0
+    out = capsys.readouterr().out
+    assert "لا يرفع عتبةً" in out and "بما أُمكن فحصُه" not in out, out
+    raised = dict(base)
+    raised["tests/debt.py"] = {"count": base.get("tests/debt.py", {"count": 0})["count"] + 1}
+    monkeypatch.setattr(ag, "read_baseline", lambda: raised)
+    assert ag.main(["--baseline-audit", "origin/main"]) == 1, "خطٌّ مرفوعٌ بلا أدلّةٍ يجب أن يسقط"
+
+
+def test_the_range_is_never_derived_from_HEAD(tmp_path, monkeypatch):
+    """**مراجعة ٤٠ البند ٢:** المدى من **المرجع المدفوع** — و`HEAD` ليس ما يُدفع.
+
+    كان الاحتياطُ `rev-list HEAD --not --remotes` ⇒ فرعٌ متسرّبٌ يُدفع و`HEAD` نظيف ⇒ `rc=0`.
+    الاختبارُ يمنع عودةَ الآلية (غيابٌ لا تعطيل) ويقيس الحالةَ (E) بعينها: المدى يحمل التزامَ
+    الفرع المدفوع، ولا يحمل التزامَ `HEAD` النظيف.
+    """
+    assert not hasattr(ag, "_range_from_git"), "الأداةُ التي اشتقّت المدى من HEAD أُزيلت لا عُطّلت"
+    for fn in (ag.pushed_revs, ag._range_from_heads):
+        # **الكودُ المُنفَّذ لا الشرح**: الشرحُ يذكر `HEAD` ليُعلن الإصلاح، والشروطُ على ما يُنفَّذ.
+        tree = ast.parse(inspect.getsource(fn))
+        for node in ast.walk(tree):
+            body = getattr(node, "body", None)
+            if isinstance(body, list) and body and isinstance(body[0], ast.Expr) \
+                    and isinstance(getattr(body[0], "value", None), ast.Constant) \
+                    and isinstance(body[0].value.value, str):
+                node.body = body[1:]                       # إسقاطُ التوثيق (نصٌّ لا كود)
+        code = ast.unparse(tree)
+        assert "HEAD" not in code, f"`HEAD` ما زال في كود {fn.__name__}:" + code
+    repo = _git_repo(tmp_path / "r")
+    bare = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    # **الحارسُ يعمل على مستودعه لا على مستودع الاختبار** ⇒ يُحوَّل جذرُه إلى الريبو المؤقّت،
+    # وإلّا فحصت هذه الأوامرُ المستودعَ الحقيقيّ (والالتزاماتُ المؤقّتة «bad object» هناك).
+    monkeypatch.setattr(ag, "ROOT", repo)
+    (repo / "a.txt").write_text("base\n", encoding="utf-8")
+    _commit(repo, "base")
+    clean = _rev(repo)
+    subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=repo, check=True)
+    subprocess.run(["git", "push", "-q", "origin", f"{clean}:refs/heads/main"], cwd=repo, check=True)
+    subprocess.run(["git", "fetch", "-q", "origin"], cwd=repo, check=True)
+    subprocess.run(["git", "checkout", "-q", "-b", "bleak"], cwd=repo, check=True)
+    (repo / "leak.txt").write_text("x\n", encoding="utf-8")
+    _commit(repo, "leak")
+    leak = _rev(repo)
+    subprocess.run(["git", "checkout", "-q", "--detach", clean], cwd=repo, check=True)   # HEAD نظيف
+    assert _rev(repo) == clean
+    zeros = "0" * 40
+    for remote_sha, why in ((zeros, "فرعٌ جديدٌ فوق ريموتٍ يعرف الأساس"), ("f" * 40, "رأسٌ بعيدٌ مجهول")):
+        revs = ag.pushed_revs(f"refs/heads/bleak {leak} refs/heads/bleak {remote_sha}\n")
+        assert leak in revs, f"{why} ⇒ المدى لا يحمل التزامَ الفرع المدفوع: {revs}"
+        assert clean not in revs, f"{why} ⇒ المدى فحص `HEAD` لا المدفوع"
 
 
 # ── فحصُ **كلّ التاريخ** ومسارُ إعادة الكتابة المُعلَن (بلا مدى) ────────────────────────────
@@ -360,17 +414,176 @@ def _commit(repo: Path, msg: str) -> None:
                    cwd=repo, check=True)
 
 
+def _rev(repo: Path) -> str:
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True,
+                          text=True, check=True).stdout.strip()
+
+
+def test_an_empty_stdin_and_an_empty_range_are_not_the_same_failure():
+    """**مراجعة ٤٠/٣ + مقعدا ٤١:** ثلاثُ حالاتٍ **مفصولة** (والخلطُ بينها أفتحُ عطبٍ):
+
+    * `stdin` فارغٌ (دفعٌ لا يُحدّث مرجعاً — مقيسٌ عند git: `bytes=0`) ⇒ **PASS بإعلان**، لا سقوط
+      كاذبٍ على عملٍ روتينيّ (والسقوطُ الكاذبُ يخلق حافزَ `--no-verify`).
+    * مراجعُ قُرئت وحُلّت ومداها فارغٌ (فرعٌ تعرف الوجهةُ أساسَه، أو **حذفُ فرع**) ⇒ **PASS بإعلان**.
+    * و`stdin` **غيرُ فارغٍ ولا يُقرأ** (مجرى مقصوص) ⇒ **سقوطٌ مُغلَق** `rc=2`: «لم أقرأ» ≠ «لا شيء».
+    """
+    if ag.load_deny() is None:
+        pytest.skip("بلا أدلّة ⇒ السقوطُ المُغلَق (غيابُ المانيفست) يسبق مسار المدى")
+    head = _rev(ROOT)
+    zeros = "0" * 40
+    for refs, why in ((f"refs/heads/x {head} refs/heads/x {head}\n", "فرعٌ تعرف الوجهةُ أساسَه"),
+                      (f"(delete) {zeros} refs/heads/x {head}\n", "حذفُ فرع (شكلُ git الحقيقيّ)")):
+        r = subprocess.run([sys.executable, str(GUARD), "--pre-push"], cwd=ROOT,
+                           capture_output=True, text=True, input=refs)
+        assert r.returncode == 0 and "المدى فارغٌ **بالقياس" in r.stdout, (why, r.stdout, r.stderr)
+    # **فارغٌ شرعاً:** دفعٌ لا يُحدّث مرجعاً (مقيسٌ: git يُنفّذ الخطّاف وbytes=0) ⇒ PASS بإعلان،
+    # لا سقوط (كان rc=2 ⇒ حافزُ `--no-verify` لعملٍ روتينيّ — مراجعة ٤٠/٣).
+    empty = subprocess.run([sys.executable, str(GUARD), "--pre-push"], cwd=ROOT,
+                           capture_output=True, text=True, input="")
+    assert empty.returncode == 0 and "لا مراجعَ على stdin" in empty.stdout, (empty.stdout, empty.stderr)
+    # **ولم أقرأه ⇒ سقوطٌ مُغلَق** (القاعدة ١٩): المجرى المقصوص لا يُقرأ «لا شيءَ يُنشر».
+    for junk, why in (("refs/heads/x " + head + "\n", "سطرٌ بحقلين"),
+                      ("refs/heads/x " + head[:20] + " refs/heads/x " + head + "\n", "sha مقصوص"),
+                      ("not-a-ref\n", "سطرٌ لا مرجعَ فيه")):
+        r = subprocess.run([sys.executable, str(GUARD), "--pre-push"], cwd=ROOT,
+                           capture_output=True, text=True, input=junk)
+        assert r.returncode == 2 and "لم أُقرأ منه مرجعاً" in r.stdout, (why, r.stdout, r.stderr)
+
+
+def test_the_four_forms_git_actually_sends_are_all_read(tmp_path):
+    """**مراجعة ٤١/١:** الأشكالُ الأربعة **مقيسةٌ من git نفسِه** (probe على خطّافٍ يطبع `stdin`):
+
+    | الأمر | ما يصل الخطّاف |
+    | :--- | :--- |
+    | `git push origin HEAD:refs/heads/x` | `HEAD <sha> refs/heads/x <zeros>` |
+    | `git push origin <sha>:refs/heads/y` | `<sha> <sha> refs/heads/y <zeros>` |
+    | `git push origin --delete x` | `(delete) <zeros> refs/heads/x <sha>` |
+    | `git push origin HEAD:refs/heads/z` | `HEAD <sha> refs/heads/z <zeros>` |
+
+    واشتراطُ `refs/` في **الحقل الأول** (وهو ما فعلتُه) يرفض ثلاثةً منها `rc=2` — وفيها الحذفُ الذي
+    ادّعى تقريري أنّه يمرّ. فالاختبارُ يقيس **شكلَ git** لا شكلَ ظنّي.
+    """
+    zeros, head = "0" * 40, _rev(ROOT)
+    forms = {
+        "HEAD:refs/heads/x": f"HEAD {head} refs/heads/x {zeros}\n",
+        "<sha>:refs/heads/y": f"{head} {head} refs/heads/y {zeros}\n",
+        "--delete x": f"(delete) {zeros} refs/heads/x {head}\n",
+        "refs/heads/z": f"HEAD {head} refs/heads/z {zeros}\n",
+    }
+    for why, line in forms.items():
+        pairs, bad = ag.parse_refs(line)
+        assert bad == 0 and len(pairs) == 1, f"شكلُ git مرفوضٌ: {why} ⇒ {line!r}"
+        local, remote = pairs[0]
+        assert ag._zero(local) == (why == "--delete x"), why
+    # والحذفُ: لا شيءَ يُنشر ⇒ مدىً فارغٌ شرعاً (وهو الادّعاءُ الذي سقط وأُعيد إثباتُه بالشكل الحقيقيّ)
+    assert ag.pushed_revs(forms["--delete x"], "origin") == []
+    # **ولا تأكيدَ على «غيرِ الحذف» هنا:** مدى الفرع في **clone نظيف** فارغٌ قياساً (HEAD منشورٌ
+    # على الوجهة) فيسقط الاختبارُ هناك بلا عطبٍ — والفرقُ البيئيُّ لا يُحرس بثابتٍ (مقعدُ المعايير، ٤١/٢).
+    # ومدى الوجهة مقابل كلّ الريموتات يُقاس في `test_a_second_remote_does_not_empty_the_destination_range`.
+    assert ag._is_sha("a" * 64), "sha256 (٦٤ خانة) يُرسله git على مستودع --object-format=sha256"
+
+def test_git_itself_sends_the_four_stdin_shapes(tmp_path):
+    """**الدليلُ قابلٌ لإعادة الإنتاج داخل المستودع** (القاعدةُ الحديديّة ٦): git هو من ينتج الأسطر،
+
+    لا جدولٌ نسختُه بيدي. خطّافٌ حقيقيٌّ يلقط `stdin`، وأربعُ دفعاتٍ حقيقيّةٍ إلى مستودعٍ مجرّدٍ محلّيّ.
+    (سببُ وجوده: مقعدا المعايير والبنية قاسا أنّ الجدولَ في الاختبار المجاور **مُستنسخٌ** لا مُشتقّ.)
+    """
+    remote = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    repo = _git_repo(tmp_path / "r")
+    (repo / ".githooks").mkdir()
+    probe = repo / ".githooks" / "pre-push"
+    probe.write_text('#!/bin/sh\ncat > "$(dirname "$0")/stdin.seen"\n', encoding="utf-8")
+    probe.chmod(0o755)
+    subprocess.run(["git", "config", "core.hooksPath", ".githooks"], cwd=repo, check=True)
+    subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=repo, capture_output=True)
+    (repo / "a.txt").write_text("x\n", encoding="utf-8")
+    _commit(repo, "one")
+    sha, seen = _rev(repo), repo / ".githooks" / "stdin.seen"
+
+    def push(*args: str) -> str:
+        seen.write_text("", encoding="utf-8")
+        subprocess.run(["git", "push", "-q", *args], cwd=repo, capture_output=True)
+        return seen.read_text(encoding="utf-8").strip()
+
+    cases = {
+        "دفعٌ بـHEAD:refs/heads/…": (push("origin", "HEAD:refs/heads/x"), "HEAD"),
+        "دفعٌ بالـsha:refs/heads/…": (push("origin", f"{sha}:refs/heads/y"), sha),
+        "دفعٌ بمرجعٍ كامل": (push("origin", "HEAD:refs/heads/z"), "HEAD"),
+        "حذفُ فرع": (push("origin", "--delete", "x"), "(delete)"),
+    }
+    for why, (line, first) in cases.items():
+        assert line, f"الخطّافُ لم يلقط stdin: {why}"
+        pairs, bad = ag.parse_refs(line)
+        assert bad == 0 and len(pairs) == 1, f"شكلٌ حقيقيٌّ مرفوض: {why} ⇒ {line!r}"
+        assert line.split()[0] == first, f"{why}: الحقلُ الأول {line.split()[0]!r} ≠ {first!r}"
+    assert ag.pushed_revs("(delete) " + "0" * 40 + " refs/heads/x " + sha + "\n", "origin") == []
+
+
+def test_the_hook_flag_probe_discriminates(tmp_path):
+    """**عطبٌ أمسكه مقعدان (مراجعة ٤١/٣):** `--help | grep -q -- '--remote'` **لا يفصل** — يطابق
+
+    `--not --remotes` في نصّ المساعدة ⇒ يمرّ كذباً على أداةٍ لا تعرف العلَم، فيرفض argparse دفعاً
+    مشروعاً (وهو ما وقع فعلاً). فالفحصُ يُقرأ من **المصدر** — وهذا الاختبارُ يحرس السطرَ نفسَه.
+    """
+    hook = (ROOT / ".githooks" / "pre-push").read_text(encoding="utf-8")
+    assert 'add_argument("--remote"' in hook, "الفحصُ لم يعُد يقرأ العَلَمَ من المصدر"
+    assert "grep -q -- '--remote'" not in hook, "عاد الفحصُ الذي يطابق `--remotes`"
+    older = tmp_path / "older.py"
+    older.write_text("# --pre-push: rev-list <sha> --not --remotes\n", encoding="utf-8")
+    probe = "grep -q -- 'add_argument(\"--remote\"'"
+    assert subprocess.run(["sh", "-c", f"{probe} {older}"], capture_output=True).returncode != 0, \
+        "الفحصُ يمرّ على أداةٍ لا تعرف --remote"
+    assert subprocess.run(["sh", "-c", f"{probe} tools/amount_guard.py"], cwd=ROOT,
+                          capture_output=True).returncode == 0, "الفحصُ يرفض أداتنا الحاليّة"
+
+def test_a_second_remote_does_not_empty_the_destination_range(tmp_path, monkeypatch):
+    """**إغلاقُ الفتح (مقعدا البنية والمواصفة، ٤١):** `--not --remotes` تطرح مراجعَ **كلّ** ريموت ⇒
+
+    التزامٌ تعرفه نسخةٌ احتياطيّة يُقرأ «منشوراً»، والدفعُ إلى `origin` ينشره ⇒ `PASS` كاذب.
+    فالفراغُ يُقاس **مقابل وجهة الدفع**: بلا وجهةٍ يفرغ المدى (العطبُ، مُثبتٌ هنا)، وبه يظهر
+    الالتزامُ غيرُ المنشور إلى الوجهة.
+    """
+    repo = _git_repo(tmp_path / "r")
+    monkeypatch.setattr(ag, "ROOT", repo)
+    for name in ("origin.git", "backup.git"):
+        subprocess.run(["git", "init", "-q", "--bare", str(tmp_path / name)], check=True)
+    for name in ("origin", "backup"):
+        subprocess.run(["git", "remote", "add", name, str(tmp_path / f"{name}.git")],
+                       cwd=repo, capture_output=True)
+    (repo / "base.txt").write_text("أساس\n", encoding="utf-8")
+    _commit(repo, "base")
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:refs/heads/other"], cwd=repo, check=True)
+    subprocess.run(["git", "fetch", "-q", "origin"], cwd=repo, check=True)   # ⇒ مراجعُ الوجهة معروفة
+    (repo / "leak.txt").write_text("قيمة\n", encoding="utf-8")
+    _commit(repo, "leak")
+    subprocess.run(["git", "push", "-q", "backup", "HEAD:refs/heads/main"], cwd=repo, check=True)
+    subprocess.run(["git", "fetch", "-q", "backup"], cwd=repo, check=True)
+    sha = _rev(repo)
+    line = f"refs/heads/main {sha} refs/heads/main {'0' * 40}\n"
+    assert ag.pushed_revs(line, "origin") == [sha], "وجهةُ origin لا تعرف الالتزام ⇒ يجب أن يظهر"
+    # **وبلا وجهةٍ:** التقريبُ يبقى (طرحُ كلّ الريموتات) لكنه **يُعلَن** اليومَ بجملة، ولا يعود
+    # `PASS` صامتاً؛ والدقّةُ تأتي من تمرير الوجهة — وهو ما يفعله الخطّاف. (الحدُّ مقيسٌ ومُعلَن.)
+    assert ag.pushed_revs(line) == [], "الاحتياطُ يطرح كلّ الريموتات — ويُعلن ذلك ولا يصمت"
+
+
 def _guard_in(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, str(GUARD), *args], cwd=repo, capture_output=True, text=True)
 
 
 def _with_evidence(repo: Path) -> None:
-    """يُنقل المانيفستُ والمفتاحُ إلى المستودع المؤقّت (المسارُ النسبيُّ نفسُه) ⇒ الحكمُ حقيقيّ."""
+    """يُنقل المانيفستُ والمفتاحُ إلى المستودع المؤقّت (المسارُ النسبيُّ نفسُه) ⇒ الحكمُ حقيقيّ.
+
+    **والأصلُ يُقرأ من `ag.DATA_ROOT` لا من `ROOT`** (مراجعة ٤٠/٤): في `worktree` مرتبط يكون
+    جذرُ الأدلّة **النسخةَ الرئيسيّة**، فالقراءةُ من `ROOT` تسقط هناك — وهو ما كان يجعل اختباراً
+    يسقط من `worktree` ويمرّ في الرئيسيّة.
+    """
     _skip_without_evidence()
+    src = getattr(ag, "DATA_ROOT", ROOT)
     (repo / "data" / "eval_pack").mkdir(parents=True, exist_ok=True)
-    shutil.copy(ROOT / "data" / "eval_pack" / "amount-manifest.json",
+    shutil.copy(src / "data" / "eval_pack" / "amount-manifest.json",
                 repo / "data" / "eval_pack" / "amount-manifest.json")
-    shutil.copy(ROOT / "data" / ".amount-guard-key", repo / "data" / ".amount-guard-key")
+    shutil.copy(src / "data" / ".amount-guard-key", repo / "data" / ".amount-guard-key")
 
 
 def test_the_whole_history_is_scanned_not_only_the_working_tree(tmp_path):
