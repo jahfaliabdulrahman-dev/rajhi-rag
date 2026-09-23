@@ -442,6 +442,12 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     done = {k: v for k, v in prev_all.items()
             if not str(v.get("answer") or "").startswith("<")}   # **النائبُ ليس جواباً** ⇒ يُعاد سؤالُه
     todo = [q for q in qs if q["id"] not in done]
+    if a.budget:                       # **سقفٌ يُعلن ويُقاس**: بمعدّلٍ مُقنَّعٍ من نقطتين مقيسَتين (٠٫٠٠٦–٠٫٠١٠ للسؤال)
+        cap = max(0, int(float(a.budget) / 0.01))
+        if len(todo) > cap:
+            print(f"⛔ السقفُ أوقف الجدولة: {len(todo)} سؤالاً > {cap} (بمعدّل $0.01/سؤال المُقنَّع) ⇒ "
+                  f"التغطيةُ المُعلَنة: {cap} من {len(qs)}", flush=True)
+            todo = todo[:cap]
     if getattr(a, "only", None):           # إعادةُ أسئلةٍ بعينها (بعد تصحيح نطاقِها أو صياغتِها)
         want = {x.strip() for x in a.only.split(",") if x.strip()}
         todo = [q for q in qs if q["id"] in want]
@@ -462,6 +468,8 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
             out_box["error"] = f"{type(e).__name__}: {e}"
 
     for i, q in enumerate(todo, 1):
+        import time
+        t0 = time.monotonic()
         truth_val, _ = truth(q, c, pack)
         box: dict = {}
         t = threading.Thread(target=_ask, args=(q["q"], box), daemon=True)
@@ -481,9 +489,11 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                          "used_row_nos": (list(getattr(res, "used_row_nos", None) or [])[:40] if res else []),
                          "scope": getattr(res, "scope", None) if res else None,
                          "refused": bool(getattr(res, "refused", False)) if res else None,
-                         "spec_sha": _spec_sha()}   # **شاهدُ الربط**: أيُّ نصِّ سؤالٍ أُجيب عنه
+                         "spec_sha": _spec_sha(),   # **شاهدُ الربط**: أيُّ نصِّ سؤالٍ أُجيب عنه
+                         "secs": round(time.monotonic() - t0, 1)}   # **المتزنُ في الدليل**: كم أخذ السؤال
         merged = {**prev_all, **done}      # النائبُ يبقى ما لم يُجَب عنه فعلاً
-        out.write_text(json.dumps({"model": a.model or "افتراضيّ",
+        out.write_text(json.dumps({"model": a.model or "افتراضيّ", "spec_sha": _spec_sha(),
+                                   "budget_usd": a.budget,     # **العقدةُ في الدليل**: ميزانيةُ الجولة مُعلنةٌ في ملفّها
                                    "results": [merged[k] for k in order if k in merged]},
                                   ensure_ascii=False, indent=1))   # **حفظٌ تدريجيّ: قتلُ العملية لا يُهدر جواباً**
         print(f"{i:02d} {q['id']:9s} {'✅' if ok else '❌'} {why}", flush=True)
@@ -536,6 +546,7 @@ def main(argv=None) -> int:
     ap.add_argument("--limit", type=int, help="أوّلُ N سؤالاً (للقياس قبل الصرف)")
     ap.add_argument("--model", help="اسمُ النموذج على OpenRouter (وإلّا فالافتراضيّ في `build_llm`)")
     ap.add_argument("--out", type=pathlib.Path, help="ملفُّ الأجوبة (افتراضيّه `data/eval_pack/answers.json`)")
+    ap.add_argument("--budget", type=float, help="سقفُ الصرف بالدولار — يُوقف الجدولةَ ويُعلن التغطية")
     ap.add_argument("--only", help="إعادةُ سؤالِ معرّفاتٍ بعينها (مفصولةً بفاصلة) رغم الحفظ التدريجيّ")
     ap.add_argument("--timeout", type=int, default=150,
                     help="مهلةُ كلّ سؤالٍ بالثواني (بلا مهلةٍ يعلَق التشغيلُ أبدًا — قِيس)")
