@@ -238,27 +238,93 @@ def audit_privacy(pdf: Path, page: int, patterns: dict[str, list[str]],
             "mask_top_frac": mask_top_frac}
 
 
-def close_out_dir(doc_dir: Path, captured_pages: set[int]) -> list[int]:
-    """**العدّاداتُ تُغلق على القرص لا على قائمة النتائج وحدها** (مراجعة ٤٥ · R45-4).
+def on_disk_pages(doc_dir: Path) -> list[int]:
+    """صفحاتُ مستندٍ على القرص — **تُقاس بالقراءة** لا بالذاكرة (والبيانُ يُقابَل بها)."""
+    out: list[int] = []
+    if not doc_dir.is_dir():
+        return out
+    for d in doc_dir.glob("pg-*"):
+        tail = d.name.split("-")[-1]
+        if tail.isdigit():
+            out.append(int(tail))
+    return sorted(out)
 
-    كان التقاطٌ بلا استثناء ثم التقاطٌ بالحزمة في **نفس `--out`** يترك مجلّداتِ `pg-` لصفحاتٍ
-    لا تُلتقط هذه التشغيلة ⇒ البيانُ يقول «محجوزة» والقرصُ يحملها ⇒ مدرّبٌ يقرأ القرصَ يُلوَّث.
-    والذي أنقذ المجموعةَ مرّةً كان **أرشفةً يدويّة** لا الأداة.
 
-    والمقابلُ صريح: تشغيلةٌ جزئيّة (`--limit`) **لا تُغلق** شيئاً — تُعلن جزئيّتها؛ وإلّا مسحت
-    مجموعةَ التدريب في تشغيلةِ فحصٍ صغيرة. ويُعاد المحذوفُ بأسمائه ليُراجَع لا ليُخفى.
+#: حالاتُ الصفحةِ التي تُقرَّر **عن قصد** (حجزٌ لا عطب) — وهي وحدها المرشَّحةُ للإزالة عند الإغلاق.
+RESERVED_STATUSES = ("holdout_reserved", "pack_reserved")
+
+
+def close_out_dir(doc_dir: Path, remove) -> tuple[list[int], list[int]]:
+    """يُزيل **صفحاتٍ بعينها طُلبت**، ويُعيد **ما قاسه على القرص** لا ما حاوله.
+
+    (مراجعة ٤٧ · R47-1): كان المعيار «كلُّ `pg-` ليس في الملتقَط هذه المرّة» ⇒ أيُّ انكماشٍ في
+    المُلتقَط (تغيُّرُ `--holdout-mod` أو فشلُ قراءةٍ لصفحة) **حذفٌ نهائيٌّ** بتشغيلةٍ تنجح `rc=0`
+    وبيانٍ «سليمُ المظهر» (قِيس: ٢٨٣→١٤٣ بـ`--holdout-mod 2`، و٢٨٣→٠ بـ`1`).
+
+    وفيها علّتان أُغلقتا معاً:
+
+    ١. **القرارُ انتقل إلى المُستدعي**: هذه الدالّةُ لا تعرف «ما لم يُلتقط» — تُنفّذ مجموعةً
+       صريحةً اختارتها بوّابةُ `close_authority`. فالحذفُ فعلٌ يُقرَّر، لا أثرٌ جانبيّ لعَلَم.
+    ٢. **`ignore_errors=True` أُزيل**: كان **يُعلن ما لم يقع** (قِيس: أُعلنت `[3]` وبقي `pg-003`
+       لأنه للقراءة فقط). فالإزالةُ تُجرَّب، ثم **يُقاس وجودُ المجلّد على القرص**، والفشلُ يُسمّى.
     """
     removed: list[int] = []
-    if not doc_dir.is_dir():
-        return removed
-    for d in sorted(doc_dir.glob("pg-*")):
-        tail = d.name.split("-")[-1]
-        if not tail.isdigit():
+    failed: list[int] = []
+    for n in sorted(int(x) for x in remove):
+        d = doc_dir / f"pg-{n:03d}"
+        if not d.is_dir():
             continue
-        if int(tail) not in captured_pages:
-            shutil.rmtree(d, ignore_errors=True)
-            removed.append(int(tail))
-    return sorted(removed)
+        try:
+            shutil.rmtree(d)
+        except OSError:
+            pass                                     # يُقاس أدناه — ولا يُعلن هنا
+        (failed if d.exists() else removed).append(n)
+    return removed, failed
+
+
+def _prev_holdout_mod(prev: dict | None) -> int | None:
+    """قاعدةُ الحجز كما كتبها البيانُ السابق — حقلٌ صريح، أو الصيغةُ التي تولّدها هذه الأداة نفسها."""
+    if not prev:
+        return None
+    if isinstance(prev.get("holdout_mod"), int):
+        return int(prev["holdout_mod"])
+    m = re.search(r"page % (\d+) == 0", str(prev.get("holdout_rule") or ""))
+    return int(m.group(1)) if m else None
+
+
+def close_authority(*, is_full_run: bool, now: dict, prev: dict | None, disk_missing: bool) -> list[str]:
+    """**بوّابةُ الإغلاق**: كلُّ شرطٍ مُخالفٍ يُسمّى، ولا يُحذف معه صفحةٌ واحدة.
+
+    المبدأ (R47-1): الحذفُ **فعلٌ يُقرَّر** لا أثرٌ جانبيّ لعَلَمٍ لا يذكر الحذف. ولا يُقَرّ أنّ
+    هذه التشغيلةَ هي التي أنتجت ما على القرص إلا بدليل: **نفسُ قاعدة الحجز · نفسُ نسخة الالتقاط ·
+    نفسُ مصدر الوسم · نفسُ الحزمة** — وإلا فهي **إعادةُ تقسيمٍ** تُمحى بها بياناتٌ مقيسة،
+    فالوقوفُ بالاسم وإعلانُ الثمن، والقرارُ بعَلَمٍ صريح.
+
+    وغيابُ البيان السابق ليس إقراراً: قرصٌ يحمل صفحاتٍ بلا بيانٍ يُعلن ولا يُقايَس (لا أصلَ للمقابلة).
+    """
+    why: list[str] = []
+    if not is_full_run:
+        why.append("تشغيلةٌ جزئيّة (`--limit`) ⇒ القرصُ أوسعُ من هذه التشغيلة")
+        return why
+    if prev is None:
+        if not disk_missing:
+            why.append("قرصٌ يحمل صفحاتٍ ولا بيانَ سابقاً يُقايَس به")
+        return why
+    if _prev_holdout_mod(prev) is None:
+        why.append("البيانُ السابق لا يعلن قاعدةَ الحجز")
+    elif _prev_holdout_mod(prev) != now["holdout_mod"]:
+        why.append(f"قاعدةُ الحجز تبدّلت ({_prev_holdout_mod(prev)} → {now['holdout_mod']})")
+    if prev.get("capture_version") != now["capture_version"]:
+        why.append(f"نسخةُ الالتقاط تبدّلت ({prev.get('capture_version')} → {now['capture_version']})")
+    pe = prev.get("label_source") or {}
+    if pe.get("export_sha256") != now["export_sha256"]:
+        why.append("مصدرُ الوسم تبدّل (المصدَّر المعتمد تغيّر ⇒ المجموعةُ القديمة من وسومٍ أخرى)")
+    px = prev.get("pack_exclusion") or {}
+    if (px.get("identity"), px.get("excluded_pages")) != (now["pack_identity"], now["pack_pages"]):
+        why.append(f"الحزمةُ تبدّلت ({(px.get('identity') or 'لا')[:16]}×{px.get('excluded_pages')} → "
+                   f"{(now['pack_identity'] or 'لا')[:16]}×{now['pack_pages']})")
+    return why
+
 
 
 def capture_page(page: int, run: Path, out_root: Path, rows: list[dict],
@@ -361,7 +427,7 @@ def write_index(out: Path) -> dict:
     return index
 
 
-def main() -> None:
+def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True, type=_data_path)
     ap.add_argument("--export", required=True, type=_data_path)
@@ -380,6 +446,9 @@ def main() -> None:
                     help="أنماطُ الخصوصية ([anywhere] · [header]) — تعيش خارج المستودع")
     ap.add_argument("--adopt-legacy", action="store_true",
                     help="يرحّل بياناً بصيغةٍ سبقت الإصلاح (مستوى أعلى) إلى مجلد مستنده")
+    ap.add_argument("--accept-recapture", action="store_true",
+                    help="يقبل **إعادةَ تقسيم المجموعة** (قاعدة حجز/مصدَّر/حزمة تبدّلت) ⇒ يُنفَّذ "
+                         "الإغلاقُ ويُسجَّل في البيان أيُّ شرطٍ تُجُوِّز — بلا هذا العَلَم يقف بالاسم")
     args = ap.parse_args()
 
     if args.adopt_legacy:
@@ -428,6 +497,34 @@ def main() -> None:
               + (f" · {facts['file']} · هويّة {str(facts['identity'])[:16]}" if facts["file"] else ""))
     else:
         print("· لا حزمةَ مجمّدة معلَنة ⇒ لا استثناء (والالتقاطُ يشمل كلَّ ما لم يُحجَز)")
+
+    # ── **بوّابةُ الإغلاق تسبق الالتقاط** (R47-1): لا تُكتب صفحةٌ في قرصٍ سيُمحى بقرارٍ لم يُقرّ ──
+    # والفرقُ جوهريّ: بوّابةٌ **بعد** الالتقاط تمنع الحذفَ وقد أضافت صفحاتٍ بالفعل؛ وهذه تمنع الحدثَ
+    # كلَّه — فلا قرصٌ يتبدّل ولا بيانٌ يُكتب في تشغيلةٍ مرفوضة.
+    doc_dir = args.out / doc_id
+    doc_dir.mkdir(parents=True, exist_ok=True)
+    man_file = doc_dir / "manifest.json"
+    prev = json.loads(man_file.read_text(encoding="utf-8")) if man_file.exists() else None
+    disk = on_disk_pages(doc_dir)
+    now = {"holdout_mod": args.holdout_mod, "capture_version": CAPTURE_VERSION,
+           "export_sha256": meta["label_source"]["export_sha256"],
+           "pack_identity": (facts["identity"] if exclusion else None),
+           "pack_pages": (len(reserved_pack) if exclusion else None)}
+    reasons = close_authority(is_full_run=not args.limit, now=now, prev=prev,
+                              disk_missing=not disk)
+    deliberate_pop = {p for p in certified
+                      if classify_page(p, args.holdout_mod, reserved_pack) != "capture"}
+    price = sorted(set(disk) & deliberate_pop)
+    if reasons and not args.accept_recapture and not args.limit:
+        print("⛔ **إغلاقُ القرص موقوفٌ بالاسم — ولم تُكتب صفحةٌ واحدة.** الأسباب:")
+        for w in reasons:
+            print(f"   · {w}")
+        print(f"   والثمنُ المقيس لو نُفِّذت: {len(price)} صفحةً مُلتقَطة تُحذف نهائيّاً"
+              + (f" (أوّلها {price[:8]})" if price else "")
+              + f" — والمجموعةُ على القرص الآن {len(disk)} صفحة")
+        print("   والقرارُ بعَلَمٍ صريح: `--accept-recapture` ⇒ يُنفَّذ ويُسجَّل في البيان أنّه إعادةُ تقسيم.")
+        return 1
+
     for p in pages:
         decision = classify_page(p, args.holdout_mod, reserved_pack)
         if decision != "capture":
@@ -466,6 +563,7 @@ def main() -> None:
                     "balances_joined": sum(r.get("bal_ok", 0) for r in captured),
                     "balances_not_joined": sum(r.get("bal_bad", 0) for r in captured)},
         "holdout_rule": f"page % {args.holdout_mod} == 0 ⇒ لا تُلتقط (حجز التقييم)",
+        "holdout_mod": args.holdout_mod,      # **الحقلُ الآليّ**: بوّابةُ الإغلاق تقابل به قاعدةَ البيان السابق
         # **وسمُ الحزمة بهويّتها لا باسم ملفّها** (مراجعة ٤٤): كلُّ تشغيلةٍ تحمل `pack.json`.
         # **مجموعتان باسمين لا باسمٍ واحد** (مراجعة ٤٤): صفحاتُ الحزمة ٢٠٠ تُستثنى كلُّها،
         # لكنّ منها ٦٧ رقمُها %holdout-mod==0 فيسبقها وسمُ الحجز ⇒ فعدّادُ pack_reserved = الباقي.
@@ -512,22 +610,64 @@ def main() -> None:
     args.out.mkdir(parents=True, exist_ok=True)
     # **بيانٌ لكل مستند، لا بيانٌ واحد** — تشغيلةُ مستندٍ ثانٍ كانت تمحو بيانَ الأول
     # (العلّة البنيوية المقيسة). فالبيان ينزل في مجلد مستنده وفهرسٌ يجمع المستندات.
-    (args.out / doc_id).mkdir(parents=True, exist_ok=True)
-    (args.out / doc_id / "manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=1))
-    # **إغلاقُ القرص** (R45-4): تشغيلةٌ كاملةٌ تُزيل كلَّ `pg-` لم تُلتقط هذه المرّة.
-    if not args.limit:
-        _stale = close_out_dir(args.out / doc_id, {int(r["page"]) for r in captured})
-        print(f"إغلاقُ القرص: أُزيلت {len(_stale)} صفحةً لم تُلتقط هذه التشغيلة"
-              + (f" (أوّلها {_stale[:6]})" if _stale else " — لا فضلة ✓"))
-    else:
+    # (والمجلّدُ وقاعدةُ الإغلاق سُبق أن قُرئا قبل الالتقاط: البوّابةُ تسبق الكتابة.)
+    deliberate = {int(r["page"]) for r in results if r["status"] in RESERVED_STATUSES}
+    to_remove = sorted(set(disk) & deliberate)          # **الإزالةُ ⊆ الحجز المقصود** — لا غير
+    # ولا يُحذف ما فشلت التشغيلةُ في التقاطه: «فشلتُ الآن» ≠ «محجوزةٌ عن قصد» ⇒ يُعلن ويُبقى
+    uncaptured = {int(r["page"]) for r in results
+                  if r["status"] not in RESERVED_STATUSES and r["status"] != "captured"}
+    kept = sorted(set(disk) & uncaptured)
+    captured_now = {int(r["page"]) for r in captured}
+    outside = sorted(set(disk) - deliberate - captured_now - uncaptured)
+    forced = bool(args.accept_recapture)
+    manifest["close_out"] = {
+        "mode": ("not_full_run" if args.limit else
+                 ("closed" if not reasons else ("forced_redefinition" if forced else "refused"))),
+        "authority_reasons": reasons,
+        "forced_over": (reasons if (forced and reasons) else []),
+        "disk_before": len(disk), "captured_now": len(captured),
+        "deliberate_reserved_on_disk": to_remove,
+        "kept_not_recaptured": kept,
+        "kept_reasons": {str(r["page"]): r["status"] for r in results
+                         if int(r["page"]) in set(kept)},
+        "outside_the_export_population": outside,
+        "removed": [], "failed_to_remove": [], "disk_after": len(disk),
+    }
+    man_file.write_text(json.dumps(manifest, ensure_ascii=False, indent=1))
+
+    rc = 0
+    if args.limit:
         print(f"تشغيلةٌ جزئيّة (--limit {args.limit}) ⇒ **لا إغلاقَ للقرص**: الباقي مُعلَنٌ لا منسيّ.")
+    else:
+        # (والمرفوضُ رجع قبل الالتقاط ⇒ هنا: إمّا مقبولٌ بلا اعتراض، وإمّا متجاوَزٌ بعَلَمٍ صريح.)
+        removed, failed = close_out_dir(doc_dir, to_remove)
+        after = on_disk_pages(doc_dir)
+        expected = sorted(set(captured_now) | set(kept) | set(outside))
+        manifest["close_out"] |= {"removed": removed, "failed_to_remove": failed,
+                                  "disk_after": len(after),
+                                  "verified_set_equal": after == expected}
+        man_file.write_text(json.dumps(manifest, ensure_ascii=False, indent=1))
+        print(f"إغلاقُ القرص: أُزيلت {len(removed)} صفحةً محجوزةً هذه التشغيلة"
+              + (f" (أوّلها {removed[:6]})" if removed else " — لا فضلة ✓")
+              + (f" · **وفشلت إزالةُ {len(failed)}** (أسماءها في البيان)" if failed else ""))
+        if kept:
+            print(f"   وأُبقيت {len(kept)} صفحةً **فشلت هذه التشغيلةُ في التقاطها** — مُعلنةٌ لا محذوفة"
+                  f" (أوّلها {kept[:6]})")
+        if after != expected:
+            rc = 1
+            print(f"⛔ القرصُ لا يطابق البيان: المتوقَّع {len(expected)} والموجود {len(after)} "
+                  f"⇒ فرقٌ {sorted(set(after) ^ set(expected))[:8]}")
+        else:
+            print(f"   والقرصُ مطابقٌ للبيان بالمقابلة: {len(after)} صفحةً ✓")
+        if forced and reasons:
+            print(f"   ⚠ تشغيلةٌ **أعادت تقسيم** المجموعة (تجاوزت: {' · '.join(reasons)}) — مسجَّلٌ في البيان")
     idx = write_index(args.out)
     print(json.dumps(manifest["pages"] | manifest["samples"],
                      ensure_ascii=False, indent=1))
     print(f"فهرسُ المستندات: {idx['count']} · " +
           " · ".join(f"{d['doc_id']}:{d['captured']}" for d in idx["documents"]))
+    return rc
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

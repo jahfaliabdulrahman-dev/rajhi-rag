@@ -22,11 +22,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from tools.pack_io import (  # noqa: E402 — **القراءةُ والختمُ بالقارئ الذي يقرأه**
-    data_root, pack_pages, pages_sha256, repo_root,
+    content_seal, data_root, pack_pages, pages_sha256, repo_root,
 )
 
 DATA = data_root()                       # الجذرُ المشترك: الأدلّةُ الثقيلةُ باقيةٌ في الشجرة الأمّ
 PACK = DATA / "data/eval_pack/pack.json"
+RUN = DATA / "data/local_sample/slice_629p"
 TRAIN = DATA / "data/training"
 EVID = repo_root() / "docs/evidence"   # **مُتتبَّعة**: تُكتب وتُقرأ في الشجرة الجاريّة (S-1)
 FM2 = ("docs/evidence/20260921-fm2-v1-arm.json", "docs/evidence/20260921-fm2-v2-arm.json")
@@ -94,6 +95,9 @@ def main() -> int:
     pack = json.loads(PACK.read_text(encoding="utf-8"))
     pages = sorted(pack_pages(PACK))          # **القارئُ الواحد** (لا نسخةَ خامسة)
     digest = pages_sha256(pages)              # **صيغةُ الختم واحدةٌ** كاتبًا وقارئًا
+    # **ختمُ المحتوى** (R47-2): بصمةٌ لكلّ صفحةٍ مقيَّدة تُقاس الآن من التشغيلة. والمنشورُ منها
+    # **المجمَّعةُ من الإسقاط الخالي من المال** وحدَها؛ وبصمةُ المال (`sha16_local`) تبقى في الحزمة.
+    seal = content_seal(RUN, pages)
 
     raw = pack.get("doc_id") or pack.get("identity")
     ident = raw.get("doc_id") if isinstance(raw, dict) else raw
@@ -144,6 +148,17 @@ def main() -> int:
             "pages": pages,
             "pages_count": len(pages),
             "pages_sha256": digest,
+            "page_seal": {
+                "schema": seal["schema"],
+                "aggregate_sha16": seal["aggregate_sha16"],
+                "covers": seal["covers"],
+                "missing": len(seal["missing"]), "unreadable": len(seal["unreadable"]),
+                "policy": ("المجمَّعةُ من بصمات **بلا قيمِ مبالغ** (القاعدة ١٣) ⇒ تُنشر؛ "
+                           "وبصمةُ المال المحلّيّة (`sha16_local`) تبقى في `pack.json` ولا تخرج. "
+                           "وقارئُها: `--verify` يقابلها حيًّا فيسقط عند أيّ مسّ بمحتوى صفحة."),
+                "what_it_binds": ("الوجودَ والنصَّ والبنيةَ وأعلامَ القارئ — و**لا يحرس المال**: "
+                                  "المالُ تحرسه بوّاباتُ الهوية/الإطار/العدّاد المُعاد اشتقاقُها من القرص."),
+            },
             "note": ("بصمةُ المجموعة أعلاه تغطّي **الإحصاءَ والمديات** معًا؛ وكانت الشهادةُ السابقة "
                      "تغطّي الإحصاءَ وحدَه (٥٠ من ٢٠٠). فأدخلها في سمّ «تغييرُ صفحةٍ مقيَّدة»."),
         },
@@ -186,6 +201,8 @@ def main() -> int:
     print(f"  الحزمة {len(pages)} صفحة · بصمةُ المجموعة {digest[:16]} · التقاطع {len(pack['intersection_gate']['intersection'])}"
           f" · مستثناةٌ من الالتقاط {len(captured & set(pages))}")
     print(f"  المُنفَقُ سابقًا: {len(set(pages) & spent)} صفحةً من الحزمة (ذراعا FM-2) · الحرُّ {len(free)} · أطولُ مدًى {max(runs, default=0)}")
+    print(f"  ختمُ المحتوى: {seal['covers']}/{len(pages)} مبصومة · بصمةُ المجموع {seal['aggregate_sha16']} · "
+          f"غائبةٌ {len(seal['missing'])}")
     bm = ev["bias_declaration"]["metrics"]
     print(f"  إعلانُ الانحياز: خارجَ الحزمة {ev['bias_declaration']['measured_pages_outside_pack']} صفحة · "
           f"سلسلةٌ غيرُ مُثبَتة v1 {bm['chain_unproven_rows']['v1']} → v2 {bm['chain_unproven_rows']['v2']} · "

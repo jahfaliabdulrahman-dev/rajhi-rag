@@ -31,6 +31,7 @@ import sys as _sys
 _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.pack_io import pack_facts as _pack_facts, pack_path as _pack_path, evidence_path as _evidence_path, seal_violation as _seal_violation  # noqa: E402
 from tools.pack_io import data_root as _data_root, seal as _seal  # noqa: E402
+from tools.pack_io import content_seal as _content_seal  # noqa: E402 — **ختمُ المحتوى بالقارئ الواحد**
 
 PROJ = Path(__file__).resolve().parent.parent
 DEFAULTS = {                       # تُحلّ من **الجذر المشترك** (git-common-dir): شجرةُ العمل ترى data/ الأمّ
@@ -797,6 +798,11 @@ def cmd_build(args) -> int:
         print(f"  {mark} {name}: يسقط {info.get('falls') or '— لا (ضابطٌ سلبيّ)'}"
               + (f" · تصادمٌ على القرص {info['colliding_pages_on_disk']}" if info.get("colliding_pages_on_disk") else ""))
 
+    # **ختمُ المحتوى يُبنى هنا ويُقاس هنا** — والرقمُ يُطبع بجانب ما يقيسه لا في ذيل تقرير
+    page_seal = _content_seal(run.dir, pack_pages_all)
+    print(f"─ ختمُ المحتوى (لكلّ صفحةٍ مقيَّدة): {page_seal['covers']}/{len(pack_pages_all)} مبصومة · "
+          f"غائبةٌ {len(page_seal['missing'])} · غيرُ مقروءة {len(page_seal['unreadable'])} · "
+          f"بصمةُ المجموع {page_seal['aggregate_sha16']}")
     pack = {
         "identity": run.identity,
         "identity_history": run.history,
@@ -822,6 +828,10 @@ def cmd_build(args) -> int:
                               "intersection": inter, "pass": not inter,
                               "key": "(doc_id, page) — لا page"},
         "poisons": pois,
+        # **ختمُ المحتوى** (مراجعة ٤٧ · R47-2): العضويّةُ وبصمةُ أرقام الإحصاء لا تربطان **محتوى**
+        # صفحةٍ واحدة — قِيس: حذفُ صفٍّ من صفحة إحصاء · تعديلُ نصٍّ · حذفُ ملفّ نتائج ⇒ `PASS rc=0`.
+        # فهذا ختمٌ لكل صفحةٍ مقيَّدة: الوجودُ والبصمةُ (بلا قيمةِ مبلغ — القاعدة ١٣).
+        "page_seal": page_seal,
         "definitions": [{"name": n, "text": t, "source": s} for n, t, s in DEFINITIONS],
         "count_tool_files": _count_tool_files("tools"),
         "cost_usd": "0 — لا نداءَ نموذج: القياسُ من results/pg-*.json والإطاراتِ المطبوعة",
@@ -887,25 +897,72 @@ def cmd_verify(args) -> int:
     print("  (ولا يُعاد تشغيلُ المصنّف أبداً — الأصنافُ تُقرأ مجمَّدة)")
     print(f"بوابة «٢٠٠»: {pack['size_gate']['value']} {'✓' if pack['size_gate']['pass'] else '✗'} · "
           f"التقاطع: {len(inter)} {'✓' if not inter else '✗'}")
-    range_checks = []
-    for m in pack["ranges"]:                        # **قياسٌ واحدٌ يُغذّي الطباعةَ والحكم** (S-4 · STR-3)
+    range_checks, range_reasons = [], []
+    for i, m in enumerate(pack["ranges"]):        # **قياسٌ واحدٌ يُغذّي الطباعةَ والحكم** (S-4 · STR-3)
         fresh = measure_range(run, m["range"][0], m["length"])
-        same = all(fresh[k] == m[k] for k in ("movements", "sum_debit", "sum_credit", "opening", "closing"))
+        same = (bool(fresh.get("measurable"))
+                and all(fresh[k] == m[k] for k in ("movements", "sum_debit", "sum_credit", "opening", "closing")))
         range_checks.append(same)
+        if not same:
+            range_reasons.append(f"مدًى {i + 1} [{m['range'][0]}–{m['range'][1]}]"
+                                 + ("" if fresh.get("measurable") else " غيرَ قابلٍ للقياس الآن"))
         print(f"  [{m['range'][0]}–{m['range'][1]}] حركات {m['movements']} · "
               f"هوية {m['gates']['identity']['value']} · إعادةُ القياس {'مطابقة ✓' if same else 'مخالفة ✗'}")
+
+    # ── **ختمُ المحتوى** (مراجعة ٤٧ · R47-2): كلُّ صفحةٍ مقيَّدة تُربط وجوداً وبصمةً ──────────
+    # كان الختمُ يقرأ العضويّةَ وبصمةَ أرقامِ الإحصاء والمجاميعَ وحدَها ⇒ **محتوى الصفحة غيرُ مربوط**
+    # (قِيس: حذفُ صفٍّ من صفحة إحصاء · تعديلُ نصٍّ · حذفُ ملفّ نتائج ⇒ `PASS rc=0`)، والصنفُ «مُثبت»
+    # يُقرأ من نصّ الحزمة لا من القرص. وهذا فحصان مستقلّان: **بصمةُ المحتوى** (تحرس ما لا تراه بوّاباتُ
+    # المال) و**إعادةُ اشتقاقِ صنف الإحصاء** (تحرس ما تدّعيه الحزمةُ عن كل صفحة).
+    live_seal = _content_seal(run.dir, pack_pages)
+    frozen = pack.get("page_seal") or {}
+    seal_gaps = live_seal["missing"] + live_seal["unreadable"]
+    fp = frozen.get("pages") or {}
+    mismatched = sorted(int(k) for k, v in fp.items()
+                        if k in live_seal["pages"] and live_seal["pages"][k]["sha16"] != v.get("sha16"))
+    amounts_moved = sorted(int(k) for k, v in fp.items()
+                           if k in live_seal["pages"]
+                           and live_seal["pages"][k]["sha16_local"] != v.get("sha16_local"))
+    census_broken = []
+    for x in pack["census"]["pages"]:
+        n = int(x["page"])
+        m1 = measure_range(run, n, 1)
+        if not (m1.get("measurable") and m1["gates"]["identity"]["pass"] and m1["gates"]["frame"]["pass"]):
+            census_broken.append(n)
+    seal_declared = (bool(frozen.get("pages"))
+                     and set(frozen["pages"]) == {str(p) for p in pack_pages})
+    seal_failures = []
+    if not seal_declared:
+        seal_failures.append(f"ختمُ المحتوى غائبٌ أو ناقصٌ في الحزمة "
+                            f"(مُعلن {frozen.get('covers')} مقابل حيّ {len(live_seal['pages'])}) ⇒ أَعِد البناء")
+    if seal_gaps:
+        seal_failures.append(f"صفحاتٌ غائبةٌ من التشغيلة: {seal_gaps[:6]}")
+    if mismatched:
+        seal_failures.append(f"محتوى مخالفٌ في {len(mismatched)} صفحةً: {mismatched[:6]}")
+    if amounts_moved:
+        seal_failures.append(f"قيمُ مبالغ تحرّكت في {len(amounts_moved)} صفحةً "
+                             f"(بصمةُ المال المحلّيّة): {amounts_moved[:6]}")
+    if census_broken:
+        seal_failures.append(f"صفحاتُ إحصاءٍ لم تُعد تُقفل من القرص: {census_broken[:6]}")
+    seal_ok = not seal_failures
+    print(f"ختمُ المحتوى: {live_seal['covers']}/{len(pack_pages)} صفحةً مبصومة · "
+          f"بصمةُ المجموع {live_seal['aggregate_sha16']}"
+          + (f" {'✓ مطابقة' if frozen.get('aggregate_sha16') == live_seal['aggregate_sha16'] else '✗ مخالفة'}"
+             if frozen.get("aggregate_sha16") else " (لا ختمَ مُلتزم)")
+          + f" · غائبةٌ {len(seal_gaps)} · محتوى مخالفٌ {len(mismatched)} · "
+            f"مالٌ تحرّك {len(amounts_moved)} · إحصاءٌ لا يُقفل {len(census_broken)}")
     # **الحكمُ يقرأ كلَّ ما طُبع** (مراجعة ٤٥): كان الحكمُ من التقاطع والحجم وحدَهما فيطبع «✗» ثم يقول PASS.
     census_ok = frozen_fp == pack["census"]["fingerprint"]
     ranges_ok = all(range_checks)          # من القياس نفسه — لا حلقةً ثانية
     _seal_src = _seal()                         # **يُعلن من أيّ شجرةٍ قُرئ الختم** (S-2)
     seal_msg = _seal_violation(facts)          # **الختمُ المُلتزم صار له قارئ**
-    seal_ok = seal_msg is None
-    ok = (not inter) and pack["size_gate"]["pass"] and census_ok and ranges_ok and seal_ok
+    seal_ok_members = seal_msg is None
+    ok = (not inter) and pack["size_gate"]["pass"] and census_ok and ranges_ok and seal_ok_members and seal_ok
     failures = ([f"التقاطع {len(inter)}"] if inter else []) + \
                ([] if pack["size_gate"]["pass"] else ["بوابةُ الحجم"]) + \
                ([] if census_ok else ["بصمةُ الإحصاء"]) + \
-               ([] if ranges_ok else ["إعادةُ قياس المديات"]) + \
-               ([seal_msg] if seal_msg else [])
+               ([] if ranges_ok else ["إعادةُ قياس المديات" + (f" ({' · '.join(range_reasons)})" if range_reasons else "")]) + \
+               ([seal_msg] if seal_msg else []) + seal_failures
     print(f"الحكم: {'PASS — الحزمةُ تشهد لنفسها' if ok else 'FAIL — بالاسم: ' + ' · '.join(failures)}")
     print(f"  (قارئُ الشهادة: {_evidence_path() or 'لا شهادةَ مُلتزمة'} · من شجرة: {(_seal_src or {}).get('tree', '—')})")
     return 0 if ok else 1
