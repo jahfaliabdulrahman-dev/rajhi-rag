@@ -179,6 +179,13 @@ def test_bias_declaration_is_committed_and_has_a_reader():
     assert m["chain_unproven_rows"]["better"] == "v2", "المقياسُ الذي مُنح v2 يجب أن يُعلَن"
     assert m["missing_pairs"]["better"] == "v1" and m["row_count_deviation"]["better"] == "v1", \
         "المقياسان اللذان يرجّحان v1 يجب أن يبقيا معلنين (وإلا صار الإعلانُ دعاية)"
+    # **ولكلّ صفٍّ رقمُه ومقياسُه**: كانت هذه الأرقامُ غيرَ مثبَّتة فمرّ خطأُ نقلٍ بين صفَّين.
+    assert (m["pages_won"]["v1"], m["pages_won"]["v2"]) == (5, 9), "تفوّقُ مقياس **السلسلة**"
+    assert (m["pages_won_pairs"]["v1"], m["pages_won_pairs"]["v2"]) == (9, 15), "تفوّقُ مقياس **الأزواج** (لا يُنقل رقمٌ بين الصفَّين)"
+    assert m["pages_won"]["better"] == "v2" and m["pages_won_pairs"]["better"] == "v2", \
+        "في مقاييس التفوّق **الأكثرُ أفضل** (والاتجاهُ يُميَّز عن مقاييس الكلفة)"
+    assert (m["missing_pairs"]["v1"], m["missing_pairs"]["v2"]) == (28, 32)
+    assert (m["row_count_deviation"]["v1"], m["row_count_deviation"]["v2"]) == (0, 18)
     assert b["arms"]["v1"]["sha256"] and b["arms"]["v2"]["sha256"], "الإعلانُ غيرُ مقيَّد بملفَّي الذراعين"
     live = pack_evidence.bias_metrics(set(pack_io.pack_facts(pack_io.pack_path())["pages"]))
     assert live == b, "الإعلانُ تعفّن: الحسابُ الحيّ خالف المُلتزم — أعِد التوليد بـ`tools/pack_evidence.py`"

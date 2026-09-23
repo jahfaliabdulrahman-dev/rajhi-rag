@@ -62,9 +62,13 @@ def bias_metrics(pages: set[int]) -> dict:
     chain = {a: sum(rows(a, p)[0] for p in outside) for a in ("v1", "v2")}
     pairs = {a: sum(rows(a, p)[1] for p in outside) for a in ("v1", "v2")}
     devc = {a: sum(rows(a, p)[2] for p in outside) for a in ("v1", "v2")}
-    won = {a: sum(1 for p in outside if rows(a, p)[0] < rows("v2" if a == "v1" else "v1", p)[0])
-           for a in ("v1", "v2")}
-    best = lambda d: min(d, key=lambda k: (d[k], k))
+    other = lambda a: "v2" if a == "v1" else "v1"
+    # **ولكلّ صفٍّ مقياسُه**: تفوّقُ مقياس السلسلة ≠ تفوّقُ مقياس الأزواج — ونقلُ رقمٍ بين صفَّين
+    # هو عطبٌ أصاب هذا المُولِّد مرّة (وقد أمسكه القياس لا القراءة).
+    won = {a: sum(1 for p in outside if rows(a, p)[0] < rows(other(a), p)[0]) for a in ("v1", "v2")}
+    won_pairs = {a: sum(1 for p in outside if rows(a, p)[1] < rows(other(a), p)[1]) for a in ("v1", "v2")}
+    best = lambda d: min(d, key=lambda k: (d[k], k))        # **الأقلُّ أفضل** (كلفةٌ أو انحراف)
+    top = lambda d: max(d, key=lambda k: (d[k], k))         # **الأكثرُ أفضل** (تفوّقٌ في صفحات)
     return {
         "decision": "(أ) **إعلانُ انحيازٍ مؤرَّخ مع عمود المقياسين** — قرارُ المالك 2026-09-23",
         "why_it_exists": ("ذراعا FM-2 سحبا صفحاتٍ من الحزمة **قبل** ختمها (2026-09-21 مقابل 2026-09-22)، "
@@ -73,7 +77,12 @@ def bias_metrics(pages: set[int]) -> dict:
         "measured_pages_outside_pack": len(outside),
         "metrics": {
             "chain_unproven_rows": {**chain, "better": best(chain), "meaning": "صفوفٌ قُرئت ولم تُثبّتها السلسلة (الأقلُّ أفضل)"},
-            "pages_won": {**won, "better": best(won), "meaning": "صفحاتٌ تفوّق فيها كلُّ طرفٍ بالمقياس أعلاه"},
+            "pages_won": {**won, "better": top(won),
+                         "meaning": "صفحاتٌ تفوّق فيها كلُّ طرفٍ بمقياس السلسلة أعلاه (لا بمقياس الأزواج)"},
+            "pages_won_pairs": {**won_pairs, "better": top(won_pairs),
+                                "meaning": "صفحاتٌ تفوّق فيها كلُّ طرفٍ بمقياس الأزواج الناقصة"},
+            "metric_rows_are_independent": ("لكلّ صفٍّ مقياسُه: ٣٤→١٤ تفوّقٌ بـ٥:٩ صفحةً (v2) — "
+                                            "وهو **غيرُ** ٩:١٥ الخاص بمقياس الأزواج، فلا يُنقل رقمٌ بين صفَّين"),
             "missing_pairs": {**pairs, "better": best(pairs), "meaning": "أزواجٌ ناقصة عن المُصدَّق (الأقلُّ أفضل)"},
             "row_count_deviation": {**devc, "better": best(devc), "meaning": "انحرافُ عدد الصفوف عن المُصدَّق (الأقلُّ أفضل)"},
         },
