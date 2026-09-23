@@ -891,6 +891,37 @@ def cmd_build(args) -> int:
     return 0 if ok else 1
 
 
+def seal_findings(live_seal: dict, frozen: dict, pack_pages) -> tuple[list[str], dict]:
+    """**حكمُ ختم المحتوى — دالّةٌ نقيّة** تُقاس وتُختبَر بلا تشغيلةٍ حقيقيّة.
+
+    كان المنطقُ مُضمَّراً في `cmd_verify` فلا يُختبَر إلا بـ`data/` الثقيلةِ المحجوبةِ عن git ⇒
+    سمومُ الختم **تُتخطّى في أيّ استنساخ**. وبفصله صارت السمومُ تعضّ على **أرضيّةٍ صناعيّةٍ صغيرةٍ
+    مُلتزمة** (`tests/fixtures/mini_corpus/`) في كل بيئة.
+
+    والمُخرَجُ: (أسبابُ الفشل بالاسم — أو `[]`) و(تفاصيلُ للطباعة: الغياب · المخالفُ · المالُ المتحرّك).
+    """
+    fp = frozen.get("pages") or {}
+    gaps = live_seal["missing"] + live_seal["unreadable"]
+    mismatched = sorted(int(k) for k, v in fp.items()
+                        if k in live_seal["pages"] and live_seal["pages"][k]["sha16"] != v.get("sha16"))
+    amounts_moved = sorted(int(k) for k, v in fp.items()
+                           if k in live_seal["pages"]
+                           and live_seal["pages"][k]["sha16_local"] != v.get("sha16_local"))
+    out: list[str] = []
+    if not (bool(fp) and set(fp) == {str(p) for p in pack_pages}):
+        out.append(f"ختمُ المحتوى غائبٌ أو ناقصٌ في الحزمة "
+                   f"(مُعلن {frozen.get('covers')} مقابل حيّ {len(live_seal['pages'])}) ⇒ أَعِد البناء")
+    if gaps:
+        out.append(f"صفحاتٌ غائبةٌ ({live_seal['missing'][:6]}) "
+                   f"أو غيرُ مقروءة ({live_seal['unreadable'][:6]}) من التشغيلة")
+    if mismatched:
+        out.append(f"محتوى مخالفٌ في {len(mismatched)} صفحةً: {mismatched[:6]}")
+    if amounts_moved:
+        out.append(f"قيمُ مبالغ تحرّكت في {len(amounts_moved)} صفحةً "
+                   f"(بصمةُ المال المحلّيّة): {amounts_moved[:6]}")
+    return out, {"gaps": gaps, "mismatched": mismatched, "amounts_moved": amounts_moved}
+
+
 def cmd_verify(args) -> int:
     run = Run(_path(args.run))
     p = _path(args.pack)
@@ -934,13 +965,8 @@ def cmd_verify(args) -> int:
     # المال) و**إعادةُ اشتقاقِ صنف الإحصاء** (تحرس ما تدّعيه الحزمةُ عن كل صفحة).
     live_seal = _content_seal(run.dir, pack_pages)
     frozen = pack.get("page_seal") or {}
-    seal_gaps = live_seal["missing"] + live_seal["unreadable"]
-    fp = frozen.get("pages") or {}
-    mismatched = sorted(int(k) for k, v in fp.items()
-                        if k in live_seal["pages"] and live_seal["pages"][k]["sha16"] != v.get("sha16"))
-    amounts_moved = sorted(int(k) for k, v in fp.items()
-                           if k in live_seal["pages"]
-                           and live_seal["pages"][k]["sha16_local"] != v.get("sha16_local"))
+    mismatched = amounts_moved = []
+    seal_gaps = []
     census_broken = []
     for x in pack["census"]["pages"]:
         n = int(x["page"])
@@ -952,20 +978,10 @@ def cmd_verify(args) -> int:
         m1 = measure_range(run, n, 1)
         if not (m1.get("measurable") and m1["gates"]["identity"]["pass"] and m1["gates"]["frame"]["pass"]):
             census_broken.append(n)
-    seal_declared = (bool(frozen.get("pages"))
-                     and set(frozen["pages"]) == {str(p) for p in pack_pages})
-    seal_failures = []
-    if not seal_declared:
-        seal_failures.append(f"ختمُ المحتوى غائبٌ أو ناقصٌ في الحزمة "
-                            f"(مُعلن {frozen.get('covers')} مقابل حيّ {len(live_seal['pages'])}) ⇒ أَعِد البناء")
-    if seal_gaps:
-        seal_failures.append(f"صفحاتٌ غائبةٌ ({live_seal['missing'][:6]}) "
-                             f"أو غيرُ مقروءة ({live_seal['unreadable'][:6]}) من التشغيلة")
-    if mismatched:
-        seal_failures.append(f"محتوى مخالفٌ في {len(mismatched)} صفحةً: {mismatched[:6]}")
-    if amounts_moved:
-        seal_failures.append(f"قيمُ مبالغ تحرّكت في {len(amounts_moved)} صفحةً "
-                             f"(بصمةُ المال المحلّيّة): {amounts_moved[:6]}")
+    # **الحكمُ من الدالّة النقيّة** (لا منطقَ مُضمَّراً: صار يُختبَر على الأرضيّة الصناعيّة بلا `data/`).
+    seal_failures, _seal_detail = seal_findings(live_seal, frozen, pack_pages)
+    mismatched, amounts_moved = _seal_detail["mismatched"], _seal_detail["amounts_moved"]
+    seal_gaps = _seal_detail["gaps"]
     if census_broken:
         seal_failures.append(f"صفحاتُ إحصاءٍ لم تُعد تُقفل من القرص: {census_broken[:6]}")
     seal_ok = not seal_failures
