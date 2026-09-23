@@ -143,7 +143,7 @@ def truth(q: dict, c: Corpus, pack: dict) -> tuple[object, dict]:
                 if d["pattern"] in str(r.get("desc") or "")]
         return hits, {"kind": k, "hits": len(hits), "pages": sorted({p for p, _ in hits})}
     if k == "date_encoding":
-        ind = sum(1 for p in c.pages for r in c.rows(p)
+        ind = sum(1 for p in c.corpus_page_list() for r in c.rows(p)
                   if re.search(f"[{ARABIC_INDIC}{PERSIAN}]", str(r.get("date") or "")))
         lat = sum(1 for p in c.pages for r in c.rows(p)
                   if re.search(r"\d", str(r.get("date") or ""))
@@ -218,6 +218,14 @@ def extract_numbers(text: str) -> list[float]:
     return [v for v in (num(m.group(0)) for m in _NUMTOK.finditer(text or "")) if v is not None]
 
 
+_NEG_RE = re.compile(r"(لا\s*(?:يتساو|يتطابق|يتصل|يوجد|يمكن|أستطيع|تُوجد)|غير\s*(?:موجود|متساو|متطابق|متصل)|ليس|مختلف)")
+
+
+def _is_neg(ans: str) -> bool:
+    """**النفيُ بالمعنى لا بالكلمة**: «لا يتساويان» نفيٌ صريح — وقد أسقطها حُكمي مرّةً بسذاجة قائمتي."""
+    return bool(_NEG_RE.search(ans)) or any(w in ans for w in _NEG)
+
+
 def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[bool, str]:
     """حكمٌ **ميكانيكيّ** لكلّ سؤال — بلا حَكَمٍ ذوقيّ (والحدُّ معلَنٌ في التقرير).
 
@@ -232,7 +240,7 @@ def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[b
     if m == "number":
         if q["expect"] == "chain":
             t = truth_val if isinstance(truth_val, dict) else {}
-            pos, neg = any(w in ans for w in _POS), any(w in ans for w in _NEG)
+            pos, neg = any(w in ans for w in _POS), _is_neg(ans)
             if t.get("equal"):
                 near = any(abs(v - 0.0) < 0.05 for v in nums)
                 return (pos and not neg and near), f"متساويان: إيجابٌ {'✓' if pos else '✗'} · فرقٌ صفريٌّ {'✓' if near else '✗'}"
@@ -240,7 +248,7 @@ def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[b
             return (neg and not pos and near), \
                 f"غيرُ متساويين: نفيٌ {'صريح' if neg else 'غائب/مضادّ'} · الفرقُ {'مذكور' if near else 'غيرُ مذكور'}"
         if q["expect"] == "boolean":
-            pos, neg = any(w in ans for w in _POS), any(w in ans for w in _NEG)
+            pos, neg = any(w in ans for w in _POS), _is_neg(ans)
             if truth_val is True:
                 return (pos and not neg), f"إيجابٌ {'موجود' if pos else 'غائب'}{' ونفيٌ مضادّ' if neg else ''}"
             # السلسلةُ لا تتّصل: الجوابُ الصحيحُ نفيٌ صريح
@@ -272,9 +280,10 @@ def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[b
                 break
         if want is None:
             return False, f"استشهد بالصفحة {need} بلا صفٍّ منها"
-        mv = rows[want - 1]["movement"]
-        ok = mv is not None and abs(float(mv) - float(truth_val)) < 0.05
-        return ok, f"الصفُّ المُستشهَد {'هو' if ok else 'ليس'} صفَّ القمة في الصفحة {need}"
+        cands = [rows[n - 1]["movement"] for n in used
+                 if 1 <= n <= len(rows) and rows[n - 1]["page"] == need and rows[n - 1]["movement"] is not None]
+        ok = any(abs(float(mv) - float(truth_val)) < 0.05 for mv in cands)   # أيُّ صفٍّ مُستشهَدٍ يطابق القمة
+        return ok, f"{'أشار إلى' if ok else 'لم يُشر إلى'} صفِّ القمة في الصفحة {need} ({len(cands)} صفًّا مُستشهَداً)"
 
     if m == "abstain":
         if q["expect"] == "ambiguous":
@@ -287,6 +296,39 @@ def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[b
                else f"أجاب بـ{len(invented)} رقماً لا سند لها ✗")
         return (gated or (not invented and any(w in ans for w in _ABSENCE))), why
     return False, f"مقياسٌ مجهول: {m}"
+
+
+class _Trace:
+    """أثرُ جوابٍ محفوظ — يُعيد بناءَ ما يحتاجه الحُكم بلا نداءِ نموذجٍ ثانٍ."""
+
+    def __init__(self, rec: dict):
+        self.used_row_nos = list(rec.get("used_row_nos") or [])
+        self.scope = rec.get("scope") or "in_scope"
+        self.refused = bool(rec.get("refused"))
+
+
+def rescore(a, qs: list[dict], c: Corpus, pack: dict, spec: dict, rows: list[dict]) -> int:
+    """**إعادةُ الحكم على أجوبةٍ محفوظة — بلا نداءِ نموذجٍ ولا دفع** (والأثرُ محفوظٌ مع كلّ جواب).
+
+    هذا ما يجعل قواعدَ الحُكم قابلةً للتصحيح بعد التشغيل بلا إعادة صرف، وهو شرطُ عدلٍ: لا يُعاقَب
+    النظامُ مرّتين على قاعدةِ حُكمٍ كانت خاطئة.
+    """
+    out = a.out or (pack_io.data_root() / "data/eval_pack/answers.json")
+    data = json.loads(out.read_text())
+    by_id = {q["id"]: q for q in qs}
+    results = []
+    for rec in data.get("results", []):
+        q = by_id.get(rec["id"])
+        if q is not None:
+            truth_val, _ = truth(q, c, pack)
+            ok, why = score_answer(q, truth_val, rec.get("answer", ""), _Trace(rec), rows)
+            rec = {**rec, "ok": ok, "why": why}
+        results.append(rec)
+        print(f"{rec['id']:9s} {'✅' if rec.get('ok') else '❌'} {rec.get('why', '')}")
+    data["results"] = results
+    out.write_text(json.dumps(data, ensure_ascii=False, indent=1))
+    _print_metrics(results)
+    return 0
 
 
 def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
@@ -306,29 +348,51 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     chunks = chunk_rows([{**r, "row_no": i + 1} for i, r in enumerate(rows)])
     store = build_index(chunks)
     print(f"      {len(chunks)} قطعة", flush=True)
+    # ٤) الطرح: كلُّ سؤالٍ في خيطٍ بمهلة — انظر `_ask` (عميلُ النموذج واحدٌ يُبنى هنا)
     llm = build_llm(a.model)
     out = a.out or (pack_io.data_root() / "data/eval_pack/answers.json")
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    done: dict[str, dict] = {}
+    prev_all: dict[str, dict] = {}         # كلُّ ما سبق (وإن كان نائباً) — لا يُسقطه الحفظُ التدريجيّ
     if out.exists():                       # **استئنافٌ**: جوابٌ محفوظٌ لا يُعاد سؤالُه (ولا يُدفع ثمنُه مرّتين)
         try:
-            done = {r["id"]: r for r in json.loads(out.read_text()).get("results", [])}
+            prev_all = {r["id"]: r for r in json.loads(out.read_text()).get("results", [])}
         except (OSError, json.JSONDecodeError, KeyError):
-            done = {}
+            prev_all = {}
+    done = {k: v for k, v in prev_all.items()
+            if not str(v.get("answer") or "").startswith("<")}   # **النائبُ ليس جواباً** ⇒ يُعاد سؤالُه
     todo = [q for q in qs if q["id"] not in done]
+    if getattr(a, "only", None):           # إعادةُ أسئلةٍ بعينها (بعد تصحيح نطاقِها أو صياغتِها)
+        want = {x.strip() for x in a.only.split(",") if x.strip()}
+        todo = [q for q in qs if q["id"] in want]
+        done = {k: v for k, v in done.items() if k not in want}
     print(f"[3/4] طرحُ الأسئلة ({len(todo)} من {len(qs)} · ومحفوظٌ سابقاً {len(done)}) "
           f"على {a.model or 'الافتراضيّ'} …\n", flush=True)
 
     order = [q["id"] for q in qs]
+    import threading
+
+    def _ask(qtext: str, out_box: dict) -> None:
+        """سؤالٌ واحدٌ في خيط: تعليقُه لا يُسقط الجولةَ (ولا يُقتل الخيط — يُترك معلّقاً ويُسجَّل فشلُه)."""
+        try:
+            r = answer_question(store, qtext, rows=rows, chunks=chunks, llm=llm)
+            out_box.update({"answer": r.answer or "", "used": list(getattr(r, "used_row_nos", None) or []),
+                            "scope": getattr(r, "scope", None), "refused": bool(getattr(r, "refused", False))})
+        except Exception as e:                                   # noqa: BLE001 — عطبٌ يُسمّى لا يُسقط الجولة
+            out_box["error"] = f"{type(e).__name__}: {e}"
+
     for i, q in enumerate(todo, 1):
         truth_val, _ = truth(q, c, pack)
-        try:
-            res = answer_question(store, q["q"], rows=rows, chunks=chunks, llm=llm)
-            ans = (res.answer or "").strip()
-        except Exception as e:                                   # noqa: BLE001 — عطبٌ يُسمّى لا يُسقط الجولة
-            ans, res = f"<عطب: {type(e).__name__}>", None
-        ok, why = (False, "عطبٌ في النداء") if res is None else score_answer(q, truth_val, ans, res, rows)
+        box: dict = {}
+        t = threading.Thread(target=_ask, args=(q["q"], box), daemon=True)
+        t.start()
+        t.join(int(getattr(a, "timeout", 0) or 150))
+        msg = {"error": "انتهت المهلة"} if t.is_alive() else (box or {"error": "لا جواب"})
+        res = _Trace({"used_row_nos": msg.get("used"), "scope": msg.get("scope"),
+                      "refused": msg.get("refused")}) if "answer" in msg else None
+        ans = msg["answer"].strip() if res else f"<{msg.get('error')}>"
+        ok, why = (score_answer(q, truth_val, ans, res, rows) if res
+                   else (False, f"عطبٌ/مهلة: {msg.get('error')}"))
         done[q["id"]] = {"id": q["id"], "cat": q["cat"], "metric": q["metric"], "expect": q["expect"],
                          "kind": q["derive"]["kind"],
                          "q": q["q"], "answer": ans, "ok": ok, "why": why,
@@ -337,8 +401,9 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                          "used_row_nos": (list(getattr(res, "used_row_nos", None) or [])[:40] if res else []),
                          "scope": getattr(res, "scope", None) if res else None,
                          "refused": bool(getattr(res, "refused", False)) if res else None}
+        merged = {**prev_all, **done}      # النائبُ يبقى ما لم يُجَب عنه فعلاً
         out.write_text(json.dumps({"model": a.model or "افتراضيّ",
-                                   "results": [done[k] for k in order if k in done]},
+                                   "results": [merged[k] for k in order if k in merged]},
                                   ensure_ascii=False, indent=1))   # **حفظٌ تدريجيّ: قتلُ العملية لا يُهدر جواباً**
         print(f"{i:02d} {q['id']:9s} {'✅' if ok else '❌'} {why}", flush=True)
 
@@ -347,28 +412,30 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     print(f"\n[4/4] الأجوبةُ كاملةً في {out} (خارج git: `data/` · حفظٌ تدريجيّ بعد كلّ سؤال)")
 
     print("\n" + "=" * 62)
-    metrics = spec["metrics"]
-    for m, label in (("number", "دقّة الرقم"), ("citation", "صدق الاستشهاد من الأثر"), ("abstain", "صحّة الامتناع")):
-        sel = [r for r in results if r["metric"] == m]
-        n_ok = sum(1 for r in sel if r["ok"])
-        bar = "█" * n_ok + "·" * (len(sel) - n_ok)
-        print(f"{label:26s} {n_ok:2d}/{len(sel):2d}  {bar}")
-    print(f"{'المجموع':26s} {sum(1 for r in results if r['ok']):2d}/{len(results):2d}")
-    invented = sum(1 for r in results if r["metric"] == "abstain" and not r["ok"])
-    print(f"\n⛔ الامتناعاتُ الساقطة (خطرُ الاختراع): {invented}/8")
-    by_kind: dict[str, list[bool]] = {}
-    for r in results:
-        by_kind.setdefault(r["kind"], []).append(r["ok"])
-    print("\nتفصيلٌ بالقاعدة (يُظهر **أين** العطب لا كمّه فقط):")
-    for k, oks in sorted(by_kind.items(), key=lambda kv: -len(kv[1])):
-        print(f"  {k:16s} {sum(oks):2d}/{len(oks):2d}")
+    _print_metrics(results)
     if before and after and before.get("usage") is not None:
         d = float(after["usage"]) - float(before["usage"])
         print(f"💰 الكلفةُ الفعليّةُ من المزوّد: ${d:.4f} (رصيدُ المفتاح {before.get('usage')} ⇒ {after.get('usage')})")
     else:
         print("💰 تعذّر قياسُ الكلفة من المزوّد — لا يُدَّعى رقمٌ بلا مصدر.")
-    print(f"\n{metrics['citation']}")
     return 0 if all(r["ok"] for r in results) else 1
+
+
+def _print_metrics(results: list[dict]) -> None:
+    """المقاييسُ الثلاثة + تفصيلٌ بالقاعدة (يُظهر **أين** العطب لا كمّه فقط)."""
+    for m, label in (("number", "دقّة الرقم"), ("citation", "صدق الاستشهاد من الأثر"), ("abstain", "صحّة الامتناع")):
+        sel = [r for r in results if r.get("metric") == m]
+        n_ok = sum(1 for r in sel if r.get("ok"))
+        print(f"{label:26s} {n_ok:2d}/{len(sel):2d}  {'█' * n_ok}{'·' * (len(sel) - n_ok)}")
+    print(f"{'المجموع':26s} {sum(1 for r in results if r.get('ok')):2d}/{len(results):2d}")
+    invented = sum(1 for r in results if r.get("metric") == "abstain" and not r.get("ok"))
+    print(f"\n⛔ الامتناعاتُ الساقطة (خطرُ الاختراع): {invented}/8")
+    by_kind: dict[str, list[bool]] = {}
+    for r in results:
+        by_kind.setdefault(r.get("kind") or "?", []).append(bool(r.get("ok")))
+    print("\nتفصيلٌ بالقاعدة:")
+    for k, oks in sorted(by_kind.items(), key=lambda kv: -len(kv[1])):
+        print(f"  {k:16s} {sum(oks):2d}/{len(oks):2d}")
 
 
 def _repo_root() -> pathlib.Path:
@@ -387,6 +454,11 @@ def main(argv=None) -> int:
     ap.add_argument("--limit", type=int, help="أوّلُ N سؤالاً (للقياس قبل الصرف)")
     ap.add_argument("--model", help="اسمُ النموذج على OpenRouter (وإلّا فالافتراضيّ في `build_llm`)")
     ap.add_argument("--out", type=pathlib.Path, help="ملفُّ الأجوبة (افتراضيّه `data/eval_pack/answers.json`)")
+    ap.add_argument("--only", help="إعادةُ سؤالِ معرّفاتٍ بعينها (مفصولةً بفاصلة) رغم الحفظ التدريجيّ")
+    ap.add_argument("--timeout", type=int, default=150,
+                    help="مهلةُ كلّ سؤالٍ بالثواني (بلا مهلةٍ يعلَق التشغيلُ أبدًا — قِيس)")
+    ap.add_argument("--rescore", action="store_true",
+                    help="**إعادةُ الحكم على أجوبةٍ محفوظة** بالقواعد الحاليّة — بلا نداءِ نموذجٍ ولا دفع")
     ap.add_argument("--run", type=pathlib.Path,
                     default=pack_io.data_root() / "data/local_sample/slice_629p",
                     help="مجلّدُ التشغيلة المقروءة (نفسُ مصدر الحزمة)")
@@ -420,6 +492,12 @@ def main(argv=None) -> int:
                 bad.append(f"{qid}: الصفحة {p} خارج الحزمة — مرسًى لا يُقاس")
     if bad:
         print("\n".join(x for x in bad if x), file=sys.stderr)
+
+    if a.rescore:
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
+        from tools.refusal_test import build_rows                     # noqa: PLC0415
+        rows, _ = build_rows(a.run)
+        return rescore(a, qs, c, pack, spec, rows)
 
     if a.execute:
         sel = qs[: a.limit] if a.limit else qs
