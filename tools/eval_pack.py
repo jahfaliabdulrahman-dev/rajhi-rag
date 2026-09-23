@@ -32,6 +32,7 @@ _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.pack_io import pack_facts as _pack_facts, pack_path as _pack_path, evidence_path as _evidence_path, seal_violation as _seal_violation  # noqa: E402
 from tools.pack_io import data_root as _data_root, seal as _seal  # noqa: E402
 from tools.pack_io import content_seal as _content_seal  # noqa: E402 — **ختمُ المحتوى بالقارئ الواحد**
+from tools.pack_io import run_page as _run_page  # noqa: E402 — **قارئُ الملفّ المحصَّن** (لا Traceback)
 
 PROJ = Path(__file__).resolve().parent.parent
 DEFAULTS = {                       # تُحلّ من **الجذر المشترك** (git-common-dir): شجرةُ العمل ترى data/ الأمّ
@@ -137,7 +138,14 @@ class Run:
             f = self.dir / "results" / f"pg-{n:03d}.json"
             if not f.exists():
                 raise Stopped(f"الصفحة {n} غير موجودة في هذه التشغيلة ({f}) — لا يُقاس ما لا يوجد.")
-            self._pages[n] = json.loads(f.read_text(encoding="utf-8"))
+            try:
+                self._pages[n] = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as e:
+                # **التلفُ يُسمّى ولا يُنفجر** (بوّابةُ التسليم · المقعد الثاني): `json.loads` كان يرفع
+                # `JSONDecodeError` خامًا من داخل حلقات القياس ⇒ أثرُ بايثون بدل حكم — والحالةُ
+                # الفيزيائيّةُ المتوقَّعة (كتابةٌ مُنقطِعة) تصير «غيرَ مقروءة» بالاسم.
+                raise Stopped(f"الصفحة {n} غيرُ مقروءة (ملفٌّ تالف: {type(e).__name__}) — "
+                              "لا يُقاس ما لا يُقرأ.") from None
         return self._pages[n]
 
     def has_page(self, n: int) -> bool:
@@ -803,6 +811,14 @@ def cmd_build(args) -> int:
     print(f"─ ختمُ المحتوى (لكلّ صفحةٍ مقيَّدة): {page_seal['covers']}/{len(pack_pages_all)} مبصومة · "
           f"غائبةٌ {len(page_seal['missing'])} · غيرُ مقروءة {len(page_seal['unreadable'])} · "
           f"بصمةُ المجموع {page_seal['aggregate_sha16']}")
+    # **وردُّ العدد المنشور** (بوّابةُ التسليم · المقعد الثاني): المجمَّعةُ المُلتزمة تُقابَل هنا أيضًا؛
+    # وإلا فبناءٌ على قرصٍ مُحرَّف يُنتج `PASS` و«الحزمةُ تشهد لنفسها» (قِيس في المقعد).
+    _anchor = (_seal() or {}).get("page_seal_aggregate")
+    anchor_drift = (f"المجمَّعةُ المُلتزمة {_anchor} ≠ المبنيّة {page_seal['aggregate_sha16']} ⇒ "
+                    "محتوى القرص تغيّر بعد الشهادة: أَعِد الشهادةَ (`tools/pack_evidence.py`) أو حقِّق في المسّ"
+                    if _anchor and _anchor != page_seal["aggregate_sha16"] else None)
+    if anchor_drift:
+        print(f"⛔ {anchor_drift}")
     pack = {
         "identity": run.identity,
         "identity_history": run.history,
@@ -841,7 +857,7 @@ def cmd_build(args) -> int:
     out.mkdir(parents=True, exist_ok=True)
     (out / "pack.json").write_text(json.dumps(pack, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     ok = (all_gates and chosen["size_gate"]["pass"] and not inter
-          and pois["_coverage"]["every_check_has_a_poison"])
+          and pois["_coverage"]["every_check_has_a_poison"] and not anchor_drift)
     if comp.get("classes"):
         print("\n── أصنافُ الإحصاء — مقيسةٌ من القرص (شرطُ review-29 §٦/٢: العددُ من الأداة):")
         print(f"   المجموعُ الساذج = {comp['structural_sum']} · وبعد طرح المتقاطع = "
@@ -868,6 +884,8 @@ def cmd_build(args) -> int:
         blockers.append("بوابةُ الحجم")
     if not pois["_coverage"]["every_check_has_a_poison"]:
         blockers.append("تغطيةُ السموم")
+    if anchor_drift:
+        blockers.append("المجمَّعةُ المُلتزمة (محتوى القرص تغيّر بعد الشهادة)")
     verdict = classify_verdict(ok=ok, inter=inter, blockers=blockers, remedy_rows=remedy_rows)
     print(f"\nالحكم: {verdict} · كُتبت في {out / 'pack.json'} · cost_usd 0")
     return 0 if ok else 1
@@ -926,6 +944,11 @@ def cmd_verify(args) -> int:
     census_broken = []
     for x in pack["census"]["pages"]:
         n = int(x["page"])
+        if _run_page(run.dir, n) is None:
+            # **ملفٌّ تالفٌ أو غائبٌ يُسمّى ولا يُسقط التشغيلَ بـTraceback** (بوّابةُ التسليم · المقعد
+            # الثاني: قراءةٌ غيرُ محروسة هنا كانت تُنفجر بـ`JSONDecodeError` **قبل** سطر الختم والحكم).
+            census_broken.append(n)
+            continue
         m1 = measure_range(run, n, 1)
         if not (m1.get("measurable") and m1["gates"]["identity"]["pass"] and m1["gates"]["frame"]["pass"]):
             census_broken.append(n)
@@ -936,7 +959,8 @@ def cmd_verify(args) -> int:
         seal_failures.append(f"ختمُ المحتوى غائبٌ أو ناقصٌ في الحزمة "
                             f"(مُعلن {frozen.get('covers')} مقابل حيّ {len(live_seal['pages'])}) ⇒ أَعِد البناء")
     if seal_gaps:
-        seal_failures.append(f"صفحاتٌ غائبةٌ من التشغيلة: {seal_gaps[:6]}")
+        seal_failures.append(f"صفحاتٌ غائبةٌ ({live_seal['missing'][:6]}) "
+                             f"أو غيرُ مقروءة ({live_seal['unreadable'][:6]}) من التشغيلة")
     if mismatched:
         seal_failures.append(f"محتوى مخالفٌ في {len(mismatched)} صفحةً: {mismatched[:6]}")
     if amounts_moved:
@@ -955,7 +979,7 @@ def cmd_verify(args) -> int:
     census_ok = frozen_fp == pack["census"]["fingerprint"]
     ranges_ok = all(range_checks)          # من القياس نفسه — لا حلقةً ثانية
     _seal_src = _seal()                         # **يُعلن من أيّ شجرةٍ قُرئ الختم** (S-2)
-    seal_msg = _seal_violation(facts)          # **الختمُ المُلتزم صار له قارئ**
+    seal_msg = _seal_violation(facts, live_seal)   # **الختمُ المُلتزم صار له قارئ** (وبصمتُه المجمَّعة)
     seal_ok_members = seal_msg is None
     ok = (not inter) and pack["size_gate"]["pass"] and census_ok and ranges_ok and seal_ok_members and seal_ok
     failures = ([f"التقاطع {len(inter)}"] if inter else []) + \

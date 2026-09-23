@@ -252,6 +252,8 @@ def on_disk_pages(doc_dir: Path) -> list[int]:
 
 #: حالاتُ الصفحةِ التي تُقرَّر **عن قصد** (حجزٌ لا عطب) — وهي وحدها المرشَّحةُ للإزالة عند الإغلاق.
 RESERVED_STATUSES = ("holdout_reserved", "pack_reserved")
+#: حقولُ **سلطة القرص**: من كتبها فقد صدّق أنّ ما على القرص من إنتاجه ⇒ لا يكتبها إلا تشغيلةٌ كاملة.
+AUTHORITY_FIELDS = ("holdout_rule", "holdout_mod", "capture_version", "label_source", "pack_exclusion")
 
 
 def close_out_dir(doc_dir: Path, remove) -> tuple[list[int], list[int]]:
@@ -451,6 +453,13 @@ def main() -> int:
                          "الإغلاقُ ويُسجَّل في البيان أيُّ شرطٍ تُجُوِّز — بلا هذا العَلَم يقف بالاسم")
     args = ap.parse_args()
 
+    # **قاعدةٌ لا تحجز شيئاً ليست قاعدة** (بوّابةُ التسليم · المقعد الثاني): `--holdout-mod 0` (أو سالب)
+    # يُفرِّغ الحجزَ كلَّه: قِيس ١٤٢ صفحةً مُقيَّمة دخلت التدريب، والبيانُ كتب «page % 0 == 0» و`rc=0`.
+    if args.holdout_mod < 1:
+        raise SystemExit(
+            f"⛔ `--holdout-mod {args.holdout_mod}` لا يحجز شيئاً: القاعدةُ «page % N == 0» تحتاج N ≥ 1 "
+            "— وإلا دخلت صفحاتُ الحجز كلُّها في التدريب. لا التقاطَ بقاعدةٍ فارغة.")
+
     if args.adopt_legacy:
         args.out.mkdir(parents=True, exist_ok=True)
         adopt_legacy(args.out)
@@ -488,6 +497,16 @@ def main() -> int:
     exclusion = resolve_exclusion(args.exclude_pack, args.no_pack_exclusion, DEFAULT_PACK)
     facts = pack_facts(exclusion, expect_identity=doc_id)
     reserved_pack = facts["pages"]
+    # **الحمايةُ لا تنطفئ صامتةً** (بوّابةُ التسليم · المقعد الثاني): حزمةٌ معلَنةٌ بصفحاتٍ ولم تُستثنَ
+    # واحدة ⇒ الهويّةُ لم تُحلّ (لا ملفَّ أصل ⇒ `unknown_doc`) أو الجذرُ خطأ أو الحزمةُ لمستندٍ آخر.
+    # والمآلُ المقيس: ١٣٣ من ٢٠٠ صفحةً مقيَّدة كُتبت في التدريب بـ`rc=0` — وهي علّةُ R45-2 من بابٍ آخر.
+    if (facts["file"] and facts["declared"] and not reserved_pack
+            and not args.no_pack_exclusion):
+        raise SystemExit(
+            f"⛔ الحزمةُ معلَنةٌ ({facts['declared']} صفحةً في {facts['file']}) **ولم تُستثنَ صفحةٌ واحدة**: "
+            f"هويّةُ المستند `{doc_id}` لا تُطابق هويّةَ الحزمة ({str(facts['identity'])[:16]})"
+            + (" — ولا ملفَّ أصلٍ يُشتقّ منه (لا PDF)" if not doc_file.exists() else "")
+            + ". لا التقاطَ بصمت: إمّا صحِّح المصدرَ/الهويّة، وإمّا أعلِن القرارَ بـ`--no-pack-exclusion`.")
     if args.no_pack_exclusion:
         print("⚠ استثناءُ الحزمة مُلغًى صراحةً (--no-pack-exclusion) ⇒ صفحاتُ الحزمة ستُلتقط — القرارُ مُعلَن")
     if reserved_pack:
@@ -633,6 +652,20 @@ def main() -> int:
         "outside_the_export_population": outside,
         "removed": [], "failed_to_remove": [], "disk_after": len(disk),
     }
+    # **تشغيلةٌ جزئيّةٌ لا تُصدّق على القرص** (بوّابةُ التسليم · المقعد الثاني): كانت تكتب البيانَ
+    # كاملاً فتُبيّض قاعدةَ الحجز ⇒ التشغيلةُ الكاملةُ بعدها رأت «نفسَ القاعدة» فحذفت ١٤٠ صفحةً
+    # بلا عَلَمٍ ولا سببٍ مُسمّى (قِيس بالتنفيذ). فحقولُ السلطة لا يكتبها إلا من صدّق على القرص.
+    if args.limit:
+        for _k in AUTHORITY_FIELDS:
+            manifest.pop(_k, None)
+        if prev:
+            manifest.update({k: prev[k] for k in AUTHORITY_FIELDS if k in prev})
+        manifest["partial_run"] = {
+            "holdout_mod_attempted": args.holdout_mod,
+            "authority_fields": ("من البيان السابق (تشغيلةٌ كاملةٌ سبقت)"
+                                 if prev else "لا شيء — لا بيانَ سابقٌ يُصدّق على القرص"),
+            "note": "تشغيلةٌ جزئيّة: لا تُصدّق على سلطة القرص ⇒ التشغيلةُ الكاملةُ بعدها تحتاج قراراً صريحاً",
+        }
     man_file.write_text(json.dumps(manifest, ensure_ascii=False, indent=1))
 
     rc = 0

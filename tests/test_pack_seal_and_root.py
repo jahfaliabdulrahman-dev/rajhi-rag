@@ -549,3 +549,133 @@ def test_data_root_refuses_to_guess_and_never_loses_the_pack_silently(tmp_path):
             os.environ.pop("GIT_CEILING_DIRECTORIES", None)
         else:
             os.environ["GIT_CEILING_DIRECTORIES"] = old_ceil
+
+
+# ═══════ (بوّابةُ التسليم · review-47) منافذُ التفادي التي كشفتها المقاعدُ المعزولة ═══════
+
+def _build_on(tmp_path: Path, run: Path) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, "tools/eval_pack.py", "--build",
+                           "--run", str(run), "--out", str(tmp_path / "built")],
+                          cwd=ROOT, capture_output=True, text=True)
+
+
+def _verdict(r) -> str:
+    return next((ln for ln in r.stdout.splitlines() if ln.startswith("الحكم:")), "")
+
+
+@needs_artifacts
+def test_a_census_page_that_no_longer_closes_is_named_by_the_second_layer(tmp_path):
+    """**سمُّ الطبقة ٢** (إعادةُ الاشتقاق): قيمةُ إطارٍ تُبدَّل ⇒ الإسقاطُ لا يتغيّر (الحقولُ بالمفاتيح
+    لا بالقيم) ⇒ لا يمسكها الختم، **وتمسكها إعادةُ الاشتقاق باسمها** — فالادّعاءُ بالطبقات صار مُقاساً."""
+    n = _census_first()
+
+    def poison(run: Path) -> None:
+        f = _page_file(run, n)
+        d = json.loads(f.read_text(encoding="utf-8"))
+        d["footer"]["debits"] = "999999.99"
+        f.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+
+    r = _verify_on(_tampered_run(tmp_path, poison), _pack_copy(tmp_path))
+    v = _verdict(r)
+    assert r.returncode != 0 and "لم تُعد تُقفل" in v, r.stdout[-400:]
+    assert "محتوى مخالف" not in v, "لو تغيّر الإسقاطُ لَما كان السمُّ معزولاً للطبقة ٢"
+
+
+@needs_artifacts
+def test_a_text_edit_past_the_old_120_char_cap_is_now_caught(tmp_path):
+    """**ثقبٌ كشفته بوّابةُ التسليم:** كان النصُّ يُقطع عند ١٢٠ خانةً **بلا إعلان**، و٣٢ حقلًا في ٢٩
+    صفحةً أطولُ من ذلك ⇒ تعديلُ الذيل يمرّ `PASS`. الآن: النصُّ كاملًا حتى 4096 وطولُه مُعلَنٌ قبلَه."""
+    def poison(run: Path) -> None:
+        for p in sorted(pack_io.pack_pages(PACK)):
+            f = _page_file(run, p)
+            d = json.loads(f.read_text(encoding="utf-8"))
+            for row in d.get("raw_rows") or []:
+                tx = str(row.get("desc") or "")
+                if len(tx) > 120:                     # **الذيلُ وحده** — تعديلٌ بنفس الطول
+                    row["desc"] = tx[:-1] + ("ز" if tx[-1] != "ز" else "س")
+                    f.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+                    return
+        raise AssertionError("لا نصَّ أطولَ من ١٢٠ خانةً في الكوربوس ⇒ السمُّ غيرُ قابلٍ للتنفيذ")
+
+    r = _verify_on(_tampered_run(tmp_path, poison), _pack_copy(tmp_path))
+    assert r.returncode != 0 and "محتوى مخالف" in _verdict(r), r.stdout[-400:]
+
+
+@needs_artifacts
+def test_a_corrupt_results_file_is_named_and_never_a_traceback(tmp_path):
+    """قراءةٌ غيرُ محروسة في حلقة إعادة الاشتقاق كانت تُنفجر بـ`JSONDecodeError` **قبل** سطر الختم
+    والحكم (الحالةُ الفيزيائيّةُ المتوقَّعة: كتابةٌ مُنقطِعة) ⇒ الآن تُسمّى صفحةً غيرَ مقروءة."""
+    def poison(run: Path) -> None:
+        _page_file(run, _census_first()).write_text("{ ليس JSON", encoding="utf-8")
+
+    r = _verify_on(_tampered_run(tmp_path, poison), _pack_copy(tmp_path))
+    out = r.stdout + r.stderr
+    assert "Traceback" not in out, "انفجارُ بايثون بدل حكمٍ مُسمّى"
+    assert r.returncode != 0 and "غيرُ مقروءة" in out, out[-400:]
+
+
+@needs_artifacts
+def test_build_refuses_when_the_committed_aggregate_drifted(tmp_path):
+    """**منفذٌ مقيس:** `--build` على قرصٍ مُحرَّف كان `PASS` (الختمُ يعيد الاشتقاق من القرص نفسِه)
+    ⇒ وبعدها `--verify` يقول «الحزمةُ تشهد لنفسها». الآن **المجمَّعةُ المُلتزمة** تُقابَل في البناء أيضًا."""
+    def poison(run: Path) -> None:
+        f = _page_file(run, _census_first())
+        d = json.loads(f.read_text(encoding="utf-8"))
+        d["raw_rows"][0]["desc"] = str(d["raw_rows"][0].get("desc") or "") + "ز"
+        f.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+
+    b = _build_on(tmp_path, _tampered_run(tmp_path, poison))
+    assert b.returncode != 0, b.stdout[-400:]
+    assert "المجمَّعةُ المُلتزمة" in (b.stdout + b.stderr), b.stdout[-400:]
+
+
+@needs_artifacts
+def test_a_rule_of_zero_is_refused_by_name_and_writes_nothing(tmp_path):
+    """`--holdout-mod 0` كان يُفرِّغ الحجزَ (قِيس عند المدقّق: ١٤٢ صفحةً مُقيَّمة دخلت التدريب · `rc=0`)."""
+    out = tmp_path / "t0"
+    r = subprocess.run([sys.executable, "tools/capture_training.py",
+                        "--run", "data/local_sample/slice_629p",
+                        "--export", "data/local_sample/export-629p.xlsx",
+                        "--out", str(out), "--holdout-mod", "0"],
+                       cwd=ROOT, capture_output=True, text=True)
+    assert r.returncode == 1 and "لا يحجز شيئاً" in (r.stdout + r.stderr), r.stdout[-300:]
+    assert not list(out.rglob("pg-*")), "كُتبت صفحاتٌ بقاعدةٍ فارغة"
+
+
+@needs_artifacts
+def test_an_unknown_identity_does_not_abandon_the_pack_silently(tmp_path):
+    """**منفذٌ مقيس:** بلا ملفّ أصل يصير `doc_id = unknown_doc` ⇒ الحزمةُ لا تُستثنى **بصمت** وتُكتب
+    ١٣٣ من ٢٠٠ صفحةً مقيَّدة في التدريب بـ`rc=0`. الآن: وقوفٌ بالاسم، والمخرجُ بعَلَمٍ صريح."""
+    base = [sys.executable, "tools/capture_training.py",
+            "--run", "data/local_sample/slice_629p",
+            "--export", "data/local_sample/export-629p.xlsx",
+            "--pdf", str(tmp_path / "لا-يوجد.pdf"), "--limit", "1"]
+    r = subprocess.run([*base, "--out", str(tmp_path / "t1")], cwd=ROOT, capture_output=True, text=True)
+    assert r.returncode != 0 and "لم تُستثنَ صفحةٌ واحدة" in (r.stdout + r.stderr), r.stdout[-300:]
+    ok = subprocess.run([*base, "--no-pack-exclusion", "--out", str(tmp_path / "t2")],
+                        cwd=ROOT, capture_output=True, text=True)
+    assert ok.returncode == 0, "القرارُ الصريحُ يجب أن يمرّ: " + ok.stdout[-300:]
+
+
+@needs_artifacts
+def test_a_partial_run_never_certifies_the_disk(tmp_path):
+    """**منفذٌ مقيس:** تشغيلةٌ جزئيّةٌ كانت تكتب البيانَ كاملاً فتُبيّض قاعدةَ الحجز ⇒ التشغيلةُ الكاملةُ
+    بعدها حذفت ١٤٠ صفحةً بلا عَلَمٍ ولا سببٍ مُسمّى. والقاعدةُ الآن: لا يكتب حقولَ السلطة إلا من صدّق."""
+    from tools.capture_training import close_authority
+    ident = str(pack_io.pack_facts(PACK)["identity"])
+    out = tmp_path / "tp"
+    r = subprocess.run([sys.executable, "tools/capture_training.py",
+                        "--run", "data/local_sample/slice_629p",
+                        "--export", "data/local_sample/export-629p.xlsx",
+                        "--out", str(out), "--limit", "1", "--holdout-mod", "2"],
+                       cwd=ROOT, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout[-300:]
+    man = json.loads((out / ident / "manifest.json").read_text(encoding="utf-8"))
+    assert man["close_out"]["mode"] == "not_full_run"
+    assert "holdout_mod" not in man and "holdout_rule" not in man and "pack_exclusion" not in man, \
+        f"تشغيلةٌ جزئيّةٌ صدّقت على سلطة القرص: {[k for k in man if 'holdout' in k or 'pack' in k]}"
+    why = close_authority(is_full_run=True, now={"holdout_mod": 2, "capture_version": "1",
+                                                 "export_sha256": "x", "pack_identity": ident,
+                                                 "pack_pages": 200},
+                          prev=man, disk_missing=False)
+    assert any("لا يعلن قاعدةَ الحجز" in w for w in why), why

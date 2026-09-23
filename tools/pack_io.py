@@ -167,9 +167,10 @@ def pages_sha256(pages) -> str:
 #: ليست قناعاً، فمجالُه قابلٌ للتعداد). فالمالُ تحرسه بوّاباتُه (الهوية/الإطار/العدّاد)
 #: التي تُعاد اشتقاقُها من القرص، والختمُ يحرس ما لا تراه: **الوجودُ والنصُّ والبنيةُ والأعلام**.
 PAGE_SEAL_SCHEMA = ("sha256 لِإسقاطٍ قياسيٍّ للصفحة: pg · page_no · حقولُ الإطار · عددُ الصفوف · "
-                    "(الترتيب · التاريخ · مصدرُ التاريخ · العمودُ المطبوع · وُجودُ مبلغ · النصّ) · "
+                    "(الترتيب · التاريخ · مصدرُ التاريخ · العمودُ المطبوع · وُجودُ مبلغ · "
+                    "النصّ **كاملًا** حتى 4096 خانةً ومع طولِه المُعلَن قبلَه) · "
                     "وأعلامُ القارئ — **بلا قيمِ مبالغ** (القاعدة ١٣)")
-SEAL_TEXT_MAX = 120
+SEAL_TEXT_MAX = 4096
 SEAL_FLAGS = ("recovered", "reread", "arbitrated_by", "superseded_reason", "page_no_source", "page_no_note")
 
 
@@ -181,7 +182,13 @@ def page_projection(pg: dict) -> dict:
     فكان الإسقاطُ فارغاً من النصّ **وضبطُ تعديل النصّ لم يَعَضّ** (قِيس: `PASS` على سمٍّ حقيقيّ).
     """
     def txt(x) -> str:
-        return re.sub(r"\s+", " ", str(x if x is not None else "")).strip()[:SEAL_TEXT_MAX]
+        """نصٌّ مطبَّعٌ **بكاملِه** حتى `SEAL_TEXT_MAX`، وطولُه **مُعلَنٌ قبلَه** فلا يُخفي ذيلًا.
+
+        (بوّابةُ التسليم: كان `[:120]` يقطع صمتاً، وقِيس أنّ ٣٢ حقلًا في ٢٩ صفحةً أطولُ من ١٢٠
+        ⇒ سمٌّ في الذيل يمرّ `PASS`. والطولُ المُعلَن يجعل أيَّ تغييرٍ للطول مرئيًّا، حتى فوق الحدّ.)
+        """
+        s = re.sub(r"\s+", " ", str(x if x is not None else "")).strip()
+        return f"{len(s)}:{s[:SEAL_TEXT_MAX]}"
 
     rows = pg.get("raw_rows") or []
     return {
@@ -253,7 +260,11 @@ def content_seal(run_dir: Path, pages) -> dict:
 
 
 def seal(start: Path | None = None) -> dict | None:
-    """ما تقوله الشهادةُ المُلتزمة: بصمةُ المجموعة وعددُها — **القارئُ الذي لم يكن للختم**."""
+    """ما تقوله الشهادةُ المُلتزمة: بصمةُ المجموعة وعددُها **والمجمَّعةُ الخاليةُ من المال**.
+
+    **والثالثُ هو قراءةُ العدد المنشور** (بوّابةُ التسليم · المقعد الثاني): كان يُكتب في الشهادة
+    ولا يقرأه أحد ⇒ بعد أيّ `--build` على قرصٍ مُحرَّف يعود الحكمُ `PASS` و«الحزمةُ تشهد لنفسها».
+    """
     ev = evidence_path(start)
     if ev is None:
         return None
@@ -263,11 +274,16 @@ def seal(start: Path | None = None) -> dict | None:
         return {"file": ev.name, "error": "شهادةٌ لا تُقرأ"}
     p = d.get("pack") or {}
     return {"file": ev.name, "sha256": p.get("pages_sha256"), "count": p.get("pages_count"),
+            "page_seal_aggregate": ((p.get("page_seal") or {}).get("aggregate_sha16")),
             "tree": str(repo_root(start))}          # **يُعلَن من أيّ شجرةٍ قُرئ** (S-2)
 
 
-def seal_violation(facts: dict, start: Path | None = None) -> str | None:
-    """مقابلةُ الحزمة الحيّة بالختم المُلتزم — ورسالةُ مخالفةٍ مُسمّاة، أو None إن طابق."""
+def seal_violation(facts: dict, live_seal: dict | None = None,
+                   start: Path | None = None) -> str | None:
+    """مقابلةُ الحزمة الحيّة بالختم المُلتزم — ورسالةُ مخالفةٍ مُسمّاة، أو None إن طابق.
+
+    و`live_seal` (إن مُرِّر) يُدخل **المجمَّعةَ الخاليةَ من المال** في المقابلة ⇒ صار للعدد المنشور قارئ.
+    """
     s = seal(start)
     if s is None:
         return "لا شهادةَ مُلتزمة ⇒ الختمُ بلا قارئ (شغّل tools/pack_evidence.py وحدِّث الشهادة)"
@@ -277,4 +293,10 @@ def seal_violation(facts: dict, start: Path | None = None) -> str | None:
     if s.get("count") != len(facts["pages"]) or s.get("sha256") != live:
         return (f"ختمُ الحزمة لا يطابق الشهادة المُلتزمة ({s['file']}): "
                 f"المُلتزم {str(s.get('sha256'))[:16]}×{s.get('count')} ≠ الحيّ {live[:16]}×{len(facts['pages'])}")
+    if live_seal is not None and s.get("page_seal_aggregate") \
+            and s["page_seal_aggregate"] != live_seal.get("aggregate_sha16"):
+        return (f"المجمَّعةُ المُلتزمة لمحتوى الصفحات تخالف الحيّة ({s['file']}): "
+                f"المُلتزم {s['page_seal_aggregate']} ≠ الحيّ {live_seal.get('aggregate_sha16')} "
+                "⇒ محتوى القرص تغيّر بعد الشهادة — أَعِد الشهادةَ بأمرٍ معلَن "
+                "(`tools/pack_evidence.py`) أو حقِّق في المسّ")
     return None
