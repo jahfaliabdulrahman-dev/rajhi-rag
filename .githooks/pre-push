@@ -27,7 +27,14 @@ done
 REFS=$(cat)
 printf '%s\n' "$REFS" | "$PY" tools/publish_guard.py --pre-push || exit 1
 # `$1` = وجهةُ الدفع (اسمُ ريموت أو رابط): يمرّرها الحارسُ ليَقيس «ما يُنشر» مقابلها لا مقابل كلّ الريموتات.
-printf '%s\n' "$REFS" | "$PY" tools/amount_guard.py --pre-push --remote "$1" || exit 1
+# **ويُمرَّر فقط إن أعلنته الأداة:** خطّافُ نسخةٍ يشير إليها worktree آخر قد يُشغّل أداةً أقدمَ لا
+# تعرف `--remote` ⇒ argparse يرفض ⇒ يُمنَع دفعٌ مشروع (وقع فعلاً للمدقّق). والبديلُ يُعلَن لا يُخفى.
+if "$PY" tools/amount_guard.py --help 2>/dev/null | grep -q -- '--remote'; then
+  printf '%s\n' "$REFS" | "$PY" tools/amount_guard.py --pre-push --remote "$1" || exit 1
+else
+  echo "⚠ الأداةُ لا تعرف --remote ⇒ المدى تقريباً من كلّ الريموتات (يُعلن ولا يُخفى)"
+  printf '%s\n' "$REFS" | "$PY" tools/amount_guard.py --pre-push || exit 1
+fi
 
 if "$PY" -c "import pyflakes" 2>/dev/null; then
   "$PY" tools/static_gate.py || exit 1

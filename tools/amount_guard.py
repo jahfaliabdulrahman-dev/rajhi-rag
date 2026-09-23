@@ -601,7 +601,13 @@ def parse_refs(stream: str) -> tuple[list[tuple[str, str]], int]:
         if not line.strip():
             continue
         p = line.split()
-        if len(p) != 4 or not p[0].startswith("refs/") or not _is_sha(p[1]) or not _is_sha(p[3]):
+        # **الحقلُ الأول ليس مرجعاً دائماً** — مقيسٌ من git نفسِه (لا من ظنٍّ):
+        #   `git push origin HEAD:refs/heads/x` ⇒ `HEAD <sha> refs/heads/x <zeros>`
+        #   `git push origin <sha>:refs/heads/y` ⇒ `<sha> <sha> refs/heads/y <zeros>`
+        #   `git push origin --delete x`        ⇒ `(delete) <zeros> refs/heads/x <sha>`
+        # واشتراطُ `refs/` في الحقل الأول **رفض ثلاثَ صيغٍ مشروعة** بـ`rc=2` (وفيها الحذفُ الذي
+        # ادّعيتُ أنّه يمرّ — فسقط الادّعاء بالقياس). فيُفحَص **الشكل**: حقلان sha صحيحان، ومقصدٌ مرجع.
+        if len(p) != 4 or not p[2].startswith("refs/") or not _is_sha(p[1]) or not _is_sha(p[3]):
             bad += 1
             continue
         pairs.append((p[1], p[3]))

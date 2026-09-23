@@ -430,7 +430,7 @@ def test_an_empty_stdin_and_an_empty_range_are_not_the_same_failure():
     head = _rev(ROOT)
     zeros = "0" * 40
     for refs, why in ((f"refs/heads/x {head} refs/heads/x {head}\n", "فرعٌ تعرف الوجهةُ أساسَه"),
-                      (f"refs/heads/x {zeros} refs/heads/x {head}\n", "حذفُ فرع")):
+                      (f"(delete) {zeros} refs/heads/x {head}\n", "حذفُ فرع (شكلُ git الحقيقيّ)")):
         r = subprocess.run([sys.executable, str(GUARD), "--pre-push"], cwd=ROOT,
                            capture_output=True, text=True, input=refs)
         assert r.returncode == 0 and "المدى فارغٌ **بالقياس" in r.stdout, (why, r.stdout, r.stderr)
@@ -447,6 +447,35 @@ def test_an_empty_stdin_and_an_empty_range_are_not_the_same_failure():
                            capture_output=True, text=True, input=junk)
         assert r.returncode == 2 and "لم أُقرأ منه مرجعاً" in r.stdout, (why, r.stdout, r.stderr)
 
+
+def test_the_four_forms_git_actually_sends_are_all_read(tmp_path):
+    """**مراجعة ٤١/١:** الأشكالُ الأربعة **مقيسةٌ من git نفسِه** (probe على خطّافٍ يطبع `stdin`):
+
+    | الأمر | ما يصل الخطّاف |
+    | :--- | :--- |
+    | `git push origin HEAD:refs/heads/x` | `HEAD <sha> refs/heads/x <zeros>` |
+    | `git push origin <sha>:refs/heads/y` | `<sha> <sha> refs/heads/y <zeros>` |
+    | `git push origin --delete x` | `(delete) <zeros> refs/heads/x <sha>` |
+    | `git push origin HEAD:refs/heads/z` | `HEAD <sha> refs/heads/z <zeros>` |
+
+    واشتراطُ `refs/` في **الحقل الأول** (وهو ما فعلتُه) يرفض ثلاثةً منها `rc=2` — وفيها الحذفُ الذي
+    ادّعى تقريري أنّه يمرّ. فالاختبارُ يقيس **شكلَ git** لا شكلَ ظنّي.
+    """
+    zeros, head = "0" * 40, _rev(ROOT)
+    forms = {
+        "HEAD:refs/heads/x": f"HEAD {head} refs/heads/x {zeros}\n",
+        "<sha>:refs/heads/y": f"{head} {head} refs/heads/y {zeros}\n",
+        "--delete x": f"(delete) {zeros} refs/heads/x {head}\n",
+        "refs/heads/z": f"HEAD {head} refs/heads/z {zeros}\n",
+    }
+    for why, line in forms.items():
+        pairs, bad = ag.parse_refs(line)
+        assert bad == 0 and len(pairs) == 1, f"شكلُ git مرفوضٌ: {why} ⇒ {line!r}"
+        local, remote = pairs[0]
+        assert ag._zero(local) == (why == "--delete x"), why
+    # والحذفُ: لا شيءَ يُنشر ⇒ مدىً فارغٌ شرعاً (وهو الادّعاءُ الذي سقط وأُعيد إثباتُه بالشكل الحقيقيّ)
+    assert ag.pushed_revs(forms["--delete x"], "origin") == []
+    assert ag.pushed_revs(forms["HEAD:refs/heads/x"], "origin"), "وغيرُ الحذف يعطي مدىً (لا فارغٌ كاذب)"
 
 def test_a_second_remote_does_not_empty_the_destination_range(tmp_path, monkeypatch):
     """**إغلاقُ الفتح (مقعدا البنية والمواصفة، ٤١):** `--not --remotes` تطرح مراجعَ **كلّ** ريموت ⇒
