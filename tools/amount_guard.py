@@ -917,7 +917,7 @@ def proof_inject() -> int:
 
 # ═══════════════════════ الواجهة ═══════════════════════
 
-def history_forms(deny: set[str] | None = None) -> tuple[int, int]:
+def history_forms(deny: set[str] | None = None, repo: Path | None = None) -> tuple[int, int]:
     """**مسحُ كلّ تاريخ المستودع** (`--all --objects`) عن صيغِ مبالغَ حقيقيّة.
 
     (لماذا: تطهيرُ الملفّات لا يكفي — المفتاحُ وبصماتُه ونسخُ الفيكسترات في *التزاماتٍ سابقة*
@@ -927,11 +927,23 @@ def history_forms(deny: set[str] | None = None) -> tuple[int, int]:
     يُعيد (عددُ الـblobs، عددُ الصيغ) — **أعداداً لا نصوصاً**.
     """
     deny = load_deny() if deny is None else deny
-    listing = _git_here("rev-list", "--all", "--objects")
+    # **سطحُ المسح يُقاس لا يُفترض (مراجعةُ ٤٣):** كان `--history-audit` يقرأ المستودعَ الحاليّ أبداً
+    # وإن مُرِّر `--mirror` ⇒ «PASS» عن سطحٍ لم يُطلَب فحصُه. أُثبت بزرعٍ حقيقيّ: rc=0 والعددُ نفسُه.
+    prefix = ["-C", str(repo)] if repo is not None else []
+    if repo is not None:
+        probe = subprocess.run(["git", "-C", str(repo), "rev-parse", "--git-dir"],
+                               capture_output=True, text=True)
+        if probe.returncode != 0:
+            raise UnresolvedRange(f"سطحُ المسح المُعلَن ليس مستودعاً ({_shown(Path(repo))}) ⇒ لا أمرّ")
+    # **سطحٌ واحدٌ للقراءة والكتابة:** بلا وجهةٍ يُقرأ المستودعُ الذي أُنفِّذ فيه الأمر (سلوكُ
+    # `_git_here` نفسُه)، وبوجهةٍ `-C <المسار>`. (وأوّلُ صياغةٍ لي استعملت `_git(*)` أي `cwd=ROOT`
+    # ⇒ أشارت القراءةُ إلى مستودعٍ آخر، فسقط اختبارُ «كلّ التاريخ يُفحَص» — قِيسَ لا تُخُمّ.)
+    listing = subprocess.run(["git", *prefix, "rev-list", "--all", "--objects"],
+                             capture_output=True, text=True)
     if listing.returncode != 0:
         raise UnresolvedRange("rev-list --all --objects فشل ⇒ لا تاريخَ أُثبته")
     shas = sorted({line.split()[0] for line in listing.stdout.splitlines() if line.split()})
-    batch = subprocess.run(["git", "cat-file", "--batch"], input="\n".join(shas).encode(),
+    batch = subprocess.run(["git", *prefix, "cat-file", "--batch"], input="\n".join(shas).encode(),
                            capture_output=True)
     if batch.returncode != 0:
         raise UnresolvedRange(f"cat-file --batch فشل (rc={batch.returncode}) ⇒ مسحٌ لم يقع ⇒ لا أمرّ")
@@ -1055,7 +1067,9 @@ def main(argv=None) -> int:
                 return 0
             print("⛔ BLOCK — لا أدلّةَ (مفتاح/مانيفست) ⇒ لا أستطيع مسحَ التاريخ ⇒ لا أُثبت شيئاً")
             return 2
-        nblobs, forms = history_forms(deny)
+        scan_repo = Path(args.mirror) if args.mirror else None
+        print(f"· سطحُ المسح: {_shown(scan_repo) if scan_repo else 'المستودع الحالي'}")
+        nblobs, forms = history_forms(deny, repo=scan_repo)
         if forms:
             print(f"⛔ BLOCK — التاريخُ يحمل {forms} صيغةً لمبالغَ حقيقيّة داخل {nblobs} blobاً "
                   f"(النصوصُ لا تُطبع؛ استعمل `--json` للأعداد فقط)")

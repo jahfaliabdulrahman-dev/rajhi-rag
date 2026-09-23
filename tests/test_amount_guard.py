@@ -631,3 +631,41 @@ def test_a_truncated_batch_stream_fails_closed(monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run)
     with pytest.raises(ag.UnresolvedRange):
         ag.history_forms({ag.fingerprint(FAKE)})      # تدفّقٌ مقصوص ⇒ لا مسحَ ناقص
+
+def test_the_history_audit_scans_the_mirror_it_is_given(tmp_path):
+    """**مراجعة ٤٣ — «فحصٌ لا يستطيع أن يسقط»:** كان `--history-audit` يقرأ المستودعَ الحاليّ أبداً
+    ويُهمل `--mirror`، فطبع «PASS» بـ**نفس عدد الكائنات (١١١٣)** على مرآةٍ حقيقيّةٍ وعلى مرآةٍ
+    زُرع فيها رقمٌ حقيقيّ (rc=0). اليومَ السطحُ يُقاس: المزروعةُ **تسقط**، والوهميّةُ تمرّ، والحاليُّ يمرّ.
+
+    **والسمُّ يُشتقّ من المصدر (القاعدة ١٢):** رمزٌ من الكاش المعتمد بصمتُه في المانيفست — لا قيمةَ مكتوبة.
+    """
+    deny = ag.load_deny()
+    if deny is None:
+        _skip_without_evidence()
+    corpus = Path(ag.DATA_ROOT) / "data" / "local_sample" / "slice_629p" / "results"
+    poison = ""
+    for f in sorted(corpus.glob("pg-*.json")):
+        for tok in ag.TOKEN.findall(f.read_text(encoding="utf-8", errors="replace")):
+            if ag.is_significant(tok) and ag.fingerprint(tok) in deny:
+                poison = tok
+                break
+        if poison:
+            break
+    assert poison, "لا رمزَ من الكوربوس بصمتُه في المانيفست ⇒ السمُّ لا يمثّل شيئاً (واختبارٌ لا يستطيع أن يسقط)"
+
+    def _mirror(name: str, token: str) -> Path:
+        work = tmp_path / name
+        work.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=work, check=True)
+        (work / "note.md").write_text(f"قيمة: {token}\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=work, check=True)
+        subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                        "commit", "-q", "-m", "plant"], cwd=work, check=True)
+        bare = tmp_path / (name + ".git")
+        subprocess.run(["git", "clone", "-q", "--mirror", str(work), str(bare)], check=True)
+        return bare
+
+    n, forms = ag.history_forms(deny, repo=_mirror("poison", poison))
+    assert forms >= 1, f"مرآةٌ تحمل رقماً حقيقيّاً يجب أن تُسقط ⇒ بلغ {forms} في {n} blobاً"
+    assert ag.history_forms(deny, repo=_mirror("fake", FAKE))[1] == 0, "وهميّةٌ لا تُسقط (لا إنذارَ كاذب)"
+    assert ag.history_forms(deny)[1] == 0, "والمستودعُ الحاليُّ نظيفٌ بها"
