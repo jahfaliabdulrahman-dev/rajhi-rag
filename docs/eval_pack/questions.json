@@ -442,22 +442,21 @@
    "cat": "امتناع",
    "metric": "abstain",
    "expect": "abstain",
-   "q": "ما مجموعُ المبالغ المدينة في تذييل الصفحة ٣٠٠؟",
+   "q": "ما مجموعُ المبالغ المدينة في تذييل الصفحة ٧٠٠؟",
    "derive": {
     "kind": "absent",
     "reason": "page_outside_pack",
-    "page": 300
+    "page": 700
    }
   },
   {
    "id": "abs-02",
-   "cat": "امتناع",
-   "metric": "abstain",
-   "expect": "abstain",
+   "cat": "رقمي",
+   "metric": "number",
+   "expect": "number",
    "q": "كم صفًّا مطبوعًا في الصفحة ٦٢٩؟",
    "derive": {
-    "kind": "absent",
-    "reason": "page_outside_pack",
+    "kind": "count_rows",
     "page": 629
    }
   },
@@ -466,11 +465,11 @@
    "cat": "امتناع",
    "metric": "abstain",
    "expect": "abstain",
-   "q": "ما مجموعُ حركات سنة ٢٠٢٢ في هذه الحزمة؟",
+   "q": "ما مجموعُ حركات سنة ١٩٩٩ في الكشف؟",
    "derive": {
     "kind": "absent",
     "reason": "year_absent",
-    "year": 2022
+    "year": 1999
    }
   },
   {
@@ -514,11 +513,11 @@
    "cat": "امتناع",
    "metric": "abstain",
    "expect": "abstain",
-   "q": "هل يتّصل رصيدُ الصفحة ٥٣٥ بما بعدها؟",
+   "q": "هل يتّصل رصيدُ الصفحة ٧٠٠ بما بعدها؟",
    "derive": {
     "kind": "absent",
-    "reason": "boundary",
-    "page": 535
+    "reason": "page_outside_pack",
+    "page": 700
    }
   },
   {
@@ -533,28 +532,28 @@
    }
   },
   {
-   "id": "str-01",
+   "id": "abs-09",
    "cat": "امتناع",
    "metric": "abstain",
    "expect": "absent",
-   "q": "ما معرّفُ هويّة الكوربوس، وهل هذا الحقلُ مطبوعٌ في الكشوف؟",
+   "q": "كم صفًّا مطبوعًا في الصفحة ٨٠٠؟",
    "derive": {
-    "kind": "pack_meta",
-    "field": "identity"
-   },
-   "absent_reason": "حقلُ هويّة الحزمة ليس من حقول الكشف ولا تراه أدواتُ النظام"
+    "kind": "absent",
+    "reason": "page_outside_pack",
+    "page": 800
+   }
   },
   {
-   "id": "str-02",
+   "id": "abs-10",
    "cat": "امتناع",
    "metric": "abstain",
    "expect": "absent",
-   "q": "ما معرّفُ هويّة الكوربوس، وهل هذا الحقلُ مطبوعٌ في الكشوف؟",
+   "q": "ما أكبرُ مبلغ حركة في الصفحة ٩٠٠؟",
    "derive": {
-    "kind": "pack_meta",
-    "field": "pages"
-   },
-   "absent_reason": "حقلُ هويّة الحزمة ليس من حقول الكشف ولا تراه أدواتُ النظام"
+    "kind": "absent",
+    "reason": "page_outside_pack",
+    "page": 900
+   }
   },
   {
    "id": "str-03",
@@ -568,16 +567,16 @@
    }
   },
   {
-   "id": "str-04",
+   "id": "abs-11",
    "cat": "امتناع",
    "metric": "abstain",
    "expect": "absent",
-   "q": "ما معرّفُ هويّة الكوربوس، وهل هذا الحقلُ مطبوعٌ في الكشوف؟",
+   "q": "ما الرصيدُ الأخير في الصفحة ١٠٠٠؟",
    "derive": {
-    "kind": "pack_meta",
-    "field": "class_count"
-   },
-   "absent_reason": "حقلُ هويّة الحزمة ليس من حقول الكشف ولا تراه أدواتُ النظام"
+    "kind": "absent",
+    "reason": "page_outside_pack",
+    "page": 1000
+   }
   }
  ]
 }

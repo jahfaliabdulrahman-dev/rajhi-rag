@@ -21,7 +21,7 @@ PACK = ROOT / "data" / "eval_pack" / "pack.json"
 needs_artifacts = pytest.mark.skipif(not PACK.exists(), reason="الأدلّةُ الثقيلةُ خارج git (مقصود)")
 
 KINDS = {"footer", "page_sum_all", "count_rows", "last_row_balance", "argmax_row", "rows_matching",
-         "row_chain", "date_encoding", "pack_meta", "absent"}
+         "row_chain", "date_encoding", "absent"}
 METRICS = {"number", "citation", "abstain"}
 
 
@@ -98,7 +98,7 @@ def test_every_question_yields_a_value_or_a_declared_abstention():
     spec = json.loads(Q.read_text())
     for ln, q in zip(lines, spec["questions"]):
         value = ln.split()[-1]
-        if q["metric"] == "abstain" and q["expect"] == "abstain":
+        if q["derive"]["kind"] == "absent":     # **الامتناعُ المشتقُّ: لا قيمة، وسببٌ معلَن**
             assert value == "null", f"{q['id']}: امتناعٌ أخرج قيمة"
         else:
             assert value not in ("null", "None"), f"{q['id']}: لا قيمةَ مُشتقّة"

@@ -94,6 +94,16 @@ class Corpus:
     def covers(self, p: int) -> bool:
         return p in self.pages and self.page(p) is not None
 
+    def raw_rows(self, page: int) -> list[dict]:
+        """**الصفوفُ المطبوعةُ الخامّة** — لا تُسقِط صفًّا بلا رصيد (وإسقاطُها كان يُخفي صفحةَ ٦٢٩ كلَّها)."""
+        p = self.dir / "results" / f"pg-{page:03d}.json"
+        if not p.exists():
+            return []
+        try:
+            return list(json.loads(p.read_text()).get("raw_rows") or [])
+        except (OSError, json.JSONDecodeError):
+            return []
+
     def corpus_pages(self) -> int:
         return len(list((self.dir / "results").glob("pg-*.json")))
 
@@ -117,7 +127,7 @@ def truth(q: dict, c: Corpus, pack: dict) -> tuple[object, dict]:
         vals = [v for v in vals if v is not None]
         return (sum(vals) if vals else None), {"kind": k, "page": d["page"], "rows": len(vals)}
     if k == "count_rows":
-        n = len(c.rows(d["page"]))
+        n = len(c.raw_rows(d["page"]))        # **المطبوعُ الخامّ** (لا المشتقُّ الذي يُسقِط صفوفاً)
         return n, {"kind": k, "page": d["page"], "rows": n}
     if k == "last_row_balance":
         rs = c.rows(d["page"])
@@ -129,7 +139,9 @@ def truth(q: dict, c: Corpus, pack: dict) -> tuple[object, dict]:
             return None, {"kind": k, "page": d["page"], "rows": 0}
         m = max(v for _, v in vals)
         tops = [i for i, v in vals if v == m]
-        return (tops[0] if len(tops) == 1 else {"tie": tops}), {"kind": k, "page": d["page"], "tops": tops}
+        # **الحقيقةُ صفٌّ ومبلغٌ وتعادلٌ — لا فهرسٌ يُقارَن بمبلغ** (كان المصحِّحُ معكوساً: صحّحتُ ٢٠٢٦-٠٩-٢٤)
+        return ({"amount": m, "tops": tops, "tie": len(tops) > 1},
+                {"kind": k, "page": d["page"], "tops": tops})
     if k == "row_chain":
         ra, rb = c.rows(d["a"]), c.rows(d["b"])
         la = num(ra[-1].get("balance")) if ra else None
@@ -166,11 +178,13 @@ def check_abstention(q: dict, c: Corpus, pack: dict) -> tuple[bool, str]:
     """
     d = q["derive"]
     r = d["reason"]
+    present = set(c.corpus_page_list())     # **نطاقُ النظام**: الكشفُ كلُّه (٦٢٩) لا حزمةُ تقييمي (٢٠٠)
     if r == "page_outside_pack":
-        return (d["page"] not in c.pages), f"الصفحة {d['page']} {'داخل' if d['page'] in c.pages else 'خارج'} الحزمة"
+        return (d["page"] not in present), \
+            f"الصفحة {d['page']} {'داخل' if d['page'] in present else 'خارج'} نطاقِ النظام ({len(present)} صفحة)"
     if r == "year_absent":
         yrs = set()
-        for p in c.pages:
+        for p in present:
             for row in c.rows(p):
                 m = re.findall(r"(?:19|20)\d{2}", norm_digits(row.get("date") or ""))
                 yrs.update(m)
@@ -226,6 +240,39 @@ def _is_neg(ans: str) -> bool:
     return bool(_NEG_RE.search(ans)) or any(w in ans for w in _NEG)
 
 
+_AMOUNT_TOK = re.compile(r"\d[\d,٬]*(?:[.٫]\d{1,2})\b")   # مبلغٌ لا رقمُ صفحة: الفاصلةُ العشريّةُ شرط
+
+
+def _claimed_amounts(ans: str) -> list[float]:
+    """المبالغُ المُدّعاةُ في الجواب (لا كلُّ رقم) — رقمُ الصفحةِ والعدّ ليسا مبلغاً."""
+    out = []
+    for tok in _AMOUNT_TOK.findall(ans or ""):
+        try:
+            out.append(float(tok.replace(",", "").replace("٬", "").replace("٫", ".")))
+        except ValueError:
+            continue
+    return out
+
+
+def _trace_amounts(res, rows: list[dict]) -> list[float]:
+    """**السندُ = الأثر**: مبالغُ الصفوف التي استُشهد بها فعلاً (movement/balance)."""
+    out = []
+    for n in (getattr(res, "used_row_nos", None) or []):
+        if 1 <= n <= len(rows):
+            for v in (rows[n - 1].get("movement"), rows[n - 1].get("balance")):
+                if v is not None:
+                    out.append(float(v))
+    return out
+
+
+_TIE_RE = re.compile(r"(مرّ?تين|مرتين|يتكرّر|يتكرر|مكرّر|مكرر|تعادل|متساو|نفس المبلغ|الصفَّ?ين|كليهما)")
+
+
+def _declares_tie(ans: str) -> bool:
+    """التعادلُ يُعلَن بألفاظٍ لا بقائمةٍ فقيرة: «ويظهر مرتين» إعلانٌ صريح (قِيس: رسب ظلماً)."""
+    return bool(_TIE_RE.search(ans))
+
+
 def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[bool, str]:
     """حكمٌ **ميكانيكيّ** لكلّ سؤال — بلا حَكَمٍ ذوقيّ (والحدُّ معلَنٌ في التقرير).
 
@@ -271,8 +318,6 @@ def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[b
                 f"أصابت {len(hit)}/{len(hit_pages)} صفحةً صحيحة · دقّةُ الاستشهاد {prec:.0%} ({len(cited_pages)} صفحةً مُستشهدة)"
         if need not in cited_pages:
             return False, f"لم يستشهد بالصفحة {need} (المستشهَد {cited_pages})"
-        if isinstance(truth_val, dict):                      # تعادلٌ ⇒ لا يجوز الجزم
-            return False, "الصفحةُ صحيحةٌ لكن الحقيقةَ تعادلٌ لا جزم"
         want = None
         for n in used:
             if 1 <= n <= len(rows) and rows[n - 1]["page"] == need:
@@ -280,21 +325,37 @@ def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[b
                 break
         if want is None:
             return False, f"استشهد بالصفحة {need} بلا صفٍّ منها"
+        t = truth_val if isinstance(truth_val, dict) else {}
         cands = [rows[n - 1]["movement"] for n in used
                  if 1 <= n <= len(rows) and rows[n - 1]["page"] == need and rows[n - 1]["movement"] is not None]
-        ok = any(abs(float(mv) - float(truth_val)) < 0.05 for mv in cands)   # أيُّ صفٍّ مُستشهَدٍ يطابق القمة
-        return ok, f"{'أشار إلى' if ok else 'لم يُشر إلى'} صفِّ القمة في الصفحة {need} ({len(cands)} صفًّا مُستشهَداً)"
+        if not cands:
+            return False, f"استشهد بالصفحة {need} بلا صفٍّ منها"
+        amt = t.get("amount")
+        if amt is None:
+            return False, f"لا قمةَ مُشتقّةً للصفحة {need} (صفحةٌ بلا مبالغ)"
+        floor = float(amt)
+        names = any(abs(float(mv) - floor) < 0.05 for mv in cands)  # **مبلغٌ بمبلغ لا فهرسٌ بمبلغ**
+        tie_ok = (not t.get("tie")) or _declares_tie(ans)
+        ok = bool(names and tie_ok)
+        why = (f"{'ذكر' if names else 'لم يذكر'} قمةَ الصفحة {need} ({len(cands)} صفًّا مُستشهَداً)"
+               + ("" if tie_ok else " · **ولم يُعلن التعادل** وهو متعادل"))
+        return ok, why
 
     if m == "abstain":
         if q["expect"] == "ambiguous":
             ok = any(w in ans for w in _AMBIG)
             return ok, ("أعلن التعادل ✓" if ok else "لم يُعلن التعادل (جزمَ بلا سند)")
-        invented = [v for v in nums if abs(v) > 0.005]
+        # **الاختراعُ = ادّعاءُ مبلغٍ لا سندَ له في الأثر** — لا كلُّ رقمٍ في الجواب (رقمُ الصفحة ليس مبلغاً).
+        # قِيس: العدّادُ القديم حسب ٩ اختراعات، منها جوابٌ ردّ فيه رقمَ الصفحة المسؤول عنها ⇒ تعليمٌ كاذب.
+        sup = _trace_amounts(res, rows)
+        claimed = [v for v in _claimed_amounts(ans) if abs(v) > 0.005]
+        unsupported = [v for v in claimed if not any(abs(v - s) < 0.005 for s in sup)]
         gated = getattr(res, "scope", "in_scope") != "in_scope" or bool(getattr(res, "refused", False))
+        declared = any(w in ans for w in _ABSENCE)
         why = ("بوّابةُ النطاق منعته قبل النموذج ✓" if gated
-               else "امتناعٌ نصّيّ بلا مبلغٍ مُخترع ✓" if (not invented and any(w in ans for w in _ABSENCE))
-               else f"أجاب بـ{len(invented)} رقماً لا سند لها ✗")
-        return (gated or (not invented and any(w in ans for w in _ABSENCE))), why
+               else "امتناعٌ نصّيّ بلا مبلغٍ مُخترع ✓" if (not unsupported and declared)
+               else f"ادّعى {len(unsupported)} مبلغاً بلا سند في الأثر ✗")
+        return (gated or (not unsupported and declared)), why
     return False, f"مقياسٌ مجهول: {m}"
 
 
@@ -307,6 +368,16 @@ class _Trace:
         self.refused = bool(rec.get("refused"))
 
 
+def _spec_sha() -> str:
+    """بصمةُ ملفّ الأسئلة — تُحفظ مع كلّ جواب ليكون **الربطُ بين النصّ والجواب قابلاً للتدقيق**."""
+    import hashlib
+    p = pathlib.Path(__file__).resolve().parent.parent / "docs/eval_pack/questions.json"
+    try:
+        return hashlib.sha256(p.read_bytes()).hexdigest()[:12]
+    except OSError:
+        return "?"
+
+
 def rescore(a, qs: list[dict], c: Corpus, pack: dict, spec: dict, rows: list[dict]) -> int:
     """**إعادةُ الحكم على أجوبةٍ محفوظة — بلا نداءِ نموذجٍ ولا دفع** (والأثرُ محفوظٌ مع كلّ جواب).
 
@@ -316,19 +387,26 @@ def rescore(a, qs: list[dict], c: Corpus, pack: dict, spec: dict, rows: list[dic
     out = a.out or (pack_io.data_root() / "data/eval_pack/answers.json")
     data = json.loads(out.read_text())
     by_id = {q["id"]: q for q in qs}
+    cur_sha = _spec_sha()
+    stale = 0
     results = []
     for rec in data.get("results", []):
         q = by_id.get(rec["id"])
         if q is not None:
             truth_val, _ = truth(q, c, pack)
             ok, why = score_answer(q, truth_val, rec.get("answer", ""), _Trace(rec), rows)
-            # **تحديثُ الوصف من المصدر الحاليّ**: إعادةُ الحكم تُصحّح التصنيفَ أيضًا (لا تبقى حقولٌ قديمة)
+            # **لا يُكتب فوق نصّ السؤال المحفوظ**: الملفُّ شاهدٌ على ما طُلب فعلاً (كان يُستبدل فيُفقد الشاهد)
             rec = {**rec, "ok": ok, "why": why, "metric": q["metric"], "expect": q["expect"],
-                   "cat": q["cat"], "kind": q["derive"]["kind"], "q": q["q"]}
+                   "cat": q["cat"], "kind": q["derive"]["kind"]}
+            if rec.get("spec_sha") not in (None, cur_sha):
+                stale += 1
         results.append(rec)
         print(f"{rec['id']:9s} {'✅' if rec.get('ok') else '❌'} {rec.get('why', '')}")
     data["results"] = results
     out.write_text(json.dumps(data, ensure_ascii=False, indent=1))
+    if stale:
+        print(f"\n⚠️ {stale} سجلاً كُتب **قبل** بصمةِ الأسئلة الحاليّة ({cur_sha}) ⇒ نصُّ السؤال في السجل قد يخالف "
+              f"ما طُلب فعلاً. الأصلُ: إعادةُ الطرح. **ولا يُنشر رقمٌ من سجلاتٍ غيرِ مطابقةِ البصمة.**")
     _print_metrics(results)
     return 0
 
@@ -402,7 +480,8 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                                                 if 1 <= n <= len(rows)}) if res else [],
                          "used_row_nos": (list(getattr(res, "used_row_nos", None) or [])[:40] if res else []),
                          "scope": getattr(res, "scope", None) if res else None,
-                         "refused": bool(getattr(res, "refused", False)) if res else None}
+                         "refused": bool(getattr(res, "refused", False)) if res else None,
+                         "spec_sha": _spec_sha()}   # **شاهدُ الربط**: أيُّ نصِّ سؤالٍ أُجيب عنه
         merged = {**prev_all, **done}      # النائبُ يبقى ما لم يُجَب عنه فعلاً
         out.write_text(json.dumps({"model": a.model or "افتراضيّ",
                                    "results": [merged[k] for k in order if k in merged]},
@@ -490,9 +569,10 @@ def main(argv=None) -> int:
             if not ok_abs:
                 bad.append(f"{qid}: ادّعاءُ امتناعٍ لا يقيسه القرص ({why})")
             continue
+        present = set(c.corpus_page_list())   # **نطاقُ النظام**: الكشفُ كلُّه (٦٢٩) — المرسى يُقاس عليه لا على حزمة تقييمي
         for p in (v for k_, v in q["derive"].items() if k_ in ("page", "a", "b")):
-            if not c.covers(p):
-                bad.append(f"{qid}: الصفحة {p} خارج الحزمة — مرسًى لا يُقاس")
+            if p not in present:
+                bad.append(f"{qid}: الصفحة {p} خارج نطاقِ النظام ({len(present)} صفحة) — مرسًى لا يُقاس")
     if bad:
         print("\n".join(x for x in bad if x), file=sys.stderr)
 
