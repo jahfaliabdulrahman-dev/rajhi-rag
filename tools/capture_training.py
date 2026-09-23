@@ -51,6 +51,34 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def pack_pages(path: Path | None) -> set[int]:
+    """**صفحاتُ حزمة التقييم المجمّدة** — تُقرأ من `pack.json` بحقولها (لا تُكتب بيد).
+
+    وليست هي «الحجز بالقسمة»: ذاك حجزٌ **بقاعدة** (page % 3)، وهذا **حجزٌ باسمِ الحزمة** —
+    لأنّ الحزمةَ اختيرت أوّلًا، فحقُّها أن تُستثنى من التدريب لا العكس (وإلّا لزم تغييرُ الحزمة
+    بعد بنائها، وهو نقضُ «لا تُلمَس بعد اليوم»).
+    """
+    if path is None:
+        return set()
+    f = Path(path)
+    if not f.exists():
+        raise SystemExit(f"⛔ قائمةُ استثناءٍ مُعلَنة وغيرُ موجودة ({f.name}) ⇒ لا التقاط")
+    d = json.loads(f.read_text(encoding="utf-8"))
+
+    def _nums(x):
+        out = set()
+        for p in x or []:
+            out.add(int(p["page"]) if isinstance(p, dict) and "page" in p else int(p))
+        return out
+
+    out = _nums(d.get("census", {}).get("pages", []))
+    for r in d.get("ranges", []):
+        out |= _nums(r.get("pages", []))
+    if not out:
+        raise SystemExit("⛔ قائمةُ الاستثناء فارغةٌ ⇒ استثناءٌ بلا صفحاتٍ لا يُنفَّذ صامتاً")
+    return out
+
+
 def is_holdout(page: int, mod: int) -> bool:
     """حجز التقييم: حتميّ وقابل لإعادة الإنتاج."""
     return mod > 0 and page % mod == 0
@@ -308,6 +336,8 @@ def main() -> None:
     ap.add_argument("--holdout-mod", type=int, default=3,
                     help="كل صفحةٍ رقمها يقبل القسمة على هذا لا تُلتقط (حجز التقييم)")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--exclude-pack", type=Path, default=None,
+                    help="pack.json للحزمة المجمّدة ⇒ لا تُلتقط صفحاتُها (فالتقاطعُ صفرٌ بالبناء)")
     ap.add_argument("--redact-top", type=float, default=HEADER_MASK_FRACTION)
     ap.add_argument("--pdf", type=Path, default=None,
                     help="ملف الأصل — يُفحَص نصُّه لمقابلة أنماط الخصوصية (قياسٌ لا دعوى)")
@@ -351,9 +381,15 @@ def main() -> None:
     if args.limit:
         pages = pages[:args.limit]
     results, train_pages = [], 0
+    reserved_pack = pack_pages(args.exclude_pack)
+    if reserved_pack:
+        print(f"· صفحاتُ الحزمة المجمّدة المستثناة من الالتقاط: {len(reserved_pack)}")
     for p in pages:
         if is_holdout(p, args.holdout_mod):
             results.append({"page": p, "status": "holdout_reserved"})
+            continue
+        if p in reserved_pack:
+            results.append({"page": p, "status": "pack_reserved"})
             continue
         r = capture_page(p, args.run, args.out, certified[p], doc_id, meta, mask_frac)
         # **فحصُ الخصوصية قبل قبول الصفحة**: تسرُّبٌ ممنوع ⇒ رفضٌ بالاسم لا تجاوز
@@ -376,6 +412,8 @@ def main() -> None:
                   "captured": len(captured),
                   "holdout_reserved": sum(1 for r in results
                                           if r["status"] == "holdout_reserved"),
+                  "pack_reserved": sum(1 for r in results
+                                       if r["status"] == "pack_reserved"),
                   "skipped": [{"page": r["page"], "why": r["status"]}
                               for r in results
                               if r["status"] not in ("captured", "holdout_reserved")]},
@@ -384,6 +422,7 @@ def main() -> None:
                     "balances_joined": sum(r.get("bal_ok", 0) for r in captured),
                     "balances_not_joined": sum(r.get("bal_bad", 0) for r in captured)},
         "holdout_rule": f"page % {args.holdout_mod} == 0 ⇒ لا تُلتقط (حجز التقييم)",
+        "pack_exclusion": (str(args.exclude_pack.name) if args.exclude_pack else None),
         "privacy": {
             "header_masked_fraction": mask_frac,
             # الدليلُ يتبع التصميم: دليلُ المسح (أدنى y لصفٍّ مُثبت) لا يُنسب
