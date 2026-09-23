@@ -14,13 +14,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PACK = ROOT / "data/eval_pack/pack.json"
-TRAIN = ROOT / "data/training"
-EVID = ROOT / "docs/evidence"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from tools.pack_io import data_root  # noqa: E402 — **جذرٌ واحد** (يعمل من شجرة عمل)
+
+DATA = data_root()                       # الجذرُ المشترك: الأدلّةُ الثقيلةُ باقيةٌ في الشجرة الأمّ
+PACK = DATA / "data/eval_pack/pack.json"
+TRAIN = DATA / "data/training"
+EVID = DATA / "docs/evidence"
 FM2 = ("docs/evidence/20260921-fm2-v1-arm.json", "docs/evidence/20260921-fm2-v2-arm.json")
 
 
@@ -29,6 +35,53 @@ def page_numbers(pack: dict) -> list[int]:
     for r in pack["ranges"]:
         out |= {int(p) if not isinstance(p, dict) else int(p["page"]) for p in r["pages"]}
     return sorted(out)
+
+
+def bias_metrics(pages: set[int]) -> dict:
+    """الانحياز **مقيسًا لا مُعلَنًا** — بمقياسين يُعرضان معًا (قرارُ المالك 2026-09-23: «(أ)»).
+
+    والقاعدةُ الحاكمة: **لا يُنتقى مقياسٌ واحد**. المقياسُ الأوّل (صفوفٌ لم تُثبّتها السلسلة) هو ما
+    بُنيت الذراعان لقياسه ⇒ **v2 يتقدّم فيه**؛ والمقياسان الآخران (اكتمالُ الأزواج · انحرافُ العدّ)
+    يرجّحان **v1** ⇒ فيُعلنان معه. وإن سقط أحدُهما من الشهادة فقد صار إعلانُ الانحياز دعايةً لا قياس.
+    """
+    per = {}
+    for tag in ("v1", "v2"):
+        f = EVID / f"20260921-fm2-{tag}-arm.json"
+        d = json.loads(f.read_text(encoding="utf-8"))
+        per[tag] = {"file": f.name, "sha256": hashlib.sha256(f.read_bytes()).hexdigest()[:16],
+                    "pages": {e["page"]: e for e in d["prompts"][tag]["per_page"] if "rows_read" in e}}
+    common = sorted(set(per["v1"]["pages"]) & set(per["v2"]["pages"]))
+    outside = [p for p in common if p not in pages]
+
+    def rows(a, p):
+        e = per[a]["pages"][p]
+        return (e["rows_read"] - e["rows_chain_verified"],
+                max(0, e["pairs_certified"] - e["pairs_matching_certified"]),
+                abs(e["rows_read"] - e["rows_certified"]))
+
+    chain = {a: sum(rows(a, p)[0] for p in outside) for a in ("v1", "v2")}
+    pairs = {a: sum(rows(a, p)[1] for p in outside) for a in ("v1", "v2")}
+    devc = {a: sum(rows(a, p)[2] for p in outside) for a in ("v1", "v2")}
+    won = {a: sum(1 for p in outside if rows(a, p)[0] < rows("v2" if a == "v1" else "v1", p)[0])
+           for a in ("v1", "v2")}
+    best = lambda d: min(d, key=lambda k: (d[k], k))
+    return {
+        "decision": "(أ) **إعلانُ انحيازٍ مؤرَّخ مع عمود المقياسين** — قرارُ المالك 2026-09-23",
+        "why_it_exists": ("ذراعا FM-2 سحبا صفحاتٍ من الحزمة **قبل** ختمها (2026-09-21 مقابل 2026-09-22)، "
+                          "فلا يجوز أن يُنشر مقياسٌ من هذه الحزمة بلا هذا الإعلان."),
+        "arms": {a: {"file": per[a]["file"], "sha256": per[a]["sha256"][:16]} for a in ("v1", "v2")},
+        "measured_pages_outside_pack": len(outside),
+        "metrics": {
+            "chain_unproven_rows": {**chain, "better": best(chain), "meaning": "صفوفٌ قُرئت ولم تُثبّتها السلسلة (الأقلُّ أفضل)"},
+            "pages_won": {**won, "better": best(won), "meaning": "صفحاتٌ تفوّق فيها كلُّ طرفٍ بالمقياس أعلاه"},
+            "missing_pairs": {**pairs, "better": best(pairs), "meaning": "أزواجٌ ناقصة عن المُصدَّق (الأقلُّ أفضل)"},
+            "row_count_deviation": {**devc, "better": best(devc), "meaning": "انحرافُ عدد الصفوف عن المُصدَّق (الأقلُّ أفضل)"},
+        },
+        "reading": ("على مقياس السلسلة (وهو ما بُنيت الذراعان لقياسه) **v2 يتقدّم بلا أيّ صفحةٍ من الحزمة**، "
+                    "وعلى اكتمال الأزواج وانحراف العدّ **v1 يتقدّم قليلًا** ⇒ القرارُ يمضي بالمقياسين معلنين."),
+        "invalidated_by": ("تغيُّرُ بصمة الحزمة (‏`pages_sha256`) أو تغيُّرُ ملفَّي الذراعين ⇒ أعِد التوليد: "
+                           "`python3 tools/pack_evidence.py` — والقارئُ في `tests/test_pack_seal_and_root.py` يقيسه."),
+    }
 
 
 def main() -> int:
@@ -110,6 +163,7 @@ def main() -> int:
                             "(والمطلوب ٣ مديات × ٥٠ متّصلة) ⇒ القرارُ للمالك: إعلانُ الانحياز المؤرَّخ، "
                             "أو تغييرُ بنية الاختيار إلى صفحاتٍ متفرّقة (٢٠٨ ≥ ٢٠٠ بهامش ٨)."),
         },
+        "bias_declaration": bias_metrics(set(pages)),
         "invalidates": {
             "file": "docs/evidence/20260922-item4-step1-gate3-eval-pack.json",
             "why": ("ذاك سجلٌّ مؤرَّخ يقول `capture_mode=explicit-list · captured=416 · intersection=133 · "
@@ -124,6 +178,10 @@ def main() -> int:
     print(f"  الحزمة {len(pages)} صفحة · بصمةُ المجموعة {digest[:16]} · التقاطع {len(pack['intersection_gate']['intersection'])}"
           f" · مستثناةٌ من الالتقاط {len(captured & set(pages))}")
     print(f"  المُنفَقُ سابقًا: {len(set(pages) & spent)} صفحةً من الحزمة (ذراعا FM-2) · الحرُّ {len(free)} · أطولُ مدًى {max(runs, default=0)}")
+    bm = ev["bias_declaration"]["metrics"]
+    print(f"  إعلانُ الانحياز: خارجَ الحزمة {ev['bias_declaration']['measured_pages_outside_pack']} صفحة · "
+          f"سلسلةٌ غيرُ مُثبَتة v1 {bm['chain_unproven_rows']['v1']} → v2 {bm['chain_unproven_rows']['v2']} · "
+          f"أزواجٌ ناقصة {bm['missing_pairs']['v1']} → {bm['missing_pairs']['v2']}")
     return 0
 
 

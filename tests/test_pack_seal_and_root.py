@@ -161,3 +161,24 @@ def test_compare_prompts_excludes_pack_pages():
     assert excluding_pack([1, 2, 3, 4], {2, 4}) == [1, 3]
     assert excluding_pack([7, 8], {7, 8}) == []
     assert excluding_pack([5], set()) == [5]
+
+
+# ───────────────── قرارُ المالك (أ): إعلانُ انحيازٍ مؤرَّخ + عمودُ المقياسين ─────────────────
+
+@needs_artifacts
+def test_bias_declaration_is_committed_and_has_a_reader():
+    """**الإعلانُ يُقاس ولا يُمحى**: يُلتزم في الشهادة، **ويُعاد حسابُه حيًّا فيُقابَل** ⇒ تعفّنٌ يسقط."""
+    from tools import pack_evidence
+    ev = pack_io.evidence_path()
+    assert ev, "لا شهادةَ مُلتزمة"
+    b = json.loads(ev.read_text(encoding="utf-8")).get("bias_declaration")
+    assert b, "الشهادةُ بلا إعلانِ انحياز — وهذا نقضُ قرار المالك (أ)"
+    m = b["metrics"]
+    assert b["measured_pages_outside_pack"] == 282
+    assert (m["chain_unproven_rows"]["v1"], m["chain_unproven_rows"]["v2"]) == (34, 14)
+    assert m["chain_unproven_rows"]["better"] == "v2", "المقياسُ الذي مُنح v2 يجب أن يُعلَن"
+    assert m["missing_pairs"]["better"] == "v1" and m["row_count_deviation"]["better"] == "v1", \
+        "المقياسان اللذان يرجّحان v1 يجب أن يبقيا معلنين (وإلا صار الإعلانُ دعاية)"
+    assert b["arms"]["v1"]["sha256"] and b["arms"]["v2"]["sha256"], "الإعلانُ غيرُ مقيَّد بملفَّي الذراعين"
+    live = pack_evidence.bias_metrics(set(pack_io.pack_facts(pack_io.pack_path())["pages"]))
+    assert live == b, "الإعلانُ تعفّن: الحسابُ الحيّ خالف المُلتزم — أعِد التوليد بـ`tools/pack_evidence.py`"
