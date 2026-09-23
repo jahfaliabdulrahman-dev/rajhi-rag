@@ -12,6 +12,10 @@
 
 from __future__ import annotations
 
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tools.pack_io import pack_facts as _pack_facts, pack_path as _pack_path  # noqa: E402
+
 import argparse
 import json
 import statistics
@@ -111,6 +115,15 @@ def main() -> None:
     pages = sorted(int(p.stem.split("-")[1]) for p in (run / "results").glob("pg-*.json"))
     divisible = [p for p in pages if p % args.holdout_mod == 0]
     pool = divisible if args.set == "holdout" else [p for p in pages if p not in divisible]
+    # **الحزمةُ المجمّدة لا تُنفَق في أيّ ضبط** (مراجعة ٤٥ · R45-3): هذه الأداةُ نفسُها هي التي
+    # سحبت عيّنةَ FM-2 فسبّبت SPEC-1 — فصارت تسأل الحزمةَ أوّلًا، وتُعلن ما استثنته، وتقف إن عمِيت.
+    _facts = _pack_facts(_pack_path())
+    _before = len(pool)
+    pool = [p for p in pool if p not in _facts["pages"]]
+    print(f"استثناءُ الحزمة: {_before - len(pool)} صفحةً من {_before} · "
+          f"(حزمةٌ معلَنة: {_facts['file']} · {len(_facts['pages'])} صفحة)")
+    if not pool:
+        raise SystemExit("⛔ لا صفحاتَ خارج الحزمة ⇒ لا ضبطَ بلا إنفاقها (فشلٌ مُغلَق)")
     step = max(1, len(pool) // args.count)
     picked = pool[::step][:args.count]
 

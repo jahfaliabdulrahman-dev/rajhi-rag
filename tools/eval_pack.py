@@ -24,15 +24,20 @@ import hashlib
 import json
 import subprocess
 import sys
+
 from decimal import Decimal
 from pathlib import Path
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tools.pack_io import pack_facts as _pack_facts, pack_path as _pack_path, evidence_path as _evidence_path, seal_violation as _seal_violation  # noqa: E402
+from tools.pack_io import data_root as _data_root  # noqa: E402
 
 PROJ = Path(__file__).resolve().parent.parent
-DEFAULTS = {
-    "run": "data/local_sample/slice_629p",
-    "capture": "data/training",
-    "digital": "data/local_sample/digital",
-    "out": "data/eval_pack",
+DEFAULTS = {                       # تُحلّ من **الجذر المشترك** (git-common-dir): شجرةُ العمل ترى data/ الأمّ
+    "run": str(_data_root() / "data/local_sample/slice_629p"),
+    "capture": str(_data_root() / "data/training"),
+    "digital": str(_data_root() / "data/local_sample/digital"),
+    "out": str(_data_root() / "data/eval_pack"),
 }
 
 #: ممرّاتُ الفجوات المُعلنة (من `slice_report.page_numbers.gaps`) — تُستثنى من تقسيم المديات
@@ -90,9 +95,13 @@ def _dec(x) -> Decimal:
 
 
 def _path(x) -> Path:
-    """وسيطٌ من سطر الأوامر ⇒ مسارٌ مطلق (نسبيٌّ إلى جذر المشروع)."""
+    """وسيطٌ من سطر الأوامر ⇒ مسارٌ مطلق — **نسبيٌّ إلى الجذر المشترك لا إلى شجرة العمل**.
+
+    (مراجعة ٤٥ · R45-2): الأدلّةُ الثقيلةُ باقيةٌ في الشجرة الأمّ، فمسارٌ نسبيٌّ يُحلّ من `PROJ`
+    ينكسر من شجرةِ عملٍ منفصلة — وهو نفسُ العمى الذي جعل الحمايةَ تختفي هناك.
+    """
     q = Path(str(x))
-    return q if q.is_absolute() else PROJ / q
+    return q if q.is_absolute() else _data_root() / q
 
 
 def _sha16(a: str) -> str:
@@ -868,8 +877,9 @@ def cmd_verify(args) -> int:
                       "**HISTORY_MOVED** — الطرفان تحرّكا معاً، فالتحقّقُ لا يعني شيئاً. البناءُ من جديد.")
     print(f"مطابقة ✓ ({pack['identity']})")
     cap = captured_pages(_path(args.capture), run.identity, _path(args.digital))
-    pack_pages = sorted({x["page"] for x in pack["census"]["pages"]}      # المجتمعُ: الإحصاء + المديات
-                        | {pg for m in pack["ranges"] for pg in m["pages"]})
+    # **القارئُ الواحد** (مراجعة ٤٥): لا نسخةَ محلّيةً من قراءة صفحات الحزمة.
+    facts = _pack_facts(p, expect_identity=run.identity)
+    pack_pages = sorted(facts["pages"])
     inter = sorted(set(pack_pages) & cap["mine"])
     frozen_fp = _sha16(json.dumps([x["page"] for x in pack["census"]["pages"]]))
     print(f"الإحصاء: {pack['census']['size']} صفحة · بصمةٌ محفوظة {pack['census']['fingerprint']} · "
@@ -882,8 +892,24 @@ def cmd_verify(args) -> int:
         same = all(fresh[k] == m[k] for k in ("movements", "sum_debit", "sum_credit", "opening", "closing"))
         print(f"  [{m['range'][0]}–{m['range'][1]}] حركات {m['movements']} · "
               f"هوية {m['gates']['identity']['value']} · إعادةُ القياس {'مطابقة ✓' if same else 'مخالفة ✗'}")
-    ok = not inter and pack["size_gate"]["pass"]
-    print(f"\nالحكم: {'PASS — الحزمةُ تشهد لنفسها' if ok else 'FAIL — بالاسم أعلاه'}")
+        assert same or True
+    # **الحكمُ يقرأ كلَّ ما طُبع** (مراجعة ٤٥): كان الحكمُ من التقاطع والحجم وحدَهما فيطبع «✗» ثم يقول PASS.
+    census_ok = frozen_fp == pack["census"]["fingerprint"]
+    ranges_ok = True
+    for m in pack["ranges"]:
+        fresh = measure_range(run, m["range"][0], m["length"])
+        if not all(fresh[k] == m[k] for k in ("movements", "sum_debit", "sum_credit", "opening", "closing")):
+            ranges_ok = False
+    seal_msg = _seal_violation(facts)          # **الختمُ المُلتزم صار له قارئ**
+    seal_ok = seal_msg is None
+    ok = (not inter) and pack["size_gate"]["pass"] and census_ok and ranges_ok and seal_ok
+    failures = ([f"التقاطع {len(inter)}"] if inter else []) + \
+               ([] if pack["size_gate"]["pass"] else ["بوابةُ الحجم"]) + \
+               ([] if census_ok else ["بصمةُ الإحصاء"]) + \
+               ([] if ranges_ok else ["إعادةُ قياس المديات"]) + \
+               ([seal_msg] if seal_msg else [])
+    print(f"الحكم: {'PASS — الحزمةُ تشهد لنفسها' if ok else 'FAIL — بالاسم: ' + ' · '.join(failures)}")
+    print(f"  (قارئُ الشهادة: {_evidence_path() or 'لا شهادةَ مُلتزمة'})")
     return 0 if ok else 1
 
 

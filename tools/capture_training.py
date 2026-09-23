@@ -40,7 +40,11 @@ HEADER_MASK_FRACTION = 0.26
 HEADER_MASK_EVIDENCE = "pos_witness_rows.json: min y = 0.347 (28 rows · 3 pages)"
 CAPTURE_VERSION = "1"
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PACK = ROOT / "data/eval_pack/pack.json"
+if str(ROOT) not in sys.path:                      # ليُستورد القارئُ الواحدُ عند التشغيل كسكربت
+    sys.path.insert(0, str(ROOT))
+from tools.pack_io import data_root, pack_facts, pack_pages, pack_path   # noqa: E402 — **القارئُ الواحد**
+
+DEFAULT_PACK = pack_path()                         # يُحلّ بـ`git-common-dir` ⇒ يعمل من worktree
 CHAIN_PROOF_PREFIX = "السلسلة"
 SHEET_ROWS = "الحركات"
 DESC_MAX = 600
@@ -54,60 +58,23 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def pack_facts(path: Path | None, *, expect_identity: str | None = None) -> dict:
-    """**حقيقةُ الحزمة المجمّدة** — تُقرأ من `pack.json` (لا تُكتب بيد)، وتُقابَل بهويّتها ومقاسها.
+def _data_path(x) -> Path:
+    """مسارٌ من سطر الأوامر ⇒ مطلقٌ من **الجذر المشترك** (فالأمرُ الموثَّق يعمل من أيّ شجرة عمل)."""
+    q = Path(str(x))
+    return q if q.is_absolute() else data_root() / q
 
-    أربعةُ أصنافِ عطبٍ تُغلق هنا، وكلُّها **عطبٌ مقيسٌ لا افتراض**:
-      ١) القائمةُ غائبةٌ أو غيرُ مقروءة ⇒ وقوفٌ مُسمّى (لا استثناءَ صامت).
-      ٢) القائمةُ فارغة ⇒ وقوفٌ مُسمّى.
-      ٣) **قراءةٌ ناقصة**: ما قُرئ لا يطابق مقاسَ الحزمة المُعلَن (`size_gate.value`) ⇒ وقوفٌ مُسمّى،
-         لأنّ استثناءً ناقصًا يُبقي صفحاتِ الحزمة في التدريب **بصمت** — وهو أسوأُ من غياب الاستثناء.
-      ٤) **هويّةٌ أخرى**: المفتاحُ `(doc_id, page)` كما تُعلنه الحزمة نفسُها؛ فحزمةُ مستندٍ آخر
-         بأرقامٍ متصادمة كانت تُحجز صفحاتِ مستندنا بلا أن يسقط شيء.
+
+def classify_page(page: int, holdout_mod: int, reserved: set[int]) -> str:
+    """حالةُ الصفحة — **قرارٌ نقيٌّ يُختبَر مباشرةً** (لا فروعٌ داخل حلقةٍ لا ينالها اختبار).
+
+    والترتيبُ مقصودٌ ومُعلَن: حجزُ القسمة أوّلًا (الأقدمُ والأشمل)، ثم استثناءُ الحزمة.
+    وبهذا **يسقط الاختبارُ إن حُذف فرعُ الحزمة** — وهو ما أثبتت المراجعةُ ٤٥ أنّه كان يمرّ كذبًا.
     """
-    if path is None:
-        return {"pages": set(), "identity": None, "declared": None, "fingerprint": None,
-                "file": None, "expect_identity": expect_identity}
-    f = Path(path)
-    if not f.exists():
-        raise SystemExit(f"⛔ قائمةُ استثناءٍ مُعلَنة وغيرُ موجودة ({f.name}) ⇒ لا التقاط")
-    try:
-        d = json.loads(f.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as e:
-        raise SystemExit(f"⛔ قائمةُ استثناءٍ لا تُقرأ ({f.name} · {type(e).__name__}) ⇒ لا التقاط") from e
-
-    def _nums(xs, where: str) -> set[int]:
-        out: set[int] = set()
-        for p in xs or []:
-            if isinstance(p, dict) and "page" in p:
-                out.add(int(p["page"]))
-            elif isinstance(p, int):
-                out.add(p)
-            else:
-                raise SystemExit(f"⛔ عنصرٌ غيرُ معروفٍ في {where} ({type(p).__name__}) ⇒ لا التقاط")
-        return out
-
-    out = _nums(d.get("census", {}).get("pages", []), "census.pages")
-    for r in d.get("ranges", []):
-        out |= _nums(r.get("pages", []), "ranges[].pages")
-    if not out:
-        raise SystemExit("⛔ قائمةُ الاستثناء فارغةٌ ⇒ استثناءٌ بلا صفحاتٍ لا يُنفَّذ صامتاً")
-
-    declared = d.get("size_gate", {}).get("value")
-    if isinstance(declared, int) and len(out) != declared:
-        raise SystemExit(f"⛔ قراءةُ الحزمة ناقصة: قُرئ {len(out)} والمُعلَن {declared} ⇒ لا التقاط")
-    ident = d.get("identity")
-    ident = ident.get("doc_id") if isinstance(ident, dict) else ident
-    if expect_identity and ident and str(ident) != str(expect_identity):
-        raise SystemExit(f"⛔ الحزمةُ لمستندٍ آخر ({str(ident)[:16]} ≠ {str(expect_identity)[:16]}) ⇒ لا استثناء")
-    return {"pages": out, "identity": (str(ident) if ident else None), "declared": declared,
-            "fingerprint": (d.get("census") or {}).get("fingerprint"),
-            "file": f.name, "expect_identity": expect_identity}
-
-
-def pack_pages(path: Path | None, *, expect_identity: str | None = None) -> set[int]:
-    """صفحاتُ الحزمة وحدَها (غلافٌ حول `pack_facts` لمن يريد المجموعةَ لا الحقيقةَ كاملة)."""
-    return pack_facts(path, expect_identity=expect_identity)["pages"]
+    if is_holdout(page, holdout_mod):
+        return "holdout_reserved"
+    if page in reserved:
+        return "pack_reserved"
+    return "capture"
 
 
 def resolve_exclusion(explicit: Path | None, opted_out: bool, default: Path) -> Path | None:
@@ -372,13 +339,13 @@ def write_index(out: Path) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--run", required=True, type=Path)
-    ap.add_argument("--export", required=True, type=Path)
-    ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--run", required=True, type=_data_path)
+    ap.add_argument("--export", required=True, type=_data_path)
+    ap.add_argument("--out", required=True, type=_data_path)
     ap.add_argument("--holdout-mod", type=int, default=3,
                     help="كل صفحةٍ رقمها يقبل القسمة على هذا لا تُلتقط (حجز التقييم)")
     ap.add_argument("--limit", type=int, default=0)
-    ap.add_argument("--exclude-pack", type=Path, default=None,
+    ap.add_argument("--exclude-pack", type=_data_path, default=None,
                     help=f"pack.json للحزمة المجمّدة (افتراضاً: {DEFAULT_PACK.relative_to(ROOT) if DEFAULT_PACK.is_relative_to(ROOT) else DEFAULT_PACK} إن وُجد)")
     ap.add_argument("--no-pack-exclusion", action="store_true",
                     help="إلغاءُ استثناء الحزمة **صراحةً** — يُعلَن في البيان، ولا يُستعمل إلا بقرارٍ معلَن")
@@ -438,11 +405,9 @@ def main() -> None:
     else:
         print("· لا حزمةَ مجمّدة معلَنة ⇒ لا استثناء (والالتقاطُ يشمل كلَّ ما لم يُحجَز)")
     for p in pages:
-        if is_holdout(p, args.holdout_mod):
-            results.append({"page": p, "status": "holdout_reserved"})
-            continue
-        if p in reserved_pack:
-            results.append({"page": p, "status": "pack_reserved"})
+        decision = classify_page(p, args.holdout_mod, reserved_pack)
+        if decision != "capture":
+            results.append({"page": p, "status": decision})
             continue
         r = capture_page(p, args.run, args.out, certified[p], doc_id, meta, mask_frac)
         # **فحصُ الخصوصية قبل قبول الصفحة**: تسرُّبٌ ممنوع ⇒ رفضٌ بالاسم لا تجاوز
