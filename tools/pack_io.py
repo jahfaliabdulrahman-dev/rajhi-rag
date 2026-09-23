@@ -68,15 +68,21 @@ def pack_path(start: Path | None = None) -> Path:
 
 
 def evidence_path(start: Path | None = None) -> Path | None:
-    """أحدثُ شهادةٍ مُلتزمةٍ للحزمة (تحمل بصمةَ المجموعة كاملةً) — أو None."""
-    d = data_root(start) / "docs/evidence"
+    """أحدثُ شهادةٍ مُلتزمةٍ للحزمة — من **الشجرة الجاريّة** لا من الشجرة الأمّ.
+
+    (مراجعة ٤٥+ · S-1/S-2): `docs/evidence` **مُتتبَّعة** في git، فحقُّها أن تُقرأ وتُكتب في النسخة
+    التي تعمل فيها — بخلاف `data/` (أدلّةٌ ثقيلةٌ مُهمَلةٌ باقيةٌ في شجرةٍ واحدة). وخلطُ الجذرين
+    جعل الأمرَ الموثَّق يسقط من شجرة عملٍ (`relative_to` ValueError) **بعد** أن كتب في نسخةٍ أخرى.
+    """
+    d = repo_root(start) / "docs/evidence"
     if not d.is_dir():
         return None
     files = sorted(d.glob(EVIDENCE_GLOB))
     return files[-1] if files else None
 
 
-def pack_facts(path: Path | None, *, expect_identity: str | None = None) -> dict:
+def pack_facts(path: Path | None, *, expect_identity: str | None = None,
+               absent_ok: bool = False) -> dict:
     """حقيقةُ الحزمة المجمّدة — أربعةُ أصنافِ عطبٍ تُغلقها وقوفٌ مُسمّى (لا استثناءَ صامت):
 
       ١) القائمةُ غائبةٌ أو غيرُ مقروءة.  ٢) فارغة.  ٣) **قراءةٌ ناقصة** (ما قُرئ ≠ المقاس المُعلَن).
@@ -84,9 +90,12 @@ def pack_facts(path: Path | None, *, expect_identity: str | None = None) -> dict
     """
     if path is None:
         return {"pages": set(), "identity": None, "declared": None, "fingerprint": None,
-                "file": None, "expect_identity": expect_identity}
+                "file": None, "expect_identity": expect_identity, "note": "لا حزمةَ مُعلَنة"}
     f = Path(path)
     if not f.exists():
+        if absent_ok:                       # **سياسةُ غيابٍ واحدة** لكلّ الساحبين (STR-5)
+            return {"pages": set(), "identity": None, "declared": None, "fingerprint": None,
+                    "file": f.name, "expect_identity": expect_identity, "note": "الحزمةُ غائبة ⇒ لا استثناء"}
         raise SystemExit(f"⛔ قائمةُ استثناءٍ مُعلَنة وغيرُ موجودة ({f.name}) ⇒ لا التقاط")
     try:
         d = json.loads(f.read_text(encoding="utf-8"))
@@ -116,7 +125,13 @@ def pack_facts(path: Path | None, *, expect_identity: str | None = None) -> dict
     ident = d.get("identity")
     ident = ident.get("doc_id") if isinstance(ident, dict) else ident
     if expect_identity and ident and str(ident) != str(expect_identity):
-        raise SystemExit(f"⛔ الحزمةُ لمستندٍ آخر ({str(ident)[:16]} ≠ {str(expect_identity)[:16]}) ⇒ لا استثناء")
+        # (F3): حزمةُ **مستندٍ آخر** لا تُلوّث مستندَنا (أرقامُ الصفحات تتشابه بلا معنى) ⇒ لا استثناء،
+        # ويُعلَن الاختلافُ بدل أن يتوقّف أمرٌ موثَّق. والضمانةُ الحقيقيّةُ للمستند نفسِه تبقى في المسار
+        # المطابق: مفتاحُ `(doc_id, page)` وسَمُّ التصادم المُلتزم.
+        return {"pages": set(), "identity": (str(ident) if ident else None), "declared": declared,
+                "fingerprint": (d.get("census") or {}).get("fingerprint"), "file": f.name,
+                "expect_identity": expect_identity,
+                "note": f"حزمةٌ لمستندٍ آخر ({str(ident)[:16]} ≠ {str(expect_identity)[:16]}) ⇒ لا استثناء"}
     return {"pages": out, "identity": (str(ident) if ident else None), "declared": declared,
             "fingerprint": (d.get("census") or {}).get("fingerprint"),
             "file": f.name, "expect_identity": expect_identity}
@@ -125,6 +140,11 @@ def pack_facts(path: Path | None, *, expect_identity: str | None = None) -> dict
 def pack_pages(path: Path | None, *, expect_identity: str | None = None) -> set[int]:
     """صفحاتُ الحزمة وحدَها (غلافٌ حول `pack_facts` لمن يريد المجموعةَ لا الحقيقةَ كاملة)."""
     return pack_facts(path, expect_identity=expect_identity)["pages"]
+
+
+def excluding_pack(pool: list[int], pages: set[int]) -> list[int]:
+    """يُسقط صفحاتِ الحزمة من مجموعة السحب — **الدالّةُ الواحدةُ لكلّ ساحب** (كانت في أداةٍ واحدة)."""
+    return [p for p in pool if p not in pages]
 
 
 def pages_sha256(pages) -> str:
@@ -142,7 +162,8 @@ def seal(start: Path | None = None) -> dict | None:
     except (OSError, json.JSONDecodeError):
         return {"file": ev.name, "error": "شهادةٌ لا تُقرأ"}
     p = d.get("pack") or {}
-    return {"file": ev.name, "sha256": p.get("pages_sha256"), "count": p.get("pages_count")}
+    return {"file": ev.name, "sha256": p.get("pages_sha256"), "count": p.get("pages_count"),
+            "tree": str(repo_root(start))}          # **يُعلَن من أيّ شجرةٍ قُرئ** (S-2)
 
 
 def seal_violation(facts: dict, start: Path | None = None) -> str | None:

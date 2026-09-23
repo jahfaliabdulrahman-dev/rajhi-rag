@@ -147,10 +147,51 @@ def test_data_root_resolves_from_a_worktree(tmp_path):
     assert pack_io.data_root(wt) == main.resolve(), "جذرُ البيانات يجب أن يكون الشجرةَ الأمّ"
 
 
-def test_pack_path_is_not_derived_from_file_location():
-    """رائحةُ العلّة: المسارُ لا يُبنى من موضع ملفّ الأداة بل من الجذر المشترك."""
-    assert pack_io.pack_path() == pack_io.data_root() / "data/eval_pack/pack.json"
-    assert pack_io.pack_path() == PACK
+def test_documented_capture_from_a_worktree_announces_the_pack(tmp_path):
+    """**يقيس الأمرَ نفسَه لا إعادةَ كتابة المنطق** (S-6 · STR-4): من شجرة عملٍ منفصلة
+    (لا `data/` فيها) يشغّل الأمرَ الموثَّق ويقرأ ما طبعه — وهو ما كان يسقط قبل الإصلاح."""
+    if not PACK.exists():
+        pytest.skip("الأدلّةُ الثقيلةُ خارج git (مقصود)")
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "-C", str(ROOT), "worktree", "add", "-q", "--detach", str(wt), "HEAD"],
+                   check=True, capture_output=True)
+    try:
+        r = subprocess.run([sys.executable, "tools/capture_training.py",
+                            "--run", "data/local_sample/slice_629p",
+                            "--export", "data/local_sample/export-629p.xlsx",
+                            "--out", str(tmp_path / "out"), "--limit", "2"],
+                           cwd=wt, capture_output=True, text=True)
+        both = r.stdout + r.stderr
+        assert "الحزمةُ المجمّدة" in both and "مستثناة" in both, both[-500:]
+        assert r.returncode == 0, both[-500:]
+    finally:
+        subprocess.run(["git", "-C", str(ROOT), "worktree", "remove", "--force", str(wt)], capture_output=True)
+
+
+def test_amount_guard_pre_push_checks_bite_on_a_stale_manifest(tmp_path, monkeypatch):
+    """**سمُّ حارس المبالغ** (S-3): الفحصان نُقلا إلى مسار الخطّاف — ومانيفستٌ متعفّنٌ يجب أن يسقطهما."""
+    from tools import amount_guard as ag
+    if not PACK.exists():
+        pytest.skip("الأدلّةُ الثقيلةُ خارج git (مقصود)")
+    # **الصنفُ الصحيحُ من العطب**: مانيفستٌ **صحيحُ الشكل** يقول عدداً غيرَ عددِ المصدر ⇒ تعفّن.
+    mf = tmp_path / "amount-manifest.json"
+    mf.write_text(json.dumps({"derivation": {"source_shape_ok": 10 ** 9},
+                              "fingerprints": ["0" * 64], "set_digest": "0" * 64}),
+                  encoding="utf-8")
+    monkeypatch.setattr(ag, "MANIFEST", mf)
+    assert ag.pre_push_checks() == 1, "مانيفستٌ متعفّنٌ مرّ من فحص ما قبل الدفع ⇒ الحارسُ لا يعضّ"
+    monkeypatch.setattr(ag, "MANIFEST", tmp_path / "absent.json")
+    assert ag.pre_push_checks() == 0, "غيابُ المانيفست = «سطحٌ بلا أدلّة» لا تعفّن — يُعلن في مسارٍ آخر"
+
+
+def test_oracle_confirm_refuses_to_spend_on_pack_pages(tmp_path):
+    """**الشاهدُ المدفوع** (F2): إحصاءُ الحزمة مصدرُه الافتراضيّ ⇒ يقف مُعلَنًا بلا عَلَمٍ صريح."""
+    if not PACK.exists():
+        pytest.skip("الأدلّةُ الثخينةُ خارج git (مقصود)")
+    r = subprocess.run([sys.executable, "tools/oracle_confirm.py", "--dry-run", "--max-usd", "0"],
+                       cwd=ROOT, capture_output=True, text=True)
+    assert r.returncode != 0, "شاهدٌ مدفوعٌ سحب إحصاءَ الحزمة بلا وقف"
+    assert "حزمة التقييم المجمّدة" in (r.stdout + r.stderr)
 
 
 # ───────────────── (R45-3) الساحبُ الذي أنفق الحزمة صار يستثنيها ─────────────────
@@ -168,7 +209,7 @@ def test_compare_prompts_excludes_pack_pages():
 @needs_artifacts
 def test_bias_declaration_is_committed_and_has_a_reader():
     """**الإعلانُ يُقاس ولا يُمحى**: يُلتزم في الشهادة، **ويُعاد حسابُه حيًّا فيُقابَل** ⇒ تعفّنٌ يسقط."""
-    from tools import pack_evidence
+    from tools import pack_evidence  # noqa: E402
     ev = pack_io.evidence_path()
     assert ev, "لا شهادةَ مُلتزمة"
     b = json.loads(ev.read_text(encoding="utf-8")).get("bias_declaration")
@@ -189,3 +230,16 @@ def test_bias_declaration_is_committed_and_has_a_reader():
     assert b["arms"]["v1"]["sha256"] and b["arms"]["v2"]["sha256"], "الإعلانُ غيرُ مقيَّد بملفَّي الذراعين"
     live = pack_evidence.bias_metrics(set(pack_io.pack_facts(pack_io.pack_path())["pages"]))
     assert live == b, "الإعلانُ تعفّن: الحسابُ الحيّ خالف المُلتزم — أعِد التوليد بـ`tools/pack_evidence.py`"
+
+
+def test_close_out_dir_removes_what_the_run_did_not_capture(tmp_path):
+    """**سمُّ R45-4**: البيانُ يقول «محجوزة» والقرصُ يجب أن يطابق البيان — لا أن يحمل فضلة."""
+    from tools.capture_training import close_out_dir
+    doc = tmp_path / "3e2d360a665c88aa"
+    doc.mkdir()
+    for n in (2, 4, 5, 9):
+        (doc / f"pg-{n:03d}").mkdir()
+        (doc / f"pg-{n:03d}" / "page.png").write_bytes(b"x")
+    removed = close_out_dir(doc, {4, 5})
+    assert removed == [2, 9], "الفضلةُ لم تُغلق"
+    assert sorted(d.name for d in doc.glob("pg-*")) == ["pg-004", "pg-005"], "الصفحاتُ المُلتقَطة مُسحت"

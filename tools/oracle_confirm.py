@@ -145,6 +145,15 @@ def rule_of_three(n: int) -> float:
     return 3.0 / n if n else float("nan")
 
 
+def _pack_pages(p) -> set[int]:
+    """صفحاتُ الحزمة بالقارئ الواحد (فشلٌ مُغلَق) — تُستعمل في حماية الصرف."""
+    import sys as _s
+    from pathlib import Path as _P
+    _s.path.insert(0, str(_P(__file__).resolve().parents[1]))
+    from tools.pack_io import pack_pages
+    return pack_pages(p)
+
+
 def cmd_summary(evidence_path: Path) -> int:
     ev = json.loads(evidence_path.read_text(encoding="utf-8"))
     graded = [r for r in ev["pages"] if r.get("compared") is not None]
@@ -189,6 +198,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-usd", type=float, default=0.0, help="سقفُ صرفٍ صريح — إلزاميّ للصرف")
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--dry-run", action="store_true", help="يُجهّز الصورَ والصفحاتِ بلا نداءِ نموذج")
+    ap.add_argument("--allow-pack-pages", action="store_true",
+                    help="يسمح بالصرف على صفحاتِ حزمة التقييم المجمّدة — لا يُستعمل إلا بقرارٍ معلَن")
     ap.add_argument("--summary", type=Path, default=None,
                     help="يقرأ شهادةً مكتوبةً ويطبع المجالاتِ الإحصائية (بلا نداءِ نموذج)")
     args = ap.parse_args(argv)
@@ -205,6 +216,16 @@ def main(argv: list[str] | None = None) -> int:
     else:
         pages = ([int(x) for x in args.pages.split(",") if x.strip()] if args.pages.strip()
                  else census[:args.sample] if args.sample else census)
+    # **الشاهدُ المدفوع لا يُنفق الحزمةَ افتراضاً** (مراجعة ٤٥ · F2): الإحصاءُ هو المصدرُ الافتراضيّ
+    # لصفحاته، وكان ذلك يجعل الشاهدَ ساحبًا ثالثًا يُنفق الحزمةَ بلا علَم. صار يقف مُعلَنًا.
+    _pk = _pack_pages(args.pack)
+    _about_to = sorted(set(pages) & _pk)
+    if _about_to and not args.allow_pack_pages:
+        raise SystemExit(f"⛔ {len(_about_to)} صفحةً من حزمة التقييم المجمّدة في هذه التشغيلة "
+                         f"(مثال: {_about_to[:5]}) ⇒ يتوقّف الصرف. مرّر `--pages` خارج الحزمة، "
+                         f"أو أعلِن `--allow-pack-pages`.")
+    print(f"حمايةُ الحزمة: {len(_about_to)} صفحةً منها في هذه التشغيلة"
+          f"{' (مسموحٌ بعَلَمٍ صريح)' if _about_to else ' — خارجها ✓'}")
     doc = pack["identity"]
     out_path = args.out or (DEFAULT_OUT_DIR / f"{ORACLE_OUT_NAME}-{doc}.json")
     assert_not_published(out_path)

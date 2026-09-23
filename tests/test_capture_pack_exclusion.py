@@ -159,12 +159,15 @@ def test_reads_pages_from_both_census_and_ranges(tmp_path: Path):
 
 # ── ٣) الهويّة: المفتاحُ (doc_id, page) ──────────────────────────────────────
 
-def test_identity_mismatch_fails_closed(tmp_path: Path):
-    f = _pack_file_on_disk(tmp_path, identity="093e1b733689193f")
-    with pytest.raises(SystemExit) as e:
-        pack_pages(f, expect_identity="3e2d360a665c88aa")
-    assert "لمستندٍ آخر" in str(e.value)
+def test_identity_mismatch_drops_the_exclusion_and_announces():
+    """حزمةُ **مستندٍ آخر** ⇒ لا استثناء (أرقامُ الصفحات لا تعني شيئًا عبر المستندات) **ويُعلَن** (F3).
 
+    وكان يقف بالاسم؛ وهذا كان يكسر أمراً موثَّقاً (إعادةُ التقاط بيانٍ رقميّ والحزمةُ على القرص).
+    والضمانةُ الحقيقيّةُ للمستند نفسِه باقية: مفتاحُ `(doc_id, page)` وسمُّ التصادم المُلتزم.
+    """
+    f = pack_facts(PACK, expect_identity="0" * 16)
+    assert f["pages"] == set(), "حزمةُ مستندٍ آخر يجب ألا تستثني شيئاً"
+    assert "لمستندٍ آخر" in (f.get("note") or ""), "الاختلافُ يجب أن يُعلَن لا أن يمرّ صامتاً"
 
 def test_identity_recorded_in_facts(tmp_path: Path):
     facts = pack_facts(_pack_file_on_disk(tmp_path), expect_identity="3e2d360a665c88aa")

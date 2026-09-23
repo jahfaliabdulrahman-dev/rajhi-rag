@@ -424,6 +424,24 @@ def counts_by_file(deny: set[str], files: list[str] | None = None) -> dict[str, 
     return counts
 
 
+def pre_push_checks() -> int:
+    """فحصا **كلّ** مسار دفع — التعفّنُ والثنائياتُ غيرُ المُعلَنة (T-5 · مراجعة ٤٥ S-3).
+
+    كانا بعد `return` فرعَي `--pre-push` و`--ratchet` ⇒ **لا يبلغهما الخطّاف أبداً**. وبعد النقل
+    صارا في موضعٍ واحدٍ يُستدعى من كلّ مسار — **ولهما سمٌّ**: مانيفستٌ متعفّن ⇒ يُخرج ١ بالاسم.
+    """
+    if undeclared_binaries():
+        print("⛔ BLOCK — ثنائيٌّ مدفوعٌ تحت data/ أو digital/ بلا إعلان:")
+        for f in undeclared_binaries()[:10]:
+            print(f"   {f}")
+        return 1
+    stale = staleness()
+    if stale:
+        print(stale)
+        return 1
+    return 0
+
+
 def undeclared_binaries() -> list[str]:
     declared = declared_set(DECLARED_BINARIES)
     out = subprocess.run(["git", "ls-files"], cwd=str(ROOT), capture_output=True, text=True).stdout
@@ -1078,14 +1096,7 @@ def main(argv=None) -> int:
         return 0
     # **الفحصانِ فوق كلّ تفريع (مراجعة ٤٤):** كانا بعد `return` فرعَي `--pre-push` و`--ratchet`
     # ⇒ الخطّافُ لا يبلغهما أبداً، ومانيفستٌ متعفّن يمرّ من بوابة الدفع بلا سقوط.
-    if undeclared_binaries():
-        print("⛔ BLOCK — ثنائيٌّ مدفوعٌ تحت data/ أو digital/ بلا إعلان:")
-        for f in undeclared_binaries()[:10]:
-            print(f"   {f}")
-        return 1
-    stale = staleness()
-    if stale:
-        print(stale)
+    if pre_push_checks():
         return 1
     if args.pre_push:
         refs = sys.stdin.read()

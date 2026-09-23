@@ -30,7 +30,7 @@ from pathlib import Path
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.pack_io import pack_facts as _pack_facts, pack_path as _pack_path, evidence_path as _evidence_path, seal_violation as _seal_violation  # noqa: E402
-from tools.pack_io import data_root as _data_root  # noqa: E402
+from tools.pack_io import data_root as _data_root, seal as _seal  # noqa: E402
 
 PROJ = Path(__file__).resolve().parent.parent
 DEFAULTS = {                       # تُحلّ من **الجذر المشترك** (git-common-dir): شجرةُ العمل ترى data/ الأمّ
@@ -887,19 +887,17 @@ def cmd_verify(args) -> int:
     print("  (ولا يُعاد تشغيلُ المصنّف أبداً — الأصنافُ تُقرأ مجمَّدة)")
     print(f"بوابة «٢٠٠»: {pack['size_gate']['value']} {'✓' if pack['size_gate']['pass'] else '✗'} · "
           f"التقاطع: {len(inter)} {'✓' if not inter else '✗'}")
-    for m in pack["ranges"]:
+    range_checks = []
+    for m in pack["ranges"]:                        # **قياسٌ واحدٌ يُغذّي الطباعةَ والحكم** (S-4 · STR-3)
         fresh = measure_range(run, m["range"][0], m["length"])
         same = all(fresh[k] == m[k] for k in ("movements", "sum_debit", "sum_credit", "opening", "closing"))
+        range_checks.append(same)
         print(f"  [{m['range'][0]}–{m['range'][1]}] حركات {m['movements']} · "
               f"هوية {m['gates']['identity']['value']} · إعادةُ القياس {'مطابقة ✓' if same else 'مخالفة ✗'}")
-        assert same or True
     # **الحكمُ يقرأ كلَّ ما طُبع** (مراجعة ٤٥): كان الحكمُ من التقاطع والحجم وحدَهما فيطبع «✗» ثم يقول PASS.
     census_ok = frozen_fp == pack["census"]["fingerprint"]
-    ranges_ok = True
-    for m in pack["ranges"]:
-        fresh = measure_range(run, m["range"][0], m["length"])
-        if not all(fresh[k] == m[k] for k in ("movements", "sum_debit", "sum_credit", "opening", "closing")):
-            ranges_ok = False
+    ranges_ok = all(range_checks)          # من القياس نفسه — لا حلقةً ثانية
+    _seal_src = _seal()                         # **يُعلن من أيّ شجرةٍ قُرئ الختم** (S-2)
     seal_msg = _seal_violation(facts)          # **الختمُ المُلتزم صار له قارئ**
     seal_ok = seal_msg is None
     ok = (not inter) and pack["size_gate"]["pass"] and census_ok and ranges_ok and seal_ok
@@ -909,7 +907,7 @@ def cmd_verify(args) -> int:
                ([] if ranges_ok else ["إعادةُ قياس المديات"]) + \
                ([seal_msg] if seal_msg else [])
     print(f"الحكم: {'PASS — الحزمةُ تشهد لنفسها' if ok else 'FAIL — بالاسم: ' + ' · '.join(failures)}")
-    print(f"  (قارئُ الشهادة: {_evidence_path() or 'لا شهادةَ مُلتزمة'})")
+    print(f"  (قارئُ الشهادة: {_evidence_path() or 'لا شهادةَ مُلتزمة'} · من شجرة: {(_seal_src or {}).get('tree', '—')})")
     return 0 if ok else 1
 
 

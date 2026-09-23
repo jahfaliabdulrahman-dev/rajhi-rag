@@ -794,6 +794,17 @@
   "cost_usd": "0 — لا نداء نموذج: الوسم من المصدَّر المعتمد"
  },
  "spent_before_the_pack": {
+  "enumerated_sources": [
+   "FM-2 arm v1 sample",
+   "FM-2 arm v2 sample"
+  ],
+  "other_known_tuning_pages": {
+   "mask_calibration": [
+    281,
+    282
+   ]
+  },
+  "enumeration_caveat": "الجردُ يعدّ مصدرين يسمّيان صفحاتٍ صريحة؛ ومعايرةُ القناع تسمّي ٣ صفحاتٍ اثنتان منها داخل الحزمة ⇒ فهي إنفاقٌ مُعلَنٌ لا مُنكَر، وليست جزءاً من عدّاد الذراعين.",
   "arms": [
    {
     "file": "20260921-fm2-v1-arm.json",

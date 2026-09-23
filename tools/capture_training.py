@@ -20,6 +20,7 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
 import sys
 from collections import Counter
 from datetime import date
@@ -235,6 +236,29 @@ def audit_privacy(pdf: Path, page: int, patterns: dict[str, list[str]],
             "header_furniture_inside_mask": len(inside(hits["header"])),
             "header_inside_table_declared": len(below(hits["header"])),
             "mask_top_frac": mask_top_frac}
+
+
+def close_out_dir(doc_dir: Path, captured_pages: set[int]) -> list[int]:
+    """**العدّاداتُ تُغلق على القرص لا على قائمة النتائج وحدها** (مراجعة ٤٥ · R45-4).
+
+    كان التقاطٌ بلا استثناء ثم التقاطٌ بالحزمة في **نفس `--out`** يترك مجلّداتِ `pg-` لصفحاتٍ
+    لا تُلتقط هذه التشغيلة ⇒ البيانُ يقول «محجوزة» والقرصُ يحملها ⇒ مدرّبٌ يقرأ القرصَ يُلوَّث.
+    والذي أنقذ المجموعةَ مرّةً كان **أرشفةً يدويّة** لا الأداة.
+
+    والمقابلُ صريح: تشغيلةٌ جزئيّة (`--limit`) **لا تُغلق** شيئاً — تُعلن جزئيّتها؛ وإلّا مسحت
+    مجموعةَ التدريب في تشغيلةِ فحصٍ صغيرة. ويُعاد المحذوفُ بأسمائه ليُراجَع لا ليُخفى.
+    """
+    removed: list[int] = []
+    if not doc_dir.is_dir():
+        return removed
+    for d in sorted(doc_dir.glob("pg-*")):
+        tail = d.name.split("-")[-1]
+        if not tail.isdigit():
+            continue
+        if int(tail) not in captured_pages:
+            shutil.rmtree(d, ignore_errors=True)
+            removed.append(int(tail))
+    return sorted(removed)
 
 
 def capture_page(page: int, run: Path, out_root: Path, rows: list[dict],
@@ -491,6 +515,13 @@ def main() -> None:
     (args.out / doc_id).mkdir(parents=True, exist_ok=True)
     (args.out / doc_id / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=1))
+    # **إغلاقُ القرص** (R45-4): تشغيلةٌ كاملةٌ تُزيل كلَّ `pg-` لم تُلتقط هذه المرّة.
+    if not args.limit:
+        _stale = close_out_dir(args.out / doc_id, {int(r["page"]) for r in captured})
+        print(f"إغلاقُ القرص: أُزيلت {len(_stale)} صفحةً لم تُلتقط هذه التشغيلة"
+              + (f" (أوّلها {_stale[:6]})" if _stale else " — لا فضلة ✓"))
+    else:
+        print(f"تشغيلةٌ جزئيّة (--limit {args.limit}) ⇒ **لا إغلاقَ للقرص**: الباقي مُعلَنٌ لا منسيّ.")
     idx = write_index(args.out)
     print(json.dumps(manifest["pages"] | manifest["samples"],
                      ensure_ascii=False, indent=1))

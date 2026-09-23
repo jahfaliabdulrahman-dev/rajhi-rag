@@ -21,20 +21,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from tools.pack_io import data_root  # noqa: E402 — **جذرٌ واحد** (يعمل من شجرة عمل)
+from tools.pack_io import (  # noqa: E402 — **القراءةُ والختمُ بالقارئ الذي يقرأه**
+    data_root, pack_pages, pages_sha256, repo_root,
+)
 
 DATA = data_root()                       # الجذرُ المشترك: الأدلّةُ الثقيلةُ باقيةٌ في الشجرة الأمّ
 PACK = DATA / "data/eval_pack/pack.json"
 TRAIN = DATA / "data/training"
-EVID = DATA / "docs/evidence"
+EVID = repo_root() / "docs/evidence"   # **مُتتبَّعة**: تُكتب وتُقرأ في الشجرة الجاريّة (S-1)
 FM2 = ("docs/evidence/20260921-fm2-v1-arm.json", "docs/evidence/20260921-fm2-v2-arm.json")
-
-
-def page_numbers(pack: dict) -> list[int]:
-    out = {int(p["page"]) if isinstance(p, dict) else int(p) for p in pack["census"]["pages"]}
-    for r in pack["ranges"]:
-        out |= {int(p) if not isinstance(p, dict) else int(p["page"]) for p in r["pages"]}
-    return sorted(out)
 
 
 def bias_metrics(pages: set[int]) -> dict:
@@ -97,8 +92,8 @@ def main() -> int:
     if not PACK.exists():
         raise SystemExit("لا حزمةَ على القرص — الشهادةُ تُبنى حيث الأدلّةُ موجودة (الالتقاطُ خارج git)")
     pack = json.loads(PACK.read_text(encoding="utf-8"))
-    pages = page_numbers(pack)
-    digest = hashlib.sha256(json.dumps(pages).encode()).hexdigest()
+    pages = sorted(pack_pages(PACK))          # **القارئُ الواحد** (لا نسخةَ خامسة)
+    digest = pages_sha256(pages)              # **صيغةُ الختم واحدةٌ** كاتبًا وقارئًا
 
     raw = pack.get("doc_id") or pack.get("identity")
     ident = raw.get("doc_id") if isinstance(raw, dict) else raw
@@ -161,6 +156,10 @@ def main() -> int:
             "cost_usd": cap.get("cost_usd"),
         },
         "spent_before_the_pack": {
+            "enumerated_sources": ["FM-2 arm v1 sample", "FM-2 arm v2 sample"],
+            "other_known_tuning_pages": {"mask_calibration": [281, 282]},
+            "enumeration_caveat": ("الجردُ يعدّ مصدرين يسمّيان صفحاتٍ صريحة؛ ومعايرةُ القناع تسمّي ٣ صفحاتٍ "
+                                   "اثنتان منها داخل الحزمة ⇒ فهي إنفاقٌ مُعلَنٌ لا مُنكَر، وليست جزءاً من عدّاد الذراعين."),
             "arms": arms,
             "measured": ("صفحاتُ ذراعَي FM-2 (مقارنةُ التلقينتين) تتقاطع مع الحزمة: "
                          f"{len(set(pages) & spent)} من {len(pages)} — وهذا **إنفاقٌ سابقٌ لختم الحزمة** "
