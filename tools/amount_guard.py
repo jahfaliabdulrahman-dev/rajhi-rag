@@ -1076,6 +1076,17 @@ def main(argv=None) -> int:
             return 5
         print(f"PASS — مسحُ كلّ التاريخ: {nblobs} blobاً · ولا صيغةَ مبلغٍ حقيقيّ واحدة")
         return 0
+    # **الفحصانِ فوق كلّ تفريع (مراجعة ٤٤):** كانا بعد `return` فرعَي `--pre-push` و`--ratchet`
+    # ⇒ الخطّافُ لا يبلغهما أبداً، ومانيفستٌ متعفّن يمرّ من بوابة الدفع بلا سقوط.
+    if undeclared_binaries():
+        print("⛔ BLOCK — ثنائيٌّ مدفوعٌ تحت data/ أو digital/ بلا إعلان:")
+        for f in undeclared_binaries()[:10]:
+            print(f"   {f}")
+        return 1
+    stale = staleness()
+    if stale:
+        print(stale)
+        return 1
     if args.pre_push:
         refs = sys.stdin.read()
         if not refs.strip():
@@ -1153,15 +1164,6 @@ def main(argv=None) -> int:
               f"{len(counts)} ملفّاً كما هو)")
         return 0
 
-    if undeclared_binaries():
-        print("⛔ BLOCK — ثنائيٌّ مدفوعٌ تحت data/ أو digital/ بلا إعلان:")
-        for f in undeclared_binaries()[:10]:
-            print(f"   {f}")
-        return 1
-    stale = staleness()
-    if stale:
-        print(stale)
-        return 1
     hits = counts_with_commitment(deny)
     if args.json:
         # **القاعدة ١٥:** المخرَجُ الآليُّ لا يُقصّ أبداً. **والقيمةُ لا تُطبع**: الوحدةُ ملفٌّ+عددها.

@@ -21,6 +21,7 @@ import hashlib
 import json
 import re
 import sys
+from collections import Counter
 from datetime import date
 from decimal import InvalidOperation
 from pathlib import Path
@@ -38,6 +39,8 @@ from statement_qa.legacy.arabic_digit_parser import norm_num  # noqa: E402
 HEADER_MASK_FRACTION = 0.26
 HEADER_MASK_EVIDENCE = "pos_witness_rows.json: min y = 0.347 (28 rows · 3 pages)"
 CAPTURE_VERSION = "1"
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_PACK = ROOT / "data/eval_pack/pack.json"
 CHAIN_PROOF_PREFIX = "السلسلة"
 SHEET_ROWS = "الحركات"
 DESC_MAX = 600
@@ -51,33 +54,70 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def pack_pages(path: Path | None) -> set[int]:
-    """**صفحاتُ حزمة التقييم المجمّدة** — تُقرأ من `pack.json` بحقولها (لا تُكتب بيد).
+def pack_facts(path: Path | None, *, expect_identity: str | None = None) -> dict:
+    """**حقيقةُ الحزمة المجمّدة** — تُقرأ من `pack.json` (لا تُكتب بيد)، وتُقابَل بهويّتها ومقاسها.
 
-    وليست هي «الحجز بالقسمة»: ذاك حجزٌ **بقاعدة** (page % 3)، وهذا **حجزٌ باسمِ الحزمة** —
-    لأنّ الحزمةَ اختيرت أوّلًا، فحقُّها أن تُستثنى من التدريب لا العكس (وإلّا لزم تغييرُ الحزمة
-    بعد بنائها، وهو نقضُ «لا تُلمَس بعد اليوم»).
+    أربعةُ أصنافِ عطبٍ تُغلق هنا، وكلُّها **عطبٌ مقيسٌ لا افتراض**:
+      ١) القائمةُ غائبةٌ أو غيرُ مقروءة ⇒ وقوفٌ مُسمّى (لا استثناءَ صامت).
+      ٢) القائمةُ فارغة ⇒ وقوفٌ مُسمّى.
+      ٣) **قراءةٌ ناقصة**: ما قُرئ لا يطابق مقاسَ الحزمة المُعلَن (`size_gate.value`) ⇒ وقوفٌ مُسمّى،
+         لأنّ استثناءً ناقصًا يُبقي صفحاتِ الحزمة في التدريب **بصمت** — وهو أسوأُ من غياب الاستثناء.
+      ٤) **هويّةٌ أخرى**: المفتاحُ `(doc_id, page)` كما تُعلنه الحزمة نفسُها؛ فحزمةُ مستندٍ آخر
+         بأرقامٍ متصادمة كانت تُحجز صفحاتِ مستندنا بلا أن يسقط شيء.
     """
     if path is None:
-        return set()
+        return {"pages": set(), "identity": None, "declared": None, "fingerprint": None,
+                "file": None, "expect_identity": expect_identity}
     f = Path(path)
     if not f.exists():
         raise SystemExit(f"⛔ قائمةُ استثناءٍ مُعلَنة وغيرُ موجودة ({f.name}) ⇒ لا التقاط")
-    d = json.loads(f.read_text(encoding="utf-8"))
+    try:
+        d = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        raise SystemExit(f"⛔ قائمةُ استثناءٍ لا تُقرأ ({f.name} · {type(e).__name__}) ⇒ لا التقاط") from e
 
-    def _nums(x):
-        out = set()
-        for p in x or []:
-            out.add(int(p["page"]) if isinstance(p, dict) and "page" in p else int(p))
+    def _nums(xs, where: str) -> set[int]:
+        out: set[int] = set()
+        for p in xs or []:
+            if isinstance(p, dict) and "page" in p:
+                out.add(int(p["page"]))
+            elif isinstance(p, int):
+                out.add(p)
+            else:
+                raise SystemExit(f"⛔ عنصرٌ غيرُ معروفٍ في {where} ({type(p).__name__}) ⇒ لا التقاط")
         return out
 
-    out = _nums(d.get("census", {}).get("pages", []))
+    out = _nums(d.get("census", {}).get("pages", []), "census.pages")
     for r in d.get("ranges", []):
-        out |= _nums(r.get("pages", []))
+        out |= _nums(r.get("pages", []), "ranges[].pages")
     if not out:
         raise SystemExit("⛔ قائمةُ الاستثناء فارغةٌ ⇒ استثناءٌ بلا صفحاتٍ لا يُنفَّذ صامتاً")
-    return out
 
+    declared = d.get("size_gate", {}).get("value")
+    if isinstance(declared, int) and len(out) != declared:
+        raise SystemExit(f"⛔ قراءةُ الحزمة ناقصة: قُرئ {len(out)} والمُعلَن {declared} ⇒ لا التقاط")
+    ident = d.get("identity")
+    ident = ident.get("doc_id") if isinstance(ident, dict) else ident
+    if expect_identity and ident and str(ident) != str(expect_identity):
+        raise SystemExit(f"⛔ الحزمةُ لمستندٍ آخر ({str(ident)[:16]} ≠ {str(expect_identity)[:16]}) ⇒ لا استثناء")
+    return {"pages": out, "identity": (str(ident) if ident else None), "declared": declared,
+            "fingerprint": (d.get("census") or {}).get("fingerprint"),
+            "file": f.name, "expect_identity": expect_identity}
+
+
+def pack_pages(path: Path | None, *, expect_identity: str | None = None) -> set[int]:
+    """صفحاتُ الحزمة وحدَها (غلافٌ حول `pack_facts` لمن يريد المجموعةَ لا الحقيقةَ كاملة)."""
+    return pack_facts(path, expect_identity=expect_identity)["pages"]
+
+
+def resolve_exclusion(explicit: Path | None, opted_out: bool, default: Path) -> Path | None:
+    """**الحمايةُ بنيويّةٌ لا اختيارية (مراجعة ٤٤):** حزمةٌ على القرص تُستثنى بلا سؤال،
+    وإلغاؤها يحتاج علَماً صريحاً يُعلَن في البيان ⇒ إعادةُ التقاطٍ بأمرٍ موثَّق لا تُلوّث صامتة."""
+    if explicit is not None:
+        return explicit
+    if opted_out:
+        return None
+    return default if default.exists() else None
 
 def is_holdout(page: int, mod: int) -> bool:
     """حجز التقييم: حتميّ وقابل لإعادة الإنتاج."""
@@ -317,6 +357,8 @@ def write_index(out: Path) -> dict:
                      "captured_at": d.get("captured_at"),
                      "captured": pages.get("captured"),
                      "holdout_reserved": pages.get("holdout_reserved"),
+                     "pack_reserved": pages.get("pack_reserved"),
+                     "by_status": pages.get("by_status"),
                      "holdout_rule": d.get("holdout_rule"),
                      "cost_usd": d.get("cost_usd")})
     index = {"documents": docs, "count": len(docs),
@@ -337,7 +379,9 @@ def main() -> None:
                     help="كل صفحةٍ رقمها يقبل القسمة على هذا لا تُلتقط (حجز التقييم)")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--exclude-pack", type=Path, default=None,
-                    help="pack.json للحزمة المجمّدة ⇒ لا تُلتقط صفحاتُها (فالتقاطعُ صفرٌ بالبناء)")
+                    help=f"pack.json للحزمة المجمّدة (افتراضاً: {DEFAULT_PACK.relative_to(ROOT) if DEFAULT_PACK.is_relative_to(ROOT) else DEFAULT_PACK} إن وُجد)")
+    ap.add_argument("--no-pack-exclusion", action="store_true",
+                    help="إلغاءُ استثناء الحزمة **صراحةً** — يُعلَن في البيان، ولا يُستعمل إلا بقرارٍ معلَن")
     ap.add_argument("--redact-top", type=float, default=HEADER_MASK_FRACTION)
     ap.add_argument("--pdf", type=Path, default=None,
                     help="ملف الأصل — يُفحَص نصُّه لمقابلة أنماط الخصوصية (قياسٌ لا دعوى)")
@@ -381,9 +425,18 @@ def main() -> None:
     if args.limit:
         pages = pages[:args.limit]
     results, train_pages = [], 0
-    reserved_pack = pack_pages(args.exclude_pack)
+    exclusion = resolve_exclusion(args.exclude_pack, args.no_pack_exclusion, DEFAULT_PACK)
+    facts = pack_facts(exclusion, expect_identity=doc_id)
+    reserved_pack = facts["pages"]
+    if args.no_pack_exclusion:
+        print("⚠ استثناءُ الحزمة مُلغًى صراحةً (--no-pack-exclusion) ⇒ صفحاتُ الحزمة ستُلتقط — القرارُ مُعلَن")
     if reserved_pack:
-        print(f"· صفحاتُ الحزمة المجمّدة المستثناة من الالتقاط: {len(reserved_pack)}")
+        h = len([p for p in reserved_pack if is_holdout(p, args.holdout_mod)])
+        print(f"· الحزمةُ المجمّدة: {len(reserved_pack)} صفحةً مستثناةً من الالتقاط"
+              f" (منها {h} سبقها وسمُ الحجز ⇒ pack_reserved = {len(reserved_pack) - h})"
+              + (f" · {facts['file']} · هويّة {str(facts['identity'])[:16]}" if facts["file"] else ""))
+    else:
+        print("· لا حزمةَ مجمّدة معلَنة ⇒ لا استثناء (والالتقاطُ يشمل كلَّ ما لم يُحجَز)")
     for p in pages:
         if is_holdout(p, args.holdout_mod):
             results.append({"page": p, "status": "holdout_reserved"})
@@ -404,16 +457,18 @@ def main() -> None:
         train_pages += 1 if r["status"] == "captured" else 0
 
     captured = [r for r in results if r["status"] == "captured"]
+    status_counts = Counter(r["status"] for r in results)
+    # **الإغلاقُ قاعدةٌ في الكود لا تعليقٌ في اختبار:** كلُّ صفحةٍ زُيرت لها حالةٌ واحدةٌ معدودة.
+    assert sum(status_counts.values()) == len(pages), "عدّاداتُ البيان لا تُغلق على نفسها"
     manifest = {
         "captured_at": date.today().isoformat(),
         "capture_version": CAPTURE_VERSION,
         "doc_id": doc_id,
         "pages": {"total_in_export": len(certified), "visited": len(pages),
-                  "captured": len(captured),
-                  "holdout_reserved": sum(1 for r in results
-                                          if r["status"] == "holdout_reserved"),
-                  "pack_reserved": sum(1 for r in results
-                                       if r["status"] == "pack_reserved"),
+                  "captured": status_counts.get("captured", 0),
+                  "holdout_reserved": status_counts.get("holdout_reserved", 0),
+                  "pack_reserved": status_counts.get("pack_reserved", 0),
+                  "by_status": dict(sorted(status_counts.items())),
                   "skipped": [{"page": r["page"], "why": r["status"]}
                               for r in results
                               if r["status"] not in ("captured", "holdout_reserved")]},
@@ -422,7 +477,19 @@ def main() -> None:
                     "balances_joined": sum(r.get("bal_ok", 0) for r in captured),
                     "balances_not_joined": sum(r.get("bal_bad", 0) for r in captured)},
         "holdout_rule": f"page % {args.holdout_mod} == 0 ⇒ لا تُلتقط (حجز التقييم)",
-        "pack_exclusion": (str(args.exclude_pack.name) if args.exclude_pack else None),
+        # **وسمُ الحزمة بهويّتها لا باسم ملفّها** (مراجعة ٤٤): كلُّ تشغيلةٍ تحمل `pack.json`.
+        # **مجموعتان باسمين لا باسمٍ واحد** (مراجعة ٤٤): صفحاتُ الحزمة ٢٠٠ تُستثنى كلُّها،
+        # لكنّ منها ٦٧ رقمُها %holdout-mod==0 فيسبقها وسمُ الحجز ⇒ فعدّادُ pack_reserved = الباقي.
+        "pack_exclusion": ({
+            "file": facts["file"], "identity": facts["identity"],
+            "declared_pages": facts["declared"],
+            "excluded_pages": len(reserved_pack),
+            "labeled_pack_reserved": status_counts.get("pack_reserved", 0),
+            "labeled_holdout_within_pack": len([p for p in reserved_pack
+                                                if is_holdout(p, args.holdout_mod)]),
+            "via": ("explicit" if args.exclude_pack else ("default" if exclusion else "none")),
+            "explicit_opt_out": bool(args.no_pack_exclusion),
+        } if (exclusion or args.no_pack_exclusion) else None),
         "privacy": {
             "header_masked_fraction": mask_frac,
             # الدليلُ يتبع التصميم: دليلُ المسح (أدنى y لصفٍّ مُثبت) لا يُنسب

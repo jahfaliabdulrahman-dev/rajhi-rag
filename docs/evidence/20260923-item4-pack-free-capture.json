@@ -1,0 +1,820 @@
+{
+ "what": "شهادةُ الحزمة المجمّدة بعد إغلاق التلوّث (البند ٤) — والقياسُ يأتي من القرص لا من نصّ",
+ "generated_by": "python3 tools/pack_evidence.py",
+ "date": "2026-09-23",
+ "document": "3e2d360a665c88aa",
+ "value_redaction": "القاعدةُ ١٣: لا قيمةَ مبلغٍ في هذا الملفّ — بصماتٌ وأعدادٌ وأسماءُ ملفّات",
+ "pack": {
+  "size_gate": {
+   "value": 200,
+   "expected": 200,
+   "pass": true
+  },
+  "intersection_gate": {
+   "population": "الحزمةُ كاملةً (الإحصاء + المديات)",
+   "pack_pages": 200,
+   "captured": 283,
+   "intersection": [],
+   "pass": true,
+   "key": "(doc_id, page) — لا page"
+  },
+  "capture_mode": "strict",
+  "built_at": "2026-09-23",
+  "census_fingerprint": "5b9c6b1001c3b945",
+  "pages": [
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   18,
+   19,
+   20,
+   21,
+   22,
+   23,
+   24,
+   25,
+   26,
+   27,
+   28,
+   29,
+   30,
+   31,
+   32,
+   33,
+   34,
+   35,
+   36,
+   37,
+   38,
+   39,
+   40,
+   41,
+   42,
+   43,
+   44,
+   45,
+   46,
+   47,
+   48,
+   49,
+   50,
+   51,
+   52,
+   53,
+   54,
+   55,
+   56,
+   57,
+   58,
+   59,
+   60,
+   61,
+   62,
+   63,
+   64,
+   65,
+   66,
+   67,
+   68,
+   69,
+   70,
+   71,
+   72,
+   73,
+   74,
+   75,
+   76,
+   77,
+   78,
+   79,
+   80,
+   81,
+   82,
+   83,
+   84,
+   85,
+   86,
+   87,
+   88,
+   89,
+   90,
+   91,
+   92,
+   93,
+   94,
+   95,
+   96,
+   97,
+   98,
+   99,
+   100,
+   101,
+   242,
+   243,
+   244,
+   245,
+   246,
+   247,
+   248,
+   249,
+   250,
+   251,
+   252,
+   253,
+   254,
+   255,
+   256,
+   257,
+   258,
+   259,
+   260,
+   261,
+   262,
+   263,
+   264,
+   265,
+   266,
+   267,
+   268,
+   269,
+   270,
+   271,
+   272,
+   273,
+   274,
+   275,
+   276,
+   277,
+   278,
+   279,
+   280,
+   281,
+   282,
+   283,
+   284,
+   285,
+   286,
+   287,
+   288,
+   289,
+   290,
+   291,
+   486,
+   487,
+   488,
+   489,
+   490,
+   491,
+   492,
+   493,
+   494,
+   495,
+   496,
+   497,
+   498,
+   499,
+   500,
+   501,
+   502,
+   503,
+   504,
+   505,
+   506,
+   507,
+   508,
+   509,
+   510,
+   511,
+   512,
+   513,
+   514,
+   515,
+   516,
+   517,
+   518,
+   519,
+   520,
+   521,
+   522,
+   523,
+   524,
+   525,
+   526,
+   527,
+   528,
+   529,
+   530,
+   531,
+   532,
+   533,
+   534,
+   535
+  ],
+  "pages_count": 200,
+  "pages_sha256": "f41f8ccb66f6f0c29a7269c0f6f42adf4f34993f12aa431e730b6787005cc5a6",
+  "note": "بصمةُ المجموعة أعلاه تغطّي **الإحصاءَ والمديات** معًا؛ وكانت الشهادةُ السابقة تغطّي الإحصاءَ وحدَه (٥٠ من ٢٠٠). فأدخلها في سمّ «تغييرُ صفحةٍ مقيَّدة»."
+ },
+ "capture": {
+  "command": "python3 tools/capture_training.py --run data/local_sample/slice_629p --export data/local_sample/export-629p.xlsx --out data/training",
+  "policy": "الحمايةُ بنيويّة: حزمةٌ على القرص تُستثنى بلا علَم (والعملُ الحقيقيّ في البيان)",
+  "exclusion": {
+   "file": "pack.json",
+   "identity": "3e2d360a665c88aa",
+   "declared_pages": 200,
+   "excluded_pages": 200,
+   "labeled_pack_reserved": 133,
+   "labeled_holdout_within_pack": 67,
+   "via": "default",
+   "explicit_opt_out": false
+  },
+  "pages": {
+   "total_in_export": 626,
+   "visited": 626,
+   "captured": 283,
+   "holdout_reserved": 209,
+   "pack_reserved": 133,
+   "by_status": {
+    "captured": 283,
+    "holdout_reserved": 209,
+    "no_chain_proven_rows": 1,
+    "pack_reserved": 133
+   },
+   "skipped": [
+    {
+     "page": 2,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 4,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 5,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 7,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 8,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 10,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 11,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 13,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 14,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 16,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 17,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 19,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 20,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 22,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 23,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 25,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 26,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 28,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 29,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 31,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 32,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 34,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 35,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 37,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 38,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 40,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 41,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 43,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 44,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 46,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 47,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 49,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 50,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 52,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 53,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 55,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 56,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 58,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 59,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 61,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 62,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 64,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 65,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 67,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 68,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 70,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 71,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 73,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 74,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 76,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 77,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 79,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 80,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 82,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 83,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 85,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 86,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 88,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 89,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 91,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 92,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 94,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 95,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 97,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 98,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 100,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 101,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 242,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 244,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 245,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 247,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 248,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 250,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 251,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 253,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 254,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 256,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 257,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 259,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 260,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 262,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 263,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 265,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 266,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 268,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 269,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 271,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 272,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 274,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 275,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 277,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 278,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 280,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 281,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 283,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 284,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 286,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 287,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 289,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 290,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 487,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 488,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 490,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 491,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 493,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 494,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 496,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 497,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 499,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 500,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 502,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 503,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 505,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 506,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 508,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 509,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 511,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 512,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 514,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 515,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 517,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 518,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 520,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 521,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 523,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 524,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 526,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 527,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 529,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 530,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 532,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 533,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 535,
+     "why": "pack_reserved"
+    },
+    {
+     "page": 629,
+     "why": "no_chain_proven_rows"
+    }
+   ]
+  },
+  "cost_usd": "0 — لا نداء نموذج: الوسم من المصدَّر المعتمد"
+ },
+ "spent_before_the_pack": {
+  "arms": [
+   {
+    "file": "20260921-fm2-v1-arm.json",
+    "from": "training (page % 3 != 0)",
+    "picked": 420,
+    "intersection_with_pack": 133
+   },
+   {
+    "file": "20260921-fm2-v2-arm.json",
+    "from": "training (page % 3 != 0)",
+    "picked": 420,
+    "intersection_with_pack": 133
+   }
+  ],
+  "measured": "صفحاتُ ذراعَي FM-2 (مقارنةُ التلقينتين) تتقاطع مع الحزمة: 133 من 200 — وهذا **إنفاقٌ سابقٌ لختم الحزمة** (الشهادةُ 2026-09-21، والحزمةُ 2026-09-22) لا يمنعه استثناءُ الالتقاط.",
+  "free_pages": 208,
+  "longest_contiguous_free_run": 1,
+  "consequence": "اختيارُ ٢٠٠ صفحةٍ «لم تُنفَق في أيّ ضبط» **غيرُ ممكنٍ ببنية المديات الحالية**: المجموعةُ الحرّة ٢٠٨ صفحة كلُّها %3==0 ⇒ أطولُ مدًى متّصلٍ فيها صفحةٌ واحدة (والمطلوب ٣ مديات × ٥٠ متّصلة) ⇒ القرارُ للمالك: إعلانُ الانحياز المؤرَّخ، أو تغييرُ بنية الاختيار إلى صفحاتٍ متفرّقة (٢٠٨ ≥ ٢٠٠ بهامش ٨)."
+ },
+ "invalidates": {
+  "file": "docs/evidence/20260922-item4-step1-gate3-eval-pack.json",
+  "why": "ذاك سجلٌّ مؤرَّخ يقول `capture_mode=explicit-list · captured=416 · intersection=133 · pass=false` — وهذا صحيحٌ بتاريخه ولا يُمحى؛ والحالُ اليومَ يخالفه ويكفيه إحالةٌ لا محو (الرسالةُ المؤرَّخة تُبطَل بتصريحٍ مؤرَّخ يُحيل إلى الحيّ)."
+ }
+}
