@@ -20,8 +20,8 @@ Q = ROOT / "docs" / "eval_pack" / "questions.json"
 PACK = ROOT / "data" / "eval_pack" / "pack.json"
 needs_artifacts = pytest.mark.skipif(not PACK.exists(), reason="الأدلّةُ الثقيلةُ خارج git (مقصود)")
 
-KINDS = {"footer", "count_rows", "last_row_balance", "argmax_row", "rows_matching",
-         "chain", "date_encoding", "pack_meta", "absent"}
+KINDS = {"footer", "page_sum_all", "count_rows", "last_row_balance", "argmax_row", "rows_matching",
+         "row_chain", "date_encoding", "pack_meta", "absent"}
 METRICS = {"number", "citation", "abstain"}
 
 

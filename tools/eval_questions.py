@@ -97,6 +97,13 @@ class Corpus:
     def corpus_pages(self) -> int:
         return len(list((self.dir / "results").glob("pg-*.json")))
 
+    def corpus_page_list(self) -> list[int]:
+        """**نطاقُ النظام الحقيقيّ**: كلُّ صفحةٍ في الكشف — لا صفحات الحزمة وحدها.
+
+        وهذا فرقٌ قاتلٌ في التقييم: النظامُ يفهرس الكشفَ كلَّه، فسؤالٌ يقول «في الحزمة» يسأله عمّا لا يعرفه.
+        """
+        return sorted(int(f.stem.split("-")[1]) for f in (self.dir / "results").glob("pg-*.json"))
+
 
 def truth(q: dict, c: Corpus, pack: dict) -> tuple[object, dict]:
     """يُشتقّ الجوابُ من القرص. يُعيد (الجواب, ملخّصٌ آمنٌ بلا مبالغ)."""
@@ -105,6 +112,10 @@ def truth(q: dict, c: Corpus, pack: dict) -> tuple[object, dict]:
     if k == "footer":
         v = num(c.footer(d["page"]).get(d["field"]))
         return v, {"kind": k, "page": d["page"], "field": d["field"], "found": v is not None}
+    if k == "page_sum_all":
+        vals = [num(r.get("movement")) for r in c.rows(d["page"])]
+        vals = [v for v in vals if v is not None]
+        return (sum(vals) if vals else None), {"kind": k, "page": d["page"], "rows": len(vals)}
     if k == "count_rows":
         n = len(c.rows(d["page"]))
         return n, {"kind": k, "page": d["page"], "rows": n}
@@ -119,18 +130,18 @@ def truth(q: dict, c: Corpus, pack: dict) -> tuple[object, dict]:
         m = max(v for _, v in vals)
         tops = [i for i, v in vals if v == m]
         return (tops[0] if len(tops) == 1 else {"tie": tops}), {"kind": k, "page": d["page"], "tops": tops}
+    if k == "row_chain":
+        ra, rb = c.rows(d["a"]), c.rows(d["b"])
+        la = num(ra[-1].get("balance")) if ra else None
+        fb = num(rb[0].get("balance")) if rb else None
+        if la is None or fb is None:
+            return None, {"kind": k, "a": d["a"], "b": d["b"], "found": False}
+        return ({"equal": abs(la - fb) < 0.005, "diff": round(abs(fb - la), 2)},
+                {"kind": k, "a": d["a"], "b": d["b"], "equal": abs(la - fb) < 0.005})
     if k == "rows_matching":
-        hits = [(p, i) for p in c.pages for i, r in enumerate(c.rows(p))
+        hits = [(p, i) for p in c.corpus_page_list() for i, r in enumerate(c.rows(p))
                 if d["pattern"] in str(r.get("desc") or "")]
         return hits, {"kind": k, "hits": len(hits), "pages": sorted({p for p, _ in hits})}
-    if k == "chain":
-        a, b = c.footer(d["a"]), c.footer(d["b"])
-        ba, bb = num(a.get("balance")), num(b.get("balance"))
-        if ba is None or bb is None:
-            return None, {"kind": k, "a": d["a"], "b": d["b"], "found": False}
-        net = (num(b.get("credits")) or 0.0) - (num(b.get("debits")) or 0.0)
-        ok = abs((bb - ba) - net) < 0.005
-        return ok, {"kind": k, "a": d["a"], "b": d["b"], "closes": ok}
     if k == "date_encoding":
         ind = sum(1 for p in c.pages for r in c.rows(p)
                   if re.search(f"[{ARABIC_INDIC}{PERSIAN}]", str(r.get("date") or "")))
@@ -175,6 +186,191 @@ def check_abstention(q: dict, c: Corpus, pack: dict) -> tuple[bool, str]:
     return False, f"سببٌ مجهول: {r}"
 
 
+def _key_usage() -> dict | None:
+    """**الكلفةُ الفعليّة من المزوّد** (لا عدّادُنا): رصيدُ المفتاح قبل وبعد — والفرقُ هو الكلفة.
+
+    المفتاحُ يُقرأ داخل العملية ولا يُطبع أبداً؛ ويُطبع الرقمُ وحده.
+    """
+    import urllib.request
+    try:
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
+        from statement_qa.api_key import get_api_key
+        req = urllib.request.Request("https://openrouter.ai/api/v1/key",
+                                     headers={"Authorization": f"Bearer {get_api_key()}"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            d = json.loads(r.read().decode())["data"]
+        return {"usage": d.get("usage"), "limit": d.get("limit"), "limit_remaining": d.get("limit_remaining")}
+    except Exception as e:                                   # noqa: BLE001 — قياسٌ لا يُسقط التشغيل
+        print(f"  (تعذّر قياسُ الرصيد: {type(e).__name__})", file=sys.stderr)
+        return None
+
+
+_NUMTOK = re.compile(r"[\d٠-٩۰-۹][\d٠-٩۰-۹,٬،٫.]*")
+_ABSENCE = ("غير موجود", "لا يوجد", "غير متوف", "لا تتوفر", "لا يمكن", "غير مطبوع", "لا أعلم",
+            "لا تتضمّن", "لا تتضمن", "لا بيانات", "خارج", "لا سند")
+_AMBIG = ("تعادل", "متساو", "مبلغان", "مبلغين", "أكثر من مبلغ", "لا يمكن الجزم", "لا يمكن تحديد")
+_POS = ("يتّصل", "يتصل", "متّصل", "متصل", "يتماشى", "يساوي")
+_NEG = ("لا يتّصل", "لا يتصل", "غير متّصل", "غير متصل", "لا يتماشى", "لا يساوي", "ينقطع", "لا يوجد اتصال")
+
+
+def extract_numbers(text: str) -> list[float]:
+    """كلُّ الأرقام في جوابٍ — بأيّ صيغةٍ كتبها النموذج (وهذا ما يُقابَل بالحقيقة)."""
+    return [v for v in (num(m.group(0)) for m in _NUMTOK.finditer(text or "")) if v is not None]
+
+
+def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[bool, str]:
+    """حكمٌ **ميكانيكيّ** لكلّ سؤال — بلا حَكَمٍ ذوقيّ (والحدُّ معلَنٌ في التقرير).
+
+    الأرقامُ تُقابَل بتسامح ٠٫٠٥ (كسرُ هللة)، والامتناعُ يُشترَط فيه **ألّا يخترع مبلغاً**،
+    والاستشهادُ يُقابَل بصفحات الصفوف التي استدعتها الأدوات فعلاً (`used_row_nos`).
+    """
+    nums = extract_numbers(ans)
+    m = q["metric"]
+    used = list(getattr(res, "used_row_nos", None) or [])
+    cited_pages = sorted({rows[n - 1]["page"] for n in used if 1 <= n <= len(rows)})
+
+    if m == "number":
+        if q["expect"] == "chain":
+            t = truth_val if isinstance(truth_val, dict) else {}
+            pos, neg = any(w in ans for w in _POS), any(w in ans for w in _NEG)
+            if t.get("equal"):
+                near = any(abs(v - 0.0) < 0.05 for v in nums)
+                return (pos and not neg and near), f"متساويان: إيجابٌ {'✓' if pos else '✗'} · فرقٌ صفريٌّ {'✓' if near else '✗'}"
+            near = any(abs(v - float(t.get("diff") or -1)) < 0.05 for v in nums)
+            return (neg and not pos and near), \
+                f"غيرُ متساويين: نفيٌ {'صريح' if neg else 'غائب/مضادّ'} · الفرقُ {'مذكور' if near else 'غيرُ مذكور'}"
+        if q["expect"] == "boolean":
+            pos, neg = any(w in ans for w in _POS), any(w in ans for w in _NEG)
+            if truth_val is True:
+                return (pos and not neg), f"إيجابٌ {'موجود' if pos else 'غائب'}{' ونفيٌ مضادّ' if neg else ''}"
+            # السلسلةُ لا تتّصل: الجوابُ الصحيحُ نفيٌ صريح
+            return ((neg or (not pos and any(w in ans for w in _ABSENCE)))
+                    and len(cited_pages) >= 2), f"نفيٌ {'صريح' if neg else 'غير صريح'} · صفحاتٌ مُستشهدة {len(cited_pages)}"
+        if truth_val is None:
+            return False, "لا قيمةَ مُشتقّة (عطبُ مرسًى)"
+        if isinstance(truth_val, str):
+            return (truth_val in ans), f"النصُّ المتوقَّع {'ظهر' if truth_val in ans else 'لم يظهر'}"
+        hit = [v for v in nums if abs(v - float(truth_val)) < 0.05]
+        return bool(hit), f"المتوقَّع {'وُجد' if hit else 'لم يوجد'} في {len(nums)} رقماً"
+
+    if m == "citation":
+        need = q["derive"].get("page")
+        if q["derive"]["kind"] == "rows_matching":
+            hit_pages = sorted({p for p, _ in truth_val})
+            hit = set(cited_pages) & set(hit_pages)
+            prec = (len(hit) / len(cited_pages)) if cited_pages else 0.0
+            return (bool(hit) and prec >= 0.3), \
+                f"أصابت {len(hit)}/{len(hit_pages)} صفحةً صحيحة · دقّةُ الاستشهاد {prec:.0%} ({len(cited_pages)} صفحةً مُستشهدة)"
+        if need not in cited_pages:
+            return False, f"لم يستشهد بالصفحة {need} (المستشهَد {cited_pages})"
+        if isinstance(truth_val, dict):                      # تعادلٌ ⇒ لا يجوز الجزم
+            return False, "الصفحةُ صحيحةٌ لكن الحقيقةَ تعادلٌ لا جزم"
+        want = None
+        for n in used:
+            if 1 <= n <= len(rows) and rows[n - 1]["page"] == need:
+                want = n
+                break
+        if want is None:
+            return False, f"استشهد بالصفحة {need} بلا صفٍّ منها"
+        mv = rows[want - 1]["movement"]
+        ok = mv is not None and abs(float(mv) - float(truth_val)) < 0.05
+        return ok, f"الصفُّ المُستشهَد {'هو' if ok else 'ليس'} صفَّ القمة في الصفحة {need}"
+
+    if m == "abstain":
+        if q["expect"] == "ambiguous":
+            ok = any(w in ans for w in _AMBIG)
+            return ok, ("أعلن التعادل ✓" if ok else "لم يُعلن التعادل (جزمَ بلا سند)")
+        invented = [v for v in nums if abs(v) > 0.005]
+        gated = getattr(res, "scope", "in_scope") != "in_scope" or bool(getattr(res, "refused", False))
+        why = ("بوّابةُ النطاق منعته قبل النموذج ✓" if gated
+               else "امتناعٌ نصّيّ بلا مبلغٍ مُخترع ✓" if (not invented and any(w in ans for w in _ABSENCE))
+               else f"أجاب بـ{len(invented)} رقماً لا سند لها ✗")
+        return (gated or (not invented and any(w in ans for w in _ABSENCE))), why
+    return False, f"مقياسٌ مجهول: {m}"
+
+
+def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
+    """تشغيلُ الأسئلة على سلسلة السؤال الحقيقيّة — **مدفوع**، ويُقاس بأمرٍ صريح."""
+    src = pathlib.Path(__file__).resolve().parent.parent / "src"
+    sys.path.insert(0, str(src))
+    from tools.refusal_test import build_rows                     # noqa: PLC0415
+    from statement_qa.chunking import chunk_rows                  # noqa: PLC0415
+    from statement_qa.qa import answer_question, build_llm        # noqa: PLC0415
+    from statement_qa.retriever import build_index                # noqa: PLC0415
+
+    before = _key_usage()
+    print(f"[1/4] بناءُ الجدول من {a.run} …", flush=True)
+    rows, n_pages = build_rows(a.run)
+    print(f"      {n_pages} صفحة | {len(rows)} صفًّا", flush=True)
+    print("[2/4] بناءُ الفهرس الدلاليّ (محلّيّ) …", flush=True)
+    chunks = chunk_rows([{**r, "row_no": i + 1} for i, r in enumerate(rows)])
+    store = build_index(chunks)
+    print(f"      {len(chunks)} قطعة", flush=True)
+    llm = build_llm(a.model)
+    out = a.out or (pack_io.data_root() / "data/eval_pack/answers.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    done: dict[str, dict] = {}
+    if out.exists():                       # **استئنافٌ**: جوابٌ محفوظٌ لا يُعاد سؤالُه (ولا يُدفع ثمنُه مرّتين)
+        try:
+            done = {r["id"]: r for r in json.loads(out.read_text()).get("results", [])}
+        except (OSError, json.JSONDecodeError, KeyError):
+            done = {}
+    todo = [q for q in qs if q["id"] not in done]
+    print(f"[3/4] طرحُ الأسئلة ({len(todo)} من {len(qs)} · ومحفوظٌ سابقاً {len(done)}) "
+          f"على {a.model or 'الافتراضيّ'} …\n", flush=True)
+
+    order = [q["id"] for q in qs]
+    for i, q in enumerate(todo, 1):
+        truth_val, _ = truth(q, c, pack)
+        try:
+            res = answer_question(store, q["q"], rows=rows, chunks=chunks, llm=llm)
+            ans = (res.answer or "").strip()
+        except Exception as e:                                   # noqa: BLE001 — عطبٌ يُسمّى لا يُسقط الجولة
+            ans, res = f"<عطب: {type(e).__name__}>", None
+        ok, why = (False, "عطبٌ في النداء") if res is None else score_answer(q, truth_val, ans, res, rows)
+        done[q["id"]] = {"id": q["id"], "cat": q["cat"], "metric": q["metric"], "expect": q["expect"],
+                         "kind": q["derive"]["kind"],
+                         "q": q["q"], "answer": ans, "ok": ok, "why": why,
+                         "cited_pages": sorted({rows[n - 1]["page"] for n in (getattr(res, "used_row_nos", None) or [])
+                                                if 1 <= n <= len(rows)}) if res else [],
+                         "used_row_nos": (list(getattr(res, "used_row_nos", None) or [])[:40] if res else []),
+                         "scope": getattr(res, "scope", None) if res else None,
+                         "refused": bool(getattr(res, "refused", False)) if res else None}
+        out.write_text(json.dumps({"model": a.model or "افتراضيّ",
+                                   "results": [done[k] for k in order if k in done]},
+                                  ensure_ascii=False, indent=1))   # **حفظٌ تدريجيّ: قتلُ العملية لا يُهدر جواباً**
+        print(f"{i:02d} {q['id']:9s} {'✅' if ok else '❌'} {why}", flush=True)
+
+    after = _key_usage()
+    results = [done[k] for k in order if k in done]
+    print(f"\n[4/4] الأجوبةُ كاملةً في {out} (خارج git: `data/` · حفظٌ تدريجيّ بعد كلّ سؤال)")
+
+    print("\n" + "=" * 62)
+    metrics = spec["metrics"]
+    for m, label in (("number", "دقّة الرقم"), ("citation", "صدق الاستشهاد من الأثر"), ("abstain", "صحّة الامتناع")):
+        sel = [r for r in results if r["metric"] == m]
+        n_ok = sum(1 for r in sel if r["ok"])
+        bar = "█" * n_ok + "·" * (len(sel) - n_ok)
+        print(f"{label:26s} {n_ok:2d}/{len(sel):2d}  {bar}")
+    print(f"{'المجموع':26s} {sum(1 for r in results if r['ok']):2d}/{len(results):2d}")
+    invented = sum(1 for r in results if r["metric"] == "abstain" and not r["ok"])
+    print(f"\n⛔ الامتناعاتُ الساقطة (خطرُ الاختراع): {invented}/8")
+    by_kind: dict[str, list[bool]] = {}
+    for r in results:
+        by_kind.setdefault(r["kind"], []).append(r["ok"])
+    print("\nتفصيلٌ بالقاعدة (يُظهر **أين** العطب لا كمّه فقط):")
+    for k, oks in sorted(by_kind.items(), key=lambda kv: -len(kv[1])):
+        print(f"  {k:16s} {sum(oks):2d}/{len(oks):2d}")
+    if before and after and before.get("usage") is not None:
+        d = float(after["usage"]) - float(before["usage"])
+        print(f"💰 الكلفةُ الفعليّةُ من المزوّد: ${d:.4f} (رصيدُ المفتاح {before.get('usage')} ⇒ {after.get('usage')})")
+    else:
+        print("💰 تعذّر قياسُ الكلفة من المزوّد — لا يُدَّعى رقمٌ بلا مصدر.")
+    print(f"\n{metrics['citation']}")
+    return 0 if all(r["ok"] for r in results) else 1
+
+
 def _repo_root() -> pathlib.Path:
     return pathlib.Path(__file__).resolve().parent.parent
 
@@ -186,6 +382,11 @@ def main(argv=None) -> int:
     ap.add_argument("--safe", action="store_true", help="ملخّصٌ بلا مبالغ")
     ap.add_argument("--truth", action="store_true", help="الإجاباتُ كاملةً (لا تُحفظ)")
     ap.add_argument("--page", type=int, help="سؤالٌ واحدٌ بالرقم التسلسلي (1..50)")
+    ap.add_argument("--execute", action="store_true",
+                    help="**تشغيلُ الأسئلة على سلسلة السؤال (مدفوع)** — يطرحها ويطبع المقاييس الثلاثة")
+    ap.add_argument("--limit", type=int, help="أوّلُ N سؤالاً (للقياس قبل الصرف)")
+    ap.add_argument("--model", help="اسمُ النموذج على OpenRouter (وإلّا فالافتراضيّ في `build_llm`)")
+    ap.add_argument("--out", type=pathlib.Path, help="ملفُّ الأجوبة (افتراضيّه `data/eval_pack/answers.json`)")
     ap.add_argument("--run", type=pathlib.Path,
                     default=pack_io.data_root() / "data/local_sample/slice_629p",
                     help="مجلّدُ التشغيلة المقروءة (نفسُ مصدر الحزمة)")
@@ -219,6 +420,10 @@ def main(argv=None) -> int:
                 bad.append(f"{qid}: الصفحة {p} خارج الحزمة — مرسًى لا يُقاس")
     if bad:
         print("\n".join(x for x in bad if x), file=sys.stderr)
+
+    if a.execute:
+        sel = qs[: a.limit] if a.limit else qs
+        return run_questions(a, sel, c, pack, spec)
 
     if a.validate:
         broken = [x for x in bad if x]
