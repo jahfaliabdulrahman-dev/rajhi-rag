@@ -12,7 +12,7 @@
 """
 from __future__ import annotations
 
-import re
+import importlib.util
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -20,16 +20,31 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CUTOFF = datetime(2026, 9, 25, 1, 0, tzinfo=timezone(timedelta(hours=3)))
 TOLERANCE = timedelta(minutes=20)
-#: أربعُ خانات أو ستّ — **ولا يُتخطّى صندوقٌ بصمت** (R55-2: النمطُ الرباعيّ كان يقفز فوق ملفّات المدقّق
-#: كلِّها فيمرّ «unchecked» بلا أن يُقاس عليه شيء).
-NAME = re.compile(r"^(\d{8})-(\d{4})(\d{2})?-")
+
+
+def _turn():
+    """**مصدرٌ واحد** للنمط ولاصطلاح الزمن: الأداةُ نفسُها (لا نسخةً ثانية تُعمي من جديد)."""
+    spec = importlib.util.spec_from_file_location("turn", ROOT / "tools" / "turn.py")
+    assert spec is not None and spec.loader is not None, "تعذّر تحميلُ مُشتقّ الدور"
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+NAME = _turn().NAME_RE
+
+
+def _box(side: str) -> list[Path]:
+    """كلُّ ملفّات صندوقٍ (بلا `STATE.md`) — **وليس المطابِقَ فقط**: العَدُّ الصامتُ هو صنفُ R55-2."""
+    return [p for p in sorted((ROOT / "handoff" / side).glob("*.md")) if p.name != "STATE.md"]
 
 
 def _reports() -> list[Path]:
-    out: list[Path] = []
-    for side in ("sulaiman", "claude"):
-        out += [p for p in sorted((ROOT / "handoff" / side).glob("*.md")) if NAME.match(p.name)]
-    return out
+    return [p for side in ("sulaiman", "claude") for p in _box(side) if NAME.match(p.name)]
+
+
+def _unmatched() -> list[Path]:
+    return [p for side in ("sulaiman", "claude") for p in _box(side) if not NAME.match(p.name)]
 
 
 def _landing_times(path: Path) -> list[datetime]:
@@ -50,17 +65,10 @@ def _landing_times(path: Path) -> list[datetime]:
 
 
 def _stamp(path: Path) -> datetime:
-    """زمنُ الاسم موحَّداً على مقياس واحد (ستّ خانات)، ومع **اصطلاح نهاية اليوم**.
-
-    `24:00` (كما في `20260922-240000-…`) يقتل `strptime` باستثناء `ValueError` ⇒ وضابطٌ ينهار على أوّل
-    اسمٍ بهذا الاصطلاح **لا يحرس شيئاً**. فيُقارَب: `24:00` = `00:00` من الغد (نفسُ اليوم المعنويّ).
-    """
-    m = NAME.match(path.name)
-    assert m is not None
-    date, hhmm, ss = m.group(1), m.group(2), m.group(3) or "00"
-    if hhmm[:2] == "24" and hhmm[2:] == "00" and ss == "00":
-        return datetime.strptime(date, "%Y%m%d") + timedelta(days=1)
-    return datetime.strptime(date + hhmm + ss, "%Y%m%d%H%M%S")
+    """زمنُ الاسم من **مصدرٍ واحد** (`tools/turn.py`: النمطُ + اصطلاحُ نهاية اليوم) — لا نسخةً ثانية."""
+    key = _turn().stamp_of(path.name)
+    assert key is not None, f"اسمٌ بلا زمن: {path.name}"
+    return _turn().as_datetime(key)
 
 
 def test_every_recent_report_name_matches_when_it_landed():
@@ -77,19 +85,24 @@ def test_every_recent_report_name_matches_when_it_landed():
     assert not late, f"اسمُ التقرير لا يطابق زمنَ إيداعه: {late} (أعِدْ تسميتَه بـ`git mv` على الزمن الصحيح)"
 
 
-def test_both_boxes_are_actually_checked_not_skipped():
-    """**صنفُ R55-2**: نمطٌ لا يفهم صيغةَ صندوقٍ يتخطّاه بصمت ⇒ «نجاحٌ» لم يُقَس عليه شيء.
+def test_no_report_file_escapes_the_pattern_undeclared():
+    """**صنفُ R55-2 بحصره الكامل**: نمطٌ لا يفهم صيغةً يتخطّى ملفّاتٍ **بصمت** ⇒ «نجاحٌ لم يُقَس عليه شيء».
 
-    والقياسُ هنا: **كلُّ طرفٍ له ملفٌّ مُطابَقٌ فعلاً** (لا مفترض).
+    نسخةٌ أسبق اكتفت بـ«لكلّ صندوقٍ ملفٌّ واحد مُطابَق» ⇒ **نجحت على النمط المعطوب نفسِه** (قاسها المقعدان:
+    المنفّذ ١٨/٨٦ والمدقّق ١/٤٩ عند النمط الرباعيّ، وكلاهما «نجح»). فالقياسُ الآن **بالمحصلة**:
+    كلُّ ملفٍّ لا يطابق النمط يجب أن يكون **سابقاً للقاعدة** (أُودِع قبل `CUTOFF`)؛ وإلّا فهو اسمٌ بلا زمنٍ
+    بعد القاعدة ⇒ يُصلَح لا يُعفى.
     """
-    from_name = {"sulaiman": 0, "claude": 0}
-    for p in _reports():
-        side = p.parent.name
-        from_name[side] += 1
-    assert from_name["claude"] > 0, (
-        f"لا ملفَّ واحدٍ من صندوق المدقّق يُطابَق النمط — وهو ما كان يُخفي مراجعاته كلَّها "
-        f"(أسماءُ المدقّق بستّ خانات HHMMSS · المقيس: {from_name})")
-    assert from_name["sulaiman"] > 0, f"لا ملفَّ من صندوق المنفّذ يُطابَق: {from_name}"
+    escaping = []
+    for p in _unmatched():
+        times = _landing_times(p)
+        if not times or min(times) > CUTOFF.replace(tzinfo=None):
+            escaping.append((p.name, [t.isoformat() for t in times] or "بلا زمنِ إيداع"))
+    assert not escaping, (f"أسماءٌ بلا زمنٍ أُودِعت بعد القاعدة ⇒ تُقاس ولا تُتخطّى: {escaping}")
+    # وحدُّ ذلك مُعلَن: كم بقي من أسماءٍ سابقةٍ للقاعدة (دَينٌ تاريخيٌّ مقيس لا مخفيّ)
+    assert len(_unmatched()) <= 10, (
+        f"أسماءٌ بلا زمن: {len(_unmatched())} — ارتفعت عن الحدّ التاريخيّ المُعلَن (٨) "
+        f"⇒ إمّا اسمٌ جديد بلا زمن أو توسيعٌ للصندوق")
 
 
 def test_an_end_of_day_name_does_not_break_the_parser():
@@ -98,9 +111,12 @@ def test_an_end_of_day_name_does_not_break_the_parser():
     (قِيس على `handoff/sulaiman/20260922-240000-item4-…md` — كان يُتخطّى صمتاً بالنمط الرباعيّ، فلمّا
     صار يُرى ظهر الاستثناء.)
     """
-    p = ROOT / "handoff/sulaiman/20260922-240000-item4-ONE-DELIVERY-three-commitments-price-and-outside-witness.md"
-    if p.exists():
-        assert _stamp(p) == datetime(2026, 9, 23, 0, 0), _stamp(p)
+    # **يُقاس على اسمٍ مصنوعٍ داخل الاختبار** — النسخةُ الأسبق كانت داخل `if p.exists():` فتنجو صامتةً
+    # لو أُعيدت تسميةُ الشاهد (صنفُ R55-2 نفسُه في الضابط الذي وُلد منه — قاسه المقعدُ التركيبيّ).
+    assert _stamp(Path("20260922-240000-any-report.md")) == datetime(2026, 9, 23, 0, 0)
+    real = ROOT / "handoff/sulaiman/20260922-240000-item4-ONE-DELIVERY-three-commitments-price-and-outside-witness.md"
+    assert real.exists(), ("شاهدُ اصطلاح نهاية اليوم غاب من المستودع ⇒ أُصلِح الاسم أو أُعلن الاستثناءُ بسببٍ "
+                          "مكتوب (لا يمرّ صامتاً)")
 
 
 def test_no_historic_exemption_has_outlived_its_reason():

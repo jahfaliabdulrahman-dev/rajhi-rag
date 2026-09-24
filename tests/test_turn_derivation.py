@@ -78,26 +78,40 @@ def test_a_report_asking_the_owner_makes_the_turn_the_owners(monkeypatch, tmp_pa
     assert '"turn": "المالك"' in capsys.readouterr().out
 
 
-def test_check_flags_a_stored_value_that_would_go_stale(monkeypatch, tmp_path, capsys):
-    """**R55-1 (ب)**: قيمةٌ محفوظة ⇒ ستتقادم بعد كلّ دفعةٍ من الطرف الآخر ⇒ تُكشَف **قبل** أن تقادم."""
+def test_check_flags_every_stored_value_variant(monkeypatch, tmp_path, capsys):
+    """**R55-1 (ب)** — والقياسُ **حرفيّ** لأنّ الصيغَ الأربع كلَّها نَجَت من نسخةٍ أضيق (قاسها المقعدُ التركيبيّ):
+
+    `` (`Claude`) `` · `` (`sulaiman-2`) `` · `(claude)` بلا علامتين · `Turn:` بحرفٍ كبير — كلُّها قيمٌ
+    محفوظةٌ كانت تُقرأ «لا قيمةَ محفوظة» ⇒ تقادُمٌ يمرّ بصمت. و**غيابُ السطر** عطبٌ أيضاً (القارئُ الأوّل يفقد الأمر).
+    """
     m = _load()
     monkeypatch.setattr(m, "ROOT", tmp_path)
     _tree(tmp_path, {"claude": [("20260925-0200-review", "بلا طلب")]})
-    (tmp_path / "handoff" / "STATE.md").write_text(
-        "turn: **المدقّق** (`claude`) — قيمةٌ محفوظة\n", encoding="utf-8")
-    assert m.main(["--check"]) == 1, "قيمةٌ محفوظة ⇒ 1 (وإلّا تقادمت بصمت بعد أوّل دفعةٍ من الطرف الآخر)"
-    assert "tools/turn.py --write" in capsys.readouterr().out
+    shared = tmp_path / "handoff" / "STATE.md"
+    for body in ("turn: **المدقّق** (`claude`) — قيمةٌ محفوظة\n",
+                 "turn: **المدقّق** (`Claude`) — بحرفٍ كبير\n",
+                 "turn: **المدقّق** (`sulaiman-2`) — معرّفٌ مركّب\n",
+                 "turn: **المدقّق** (claude) — بلا علامتين\n",
+                 "Turn: **المدقّق** (`claude`) — بحرفٍ كبير في المفتاح\n"):
+        shared.write_text(body, encoding="utf-8")
+        assert m.main(["--check"]) == 1, f"قيمةٌ محفوظةٌ مرّت: {body!r}"
+        assert "tools/turn.py --write" in capsys.readouterr().out
+    shared.write_text("ملفٌّ بلا سطر دورٍ أصلاً\n", encoding="utf-8")
+    assert m.main(["--check"]) == 1, "غيابُ المُؤشِّر عطبٌ لا «لا تقادُم»"
+    assert "لا سطرَ" in capsys.readouterr().out
 
 
-def test_write_writes_a_pointer_not_a_value(monkeypatch, tmp_path):
-    """`--write` يكتب **مُؤشِّراً**: لا معرّفَ طرفٍ بين علامتين خلفيّتين ⇒ لا مادّةَ للتقادُم."""
+def test_write_replaces_any_variant_and_leaves_no_second_line(monkeypatch, tmp_path):
+    """`--write` يستبدل **أيّ** صيغة (وبحرفٍ كبير) ولا يُدرج سطراً ثانياً يُبقي القيمة (قاسه المقعدُ التركيبيّ)."""
     m = _load()
     monkeypatch.setattr(m, "ROOT", tmp_path)
     _tree(tmp_path, {"claude": [("20260925-0200-review", "بلا طلب")]})
-    (tmp_path / "handoff" / "STATE.md").write_text("turn: **المدقّق** (`claude`) — قديم\n", encoding="utf-8")
+    shared = tmp_path / "handoff" / "STATE.md"
+    shared.write_text("handoff/STATE.md — تقريرُ الحالة\nTurn: **المدقّق** (`claude`) — قديم\n", encoding="utf-8")
     assert m.main(["--write"]) == 0
-    body = (tmp_path / "handoff" / "STATE.md").read_text(encoding="utf-8")
-    assert m.POINTER in body and "`claude`" not in body, "كُتبت قيمةٌ لا مُؤشِّراً ⇒ ستعود العلّةُ نفسُها"
+    body = shared.read_text(encoding="utf-8")
+    assert body.count("turn:") + body.count("Turn:") == 1, f"سطران للدور ⇒ قيمةٌ باقية: {body!r}"
+    assert m.POINTER in body and "`claude`" not in body
     assert m.main(["--check"]) == 0
 
 

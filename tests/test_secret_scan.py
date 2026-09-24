@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,11 +99,46 @@ def test_a_missing_file_fails_closed(tmp_path, capsys):
 
 # ── P-4 · «الرابطُ المُوسَم»: معرّفٌ لا وجودَ له في هذا المستودع (تبنّاه المدقّق في مراجعة ٥٤) ──
 
+#: **دَينٌ مُعلَنٌ ومؤرَّخ**: عددُ الأسطر على الكوربوس المُتتبَّع التي تُشبه إحالةً خارجية ولا وجودَ لها في
+#: رسم المستودع (أكثرُها بصماتُ محتوى ومراجعُ من جولاتٍ سابقة). القياسُ عند اعتماد هذا السقف: **٦٣ من ٣٥١ ملفّاً**
+#: (والكودُ الأسبق: ٨٥). **والسقفُ راتشت**: صعودُه يحتاج قراراً مُعلناً، لا يُبتلع بتوسيعٍ صامت.
+FOREIGN_ID_DEBT_ON_CORPUS = 63
+
+
+def test_the_corpus_positive_rate_is_declared_and_capped():
+    """**الصدقُ في المعدّل**: أداةٌ تُعلن نظافتَها على الكوربوس بينما تُنتج عشراتِ الإيجابيّات = ادّعاء.
+
+    ولا تُصلَح آليّاً (تُراجَع بشرٍ): فالقياسُ هنا **سقفٌ مُعلَن** يمنع النموّ — أي أنّ أيَّ توسيعٍ للسياق
+    أو صيغةٍ جديدة تُضاعف المعدّل **يُكشَف فوراً** بدل أن يُبتلع.
+    """
+    m = _load()
+    files = subprocess.run(["git", "ls-files", "*.md", "*.py", "*.json", "*.txt"],
+                           cwd=str(ROOT), capture_output=True, text=True).stdout.split()
+    assert files, "لا ملفّاتٍ مُتتبَّعة ⇒ فشلٌ مُغلَق (لا أُعلن سقفاً بلا مقام)"
+    n = 0
+    for f in files:
+        try:
+            lines = (ROOT / f).read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        n += sum(1 for i, ln in enumerate(lines, 1) if m.scan_foreign_ids([(i, ln)]))
+    assert n <= FOREIGN_ID_DEBT_ON_CORPUS, (
+        f"معدّلُ الإيجابيّات ارتفع إلى {n} (السقفُ المُعلَن {FOREIGN_ID_DEBT_ON_CORPUS}) ⇒ صيغةٌ تُوسّع "
+        f"الانكشافَ أو ملفٌّ جديد؛ قِسْه ثم ارفع السقفَ **بقرارٍ مُعلَن** أو أصلِح الصيغة")
+
 def test_a_foreign_commit_id_is_flagged():
-    """٤٠ خانةً سِتّ عشريّة لا وجودَ لها في المستودع + **سياقُ التزام** ⇒ إشارةٌ إلى خارجه."""
+    """٤٠ خانةً سِتّ عشريّة لا وجودَ لها + سياقُ إحالةٍ ⇒ إشارةٌ إلى خارجه.
+
+    **والصيغُ التسعُ هنا مقيسةٌ لا مُتخيَّلة**: نسخةٌ ضيّقت السياقَ إلى كلمة `commit` وحدها كانت **تنجو**
+    من `sha=<id>` و`commit hash <id>` (قاسها مقعدُ المعايير) ⇒ فالدقّةُ لا تُشترى بالقدرة.
+    """
     m = _load()
     foreign = "f" * 39 + "a"
-    for line in (f"commit = {foreign} هو مصدر البيانات", f"الالتزام {foreign} مدموجٌ سابقاً"):
+    for line in (f"commit = {foreign} هو مصدر البيانات",
+                 f"الالتزام {foreign} مدموجٌ سابقاً",
+                 f"sha={foreign} هو مصدر البيانات",
+                 f"the commit hash {foreign} في السجلّ",
+                 f"revision hash {foreign} مدموج"):
         hits = m.scan_foreign_ids([(3, line)], exists=lambda t: False)
         assert hits == [(3, "foreign_commit_id")], (line, hits)
 
@@ -118,9 +154,13 @@ def test_a_file_hash_stamp_is_not_a_commit_id():
     wide = "b" * 40
     for line in (f"`spec_sha` = {stamp} محسوبةٌ من ملفّ الأسئلة",
                  f"sha256={wide} للنسخة المُنزَّلة",
-                 f"sha={wide} بصمةُ المحتوى"):
+                 f"content_sha: {wide} في المانيفست",
+                 f"checksum={wide} للملفّ"):
         hits = m.scan_foreign_ids([(7, line)], exists=lambda t: False)
         assert hits == [], (line, hits)
+    # **وحدُّ الاستثناء**: `sha=<id>` بلا اسمِ حقلٍ صريح ⇒ **يُكتشَف** (لا استثناءَ بكلمةٍ عامّة)
+    hits = m.scan_foreign_ids([(8, f"sha={wide} بصمةُ المحتوى")], exists=lambda t: False)
+    assert hits == [(8, "foreign_commit_id")], ("الاستثناءُ صار أوسعَ من العلّة", hits)
 
 
 def test_an_id_that_exists_in_the_repo_is_not_flagged():
