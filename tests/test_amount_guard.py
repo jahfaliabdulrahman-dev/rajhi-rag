@@ -141,19 +141,24 @@ def test_ignore_is_a_measured_fact_not_a_claim():
     (مراجعة ٣٨: خريطةُ التطهير كانت في `SCAN_SKIP` ولا يفحصها `tracking_audit` ولا يمنعها
     حارسُ النشر ⇒ `git add -f` كان يمرّ من الثلاثة، وهي خريطةٌ تربط المُقنَّعَ بالحقيقيّ.)
     """
+    # ⚠ **الشجرةُ ليست جذرَ الأدلّة** (قِيس في شجرةِ عملٍ مستقلّة — واسمُ سقوطه `ValueError`):
+    # `ag.ROOT` = مكانُ الشجرة، و`ag.DATA_ROOT` = المستودع الذي فيه `data/` (يُحلّ بـ`git --git-common-dir`
+    # لتُراه كلُّ الأشجار **بالتصميم**). فحسابُ الاسم النسبيّ من `ag.ROOT` كان يرمي في worktree
+    # ⇒ ضابطان يسقطان لا لعلّةٍ في الحارس بل في **قابلية التحقّق** (القاعدة ١٧: المدقّق يتحقّق في شجرةٍ خاصّة).
+    root = ag.DATA_ROOT
     assert ag.tracking_audit() == [], f"المفتاحُ/المانيفستُ/الخريطة: {ag.tracking_audit()}"
     for path in (ag.KEY_FILE, ag.MANIFEST, ag.REDACTION_MAP):
-        rel = str(path.relative_to(ag.ROOT))
+        rel = str(path.relative_to(root)).replace("\\", "/")
         assert subprocess.run(["git", "ls-files", "--error-unmatch", "--", rel],
-                              cwd=str(ROOT), capture_output=True).returncode != 0, f"{rel} مُتتبَّع ⛔"
+                              cwd=str(root), capture_output=True).returncode != 0, f"{rel} مُتتبَّع ⛔"
         assert subprocess.run(["git", "check-ignore", "-q", "--", rel],
-                              cwd=str(ROOT), capture_output=True).returncode == 0, f"{rel} غيرُ مُهمَل ⛔"
+                              cwd=str(root), capture_output=True).returncode == 0, f"{rel} غيرُ مُهمَل ⛔"
 
 
 def test_the_manifest_is_never_published():
     """**لا يُنشر ما يمكن مهاجمتُه:** المانيفستُ وخريطةُ التطهير يسكنان `data/` المُهمَل."""
     for path in (ag.MANIFEST, ag.REDACTION_MAP):
-        rel = str(path.relative_to(ag.ROOT)).replace("\\", "/")
+        rel = str(path.relative_to(ag.DATA_ROOT)).replace("\\", "/")   # جذرُ الأدلّة لا جذرُ الشجرة
         assert rel.startswith("data/"), f"{rel} خارج data/ المُهمَل"
     assert not (ROOT / "docs" / "security" / "amount-denylist.json").exists(), \
         "نسخةٌ منشورةٌ من البصمات ⇒ تُجرَد بمن يملك المفتاح ⇒ احتفظ بها داخل data/"
