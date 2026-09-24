@@ -54,7 +54,13 @@ def is_substitute(rec: dict) -> bool:
 
 
 def is_judged(rec: dict) -> bool:
-    return rec.get("ok") is not None and not is_trace_suspect(rec)
+    """**المحكومُ فعلًا** = لا نائبٌ ولا مشكوكُ القصّ. وهذا **تعريفٌ واحدٌ يستهلكه الجميع**:
+
+    كان `ok is not None and not is_trace_suspect` ⇒ عدّادٌ ثانٍ للمقام يُخالف ما تعدّه أدواتُ القراءة
+    (أداةُ المقارنة تطبع ٢٧/٣٨ و`_print_metrics` تطبع ٤٠ من ٥٠ للملفّ نفسه) — وهي علّةُ «مالكين لقاعدة»
+    التي أمسكتها مراجعة ٥٠ مرّتين: مرّةً في النائب ومرّةً في المقام.
+    """
+    return not is_substitute(rec) and not is_trace_suspect(rec)
 
 
 def classify(records: list[dict], cur_sha: str) -> tuple[list[str], list[str], list[str]]:

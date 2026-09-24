@@ -160,16 +160,7 @@ def test_a_substitute_is_not_an_answer(tmp_path, capsys):
 # ============================================================================================
 # مراجعة ٥٠ — أربعةُ ضوابطَ لِما كان بلا ضابط (والبندُ ١ كان علّةً حقيقيّةً في كودٍ أعلنتُه مُغلقًا)
 # ============================================================================================
-import importlib.util                                                            # noqa: E402
 import json as _json                                                             # noqa: E402
-import pathlib as _pl                                                            # noqa: E402
-
-
-def _load(name: str, rel: str):
-    spec = importlib.util.spec_from_file_location(name, ROOT / rel)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
 
 
 def test_the_spend_meter_counts_forwards():
@@ -180,7 +171,7 @@ def test_the_spend_meter_counts_forwards():
     assert m._spent_since({"usage": 10.0}, {"usage": 10.3}) == pytest.approx(0.3)
     assert m._spent_since({"usage": 10.0}, {"usage": 10.0}) == 0.0
     assert m._spent_since({"usage": 10.0}, {"usage": 9.5}) < 0      # العكسُ يظهر سالبًا ⇒ لا يبلغ سقفًا
-    assert m._spent_since({"usage": 10.0}, {"usage": 9.7}) < 0.5    # ولا يبلغ ٠٫٥ ميزانيّةً وهو −٠٫٣
+    assert m._spent_since({"usage": 10.0}, {"usage": 9.7}) == pytest.approx(-0.3)  # العكسُ يُقاس لا يُقدَّر
     assert m._spent_since(None, {"usage": 1.0}) is None             # لا قياس ≠ صفرُ مصروف
     assert m._spent_since({"usage": 1.0}, None) is None
     assert m._spent_since({"usage": None}, {"usage": 1.0}) is None
@@ -232,7 +223,7 @@ def test_a_stale_snapshot_is_a_drift(tmp_path, monkeypatch):
                     reason="بلا عيّنةِ القرص المحلّيّة")
 def test_the_chain_connects_by_magnitude_not_by_signed_addition():
     """**البندُ الثالث (مراجعة ٥٠):** المبلغُ المطبوعُ **بلا إشارة**، فالربطُ بالجمع الموقَّع يعدّ الحركاتِ
-    الدائنةَ وحدها (١٢٤) ويسقط ٤٩٥ مدينة. المقياسُ على **المقدار** ⇒ ٦١٩ من ٦٢٤ وفجوتان معروفتان:
+    الدائنةَ وحدها (١٢٤) ويسقط ٤٩٥ مدينة. المقياسُ على **المقدار** ⇒ ٦١٩ من ٦٢١ زوجًا وفجوتان معروفتان:
     (٤٢٦→٤٢٧) و(٦٢٥→٦٢٦). وإرجاعُ الجمع الموقَّع يُسقط هذا الضابط."""
     import json as _j
     import sys as _s
@@ -252,7 +243,7 @@ def test_the_chain_connects_by_magnitude_not_by_signed_addition():
             return float(str(v).replace(",", "").strip())
         except Exception:                                                    # noqa: BLE001
             return None
-    connected, gaps = 0, []
+    connected, measured, gaps = 0, 0, []
     for a, b in zip(pages, pages[1:]):
         if a + 1 != b:
             continue
@@ -261,9 +252,48 @@ def test_the_chain_connects_by_magnitude_not_by_signed_addition():
         pm = next((x for x in (f(r.get("movement")) for r in raw) if x is not None), None)
         if la is None or fb is None or pm is None:
             continue
+        measured += 1                                   # المقامُ يُقاس ولا يُفترض (كان ٦٢٤ نوافذَ لا ٦٢١ زوجًا)
         if abs(abs(fb - la) - abs(pm)) < 0.005:
             connected += 1
         else:
             gaps.append((a, b))
+    assert measured == 621, f"المقامُ (الأزواجُ المتجاورة) يجب أن يكون ٦٢١ لا {measured}"
     assert connected == 619, f"الربطُ بالمقدار يجب أن يعطي ٦١٩ لا {connected} (الجمعُ الموقَّع يعطي ١٢٤)"
     assert gaps == [(426, 427), (625, 626)], f"الفجوتان المعروفتان تغيّرتا: {gaps}"
+
+
+def test_the_snapshot_gate_actually_fires(monkeypatch, tmp_path):
+    """**المانع S-3/B2 (مراجعة ٥٠):** ضابطُ اللقطة كان يقيس *الدالّة* لا *التنصيب* — حذفُ سلكها من `main`
+    يُبقيه أخضر. هذا الضابطُ يشغّل **الأمر** على وثيقةٍ تخالف لقطتها (حالةُ CI) ويطالب برمز خروجٍ غير صفري."""
+    rc = _load("render_claims_gate", "tools/render_claims.py")
+    monkeypatch.setattr(rc, "PROJ", tmp_path)
+    monkeypatch.setattr(rc, "SNAPSHOT", tmp_path / "docs" / "claims.json")
+    monkeypatch.setattr(rc, "REPORT", tmp_path / "no-such-report.json")   # بلا تقريرٍ حيّ = حالةُ CI
+    (tmp_path / "docs").mkdir(parents=True, exist_ok=True)
+    doc = tmp_path / "docs" / "QA_CHECKLIST.md"
+    doc.write_text("حالياً 999 اختباراً\n", encoding="utf-8")
+    (tmp_path / "docs" / "claims.json").write_text(_json.dumps({"tests": 606}, ensure_ascii=False),
+                                                   encoding="utf-8")
+    monkeypatch.setattr(rc, "claims",
+                        lambda d: [("docs/QA_CHECKLIST.md", f"حالياً {d['tests']}", "عدد الاختبارات")])
+    monkeypatch.setattr(sys, "argv", ["render_claims.py", "--check"])
+    with pytest.raises(SystemExit) as e:
+        rc.main()
+    assert e.value.code == 1, "البوّابةُ لا تحمرّ على وثيقةٍ تخالف لقطتها (وهي حالةُ CI بعينها)"
+    doc.write_text("حالياً 606 اختباراً\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as e2:
+        rc.main()
+    assert e2.value.code == 0
+
+
+def test_the_spend_formula_has_exactly_one_owner():
+    """**المانع B4 (مراجعة ٥٠):** ضابطُ الاتّجاه كان يربط الدالّةَ لا مستهلكيها ⇒ إرجاعُ الصيغة المضمَّنة في
+    موضع الصرف يُبقيه أخضر. هذا الضابطُ يمنع تعدُّدَ المالك: لا طرحَ لعدّاد المزوّد خارج `_spent_since`."""
+    import re
+    src = (ROOT / "tools" / "eval_questions.py").read_text(encoding="utf-8")
+    body = src.split("def _spent_since", 1)[1].split("\ndef ", 1)[0]      # حتى أوّل def في العمود صفر
+    assert body.count("return float(c) - float(b)") == 1, "المالكُ يجب أن يحمل الطرحَ وحده"
+    rest = src.replace(body, "", 1)
+    bad = re.findall(r"usage[^\n]{0,60}?-{1}[^\n]{0,20}?usage", rest)     # طرحُ قراءتَي عدّاد خارج المالك
+    assert not bad, f"طرحُ عدّاد المزوّد خارج `_spent_since`: {bad[:2]}"
+    assert src.count("_spent_since(") >= 3, "الصيغةُ تُستهلك من السقف وسطر الكلفة معًا"

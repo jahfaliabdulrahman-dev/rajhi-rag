@@ -522,7 +522,7 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     done = {k: v for k, v in prev_all.items()
             # **النائبُ ليس جواباً** ⇒ يُعاد سؤالُه · **وجوابُ نصٍّ آخر ليس جواباً لهذا السؤال** (قِيس:
             # أربعُ إعاداتِ صياغةٍ في مدىً واحد ⇒ كان يُعاد استخدامُ جوابِ النصّ القديم صامتاً).
-            if not str(v.get("answer") or "").startswith("<") and eval_stamp.is_publishable(v, curent)}
+            if not eval_stamp.is_substitute(v) and eval_stamp.is_publishable(v, curent)}
     todo = [q for q in qs if q["id"] not in done]
     if a.budget:                       # **سقفٌ يُقاس بالمزوّد لا يُقنَّع** (الجولة ٤٩ · S-2)
         # كان `cap = budget / 0.01` ⇒ ٦٠ لخمسين سؤالًا ⇒ **لا يُلجِم أبدًا** ويُوكَل إلى تقديرٍ مُقنَّع.
@@ -551,7 +551,15 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     for i, q in enumerate(todo, 1):
         import time
         if a.budget:                        # **المقياسُ قبل الطلب** (S-2 · أُعيد ٢٠٢٦-٠٩-٢٤ بعد مراجعة ٥٠)
-            spent = _spent_since(before, _key_usage())
+            cur_u = _key_usage()
+            spent = _spent_since(before, cur_u)
+            if spent is not None and spent < 0:
+                # **توقّفٌ مُسمّى عند عدّادٍ تراجعيّ** (مراجعة ٥٠ · مقعد Spec · P1): عدّادٌ ينقص يعني أنّ ما
+                # يُقاس ليس ما يزيد بالصرف ⇒ لا سقفَ يُوثق به؛ والصمتُ هنا سقفٌ معطَّلٌ يُنشر كأنّه يعمل.
+                print(f"\n⛔ **العدّادُ تراجع** ({before.get('usage') if before else '؟'} ⇒ "
+                      f"{cur_u.get('usage') if cur_u else '؟'}): الفرقُ سالبٌ ⇒ لا سقفَ يُقاس بهذا المقياس "
+                      f"⇒ توقّفٌ مُسمّى قبل السؤال {i} (fail-closed).", flush=True)
+                break
             if spent is not None and spent >= float(a.budget):
                 print(f"\n⛔ السقفُ **المقيس** بلغ {spent:.4f} من {float(a.budget):.4f} ⇒ التوقّف قبل "
                       f"السؤال {i}. **التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** في هذه الجولة.", flush=True)
@@ -597,7 +605,7 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     print("\n" + "=" * 62)
     _print_metrics(results)
     d = _spent_since(before, after)          # **نفسُ صيغةِ السقف** (مصدرٌ واحدٌ يمنع تباعدَ الفرضيّتين)
-    if d is not None and before and after:
+    if d is not None:
         print(f"💰 الكلفةُ الفعليّةُ من المزوّد: ${d:.4f} (رصيدُ المفتاح {before.get('usage')} ⇒ {after.get('usage')})")
     else:
         print("💰 تعذّر قياسُ الكلفة من المزوّد — لا يُدَّعى رقمٌ بلا مصدر.")

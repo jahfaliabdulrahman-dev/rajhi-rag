@@ -89,7 +89,11 @@ def compare(spec_path: pathlib.Path, arms: list[pathlib.Path]) -> dict:
         metrics[name] = m
         totals[name] = {"ok": sum(1 for r in rows if r.get("ok")), "n": len(rows),
                         "trace_excluded": len(excluded[name]), "substitutes": len(subs[name])}
-    tot_ok = [v["ok"] for v in totals.values()]
+    tot_ok = [v["ok"] for v in totals.values()]                                      # noqa: F841 — يُطبع أدناه
+    # **المدى على أساسٍ مشترك** (مراجعة ٥٠ · مقعد Structure · P1): مقارنةُ بسوطٍ على مقاماتٍ مختلفة
+    # (٣٨/٣٤/٤٠/٤١) تقارن تفاحًا بمقاماته. المجموعةُ المشتركةُ بين الأذرع هي الأساس، وتُنشر بأسمائها.
+    common_ok = {name: sum(1 for i in both if per_arm[name][i].get("ok")) for name in per_arm}
+    common_range = [min(common_ok.values()), max(common_ok.values())] if common_ok else []
 
     # (٤) الزمن: الوسيطُ والذيلُ (لا الوسيطُ وحده)
     secs = [float(per_arm[n][i].get("secs") or 0) for n in per_arm for i in ids]
@@ -109,7 +113,8 @@ def compare(spec_path: pathlib.Path, arms: list[pathlib.Path]) -> dict:
             "missing_ids": {k: v for k, v in missing.items() if v},
             "trace_excluded": {k: v for k, v in excluded.items() if v},
             "flaky": flaky, "stability": stability, "metrics_per_arm": metrics,
-            "totals_per_arm": totals, "total_range": [min(tot_ok), max(tot_ok)] if tot_ok else [],
+            "totals_per_arm": totals, "total_range": common_range,
+            "common_counted": len(both), "common_ok": common_ok,
             "latency": lat, "sizes": sizes,
             "invariants": {"records_never_truncated": all(v["records"] <= v["ids_expected"] for v in sizes.values()),
                            "arms_cover_the_pack": not any(missing.values()),
@@ -125,7 +130,7 @@ def main() -> int:
     out = compare(a.spec, a.arms)
 
     print(f"بصمةُ الأسئلة المرجعيّة: {out['spec_sha_expected']} · الجولات: {len(out['arms'])} · "
-          f"أسئلةٌ مُقارَنة: {out['questions_compared']}")
+          f"أسئلةٌ مُقارَنة: {out['questions_compared']} · **محسومةٌ في كلّ الأذرع: {out.get('common_counted')}**")
     if out["spec_mismatch"]:
         for name, bad in out["spec_mismatch"].items():
             print(f"⛔ {name}: بلا بصمةٍ {len(bad['unstamped'])} · ببصمةٍ مخالفة {len(bad['stale'])} "
@@ -147,7 +152,10 @@ def main() -> int:
                   f"من المجموع ومُعلَن — أعِد الطرح بأثرٍ كامل.")
     if out["total_range"]:
         lo, hi = out["total_range"]
-        print(f"\nمدى المجموع على الجولات: **{lo}–{hi}** (وعرضُ التذبذب {hi - lo} سؤالاً)")
+        per = " · ".join(f"{n.split('.')[0]} {v}" for n, v in out.get("common_ok", {}).items())
+        print(f"\nالمدى على **المجموعة المشتركة** ({out.get('common_counted')} سؤالًا): **{lo}–{hi}** "
+              f"(عرضُ التذبذب {hi - lo}) · وبسوطُ الأذرع عليها: {per}")
+        print("(وبسوطُ الأذرع على مقاماتها — بلا نوائبَ ولا مقصوص — في الجدول أعلاه؛ لا تُقارَن مقاماتٌ مختلفة.)")
     print(f"أسئلةٌ متذبذبة (flaky): {len(out['flaky'])}" + (f" ⇒ {out['flaky']}" if out["flaky"] else ""))
     if out["latency"]:
         lat = out["latency"]

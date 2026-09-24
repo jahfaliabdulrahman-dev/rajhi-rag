@@ -140,8 +140,20 @@ def main() -> None:
     args = ap.parse_args()
     d = derive()
     if d is None:
-        print(f"لا يوجد تقرير مقيس هنا ({REPORT}) — لا شيء لاشتقاقه. "
-              f"على CI هذا طبيعي: الكاش محلي.")
+        # **بلا تقريرٍ لا يُصمت** (مراجعة ٥٠ · مقعدا Standards وSpec): كان الخروجُ هنا يسبق كلّ مقابلة ⇒
+        # خطوةُ CI المسمّاة «اللقطة» كانت تقابل **لا شيء** (rc=0 ولقطةٌ مسمومة). الآن تُقابَل **اللقطةُ
+        # الملتزمةُ بالوثائق** — وهو ما يفعله `tests/test_public_claims.py` في غياب الكاش — فيحمرّ على CI.
+        if not SNAPSHOT.exists():
+            print(f"لا تقرير مقيس هنا ({REPORT}) ولا لقطةٌ ملتزمة — لا شيء يُحرس.")
+            sys.exit(0)
+        snapdoc = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
+        sdrifts = check(snapdoc)
+        if sdrifts:
+            print("⚠ الوثائقُ تخالف لقطتها الملتزمة:")
+            for rel, needle, label in sdrifts:
+                print(f"  {rel}: تفتقد {needle!r}  ({label})")
+            sys.exit(1)
+        print("الحكم: الوثائقُ توافق لقطتها الملتزمة (لا تقريرٌ حيّ هنا).")
         sys.exit(0)
     print("[claims] الأرقام المشتقّة من تقرير التشغيل:")
     for k, v in d.items():
