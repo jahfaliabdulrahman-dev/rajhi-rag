@@ -155,3 +155,115 @@ def test_a_substitute_is_not_an_answer(tmp_path, capsys):
     assert rc == 0 and "نائبًا" in txt and "المجموع" in txt, txt[-400:]
     saved = json.loads(arm.read_text())["results"][0]
     assert saved.get("substitute") is True and saved.get("ok") is None, saved
+
+
+# ============================================================================================
+# مراجعة ٥٠ — أربعةُ ضوابطَ لِما كان بلا ضابط (والبندُ ١ كان علّةً حقيقيّةً في كودٍ أعلنتُه مُغلقًا)
+# ============================================================================================
+import importlib.util                                                            # noqa: E402
+import json as _json                                                             # noqa: E402
+import pathlib as _pl                                                            # noqa: E402
+
+
+def _load(name: str, rel: str):
+    spec = importlib.util.spec_from_file_location(name, ROOT / rel)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_spend_meter_counts_forwards():
+    """**البندُ المانع الأول (مراجعة ٥٠):** كان القياسُ `before − cur` وعدّادُ المزوّد **تراكميٌّ صاعد**
+    (والكلفةُ في آخر الجولة `after − before`) ⇒ الناتجُ سالبٌ أبدًا ⇒ **سقفٌ لا يبلغ الميزانية**.
+    الضابطُ يمسك الاتّجاه: صرفٌ ⇒ موجب. إرجاعُ الطرح المعكوس يُسقطه."""
+    m = _load("eval_questions_meter", "tools/eval_questions.py")
+    assert m._spent_since({"usage": 10.0}, {"usage": 10.3}) == pytest.approx(0.3)
+    assert m._spent_since({"usage": 10.0}, {"usage": 10.0}) == 0.0
+    assert m._spent_since({"usage": 10.0}, {"usage": 9.5}) < 0      # العكسُ يظهر سالبًا ⇒ لا يبلغ سقفًا
+    assert m._spent_since({"usage": 10.0}, {"usage": 9.7}) < 0.5    # ولا يبلغ ٠٫٥ ميزانيّةً وهو −٠٫٣
+    assert m._spent_since(None, {"usage": 1.0}) is None             # لا قياس ≠ صفرُ مصروف
+    assert m._spent_since({"usage": 1.0}, None) is None
+    assert m._spent_since({"usage": None}, {"usage": 1.0}) is None
+
+
+def test_a_substitute_is_not_in_the_denominator(tmp_path):
+    """**البندُ الرابع (مراجعة ٥٠):** `--rescore` كان يستبعد النائبَ والمقارنةُ تُدخله ⇒ مجموعان على
+    الأذرع نفسها (٢٧/٣٨ مقابل ٢٧/٤٠). المقامُ الآن واحدٌ والنوائبُ في عمودها."""
+    import hashlib
+    spec = tmp_path / "q.json"
+    spec.write_text(_json.dumps({"questions": [
+        {"id": "a-1", "cat": "x", "metric": "number", "expect": "number", "q": "?", "derive": {"kind": "count_rows", "page": 1}},
+        {"id": "a-2", "cat": "x", "metric": "number", "expect": "number", "q": "?", "derive": {"kind": "count_rows", "page": 1}},
+        {"id": "a-3", "cat": "x", "metric": "number", "expect": "number", "q": "?", "derive": {"kind": "count_rows", "page": 1}}]},
+        ensure_ascii=False), encoding="utf-8")
+    sha = hashlib.sha256(spec.read_bytes()).hexdigest()[:12]
+    def arm(path, second_ok, second_answer):
+        path.write_text(_json.dumps({"results": [
+            {"id": "a-1", "ok": True, "metric": "number", "used_row_nos": [1], "trace_len": 1, "spec_sha": sha},
+            {"id": "a-2", "ok": second_ok, "metric": "number", "answer": second_answer,
+             "used_row_nos": [1], "trace_len": 1, "spec_sha": sha},
+            {"id": "a-3", "ok": True, "metric": "number", "used_row_nos": [1], "trace_len": 1, "spec_sha": sha}]},
+            ensure_ascii=False), encoding="utf-8")
+    A, B = tmp_path / "A.json", tmp_path / "B.json"
+    arm(A, False, "<انتهت المهلة>")          # نائبٌ في الذراع A
+    arm(B, True, "3")                        # جوابٌ حقيقيٌّ في B
+    cmp = _load("eval_run_compare_d", "tools/eval_run_compare.py")
+    out = cmp.compare(spec, [A, B])
+    tA, tB = out["totals_per_arm"]["A.json"], out["totals_per_arm"]["B.json"]
+    assert tA["substitutes"] == 1 and tA["n"] == 2, f"النائبُ دخل المقام: {tA}"
+    assert tB["n"] == 3
+    assert out["flaky"] == [], f"المقارنةُ على ما لم يُحكم عليه تُنتج تذبذبًا وهميًّا: {out['flaky']}"
+
+
+def test_a_stale_snapshot_is_a_drift(tmp_path, monkeypatch):
+    """**البندُ الثاني (مراجعة ٥٠ · CI):** كانت البوّابةُ تقابل الوثائقَ بالاشتقاق الحيّ **فقط**، فلا
+    ترى لقطةً متقادمة (٥٩٠ مقابل ٦٠٢) يقرأها CI ⇒ تمرّ محليًّا وتسقط هناك."""
+    rc = _load("render_claims_d", "tools/render_claims.py")
+    snap = tmp_path / "claims.json"
+    monkeypatch.setattr(rc, "SNAPSHOT", snap, raising=False)
+    snap.write_text(_json.dumps({"tests": 590}, ensure_ascii=False), encoding="utf-8")
+    drift = rc.snapshot_drift({"tests": 602})
+    assert drift and drift[0][0] == "tests" and drift[0][1] == 590 and drift[0][2] == 602
+    snap.write_text(_json.dumps({"tests": 602}, ensure_ascii=False), encoding="utf-8")
+    assert rc.snapshot_drift({"tests": 602}) == []
+
+
+@pytest.mark.skipif(not (ROOT / "data/local_sample/slice_629p/results").exists(),
+                    reason="بلا عيّنةِ القرص المحلّيّة")
+def test_the_chain_connects_by_magnitude_not_by_signed_addition():
+    """**البندُ الثالث (مراجعة ٥٠):** المبلغُ المطبوعُ **بلا إشارة**، فالربطُ بالجمع الموقَّع يعدّ الحركاتِ
+    الدائنةَ وحدها (١٢٤) ويسقط ٤٩٥ مدينة. المقياسُ على **المقدار** ⇒ ٦١٩ من ٦٢٤ وفجوتان معروفتان:
+    (٤٢٦→٤٢٧) و(٦٢٥→٦٢٦). وإرجاعُ الجمع الموقَّع يُسقط هذا الضابط."""
+    import json as _j
+    import sys as _s
+    for extra in (str(ROOT), str(ROOT / "src")):
+        if extra not in _s.path:
+            _s.path.insert(0, extra)
+    from tools import refusal_test as rt                                     # noqa: PLC0415
+    run = ROOT / "data/local_sample/slice_629p"
+    rows, _ = rt.build_rows(run)
+    by: dict = {}
+    for r in rows:
+        by.setdefault(r["page"], []).append(r)
+    pages = sorted(by)
+
+    def f(v):
+        try:
+            return float(str(v).replace(",", "").strip())
+        except Exception:                                                    # noqa: BLE001
+            return None
+    connected, gaps = 0, []
+    for a, b in zip(pages, pages[1:]):
+        if a + 1 != b:
+            continue
+        la, fb = f(by[a][-1]["balance"]), f(by[b][0]["balance"])
+        raw = _j.loads((run / "results" / f"pg-{b:03d}.json").read_text()).get("raw_rows") or []
+        pm = next((x for x in (f(r.get("movement")) for r in raw) if x is not None), None)
+        if la is None or fb is None or pm is None:
+            continue
+        if abs(abs(fb - la) - abs(pm)) < 0.005:
+            connected += 1
+        else:
+            gaps.append((a, b))
+    assert connected == 619, f"الربطُ بالمقدار يجب أن يعطي ٦١٩ لا {connected} (الجمعُ الموقَّع يعطي ١٢٤)"
+    assert gaps == [(426, 427), (625, 626)], f"الفجوتان المعروفتان تغيّرتا: {gaps}"

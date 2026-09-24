@@ -224,6 +224,20 @@ def _key_usage() -> dict | None:
         return None
 
 
+def _spent_since(before: dict | None, cur: dict | None) -> float | None:
+    """المصروفُ بين قراءتين لعدّاد المزوّد — **مصدرٌ واحدٌ للصيغة** يستهلكه السقفُ وسطرُ الكلفة معًا.
+
+    العدّادُ **تراكميٌّ صاعد** (يُثبته أنّ الكلفةَ تُحسب `after − before`)، فالصيغةُ الصحيحة `cur − before`.
+    وطرحُها معكوسًا يعني سقفًا **لا يبلغ الميزانيةَ أبدًا** — وهي العلّةُ التي أمسكتها مراجعة ٥٠ بعد أن
+    أعلنتُ S-2 مُغلقًا (والبندُ كان بلا ضابطٍ يمسك العكس). `None` تعني «لا قياس» لا «صفرَ مصروف»."""
+    if not before or not cur:
+        return None
+    b, c = before.get("usage"), cur.get("usage")
+    if b is None or c is None:
+        return None
+    return float(c) - float(b)
+
+
 _NUMTOK = re.compile(r"[\d٠-٩۰-۹][\d٠-٩۰-۹,٬،٫.]*")
 _ABSENCE = ("غير موجود", "لا يوجد", "غير متوف", "لا تتوفر", "لا يمكن", "غير مطبوع", "لا أعلم",
             "لا تتضمّن", "لا تتضمن", "لا بيانات", "خارج", "لا سند")
@@ -437,9 +451,10 @@ def rescore(a, qs: list[dict], c: Corpus, pack: dict, spec: dict, rows: list[dic
         q = by_id.get(rec["id"])
         # **النائبُ ليس جواباً** (الجولة ٤٩ · P-3/S-3): `<انتهت المهلة>` كان يُحكم عليه فشلاً فيدخل المقامَ
         # ويُخفي أنّ الجولةَ لم تُجب. الآن يُعلَن نائبًا ولا يدخل الحكمَ ولا المقاييس.
-        if str(rec.get("answer") or "").startswith("<"):
+        if eval_stamp.is_substitute(rec):
             results.append({**rec, "ok": None, "substitute": True,
                             "why": f"نائبٌ (لا جواب): {str(rec.get('answer'))[:48]}"})
+            print(f"{rec['id']:9s} ➖ نائبٌ (لا جواب) ⇒ لا يُحكم عليه ولا يدخل المقام")
             continue
         if q is not None:
             truth_val, _ = truth(q, c, pack, rows)
@@ -535,20 +550,16 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
 
     for i, q in enumerate(todo, 1):
         import time
-        if a.budget:                                        # **المقياسُ قبل الطلب** (S-2): لا يُصرف ثم يُحاسب
-            if before is None:
-                if i > 1 and (i - 1) > int(float(a.budget) / 0.05):
-                    print(f"\n⛔ السقفُ الميضيّ (بلا قراءةِ رصيد): {i - 1} سؤالاً > "
-                          f"{int(float(a.budget) / 0.05)} ⇒ التوقّف.", flush=True)
-                    break
-            else:
-                cur_u = _key_usage()
-                if before.get("usage") is not None and cur_u and cur_u.get("usage") is not None:
-                    spent = float(before["usage"]) - float(cur_u["usage"])
-                    if spent >= float(a.budget):
-                        print(f"\n⛔ السقفُ **المقيس** بلغ {spent:.4f} من {float(a.budget):.4f} ⇒ التوقّف قبل "
-                              f"السؤال {i}. **التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** في هذه الجولة.", flush=True)
-                        break
+        if a.budget:                        # **المقياسُ قبل الطلب** (S-2 · أُعيد ٢٠٢٦-٠٩-٢٤ بعد مراجعة ٥٠)
+            spent = _spent_since(before, _key_usage())
+            if spent is not None and spent >= float(a.budget):
+                print(f"\n⛔ السقفُ **المقيس** بلغ {spent:.4f} من {float(a.budget):.4f} ⇒ التوقّف قبل "
+                      f"السؤال {i}. **التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** في هذه الجولة.", flush=True)
+                break
+            if spent is None and i > 1 and (i - 1) > int(float(a.budget) / 0.05):
+                print(f"\n⛔ رصيدُ المفتاح لا يُقرأ ⇒ **سقفٌ تقديريّ مُعلَن** (بمعدّل $0.05/سؤال): "
+                      f"{i - 1} سؤالاً > {int(float(a.budget) / 0.05)} ⇒ التوقّف.", flush=True)
+                break
         t0 = time.monotonic()
         truth_val, _ = truth(q, c, pack, rows)
         box: dict = {}
@@ -585,8 +596,8 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
 
     print("\n" + "=" * 62)
     _print_metrics(results)
-    if before and after and before.get("usage") is not None:
-        d = float(after["usage"]) - float(before["usage"])
+    d = _spent_since(before, after)          # **نفسُ صيغةِ السقف** (مصدرٌ واحدٌ يمنع تباعدَ الفرضيّتين)
+    if d is not None and before and after:
         print(f"💰 الكلفةُ الفعليّةُ من المزوّد: ${d:.4f} (رصيدُ المفتاح {before.get('usage')} ⇒ {after.get('usage')})")
     else:
         print("💰 تعذّر قياسُ الكلفة من المزوّد — لا يُدَّعى رقمٌ بلا مصدر.")
@@ -600,7 +611,7 @@ def _print_metrics(results: list[dict]) -> None:
     المشكوكُ قصُّه (`trace_suspect`) لا يدخلان المقام — ثم يُطبع عددُ المستبعَد صراحةً، لأنّ استبعادًا صامتًا
     يقرأ تغطيةً كاذبة.
     """
-    subs = [r for r in results if r.get("substitute") or r.get("ok") is None]
+    subs = [r for r in results if eval_stamp.is_substitute(r)]
     susp = [r for r in results if eval_stamp.is_trace_suspect(r)]
     judged = [r for r in results if eval_stamp.is_judged(r)]
     for m, label in (("number", "دقّة الرقم"), ("citation", "صدق الاستشهاد من الأثر"), ("abstain", "صحّة الامتناع")):
@@ -621,6 +632,9 @@ def _print_metrics(results: list[dict]) -> None:
     by_kind: dict[str, list[bool]] = {}
     for r in results:
         by_kind.setdefault(r.get("kind") or "?", []).append(bool(r.get("ok")))
+    if subs or susp:
+        print(f"\n➖ **المُستبعَدُ من المقام (مُعلَن لا مخفيّ):** نوائبُ (مهلةٌ/عطبٌ) **{len(subs)}** · "
+              f"أثرٌ مشكوكُ القصّ **{len(susp)}** ⇒ الحكمُ على **{len(judged)}** سجلاً فقط.")
     print("\nتفصيلٌ بالقاعدة:")
     for k, oks in sorted(by_kind.items(), key=lambda kv: -len(kv[1])):
         print(f"  {k:16s} {sum(oks):2d}/{len(oks):2d}")

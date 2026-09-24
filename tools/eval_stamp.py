@@ -41,6 +41,18 @@ def is_trace_suspect(rec: dict) -> bool:
     return rec.get("trace_len") is None and len(rec.get("used_row_nos") or []) == TRACE_CAP
 
 
+def is_substitute(rec: dict) -> bool:
+    """نائبٌ لا جواب: مهلةٌ/عطبٌ ⇒ `<...>` أو `ok is None` أو وسمٌ صريحٌ من `--rescore`.
+
+    **ولماذا موضعٌ واحد:** أداةُ المقارنة تقرأ سجلاتٍ **خامّة** لا تحمل وسمَ `--rescore` ⇒ قراءةُ الوسم
+    وحده كانت تُدخل النوائبَ في مقامها (٢٧/٤٠ مقابل ٢٧/٣٨) — وهي نفسُ علّة «قاعدةٍ في موضعين» التي
+    أمسكتها الجولة ٥٠ في الأثر المشكوك.
+    """
+    if rec.get("substitute") or rec.get("ok") is None:
+        return True
+    return str(rec.get("answer") or "").strip().startswith("<")
+
+
 def is_judged(rec: dict) -> bool:
     return rec.get("ok") is not None and not is_trace_suspect(rec)
 

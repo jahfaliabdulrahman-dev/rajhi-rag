@@ -115,6 +115,22 @@ def check(d: dict) -> list[tuple[str, str, str]]:
     return drifts
 
 
+def snapshot_drift(d: dict) -> list[tuple[str, object, object]]:
+    """-> [(key, في اللقطة, في الاشتقاق)] — **البوّابةُ التي كانت عمياء**.
+
+    كان `check()` يقابل الوثائقَ بالاشتقاق الحيّ **فقط**، ولا يقرأ اللقطةَ الملتزمة التي يقرأها CI ⇒
+    لقطةٌ متقادمة (٥٩٠ مقابل ٦٠٢) تمرّ محليًّا وتسقط في نسخةٍ نظيفة. اللقطةُ الآن **شاهدٌ يُقابَل** لا حجرٌ
+    يُوثق به.
+    """
+    if not SNAPSHOT.exists():
+        return [("<لقطة>", "غائبة", "مطلوبة")]
+    try:
+        old = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
+    except Exception as e:                                    # noqa: BLE001
+        return [("<لقطة>", f"غيرُ مقروءة: {type(e).__name__}", "مطلوبة")]
+    return [(k, old.get(k), v) for k, v in d.items() if old.get(k) != v]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--check", action="store_true",
@@ -135,6 +151,15 @@ def main() -> None:
                             encoding="utf-8")
         print(f"\nكُتبت اللقطة: {SNAPSHOT.relative_to(PROJ)} "
               f"(مشتقّة من التقرير، لا مكتوبة بيد).")
+    # **اللقطةُ شاهدٌ يُقابَل** (مراجعة ٥٠ · CI): كانت `check` تقابل الوثائقَ بالاشتقاق الحيّ وحده،
+    # فلا ترى لقطةً متقادمة يقرأها CI ⇒ البوّابةُ تمرّ محليًّا وتسقط هناك.
+    snap = snapshot_drift(d)
+    if snap:
+        print("\n⚠ اللقطةُ الملتزمة متقادمة (CI يقرأ اللقطةَ لا الاشتقاقَ الحيّ):")
+        for k, o, n in snap:
+            print(f"  docs/claims.json: {k}: اللقطة {o!r} ≠ الاشتقاق {n!r} ⇒ `--write`")
+        if args.check:
+            sys.exit(1)
     drifts = check(d)
     if not drifts:
         print("\nالحكم: كل رقم معلن يطابق مصدره.")

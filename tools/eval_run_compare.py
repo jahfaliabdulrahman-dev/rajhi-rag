@@ -60,9 +60,15 @@ def compare(spec_path: pathlib.Path, arms: list[pathlib.Path]) -> dict:
     excluded = {name: [i for i in ids if eval_stamp.is_trace_suspect(per_arm[name][i])]
                 for name in per_arm}
     _counted = {name: [i for i in ids if i not in set(excluded[name])] for name in per_arm}
+    # **النائبُ ليس جوابًا** (مراجعة ٥٠ · البند ٤): كان `--rescore` يستبعده والمقارنةُ تُدخله ⇒ مجموعان
+    # مختلفان على الأذرع نفسها (٢٧/٣٨ مقابل ٢٧/٤٠). المقامُ الآن **واحد**، والنوائبُ تُعلَن في عمودها.
+    subs = {name: [i for i in _counted[name] if eval_stamp.is_substitute(per_arm[name][i])]
+            for name in per_arm}
+    _counted = {name: [i for i in _counted[name] if i not in set(subs[name])] for name in per_arm}
+    both = [i for i in ids if all(i in set(_counted[n]) for n in per_arm)]   # المُقارَنُ فعلًا في كلّ الأذرع
 
     stability, flaky = {}, []
-    for i in ids:
+    for i in both:
         verdicts = [bool(per_arm[n][i].get("ok")) for n in per_arm]
         if all(verdicts):
             stability[i] = "stable pass"
@@ -82,7 +88,7 @@ def compare(spec_path: pathlib.Path, arms: list[pathlib.Path]) -> dict:
             m[metric] = {"ok": sum(1 for r in sel if r.get("ok")), "n": len(sel)}
         metrics[name] = m
         totals[name] = {"ok": sum(1 for r in rows if r.get("ok")), "n": len(rows),
-                        "trace_excluded": len(excluded[name])}
+                        "trace_excluded": len(excluded[name]), "substitutes": len(subs[name])}
     tot_ok = [v["ok"] for v in totals.values()]
 
     # (٤) الزمن: الوسيطُ والذيلُ (لا الوسيطُ وحده)
@@ -124,12 +130,13 @@ def main() -> int:
         for name, bad in out["spec_mismatch"].items():
             print(f"⛔ {name}: بلا بصمةٍ {len(bad['unstamped'])} · ببصمةٍ مخالفة {len(bad['stale'])} "
                   f"⇒ **لا يُنشر رقمٌ منها** (أعِد الطرح)")
-    print("\n| الجولة | رقم | استشهاد | امتناع | المجموع | مقصوصٌ مُستبعَد |")
-    print("|---|---|---|---|---|---|")
+    print("\n| الجولة | رقم | استشهاد | امتناع | المجموع | مقصوصٌ مُستبعَد | نوائبُ مُستبعَدة |")
+    print("|---|---|---|---|---|---|---|")
     for name, m in out["metrics_per_arm"].items():
         t = out["totals_per_arm"][name]
         print(f"| {name} | {m['number']['ok']}/{m['number']['n']} | {m['citation']['ok']}/{m['citation']['n']} | "
-              f"{m['abstain']['ok']}/{m['abstain']['n']} | **{t['ok']}/{t['n']}** | {t['trace_excluded']} |")
+              f"{m['abstain']['ok']}/{m['abstain']['n']} | **{t['ok']}/{t['n']}** | {t['trace_excluded']} | "
+              f"{t.get('substitutes', 0)} |")
     if out["missing_ids"]:
         for name, ids in out["missing_ids"].items():
             print(f"⛔ {name}: ينقصه {len(ids)} سؤالاً من الحزمة ⇒ **تغطيةٌ ناقصة** (تقاطعٌ أضيق لا نظافة)")
