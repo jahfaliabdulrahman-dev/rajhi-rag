@@ -111,6 +111,80 @@ class Corpus:
         return sorted(int(f.stem.split("-")[1]) for f in (self.dir / "results").glob("pg-*.json"))
 
 
+def _page_row_ids(rows: list[dict], page: int) -> list[int]:
+    """صفوفُ الصفحة **بترقيم النظام** (`i+1`) — موضعُ الإثبات لكلّ ما يُشتقّ من صفوف الصفحة."""
+    return [i + 1 for i, r in enumerate(rows) if r.get("page") == page]
+
+
+def _ids_for_pages(rows: list[dict], pages) -> list[int]:
+    """صفوفُ صفحاتٍ بعينها بترقيم النظام — لِما يُشتقّ من مجموعة صفحات."""
+    want = set(pages)
+    return [i + 1 for i, r in enumerate(rows) if r.get("page") in want]
+
+
+def _absent_pages(c: Corpus, d: dict) -> list[int]:
+    """موضعُ إثبات الامتناع: الصفحةُ المطلوبةُ أو الجارُ الذي يُقاس به الحدّ، أو نطاقُ المسح كلُّه."""
+    r = d.get("reason")
+    if r in ("page_outside_pack", "boundary"):
+        return [d["page"], d["page"] + 1]
+    if r in ("year_absent", "field_not_printed"):
+        return sorted(set(c.pages))       # الشاهدُ: مسحُ الكشف كلِّه — ولا يُختصر بأقلّ
+    return []
+
+
+PROOF_RULE = {                    # **موضعُ الإثبات المُلزِم لكلّ نوع** — «سؤالٌ بلا صفوفٍ ⇒ يسقط»
+    "footer": "pages", "page_sum_all": "rows", "count_rows": "rows", "last_row_balance": "rows",
+    "argmax_row": "rows", "row_chain": "rows", "rows_matching": "rows", "date_encoding": "pages",
+    "absent": "pages", "pack_meta": "source",
+}
+
+
+PROOF_EXCEPTIONS = {
+    # **استثناءٌ مُعلَنٌ ومؤرَّخ — لا صمت**: صفوفُ الصفحة ٦٢٩ يسقطها `build_rows` (لا رصيدَ مطبوعاً فيها)،
+    # وحقيقةُ `abs-02` تُشتقّ من `raw_rows` ⇒ لا موضعَ إثباتٍ لها في عالم الصفوف الذي يقرؤه النموذج.
+    # وإعادةُ صياغتها **تُغيّر بصمةَ الحزمة** ⇒ تُسقط شهادةَ الـ٢٠٠ سجل ⇒ **قرارُ المالك** (أُعلن ٢٠٢٦-٠٩-٢٤).
+    "abs-02": "الصفحة ٦٢٩: صفوفٌ بلا رصيد ⇒ لا موضعَ إثباتٍ في عالم الصفوف؛ وإعادةُ الصياغة تُسقط بصمةَ الـ٢٠٠",
+}
+
+
+def proof_exception(qid: str) -> str | None:
+    """استثناءٌ مُعلَنٌ **بمعناه** لا كتمًا. ويُمنع استثناءٌ متقادمٌ بضابط (انظر `classify_proof`)."""
+    return PROOF_EXCEPTIONS.get(qid)
+
+
+def classify_proof(q: dict, safe: dict) -> tuple[str, str]:
+    """منطقٌ **واحد** يستهلكه `--validate` و`--truth` والضوابط: `ok` | `exception` | `missing`.
+
+    و**الاستثناءُ المتقادم يُكشف**: سؤالٌ صار له إثباتٌ وهو في قائمة الاستثناءات ⇒ يُعلَن ليُزال
+    (وإلا صارت القائمةُ غطاءً دائمًا — وهي علّةٌ من صنف «ضابطٌ لا يميّز الفرضيّتين»).
+    """
+    why = check_proof(q, safe)
+    exc = proof_exception((q or {}).get("id"))
+    if not why:
+        return ("ok", f"⚠ استثناءٌ متقادم: {q.get('id')} صار له موضعُ إثبات ⇒ يُزال من القائمة") if exc else ("ok", "")
+    return ("missing", why) if not exc else ("exception", exc)
+
+
+def check_proof(q: dict, safe: dict) -> str | None:
+    """**لا سؤالَ بلا موضعِ إثبات** (الخارطة · أ-١). يُعيد سببَ السقوط أو None.
+
+    ليس تزيينًا للتقرير: سؤالٌ تُشتقّ إجابتُه بلا موضعٍ يُشار إليه لا يمكن تكذيبُه ولا تصديقُه ⇒ يُسقط
+    قبل أن يُطرح. والموضعُ يُشتقّ **داخل `truth` من القيم نفسها** (لا من مصدرٍ ثانٍ) فلا تنقسم قاعدة.
+    """
+    kind = (q.get("derive") or {}).get("kind")
+    rule = PROOF_RULE.get(kind)
+    if rule is None:
+        return f"نوعٌ بلا قاعدةِ إثبات: {kind}"
+    pr = (safe or {}).get("proof") or {}
+    if rule == "rows" and not pr.get("rows"):
+        return f"بلا صفوفِ إثبات (النوع {kind})"
+    if rule == "pages" and not pr.get("pages"):
+        return f"بلا صفحاتِ إثبات (النوع {kind})"
+    if rule == "source" and not pr.get("source"):
+        return f"بلا مصدرِ إثبات (النوع {kind})"
+    return None
+
+
 def truth(q: dict, c: Corpus, pack: dict, rows: list[dict]) -> tuple[object, dict]:
     """يُشتقّ الجوابُ من القرص. يُعيد (الجواب, ملخّصٌ آمنٌ بلا مبالغ).
 
@@ -123,17 +197,23 @@ def truth(q: dict, c: Corpus, pack: dict, rows: list[dict]) -> tuple[object, dic
     k = d["kind"]
     if k == "footer":
         v = num(c.footer(d["page"]).get(d["field"]))
-        return v, {"kind": k, "page": d["page"], "field": d["field"], "found": v is not None}
+        return v, {"kind": k, "page": d["page"], "field": d["field"], "found": v is not None,
+                   "proof": {"rows": [], "pages": [d["page"]]}}
     if k == "page_sum_all":
         vals = [num(r.get("movement")) for r in c.rows(d["page"])]
         vals = [v for v in vals if v is not None]
-        return (sum(vals) if vals else None), {"kind": k, "page": d["page"], "rows": len(vals)}
+        return ((sum(vals) if vals else None),
+                {"kind": k, "page": d["page"], "rows": len(vals),
+                 "proof": {"rows": _page_row_ids(rows, d["page"]), "pages": [d["page"]]}})
     if k == "count_rows":
         n = len(c.raw_rows(d["page"]))        # **المطبوعُ الخامّ** (لا المشتقُّ الذي يُسقِط صفوفاً)
-        return n, {"kind": k, "page": d["page"], "rows": n}
+        return n, {"kind": k, "page": d["page"], "rows": n,
+                   "proof": {"rows": _page_row_ids(rows, d["page"]), "pages": [d["page"]]}}
     if k == "last_row_balance":
         rs = c.rows(d["page"])
-        return (num(rs[-1].get("balance")) if rs else None), {"kind": k, "page": d["page"], "rows": len(rs)}
+        return ((num(rs[-1].get("balance")) if rs else None),
+                {"kind": k, "page": d["page"], "rows": len(rs),
+                 "proof": {"rows": _page_row_ids(rows, d["page"])[-1:], "pages": [d["page"]]}})
     if k == "argmax_row":
         # **هويّةُ الصفّ بترقيم النظام لا بترقيم الصفحة** (REVIEW-48 · P-1): الصفُّ `i` في `rows` رقمُه `i+1`
         # — وهو بعينه ما يقرؤه النموذج في `(صفحة N، صف row_no)`. وكان يُشتقّ من صفوف الصفحة وحدها،
@@ -146,7 +226,8 @@ def truth(q: dict, c: Corpus, pack: dict, rows: list[dict]) -> tuple[object, dic
         tops = [i for i, v in vals if v == m]
         # **الحقيقةُ صفٌّ ومبلغٌ وتعادلٌ — لا فهرسٌ يُقارَن بمبلغ** (كان المصحِّحُ معكوساً: صحّحتُ ٢٠٢٦-٠٩-٢٤)
         return ({"amount": m, "tops": tops, "tie": len(tops) > 1},
-                {"kind": k, "page": d["page"], "tops": tops})
+                {"kind": k, "page": d["page"], "tops": tops,
+                 "proof": {"rows": tops, "pages": [d["page"]]}})
     if k == "row_chain":
         ra, rb = c.rows(d["a"]), c.rows(d["b"])
         la = num(ra[-1].get("balance")) if ra else None
@@ -154,25 +235,40 @@ def truth(q: dict, c: Corpus, pack: dict, rows: list[dict]) -> tuple[object, dic
         if la is None or fb is None:
             return None, {"kind": k, "a": d["a"], "b": d["b"], "found": False}
         return ({"equal": abs(la - fb) < 0.005, "diff": round(abs(fb - la), 2)},
-                {"kind": k, "a": d["a"], "b": d["b"], "equal": abs(la - fb) < 0.005})
+                {"kind": k, "a": d["a"], "b": d["b"], "equal": abs(la - fb) < 0.005,
+                 "proof": {"rows": (_page_row_ids(rows, d["a"])[-1:] + _page_row_ids(rows, d["b"])[:1]),
+                           "pages": [d["a"], d["b"]]}})
     if k == "rows_matching":
         hits = [(p, i) for p in c.corpus_page_list() for i, r in enumerate(c.rows(p))
                 if d["pattern"] in str(r.get("desc") or "")]
-        return hits, {"kind": k, "hits": len(hits), "pages": sorted({p for p, _ in hits})}
+        return hits, {"kind": k, "hits": len(hits), "pages": sorted({p for p, _ in hits}),
+                      "proof": {"rows": _ids_for_pages(rows, {p for p, _ in hits}),
+                                "pages": sorted({p for p, _ in hits})}}
     if k == "date_encoding":
-        ind = sum(1 for p in c.corpus_page_list() for r in c.rows(p)
-                  if re.search(f"[{ARABIC_INDIC}{PERSIAN}]", str(r.get("date") or "")))
-        lat = sum(1 for p in c.pages for r in c.rows(p)
-                  if re.search(r"\d", str(r.get("date") or ""))
-                  and not re.search(f"[{ARABIC_INDIC}{PERSIAN}]", str(r.get("date") or "")))
-        return (ind if d["encoding"] == "arabic_ind" else lat), {"kind": k, "encoding": d["encoding"]}
+        ind, lat, ind_pages, lat_pages = 0, 0, set(), set()     # مرورٌ واحدٌ لكلّ فحص (كان مرّتين)
+        for p in c.corpus_page_list():
+            for r in c.rows(p):
+                if re.search(f"[{ARABIC_INDIC}{PERSIAN}]", str(r.get("date") or "")):
+                    ind += 1
+                    ind_pages.add(p)
+        for p in c.pages:
+            for r in c.rows(p):
+                dt = str(r.get("date") or "")
+                if re.search(r"\d", dt) and not re.search(f"[{ARABIC_INDIC}{PERSIAN}]", dt):
+                    lat += 1
+                    lat_pages.add(p)
+        which = "arabic_ind" == d["encoding"]
+        return (ind if which else lat), \
+               {"kind": k, "encoding": d["encoding"],
+                "proof": {"rows": [], "pages": sorted(ind_pages if which else lat_pages)}}
     if k == "pack_meta":
         f = d["field"]
         v = {"pages": len(c.pages), "pack_pages": (pack.get("size_gate") or {}).get("value"),
              "identity": pack.get("identity"), "class_count": len(pack.get("census_classes") or [])}.get(f)
-        return v, {"kind": k, "field": f}
+        return v, {"kind": k, "field": f, "proof": {"rows": [], "pages": [], "source": "pack_meta"}}
     if k == "absent":
-        return None, {"kind": k, "reason": d["reason"]}
+        return None, {"kind": k, "reason": d["reason"],
+                      "proof": {"rows": [], "pages": _absent_pages(c, d)}}
     return None, {"kind": k, "unknown": True}
 
 
@@ -750,8 +846,21 @@ def main(argv=None) -> int:
         return run_questions(a, sel, c, pack, spec)
 
     if a.validate:
+        # **حاكمُ الإثبات** (الخارطة · أ-١): سؤالٌ تُشتقّ إجابتُه بلا موضعِ إثباتٍ يُسقط **قبل أن يُطرح**
+        # — لا يُسأل عنه النموذجُ ثم يُكتشف أنّه لا يُكذَّب ولا يُصدَّق. والموضعُ من `truth` نفسها.
+        from tools.refusal_test import build_rows as _vrows      # noqa: PLC0415 — عالمُ الصفوف الواحد
+        _v_rows, _ = _vrows(a.run)
+        for _q in qs:
+            _, _safe = truth(_q, c, pack, _v_rows)
+            _state, _why = classify_proof(_q, _safe)        # **مُؤجَّلٌ مُعلَن ≠ مكسور**
+            if _state == "missing":
+                bad.append(f"{_q['id']}: {_why}")
+            elif _state == "exception":
+                print(f"  ⏸ مُؤجَّلٌ مُعلَن: {_q['id']} — {_why}")
         broken = [x for x in bad if x]
         print("المراسي: %s" % ("كلُّها تقع ✓" if not broken else f"{len(broken)} مرسًى مكسور ✗"))
+        for _b in broken:
+            print("  ✗", _b)
         return 1 if broken else 0
 
     from tools.refusal_test import build_rows as _build_rows      # noqa: PLC0415 — عالمُ الصفوف الواحد
@@ -761,10 +870,17 @@ def main(argv=None) -> int:
         if a.page and i != a.page:
             continue
         val, safe = truth(q, c, pack, chain_rows)
+        _st, why_proof = classify_proof(q, safe)   # **موضعُ الإثبات يُطبع مع كلّ سؤال** (الخارطة · أ-١)
+        # **والقيمةُ تبقى آخرَ عمود** (مستهلكٌ يقرؤها بـ`split()[-1]` — لا يُكسر عقدُ المخرَج)، والإثباتُ
+        # عمودٌ **مضغوطٌ بلا مسافات** قبله، ووسمُ الاستثناءِ ملتصقٌ به لا منفصلًا.
+        proof = json.dumps(safe.get("proof"), ensure_ascii=False, separators=(",", ":")) if a.truth else ""
+        if a.truth and why_proof:
+            proof += "⏸" if _st == "exception" else "⚠"
         shown = json.dumps(val, ensure_ascii=False) if a.truth else ""
-        table.append((i, q["id"], q["cat"], q["metric"], q["expect"], safe.get("kind"), shown))
-    for i, qid, cat, metric, exp, kind, shown in table:
-        print(f"{i:02d} {qid:9s} {cat:8s} {metric:14s} {exp:9s} {kind:14s} {shown}")
+        table.append((i, q["id"], q["cat"], q["metric"], q["expect"], safe.get("kind"), proof, shown))
+    for i, qid, cat, metric, exp, kind, proof, shown in table:
+        tail = (proof + (" " + shown if shown else "")).strip()
+        print(f"{i:02d} {qid:9s} {cat:8s} {metric:14s} {exp:9s} {kind:14s} {tail}".rstrip())
     if not a.truth:
         print("\n(بلا مبالغ — والتفصيلُ الكاملُ بـ`--truth` على الشاشة وحدها)")
     return 0
