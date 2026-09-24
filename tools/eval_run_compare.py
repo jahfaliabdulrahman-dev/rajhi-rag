@@ -89,7 +89,6 @@ def compare(spec_path: pathlib.Path, arms: list[pathlib.Path]) -> dict:
         metrics[name] = m
         totals[name] = {"ok": sum(1 for r in rows if r.get("ok")), "n": len(rows),
                         "trace_excluded": len(excluded[name]), "substitutes": len(subs[name])}
-    tot_ok = [v["ok"] for v in totals.values()]                                      # noqa: F841 — يُطبع أدناه
     # **المدى على أساسٍ مشترك** (مراجعة ٥٠ · مقعد Structure · P1): مقارنةُ بسوطٍ على مقاماتٍ مختلفة
     # (٣٨/٣٤/٤٠/٤١) تقارن تفاحًا بمقاماته. المجموعةُ المشتركةُ بين الأذرع هي الأساس، وتُنشر بأسمائها.
     common_ok = {name: sum(1 for i in both if per_arm[name][i].get("ok")) for name in per_arm}

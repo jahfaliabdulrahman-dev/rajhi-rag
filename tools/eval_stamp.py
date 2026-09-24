@@ -38,7 +38,15 @@ TRACE_CAP = 40
 
 
 def is_trace_suspect(rec: dict) -> bool:
-    return rec.get("trace_len") is None and len(rec.get("used_row_nos") or []) == TRACE_CAP
+    """أثرٌ مشكوكٌ فيه بسبب **قصّ الجولة القديمة** (`[:40]`).
+
+    **ولهجتان لا واحدة** (مراجعة ٥١): كان `== TRACE_CAP` ⇒ سجلٌّ مقصوصٌ بـ٤١ أو ٤٥ (أو بأيّ تهجئةٍ
+    أخرى للحدّ) يمرّ صامتًا ⇒ صار `>=`. وقاعدةُ «بلا `trace_len`» هي علامةُ السجلّات السابقة للإصلاح،
+    فالسجلُّ الحديثُ يحمل `trace_len` ويُقاس به.
+    """
+    if rec.get("trace_len") is not None:
+        return False
+    return len(rec.get("used_row_nos") or []) >= TRACE_CAP
 
 
 def is_substitute(rec: dict) -> bool:

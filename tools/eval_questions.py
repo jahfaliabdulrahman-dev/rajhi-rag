@@ -548,25 +548,45 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
         except Exception as e:                                   # noqa: BLE001 — عطبٌ يُسمّى لا يُسقط الجولة
             out_box["error"] = f"{type(e).__name__}: {e}"
 
+    halt = 0                       # **رمزُ التوقّف المُسمّى** (مراجعة ٥١ · البند ٥): 0 = لا توقّفَ بالسقف،
+    # 3 = بلوغُ السقف، 4 = عدّادٌ تراجعيّ. كان `break` يُكمل إلى `return 0/1` ⇒ أتمتةٌ تقرأ توقّفًا
+    # مُعلَنًا «نجاحًا». والتوقّفُ ليس حكمًا على الأجوبة ⇒ لا يجوز أن يُصبح رمزَ نجاح.
+    hi_cost, prev_spent = 0.0, 0.0  # أعلى كلفةِ سؤالٍ **مُلاحَظة** في هذه الجولة (للتوقّف الاستباقيّ)
     for i, q in enumerate(todo, 1):
         import time
         if a.budget:                        # **المقياسُ قبل الطلب** (S-2 · أُعيد ٢٠٢٦-٠٩-٢٤ بعد مراجعة ٥٠)
             cur_u = _key_usage()
             spent = _spent_since(before, cur_u)
+            if spent is not None:
+                hi_cost = max(hi_cost, spent - prev_spent)
+                prev_spent = spent
             if spent is not None and spent < 0:
                 # **توقّفٌ مُسمّى عند عدّادٍ تراجعيّ** (مراجعة ٥٠ · مقعد Spec · P1): عدّادٌ ينقص يعني أنّ ما
                 # يُقاس ليس ما يزيد بالصرف ⇒ لا سقفَ يُوثق به؛ والصمتُ هنا سقفٌ معطَّلٌ يُنشر كأنّه يعمل.
                 print(f"\n⛔ **العدّادُ تراجع** ({before.get('usage') if before else '؟'} ⇒ "
                       f"{cur_u.get('usage') if cur_u else '؟'}): الفرقُ سالبٌ ⇒ لا سقفَ يُقاس بهذا المقياس "
-                      f"⇒ توقّفٌ مُسمّى قبل السؤال {i} (fail-closed).", flush=True)
+                      f"⇒ توقّفٌ مُسمّى قبل السؤال {i} (fail-closed) · رمزُ الخروج 4.", flush=True)
+                halt = 4
                 break
             if spent is not None and spent >= float(a.budget):
                 print(f"\n⛔ السقفُ **المقيس** بلغ {spent:.4f} من {float(a.budget):.4f} ⇒ التوقّف قبل "
-                      f"السؤال {i}. **التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** في هذه الجولة.", flush=True)
+                      f"السؤال {i}. **التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** · رمزُ الخروج 3.", flush=True)
+                halt = 3
+                break
+            # **توقّفٌ استباقيّ بكلفةٍ مُلاحَظة** (مراجعة ٥١ · البند ٤): بلا هذا يمرّ سؤالٌ يبلغ بالسقفِ ضِعفَه
+            # حين تكون كلفةُ السؤال أكبرَ من المتبقّي. يُقاس بـ**أعلى كلفةٍ رُصدت في هذه الجولة** لا بمعدّلٍ
+            # مفترض. (وحدُّه المُعلَن: عدّادٌ متأخّرٌ بـL نداءً قد يسمح بـL+1 نداءً زائدًا ⇒ والحدُّ الصلبُ
+            # حدُّ المفتاح عند المزوّد.)
+            if spent is not None and hi_cost and (spent + hi_cost) > float(a.budget):
+                print(f"\n⛔ **توقّفٌ استباقيّ**: المُنفَق {spent:.4f} + أعلى كلفةٍ مُلاحَظة {hi_cost:.4f} "
+                      f"يتجاوز السقف {float(a.budget):.4f} ⇒ لا يُطرح السؤال {i}. "
+                      f"**التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** · رمزُ الخروج 3.", flush=True)
+                halt = 3
                 break
             if spent is None and i > 1 and (i - 1) > int(float(a.budget) / 0.05):
                 print(f"\n⛔ رصيدُ المفتاح لا يُقرأ ⇒ **سقفٌ تقديريّ مُعلَن** (بمعدّل $0.05/سؤال): "
-                      f"{i - 1} سؤالاً > {int(float(a.budget) / 0.05)} ⇒ التوقّف.", flush=True)
+                      f"{i - 1} سؤالاً > {int(float(a.budget) / 0.05)} ⇒ التوقّف · رمزُ الخروج 3.", flush=True)
+                halt = 3
                 break
         t0 = time.monotonic()
         truth_val, _ = truth(q, c, pack, rows)
@@ -609,6 +629,8 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
         print(f"💰 الكلفةُ الفعليّةُ من المزوّد: ${d:.4f} (رصيدُ المفتاح {before.get('usage')} ⇒ {after.get('usage')})")
     else:
         print("💰 تعذّر قياسُ الكلفة من المزوّد — لا يُدَّعى رقمٌ بلا مصدر.")
+    if halt:                       # التوقّفُ المُسمّى يسبق الحكم (٣ سقف · ٤ عدّادٌ تراجعيّ) — مراجعة ٥١
+        return halt
     return 0 if all(r["ok"] for r in results) else 1
 
 
