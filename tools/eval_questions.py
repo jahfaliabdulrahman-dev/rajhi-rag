@@ -24,10 +24,12 @@ import json
 import pathlib
 import re
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from tools import eval_stamp, pack_io  # noqa: E402
+from tools.spend import at_or_over, would_exceed  # noqa: E402
 
 ARABIC_INDIC = "٠١٢٣٤٥٦٧٨٩"
 PERSIAN = "۰۱۲۳۴۵۶۷۸۹"
@@ -116,19 +118,61 @@ def _page_row_ids(rows: list[dict], page: int) -> list[int]:
     return [i + 1 for i, r in enumerate(rows) if r.get("page") == page]
 
 
-def _ids_for_pages(rows: list[dict], pages) -> list[int]:
-    """صفوفُ صفحاتٍ بعينها بترقيم النظام — لِما يُشتقّ من مجموعة صفحات."""
-    want = set(pages)
-    return [i + 1 for i, r in enumerate(rows) if r.get("page") in want]
+def _match_row_ids(rows: list[dict], hits, c: "Corpus", pattern: str) -> tuple[list[int], list[dict]]:
+    """معرّفاتُ **الصفوف المطابِقة** بترقيم النظام + **المطابقاتُ غيرُ القابلة للتموضع مُعلَنة**.
+
+    التحويلُ من الفهرس المحلّيّ داخل الصفحة إلى موضعِه في السلسلة لا يُترجَم بالتخمين: كلُّ معرّفٍ
+    يُشترط أن يكون موضعَه المحلّيّ قائمًا في صفوف السلسلة لنفس الصفحة.
+
+    **ولا يضيع ضمُّ صفٍّ صامتًا** (قِيس: `cit-01` أربعُ مطابقات إحداها على الصفحة ٦٢٩ — صفُّ مجموعٍ بلا
+    رصيدٍ مطبوع ⇒ يسقطه `build_rows` ⇒ لا موضعَ له في عالم الصفوف الذي يستشهد به النموذج): كلُّ مطابقةٍ
+    لا مقابلَ لها تخرج في `unmapped` ببابها وسببها، وضابطٌ يقيس أنّ (المُوضَّع + المُعلَن) = المطابقات.
+    """
+    want: dict[int, list[int]] = {}
+    for p, i in hits:
+        want.setdefault(p, []).append(i)
+    ids: list[int] = []
+    unmapped: list[dict] = []
+    for p, idxs in sorted(want.items()):
+        chain = _page_row_ids(rows, p)             # صفوفُ الصفحة بترقيم النظام، بترتيب السلسلة
+        src = c.raw_rows(p)                        # الصفوفُ المطبوعة كما قُرئت (نفسُ ما طُوبق عليه)
+        for i in sorted(set(idxs)):
+            if i < len(chain):
+                # **تحقّقُ هويّةٍ لا موضع**: الصفُّ المُعيَّن يجب أن يحمل النصَّ الذي طُوبق عليه الأصل.
+                # (شرطُ المدى وحده كان يفترض أنّ الترتيبَ لم يتحرّك؛ وإسقاطُ صفٍّ من وسط الصفحة
+                #  يُزيح ما بعده ⇒ استشهادٌ بصفٍّ آخر يبدو كاملًا — مراجعة ٥٢ · مقعدا المعايير والبنية.)
+                got = str((rows[chain[i] - 1] or {}).get("desc") or "")
+                if pattern and pattern not in got:
+                    unmapped.append({"page": p, "index": i,
+                                     "why": "إزاحةٌ موضعيّة: صفُّ السلسلة عند هذا الموضع لا يحمل النصّ المطابِق"})
+                    continue
+                ids.append(chain[i])
+                continue
+            why = ("الصفُّ المطابِق بلا رصيدٍ مطبوع ⇒ يخرج من السلسلة (build_rows يُسقط رصيدَه None)"
+                   if i < len(src) and num(src[i].get("balance")) is None
+                   else "المطابقةُ عند فهرسٍ لا صفَّ له في السلسلة (فهرسُ الصفحة أطولُ من صفوفها في السلسلة)")
+            unmapped.append({"page": p, "index": i, "why": why})
+    return sorted(set(ids)), unmapped
 
 
 def _absent_pages(c: Corpus, d: dict) -> list[int]:
-    """موضعُ إثبات الامتناع: الصفحةُ المطلوبةُ أو الجارُ الذي يُقاس به الحدّ، أو نطاقُ المسح كلُّه."""
+    """موضعُ إثبات الامتناع = **مجموعةُ الفحص نفسها** لا رمزٌ عنها.
+
+    كان يعيد `[page, page + 1]` لصفحةٍ مطلوبةٍ خارج الكشف (٧٠٠ ⇒ `[700, 701]`) — صفحتان **لا وجودَ
+    لهما** ⇒ موضعٌ لا يُكذَّب ولا يُصدَّق، ويمرّ لأنّ `check_proof` لا يشترط إلا «غيرَ فارغ».
+    الآن: الحدُّ **الموجودُ** في الكشف للسؤال عن صفحةٍ خارجه، والصفحاتُ الممسوحةُ فعلًا لِما يُقاس على المسح.
+    """
     r = d.get("reason")
-    if r in ("page_outside_pack", "boundary"):
-        return [d["page"], d["page"] + 1]
+    scope = c.corpus_page_list()
+    if r == "boundary":
+        # **الشاهدُ يُطابق الدعوى**: `check_abstention` يقيس `page + 1` ⇒ الموضعُ يشير إلى الصفحة نفسها
+        # التي تُقاس (كان يشير إلى `page` ⇒ موضعٌ بجوار الدعوى لا عليها — مقعدُ البنية).
+        nxt = int(d.get("page") or 0) + 1
+        return [nxt] if nxt in set(scope) else ([max(scope)] if scope else [])
+    if r == "page_outside_pack":
+        return [max(scope)] if scope else []      # آخرُ صفحةٍ موجودة = الحدُّ الذي يُقاس به الغياب
     if r in ("year_absent", "field_not_printed"):
-        return sorted(set(c.pages))       # الشاهدُ: مسحُ الكشف كلِّه — ولا يُختصر بأقلّ
+        return scope                              # الشاهدُ = ما مُسح، لا حزمةُ تقييمي (٢٠٠)
     return []
 
 
@@ -152,24 +196,32 @@ def proof_exception(qid: str) -> str | None:
     return PROOF_EXCEPTIONS.get(qid)
 
 
-def classify_proof(q: dict, safe: dict) -> tuple[str, str]:
+def classify_proof(q: dict, safe: dict, c: "Corpus", rows: list[dict]) -> tuple[str, str]:
     """منطقٌ **واحد** يستهلكه `--validate` و`--truth` والضوابط: `ok` | `exception` | `missing`.
 
     و**الاستثناءُ المتقادم يُكشف**: سؤالٌ صار له إثباتٌ وهو في قائمة الاستثناءات ⇒ يُعلَن ليُزال
     (وإلا صارت القائمةُ غطاءً دائمًا — وهي علّةٌ من صنف «ضابطٌ لا يميّز الفرضيّتين»).
     """
-    why = check_proof(q, safe)
+    why = check_proof(q, safe, c=c, rows=rows)
     exc = proof_exception((q or {}).get("id"))
     if not why:
         return ("ok", f"⚠ استثناءٌ متقادم: {q.get('id')} صار له موضعُ إثبات ⇒ يُزال من القائمة") if exc else ("ok", "")
     return ("missing", why) if not exc else ("exception", exc)
 
 
-def check_proof(q: dict, safe: dict) -> str | None:
+def check_proof(q: dict, safe: dict, c: "Corpus", rows: list[dict]) -> str | None:
     """**لا سؤالَ بلا موضعِ إثبات** (الخارطة · أ-١). يُعيد سببَ السقوط أو None.
 
     ليس تزيينًا للتقرير: سؤالٌ تُشتقّ إجابتُه بلا موضعٍ يُشار إليه لا يمكن تكذيبُه ولا تصديقُه ⇒ يُسقط
     قبل أن يُطرح. والموضعُ يُشتقّ **داخل `truth` من القيم نفسها** (لا من مصدرٍ ثانٍ) فلا تنقسم قاعدة.
+
+    **ومراجعة ٥٢ · R52-2:** «غيرُ فارغ» ليست دليلًا — موضعٌ يُشير إلى الصفحة ٧٠٠ (والكشفُ ٦٢٩) مرّ
+    لأنّ القائمةَ غيرُ فارغة. **ويُشترط أن تقع الصفحاتُ في نطاق الفحص، وأن تقع الصفوفُ في السلسلة**
+    — وإلا سقط بالاسم.
+
+    **ومقعدُ المعايير (مراجعة ٥٢):** كانا معاملَين **اختياريّين** ⇒ استدعاءٌ بلا قرص يمرّ بحكمٍ أضعفَ
+    **صامتًا**، وهذا إعفاءٌ بالمسار لا حكم. فصارا **مطلوبَين**: موضعُ إثباتٍ لا يُقابَل بعالَمٍ (كشفٍ
+    وسلسلةٍ) دعوى بلا مرجع. وضوابطُ لا‑قرصٍ تُمرّر بديلًا مُصغَّرًا صريحًا (`_Scan` في الاختبارات).
     """
     kind = (q.get("derive") or {}).get("kind")
     rule = PROOF_RULE.get(kind)
@@ -182,6 +234,25 @@ def check_proof(q: dict, safe: dict) -> str | None:
         return f"بلا صفحاتِ إثبات (النوع {kind})"
     if rule == "source" and not pr.get("source"):
         return f"بلا مصدرِ إثبات (النوع {kind})"
+    if kind == "rows_matching" and safe.get("hits") is not None:
+        # **لا تضيع مطابقةٌ صامتة** (مراجعة ٥٢ · وأمسكها قياسي): كلُّ مطابقةٍ إمّا لها معرّفُ صفٍّ،
+        # وإمّا تُعلَن في `unmapped` ببابها وسببها. والمجموعُ يساوي عددَ المطابقات بالضبط.
+        covered = len(pr.get("rows") or []) + len(pr.get("unmapped") or [])
+        if covered != safe["hits"]:
+            return (f"موضعُ المطابقة لا يغطّي المطابقات: {covered} من {safe['hits']} "
+                    f"(والصامتُ ممنوع: كلُّ مطابقةٍ بلا مقابلٍ تُعلَن في `unmapped`)")
+        if any(not (u or {}).get("why") for u in (pr.get("unmapped") or [])):
+            return "مطابقةٌ غيرُ قابلةٍ للتموضع بلا سببٍ مُعلَن"
+    scope = set(c.corpus_page_list())
+    stray = sorted({p for p in (pr.get("pages") or []) if p not in scope})
+    if stray:
+        return f"موضعُ إثباتٍ خارج نطاق الفحص: {stray[:5]} من {len(scope)} صفحة"
+    # **وحدُّ الصفوف يُقاس بـ`rows` وحدها** (كان مشروطًا بـ`c` أيضًا ⇒ اتّصالٌ يُمرّر صفوفًا بلا كوربوس
+    # لا يُقاس ⇒ حارسٌ لا يستطيع السقوط — مقعدُ البنية).
+    n = len(rows)
+    bad_rows = sorted({r for r in (pr.get("rows") or []) if not 1 <= r <= n})
+    if bad_rows:
+        return f"صفوفُ إثباتٍ خارج السلسلة (1..{n}): {bad_rows[:5]}"
     return None
 
 
@@ -241,9 +312,13 @@ def truth(q: dict, c: Corpus, pack: dict, rows: list[dict]) -> tuple[object, dic
     if k == "rows_matching":
         hits = [(p, i) for p in c.corpus_page_list() for i, r in enumerate(c.rows(p))
                 if d["pattern"] in str(r.get("desc") or "")]
-        return hits, {"kind": k, "hits": len(hits), "pages": sorted({p for p, _ in hits}),
-                      "proof": {"rows": _ids_for_pages(rows, {p for p, _ in hits}),
-                                "pages": sorted({p for p, _ in hits})}}
+        pages_hit = sorted({p for p, _ in hits})
+        # **الموضعُ = الصفوفُ المطابِقة** لا كلُّ صفوفِ الصفحات المطابِقة (كان ٢٥ صفًّا لأربع مطابقات،
+        # و٨٥٩ لـ١٦٠ ⇒ فائضٌ لا يُعيِّن شيئًا — مراجعة ٥٢ · R52-2). والتحويلُ من الفهرس المحلّيّ إلى
+        # ترقيم النظام **يُتحقَّق منه لكلّ معرّف**، وغيرُ القابل للتموضع **يُعلَن** لا يُسقط.
+        ids, unmapped = _match_row_ids(rows, hits, c, d["pattern"])
+        return hits, {"kind": k, "hits": len(hits), "pages": pages_hit,
+                      "proof": {"rows": ids, "pages": pages_hit, "unmapped": unmapped}}
     if k == "date_encoding":
         ind, lat, ind_pages, lat_pages = 0, 0, set(), set()     # مرورٌ واحدٌ لكلّ فحص (كان مرّتين)
         for p in c.corpus_page_list():
@@ -251,7 +326,7 @@ def truth(q: dict, c: Corpus, pack: dict, rows: list[dict]) -> tuple[object, dic
                 if re.search(f"[{ARABIC_INDIC}{PERSIAN}]", str(r.get("date") or "")):
                     ind += 1
                     ind_pages.add(p)
-        for p in c.pages:
+        for p in c.corpus_page_list():     # **نفسُ نطاق الفحص** (كان حزمةَ التقييم ⇒ عدّان على مقامين)
             for r in c.rows(p):
                 dt = str(r.get("date") or "")
                 if re.search(r"\d", dt) and not re.search(f"[{ARABIC_INDIC}{PERSIAN}]", dt):
@@ -267,7 +342,12 @@ def truth(q: dict, c: Corpus, pack: dict, rows: list[dict]) -> tuple[object, dic
              "identity": pack.get("identity"), "class_count": len(pack.get("census_classes") or [])}.get(f)
         return v, {"kind": k, "field": f, "proof": {"rows": [], "pages": [], "source": "pack_meta"}}
     if k == "absent":
+        scope = c.corpus_page_list()
         return None, {"kind": k, "reason": d["reason"],
+                      # **المطلوبُ إلى جانبِ نطاق الفحص**: «٧٠٠» غائبةٌ تُقرأ مع «١..٦٢٩» — وإلا فالغيابُ دعوى
+                      "requested": d.get("page", d.get("year")),
+                      "scan": {"first": min(scope) if scope else None,
+                               "last": max(scope) if scope else None, "pages": len(scope)},
                       "proof": {"rows": [], "pages": _absent_pages(c, d)}}
     return None, {"kind": k, "unknown": True}
 
@@ -279,7 +359,7 @@ def check_abstention(q: dict, c: Corpus, pack: dict) -> tuple[bool, str]:
     """
     d = q["derive"]
     r = d["reason"]
-    present = set(c.corpus_page_list())     # **نطاقُ النظام**: الكشفُ كلُّه (٦٢٩) لا حزمةُ تقييمي (٢٠٠)
+    present = set(c.corpus_page_list())          # **نطاقُ النظام**: الكشفُ كلُّه (٦٢٩) لا حزمةُ تقييمي (٢٠٠)
     if r == "page_outside_pack":
         return (d["page"] not in present), \
             f"الصفحة {d['page']} {'داخل' if d['page'] in present else 'خارج'} نطاقِ النظام ({len(present)} صفحة)"
@@ -292,12 +372,15 @@ def check_abstention(q: dict, c: Corpus, pack: dict) -> tuple[bool, str]:
         return (str(d["year"]) not in yrs), f"{d['year']} {'موجودة' if str(d['year']) in yrs else 'غائبة'}"
     if r == "field_not_printed":
         hits = 0
-        for p in c.pages:
+        for p in c.corpus_page_list():           # نفسُ مجموعة الموضع بالضبط (كان حزمةَ التقييم وحدها)
             blob = json.dumps(c.page(p), ensure_ascii=False)
             hits += blob.count(f'"{d["field"]}"')
         return (hits == 0), f"الحقل {d['field']} يظهر {hits} مرّةً"
     if r == "boundary":
-        return ((d["page"] + 1) not in c.pages), f"الصفحة {d['page'] + 1} {'داخل' if (d['page'] + 1) in c.pages else 'خارج'} الحزمة"
+        # **نفسُ القاعدة**: الحدُّ يُقاس على نطاق الفحص لا على حزمة التقييم (نوعٌ بلا سؤالٍ اليوم،
+        # ويُصلَح حتى لا يُنسخ الفرقُ إلى سؤالٍ يُكتب غدًا)
+        nxt = d["page"] + 1
+        return (nxt not in present), f"الصفحة {nxt} {'داخل' if nxt in present else 'خارج'} نطاقِ النظام ({len(present)} صفحة)"
     return False, f"سببٌ مجهول: {r}"
 
 
@@ -332,6 +415,12 @@ def _spent_since(before: dict | None, cur: dict | None) -> float | None:
     if b is None or c is None:
         return None
     return float(c) - float(b)
+
+
+# ───────── السقف بالسنتات لا بالعائم (مراجعة ٥٢ · R52-4 · ومقعدُ البنية F7) ─────────
+# **الوحدةُ صارت مشتركةً**: `tools/spend.py` — لأنّ الموضعَ المحلّيّ كان يُغلق الصنفَ في أداةٍ واحدة
+# وأربعةُ أشقّاءَ يُقارنون السقفَ بعائمٍ خامّ (`compare_prompts` · `page_numbers` · `pos_witness` · `scale_slice`).
+# والقاعدةُ (والتسامحُ المُعلَن ≤ ٠٫٥ سنت) في رأس تلك الوحدة، ويقيسها `tests/test_spend_unit.py`.
 
 
 _NUMTOK = re.compile(r"[\d٠-٩۰-۹][\d٠-٩۰-۹,٬،٫.]*")
@@ -649,7 +738,6 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     # مُعلَنًا «نجاحًا». والتوقّفُ ليس حكمًا على الأجوبة ⇒ لا يجوز أن يُصبح رمزَ نجاح.
     hi_cost, prev_spent = 0.0, 0.0  # أعلى كلفةِ سؤالٍ **مُلاحَظة** في هذه الجولة (للتوقّف الاستباقيّ)
     for i, q in enumerate(todo, 1):
-        import time
         if a.budget:                        # **المقياسُ قبل الطلب** (S-2 · أُعيد ٢٠٢٦-٠٩-٢٤ بعد مراجعة ٥٠)
             cur_u = _key_usage()
             spent = _spent_since(before, cur_u)
@@ -664,7 +752,7 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                       f"⇒ توقّفٌ مُسمّى قبل السؤال {i} (fail-closed) · رمزُ الخروج 4.", flush=True)
                 halt = 4
                 break
-            if spent is not None and spent >= float(a.budget):
+            if spent is not None and at_or_over(spent, a.budget):
                 print(f"\n⛔ السقفُ **المقيس** بلغ {spent:.4f} من {float(a.budget):.4f} ⇒ التوقّف قبل "
                       f"السؤال {i}. **التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** · رمزُ الخروج 3.", flush=True)
                 halt = 3
@@ -673,7 +761,7 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
             # حين تكون كلفةُ السؤال أكبرَ من المتبقّي. يُقاس بـ**أعلى كلفةٍ رُصدت في هذه الجولة** لا بمعدّلٍ
             # مفترض. (وحدُّه المُعلَن: عدّادٌ متأخّرٌ بـL نداءً قد يسمح بـL+1 نداءً زائدًا ⇒ والحدُّ الصلبُ
             # حدُّ المفتاح عند المزوّد.)
-            if spent is not None and hi_cost and (spent + hi_cost) > float(a.budget):
+            if spent is not None and hi_cost and would_exceed(spent + hi_cost, a.budget):
                 print(f"\n⛔ **توقّفٌ استباقيّ**: المُنفَق {spent:.4f} + أعلى كلفةٍ مُلاحَظة {hi_cost:.4f} "
                       f"يتجاوز السقف {float(a.budget):.4f} ⇒ لا يُطرح السؤال {i}. "
                       f"**التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** · رمزُ الخروج 3.", flush=True)
@@ -696,13 +784,16 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
         ans = msg["answer"].strip() if res else f"<{msg.get('error')}>"
         ok, why = (score_answer(q, truth_val, ans, res, rows) if res
                    else (False, f"عطبٌ/مهلة: {msg.get('error')}"))
+        # **مصدرٌ واحدٌ للحقول الثلاثة** (مراجعة ٥٢ · R52-3): كان `used_row_nos` و`trace_len` و
+        # `cited_pages` تُشتقّ كلٌّ على حِدة من `res` ⇒ قصٌّ يُطبَّق على إحداها يجعل **السجلَّ يشهد
+        # بغير ما حُكم به**، و`trace_len` يبقى كاملًا فلا يوسم السجلُّ مشكوكًا. الآن: قائمةٌ واحدة.
+        trace = list(getattr(res, "used_row_nos", None) or []) if res else []
         done[q["id"]] = {"id": q["id"], "cat": q["cat"], "metric": q["metric"], "expect": q["expect"],
                          "kind": q["derive"]["kind"],
                          "q": q["q"], "answer": ans, "ok": ok, "why": why,
-                         "cited_pages": sorted({rows[n - 1]["page"] for n in (getattr(res, "used_row_nos", None) or [])
-                                                if 1 <= n <= len(rows)}) if res else [],
-                         "used_row_nos": (list(getattr(res, "used_row_nos", None) or []) if res else []),
-                         "trace_len": (len(list(getattr(res, "used_row_nos", None) or [])) if res else 0),
+                         "cited_pages": sorted({rows[n - 1]["page"] for n in trace if 1 <= n <= len(rows)}),
+                         "used_row_nos": trace,
+                         "trace_len": len(trace),      # **هويّةٌ محروسة**: trace_len == len(used_row_nos)
                          "scope": getattr(res, "scope", None) if res else None,
                          "refused": bool(getattr(res, "refused", False)) if res else None,
                          "spec_sha": _spec_sha(a.questions),   # **شاهدُ الربط**: أيُّ نصِّ سؤالٍ أُجيب عنه
@@ -852,7 +943,8 @@ def main(argv=None) -> int:
         _v_rows, _ = _vrows(a.run)
         for _q in qs:
             _, _safe = truth(_q, c, pack, _v_rows)
-            _state, _why = classify_proof(_q, _safe)        # **مُؤجَّلٌ مُعلَن ≠ مكسور**
+            # **مع الكوربوس**: الموضعُ لا يكفي أن يكون غيرَ فارغ — يُشترط أن **يقع** في نطاق الفحص
+            _state, _why = classify_proof(_q, _safe, c=c, rows=_v_rows)   # **مُؤجَّلٌ مُعلَن ≠ مكسور**
             if _state == "missing":
                 bad.append(f"{_q['id']}: {_why}")
             elif _state == "exception":
@@ -870,10 +962,15 @@ def main(argv=None) -> int:
         if a.page and i != a.page:
             continue
         val, safe = truth(q, c, pack, chain_rows)
-        _st, why_proof = classify_proof(q, safe)   # **موضعُ الإثبات يُطبع مع كلّ سؤال** (الخارطة · أ-١)
+        _st, why_proof = classify_proof(q, safe, c=c, rows=chain_rows)   # موضعُ الإثبات يُطبع مع كلّ سؤال
         # **والقيمةُ تبقى آخرَ عمود** (مستهلكٌ يقرؤها بـ`split()[-1]` — لا يُكسر عقدُ المخرَج)، والإثباتُ
         # عمودٌ **مضغوطٌ بلا مسافات** قبله، ووسمُ الاستثناءِ ملتصقٌ به لا منفصلًا.
-        proof = json.dumps(safe.get("proof"), ensure_ascii=False, separators=(",", ":")) if a.truth else ""
+        pj = dict(safe.get("proof") or {})
+        # **ما يُكتب يُقرأ** (مقعدُ البنية): `requested`/`scan` كانا يُشتقّان ولا يُظهرهما شيء
+        for k in ("requested", "scan"):
+            if k in safe:
+                pj[k] = safe[k]
+        proof = json.dumps(pj, ensure_ascii=False, separators=(",", ":")) if a.truth else ""
         if a.truth and why_proof:
             proof += "⏸" if _st == "exception" else "⚠"
         shown = json.dumps(val, ensure_ascii=False) if a.truth else ""

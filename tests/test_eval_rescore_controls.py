@@ -73,3 +73,20 @@ def test_the_truncated_trace_has_two_spellings(tmp_path, monkeypatch):
     assert stamp.is_trace_suspect({"used_row_nos": list(range(cap + 5)), "trace_len": cap + 5}) is False, \
         "السجلُّ الحديث يحمل trace_len فلا يُوسم"
     assert stamp.is_trace_suspect({"used_row_nos": [1, 2, 3]}) is False, "أثرٌ قصيرٌ لا يُوسم"
+
+
+def test_a_record_whose_declared_length_disagrees_with_its_trace_is_suspect():
+    """**الهويّةُ تُقاس لا تُصدَّق** (مراجعة ٥٢ · مقعدُ البنية F6).
+
+    كان وجودُ `trace_len` وحده علامةَ «نظيف» بلا مقارنة ⇒ سجلٌّ مقصوصٌ يحمل طولًا مخالفًا يمرّ
+    **قابلًا للنشر** على مسارات القراءة (`--rescore` · أداة المقارنة)، وإن أمسكه الكاتبُ وحدَه.
+    والقياسُ على السجلات المحفوظة (٢٠٢٦-٠٩-٢٤): **صفرُ سجلٍ يحمل `trace_len`** ⇒ لا إعادةَ تصنيفٍ
+    لأيّ سجلٍّ قائم (تُقاس لا تُدَّعى: `grep -l trace_len docs/evidence data/eval_pack`).
+    """
+    stamp = _load("eval_stamp_identity", "tools/eval_stamp.py")
+    assert stamp.is_trace_suspect({"used_row_nos": [1, 2, 3], "trace_len": 45}) is True, \
+        "طولٌ مخالفٌ للأثر ⇒ مشكوك (لا نظيف)"
+    assert stamp.is_trace_suspect({"used_row_nos": [1, 2, 3], "trace_len": 3}) is False, "متطابقٌ ⇒ نظيف"
+    assert stamp.is_trace_suspect({"used_row_nos": [1, 2, 3], "trace_len": "x"}) is True, \
+        "طولٌ غيرُ رقميّ ⇒ لا يُوثق به"
+

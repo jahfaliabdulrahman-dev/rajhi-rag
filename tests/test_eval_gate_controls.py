@@ -64,12 +64,15 @@ def test_only_a_twelve_hex_sha_is_a_sha(bad):
 
 
 # ─────────────── P-2: المقصوصُ يُستبعَد مُعلَنًا (وضابطُ الشجرة على القصّ) ───────────────
-
-def test_the_writer_no_longer_truncates_the_trace():
-    """حصادةُ ارتدادٍ نصّيّة: القصُّ `[:40]` عاد ⇒ يسقط. (لا سبيلَ لقياسه بلا طرحٍ مدفوع.)"""
-    src = (ROOT / "tools/eval_questions.py").read_text()
-    assert "or [])[:40]" not in src, "عاد قصُّ الأثرِ عند ٤٠ (الجولة ٤٩ · P-2)"
-    assert '"trace_len"' in src, "لا يُحفظ طولُ الأثر ⇒ لا يُفرَّق المقصوصُ من الكامل"
+# **حارسٌ نصّيٌّ حُذف بعد أن قِيس أنه لا يحرس** (مراجعة ٥٢ · R52-3): كان
+#     `assert "or [])[:40]" not in src`
+# يقيس **تهجئةَ العلّة** لا العلّة: نفسُ القصّ بمسافةٍ واحدة (`[: 40]`) أو في موضع السجلّ وحده
+# يمرّ (مقيس: ٦٢١ passed في الحالتين، و1 failed/620 في التهجئة التي يبحث عنها النصّ).
+# والبديلُ **سلوكيّ** في `tests/test_eval_cap_loop.py`:
+#     `test_the_stored_record_carries_the_whole_trace_and_its_length`
+# — يُشغّل `run_questions` نفسَها بأثرٍ مُحاكى ٤٥ صفًّا ويطالب السجلَّ بالطول الكامل وهويّة
+# `trace_len == len(used_row_nos)`. (درسُ البروتوكول §٦-٨: ضابطٌ يُعاد فيه بناءُ المنطق أو يُقاس
+# بوصفه ليس ضابطًا؛ والدليلُ الوحيدُ أنه يحرس أن **يسقط عند إعادة حقن العلّة** — بأيّ تهجئة.)
 
 
 def test_a_suspect_trace_is_excluded_from_the_published_total(tmp_path):

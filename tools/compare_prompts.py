@@ -27,6 +27,7 @@ import sys as _sys
 _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.pack_io import data_root as _data_root, pack_facts as _pack_facts, pack_path as _pack_path  # noqa: E402
 from tools.pack_io import repo_root as _repo_root  # noqa: E402 — **الكتابةُ في الشجرة الجاريّة** (S-1)
+from tools.spend import at_or_over  # noqa: E402 — **السقفُ بالسنتات** (مراجعة ٥٢ · R52-4 · F7)
 
 PROJ = Path(__file__).resolve().parents[1]
 for _p in (str(PROJ), str(PROJ / "src"), str(PROJ / "tools")):
@@ -151,7 +152,7 @@ def main() -> None:
         futures = {}
         for name, pg in tasks:
             with lock:
-                if spent >= args.budget:
+                if at_or_over(spent, args.budget):
                     stopped_by_budget = True
                     break
             futures[executor.submit(measure_page, run, pg, PROMPTS[name])] = (name, pg)

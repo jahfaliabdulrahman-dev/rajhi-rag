@@ -44,8 +44,16 @@ def is_trace_suspect(rec: dict) -> bool:
     أخرى للحدّ) يمرّ صامتًا ⇒ صار `>=`. وقاعدةُ «بلا `trace_len`» هي علامةُ السجلّات السابقة للإصلاح،
     فالسجلُّ الحديثُ يحمل `trace_len` ويُقاس به.
     """
-    if rec.get("trace_len") is not None:
-        return False
+    # **و(٣) الهويّةُ تُقاس لا تُصدَّق** (مراجعة ٥٢ · مقعدُ البنية F6): كان وجودُ `trace_len` وحده
+    # علامةَ «نظيف» بلا مقارنة ⇒ سجلٌّ مقصوصٌ يحمل طولَه (أو طولًا مُلفَّقًا) يمرّ **نظيفًا قابلًا للنشر**
+    # على مسار القراءة (`--rescore` وأداة المقارنة) وإن أمسكه الكاتبُ وحدَه. فالهويّةُ الآن تُقارَن
+    # هنا — في الوحدة التي يقرأ منها كلُّ قارئ — والاختلافُ = مشكوك.
+    tl = rec.get("trace_len")
+    if tl is not None:
+        try:
+            return int(tl) != len(rec.get("used_row_nos") or [])
+        except (TypeError, ValueError):
+            return True                      # طولٌ غيرُ رقميّ = سجلٌّ لا يُوثق به
     return len(rec.get("used_row_nos") or []) >= TRACE_CAP
 
 

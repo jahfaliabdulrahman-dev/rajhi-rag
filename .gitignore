@@ -25,3 +25,6 @@ docs/security/amount-denylist.json
 
 # أثرُ تنقيحٍ لخطّاف الدفع: لا يُتتبَّع أبداً (ولا يُكتب في الشجرة أصلاً)
 .hook-stdin.txt
+
+# نُسَخُ الحلّ الآليّ لملفّ الحالة (`tools/render_state.py --write`) — تُقرأ عند الشكّ ولا تُتتبَّع
+handoff/*.bak

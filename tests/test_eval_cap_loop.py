@@ -5,6 +5,10 @@
 مراجعة ٥١ · البند «قبل أي صرف»: «ضابطاه يفحصان الدالة ونص المصدر **لا التوقف**. رفعتُ عتبة التوقف ألف
 ضعف فبقيت الاختبارات الـ٦٠٨ خضراء.» ⇒ هذا الملفّ يقيس **التوقّفَ في الحلقة**، ويرسب إذا رُفعت العتبة
 أو نُزع `break` أو صار التوقّفُ يُعاد بـ0. (الاختبارُ لا يمسّ الشبكة: كلُّ نداءات المزوّد مُستبدَلة.)
+
+**ومراجعة ٥٢ أضافت ضابطين بنفس الطريقة** (سلوكًا لا نصًّا): تغطيةٌ واحدة من **رصيدٍ غير صفريّ** (R52-4 ·
+كان يبدأ من صفر فتصحّ فيه المقارنةُ العائمة بالمصادفة)، وسجلٌّ يحمل **الأثرَ كاملًا** وطولَه (R52-3 · كان
+الحارسُ نصًّا يُقاس بتهجئة العلّة).
 """
 
 import importlib.util
@@ -23,16 +27,21 @@ def _load(name: str, rel: str):
 
 
 class _Meter:
-    """عدّادُ مزوّدٍ مُحاكى: يُقرأ **قبل كلّ سؤال**، وكلفةُ كلّ نداءٍ `per_call`، ويتأخّر `lag` نداءً."""
+    """عدّادُ مزوّدٍ مُحاكى: يُقرأ **قبل كلّ سؤال**، وكلفةُ كلّ نداءٍ `per_call`، ويتأخّر `lag` نداءً.
 
-    def __init__(self, per_call: float, lag: int = 0, reverse: bool = False):
+    و`base` = رصيدُ مفتاحٍ **غيرُ صفريّ**: عدّادُ OpenRouter الحقيقيّ لا يبدأ من صفر، والفروقُ العائميّة
+    تنشأ من طرح أرقامٍ كبيرة (مقيس: قراءتان من رصيد ٢٨٩ مجموعهما `0.6 + 2.27e-14` ⇒ تبدو تجاوزًا).
+    """
+
+    def __init__(self, per_call: float, lag: int = 0, reverse: bool = False, base: float = 0.0):
         self.per_call, self.lag, self.reverse, self.calls = per_call, lag, reverse, 0
+        self.base = base
 
     def read(self):
         shown = max(0, self.calls - self.lag) * self.per_call
         if self.reverse:
             shown = -abs(shown)
-        return {"usage": shown, "limit": 999.0}
+        return {"usage": self.base + shown, "limit": 999.0}
 
 
 class _Ans:
@@ -49,15 +58,19 @@ def _questions_file(tmp_path) -> pathlib.Path:
     return p
 
 
-def _run(tmp_path, monkeypatch, meter: _Meter, budget: float, n: int = 8):
+def _run(tmp_path, monkeypatch, meter: _Meter, budget: float, n: int = 8,
+         rows_n: int = 1, used: list[int] | None = None):
     m = _load("evalq_cap_loop", "tools/eval_questions.py")
     import tools.refusal_test as rt
     from statement_qa import chunking, qa, retriever
 
-    monkeypatch.setattr(rt, "build_rows", lambda run: ([{"row_no": 1, "text": "س", "page": 1}], 1))
+    monkeypatch.setattr(rt, "build_rows",
+                        lambda run: ([{"row_no": i + 1, "text": "س", "page": 1} for i in range(rows_n)], 1))
     monkeypatch.setattr(chunking, "chunk_rows", lambda rows: [{"text": "س", "row_no": 1}])
     monkeypatch.setattr(retriever, "build_index", lambda chunks: object())
     monkeypatch.setattr(qa, "build_llm", lambda model=None: None)
+    if used is not None:                     # أثرٌ بحجمٍ محدَّد (لضابط القصّ) — يُرجَع تلقائيًّا
+        monkeypatch.setattr(_Ans, "used_row_nos", list(used))
 
     def _answer(store, qtext, rows=None, chunks=None, llm=None):
         meter.calls += 1                     # الكلفةُ تُحتسب عند النداء — كما يفعل المزوّد
@@ -105,3 +118,36 @@ def test_without_a_budget_the_loop_is_not_capped(tmp_path, monkeypatch):
     rc, results = _run(tmp_path, monkeypatch, _Meter(0.30), 0)
     assert len(results) == 8, f"بلا سقفٍ يجب أن تُطرح الثمانية، طُرق {len(results)}"
     assert rc == 0, f"بلا سقفٍ ولا فشلٍ ⇒ 0، صار {rc}"
+
+
+def test_a_nonzero_meter_baseline_gives_the_same_coverage(tmp_path, monkeypatch):
+    """**السقفُ يُقاس بالسنتات لا بمصادفةٍ عشريّة** (مراجعة ٥٢ · R52-4).
+
+    الضابطُ السابق كان يبدأ من **صفر** فتصحّ فيه المقارنةُ العائمة بالمصادفة ⇒ «سؤالان». ومن رصيدٍ واقعيّ
+    (مقيس: ٢٨٩ · ٢٨٦٫٥) كان التوقّفُ الاستباقيّ يُطلق **سؤالًا مبكّرًا** (١ بدل ٢) لأنّ
+    `0.6 + 2.27e-14 > 0.6`. فالمقارنةُ صارت بالسنتات: نفسُ التغطية من أيّ رصيد.
+    """
+    for base in (0.0, 289.0, 286.5, 1000, 12345.678):
+        # **شاهدٌ منفصلٌ لكلّ رصيد**: ضابطٌ يُعيد استعمال المجلّد نفسَه **يستأنف** أجوبةَ الضابط
+        # السابق (`done` من `answers.json`) فيقرأ تغطيةً مركّبة — قِيس: ٤ بدل ٢. لا يُقاس ضابطان بيتٌ واحد.
+        d = tmp_path / f"base_{base}"
+        d.mkdir(exist_ok=True)
+        rc, results = _run(d, monkeypatch, _Meter(0.30, base=base), 0.60)
+        assert (rc, len(results)) == (3, 2), f"رصيد {base}: رمز {rc} وتغطية {len(results)} بدل 3/2"
+
+
+def test_the_stored_record_carries_the_whole_trace_and_its_length(tmp_path, monkeypatch):
+    """**القصُّ في الكاتب يُقاس بالسلوك لا بتهجئة النصّ** (مراجعة ٥٢ · R52-3).
+
+    الحارسُ السابق كان `assert "or [])[:40]" not in src` — يقيس **نصَّ العلّة** لا العلّة: نفسُها
+    بمسافةٍ واحدة تمرّ (مقيس: ٦٢١/٦٢١)، والقصُّ في السجلّ وحده يمرّ كذلك. هذا الضابطُ يُشغّل
+    `run_questions` نفسَها بأثرٍ مُحاكى **٤٥ صفًّا** ويطالب السجلَّ بثلاثةٍ معًا: الطولَ كاملًا،
+    وهويّة `trace_len == len(used_row_nos)`، والصفحاتِ المستشهدة من الأثر نفسه.
+    """
+    used = list(range(1, 46))
+    rc, results = _run(tmp_path, monkeypatch, _Meter(0.30), 0.60, n=1, rows_n=45, used=used)
+    assert rc == 0 and len(results) == 1, f"سؤالٌ واحدٌ متوقّع، طُرق {len(results)} برمز {rc}"
+    rec = results[0]
+    assert len(rec["used_row_nos"]) == 45, f"السجلُّ مقصوص: {len(rec['used_row_nos'])} من ٤٥"
+    assert rec["trace_len"] == len(rec["used_row_nos"]) == 45, "هويّةُ trace_len انكسرت"
+    assert rec["cited_pages"] == [1], f"الصفحاتُ المستشهدة ليست من الأثر: {rec['cited_pages']}"

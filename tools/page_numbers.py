@@ -37,7 +37,9 @@ from pathlib import Path
 import numpy as np
 
 PROJ = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJ))
 sys.path.insert(0, str(PROJ / "src"))
+from tools.spend import at_or_over  # noqa: E402 — **السقفُ بالسنتات** (مراجعة ٥٢ · R52-4 · F7)
 
 from statement_qa.vlm_reader import chat_vlm_image  # noqa: E402
 
@@ -320,7 +322,7 @@ def main() -> None:
         print(f"[{i}] printed={num}  (cum ${cost:.4f})", flush=True)
         out.write_text(json.dumps(mapping, ensure_ascii=False, indent=1),
                        encoding="utf-8")
-        if cost >= args.max_cost:
+        if at_or_over(cost, args.max_cost):
             print(f"STOPPED: budget ${args.max_cost} reached", flush=True)
             break
 
