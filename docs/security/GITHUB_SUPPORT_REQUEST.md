@@ -79,8 +79,8 @@ jahfaliabdulrahman-dev (repository owner)
   ⇒ الحذفُ لا يُفقد شيئاً ذا قيمة، وهو ما صرّح به الطلبُ الأصليّ.)
 - **الانكشافُ المقيسُ قبل تنفيذهم (2026-09-23 · `tools/refs_exposure_probe.py`):** `⛔ STILL EXPOSED` —
   `refs/pull/*` = **١٢٢** · التزاماتُ المرآة **٦٤٩** مقابل `main` المعاد كتابتِه **٢٣١** ·
-  **١٢٣ صيغةَ مبلغٍ حقيقيّةً داخل ١٤٤٠ blobاً مرئيّةٌ عبر المرآة** · وثلاثةُ التزاماتِ ما قبل التنقية
-  (`aa8b70cb2e` · `17f5daca92` · `d3dbf2af26`) تُرجع **HTTP 200**.
+  **١٢٣ صيغةَ مبلغٍ حقيقيّةً داخل ١٤٤٠ blobاً مرئيّةٌ عبر المرآة** · والتزاماتُ ما قبل التنقية الثلاثة
+  تُرجع **HTTP 200** (معرّفاتُها وأوصافُها في `data/security/refs-cached-shas.json` — **غيرُ مُتتبَّع**، §٧).
   ⇒ **الانكشافُ اليومَ ليس المفتاحَ وحدَه بل مبالغَ الكشف أيضاً** — وهذا هو وزنُ الموافقة.
 - **نصُّ الردّ المُقترح (يُرسله المالك):** «Thanks Finch — please proceed with deleting pull requests
   #101–#108. All eight are already merged (their changes are in `main`), and every artifact we need from
@@ -106,7 +106,7 @@ cleared out unreferenced commits. The dangling commits are now removed from GitH
 | الـPRs المطلوب حذفها (`101..108`) | قائمة | **HTTP 404 للثمانية** | ✓ نُفِّذ |
 | الالتزاماتُ المرئيّة عبر مرآة كاملة | ٦٤٩ | **٦٥٢** (و`main` ٢٨٠) | **لم تنقص** |
 | صيغُ مبالغَ حقيقيّة مرئيه عبر المرآة | ١٢٣ داخل ١٤٤٠ blobاً | **١٢٣ داخل ١٥٦٤ blobاً** | **لم تنقص** |
-| `cached views` لالتزامات ما قبل التنقية | ٣ × HTTP 200 | `aa8b70cb2e` ⇒ **404** ✓ · `17f5daca92` ⇒ **200** · `d3dbf2af26` ⇒ **200** | جزئيّ |
+| `cached views` لالتزامات ما قبل التنقية (٣) | ٣ × HTTP 200 | **الأول ⇒ 404 ✓ · الثاني ⇒ 200 · الثالث ⇒ 200** (الأسماءُ في الملفّ غير المُتتبَّع، §٧) | جزئيّ |
 
 **الحكمُ المقيس:** حُذفت **طلباتُ السحب** وطُويت واحدةٌ من ثلاث `cached views`، لكنّ **الكائناتَ نفسَها
 لا تزال قابلةً للسحب** عبر المراجع الباقية — فلا يُغلق البند. الأمرُ القاطع:
@@ -116,6 +116,10 @@ cleared out unreferenced commits. The dangling commits are now removed from GitH
 ```
 
 ### نصُّ الردّ المُقترح (يرسله المالك — نفسُ التذكرة)
+
+> **قبل الإرسال**: تُملأ `<SHA-A>/<SHA-B>/<SHA-C>` من `data/security/refs-cached-shas.json`
+> (**غيرُ مُتتبَّع**). المعرّفاتُ لا تُكتَب هنا ولا في أيّ ملفٍّ مُتتبَّع: كتابتُها تنشر **رابطاً موسوماً**
+> إلى ما لم يُطهَّر (إسقاطٌ أمنيّ أمسكه المدقّق في مراجعة ٥٣ — §٧).
 
 ```
 Hi Finch — thank you for deleting #101–#108: those pull requests now return 404 on our side, confirmed.
@@ -127,14 +131,14 @@ original request:
 - A full `git clone --mirror` (which fetches those refs) still exposes 652 commits against 280 on the
   rewritten `main`, and our amount scanner still finds 123 occurrences of real financial figures inside
   1,564 blobs reachable through them.
-- Two of the three pre-rewrite commit URLs still resolve with HTTP 200: 17f5daca92 and d3dbf2af26
-  (the third, aa8b70cb2e, now correctly returns 404).
+- Two of the three pre-rewrite commit URLs still resolve with HTTP 200: <SHA-B> and <SHA-C>
+  (the third, <SHA-A>, now correctly returns 404).
 
 So the pull requests are gone but their commits are not: they are still reachable through the remaining
 pull-request refs and cached views.
 
 Request: please expire the remaining `refs/pull/*` refs — or run the garbage collection that makes the
-pre-rewrite commits unretrievable — and clear the cached commit views for 17f5daca92 and d3dbf2af26.
+pre-rewrite commits unretrievable — and clear the cached commit views for <SHA-B> and <SHA-C>.
 Please confirm when done; we re-measure after every change.
 
 The credential was rotated and is considered burned; what remains exposed is the financial-figures class.
@@ -161,14 +165,37 @@ Thank you.
 
 | الطبقة | الأداة | ما تمنعه/تقيسه | الحالة |
 |---|---|---|---|
-| ١ · **قبل وجود الكائن** | `.githooks/pre-commit` (جديد) | مساراتُ الأدلّة/السرّ بالاسم · أشكالُ أسرارٍ معروفة في الأسطر المُضافة · أشكالُ مبالغَ حقيقيّة (بحارس المبالغ) | ✓ مُختبَرٌ بالسمّ: ٤/٤ + `tests/test_hook_gates.py` |
+| ١ · **قبل وجود الكائن** | `.githooks/pre-commit` (جديد) + `tools/secret_scan.py` | مساراتُ الأدلّة/السرّ بالاسم · **١٢ صنفاً من الأسرار بنمطٍ لكلّ صنف** (لا نمطٌ واحد يمرّر الأشكالَ ذاتَ الشَّرطات) · أشكالُ مبالغَ حقيقيّة (بحارس المبالغ) | ✓ سمٌّ يدويٌّ: ٤/٤ + **٦ أصنافٍ من المفاتيح تعضّ** + `tests/test_hook_gates.py` (٥) · `tests/test_secret_scan.py` (٦) |
 | ٢ · عند الدفع | `.githooks/pre-push` (قائم) | ما يُنشر فعلًا: حارسُ النشر + حارسُ المبالغ على المدى + البوّابةُ الساكنة | ✓ |
 | ٣ · في CI | `.github/workflows/publish-guard.yml` | الشجرةُ والتاريخُ ورسائلُ الالتزامات — **لكن نطاقُه مقيسٌ ومحدود**: `rev-list --objects --all` **داخل نسخة العمل**، و`actions/checkout` يجلب المرجعَ المدقَّقَ وحده ⇒ **`refs/pull/*` خارجَ مسح CI** | ⚠ عينٌ عمياء مقيسة |
-| ٤ · **دوريّاً على مرآة كاملة** | `tools/refs_exposure_probe.py` (يجلب `refs/pull/*` فعلًا) + `amount_guard --history-audit --mirror` | العينُ التي ترى ما لا يراه CI — والقياسُ يمرّ بجدولةٍ محلّيّة عند المالك (يحتاج المانيفستَ غيرَ المنشور) | يُشغَّل أسبوعيًّا · والحكمُ من **كود الخروج** لا من الوعد |
+| ٤ · **دوريّاً على مرآة كاملة** | مهمّةُ Hermes `refs-exposure-watch` (كلَّ اثنين ٩ص) تشغّل `tools/refs_exposure_probe.py` + `amount_guard --history-audit --mirror` | العينُ التي ترى ما لا يراه CI (يحتاج المانيفستَ غيرَ المنشور ⇒ محلّيّة) | ✓ مُنشأة (`484614c81063`) · **صمتٌ = صفرُ انكشاف**، وتنبيهٌ عند `STILL EXPOSED`/`UNMEASURED` · والقياسُ شُغِّل يدويًّا فأخرج التنبيه |
 
 **وقواعدُ أربع تُختصر بها الحادثةُ كلُّها:**
 1. **المنعُ قبل الالتزام لا التنقيةُ بعده** — التنقيةُ لا تُصلح `refs/pull/*`، والتدويرُ وحدَه يعالج السرّ.
 2. **لا تُدفع أدلّةٌ في فرعٍ إلى مستودعٍ عام**، ولو مؤقّتًا لمراجعة (هكذا دخلت أوّلًا).
 3. **المقياسُ من كود الخروج** — «مُنع» أو «نُظّف» دعوى تُقبَل بـ`rc`، لا بنصٍّ في رسالة.
 4. **الفرعُ يُحذف بعد الدمج** (نُفِّذ لِـ`feat/item4-pack-free-capture-44`) — تقليلُ مراجعَ حاملة، لا إصلاحٌ لما في مراجع پول.
+5. **لا تنشر معرّفاً موسوماً لِما لم يُطهَّر** — «أيّ التزامٍ يفكّ البيانات» دليلٌ بالقدر الذي فيه المحتوى؛
+   والمعرّفاتُ في ملفٍّ **غيرِ مُتتبَّع**، وغيابُه **فشلٌ مُغلَق** لا قياسٌ ناقصٌ صامت.
+
+---
+
+## ٧ · مراجعة ٥٣ — ثلاثةُ إسقاطاتٍ أُمسكت على البوّابة الجديدة وأُصلحت من جذورها (٢٠٢٦-٠٩-٢٥)
+
+مدقّقٌ مستقلّ هاجم **البوّابةَ الجديدة نفسَها** بمفاتيحَ مصطنعة وبنسخةٍ نقيّة. ثلاثةُ عطوبٍ — أُصلحت **بالصنف**،
+لكلٍّ سمٌّ وضابط:
+
+| العطبُ المقيس | الأثر | الإصلاحُ الجذريّ |
+|---|---|---|
+| `pre-commit` كان يمرّر `sk-or-v1-…` و`sk-ant-…` (**صنفُ الرمز الذي تسرّب فعلًا**) و`sk-proj-…` و`github_pat_…` — النمطُ الواحد توقّف عند أوّل شَرطة (قِيس: **٥ من ٦ تمرّ صامتة**) | بوّابةٌ شكلية على أخطر صنف | `tools/secret_scan.py`: **نمطٌ لكلّ صنف** (١٢) · القيمةُ **لا تُطبع** (رقمُ السطر والصنف فقط) · غيابُ الفحص ⇒ `rc=2` **فشلٌ مُغلَق** · وضابطٌ يقيس **ما يجب ألّا يُطابَق** |
+| معرّفاتُ الالتزامات الثلاثة **بأوصافها** كانت في `tools/refs_exposure_probe.py` **المُتتبَّع** ⇒ من قرأه عرف **أيّ التزامٍ يفكّ البيانات** | الانكشافُ صار **رابطاً موسوماً** | المعرّفاتُ والأوصافُ في `data/security/refs-cached-shas.json` (**غيرُ مُتتبَّع** · `data/security/` مُهمَل) · وغيابُها ⇒ `UNMEASURED` (rc=2) · والنصُّ الإنجليزيّ يستعمل `<SHA-A…C>` تُملأ قبل الإرسال |
+| `tools/guard_bite_sweep.py`: مسارُ المفسّر مكتوبٌ + **أيُّ رمزٍ غيرِ صفر = «عَضّت»** | **يشهد لبوّاباتٍ لم تُقَس**: سقوطُ الأداة يخرج 1، و`python3 -m pytest` بلا pytest يخرج 1 أيضاً | المفسّرُ يُحلّ (الشجرة ← المستودع الرئيسيّ ← `python3`) · والتصنيفُ من **علامة pytest** (`FAILED` / `N failed`) ⇒ «سقط» · «لم يسقط» · **«تعذّر التشغيل» يُحسب عطباً** |
+
+**والرابعُ يخصُّ الاكتشافَ لا الحكم:** في **نسخةٍ نقيّة** كان ضابطُ وجود الخطّافات يسقط، لأنّ
+`core.hooksPath` **إعدادٌ محلّيّ لا ينتقل مع الاستنساخ** ⇒ صار الضابطُ يقبل `""` كذلك (حالٌ معلومة: الخطّافاتُ
+لا تحرس تلك النسخة، وCI وحدَه يعمل عند الجميع)، وأُضيف ضابطٌ يقرأ **سطرَ التركيب من ملفّ الخطّاف نفسه**
+(بوّابةٌ لا تُركَّب لا تحرس). والقياسُ النهائيّ يُعاد في **نسخةٍ نقيّة**: صفرُ إسقاط.
+
+**الحدُّ المتبقّي (مُعلَن لا مُخفى):** المعرّفاتُ الثلاثة **مذكورةٌ في تاريخ المستودع** من جولاتٍ سابقة — لا
+تُنقّى بلا إعادة كتابة، وليست أدلّةً بذاتها، ولا نُعيد دورةَ تنقيةٍ رابعة (القاعدة ٥).
 

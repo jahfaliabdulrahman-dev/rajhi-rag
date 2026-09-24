@@ -88,3 +88,31 @@ def test_a_cached_view_that_answers_200_is_enough_to_stay_exposed(monkeypatch, c
     _wire(monkeypatch, mod, forms=0, http=200)
     rc, _ = _run_main(mod, monkeypatch, capsys, ["--json"])
     assert rc == 1, f"cached view = 200 ⇒ 1 (صار {rc})"
+
+
+def test_the_cached_sha_list_is_read_from_an_untracked_file(monkeypatch, capsys, tmp_path):
+    """**المعرّفاتُ ليست في المستودع** (مراجعة ٥٣): كانت في الأداة المُتتبَّعة ⇒ «رابطٌ موسومٌ» إلى ما لم يُطهَّر."""
+    import json as _json
+    mod = _load()
+    f = tmp_path / "shas.json"
+    f.write_text(_json.dumps({"cached_views": [{"sha": "a" * 40, "what": "x"}, {"sha": "b" * 40, "what": "y"}]}),
+                 encoding="utf-8")
+    monkeypatch.setenv("REFS_CACHED_SHAS", str(f))
+    mod = _load()                                    # يُعاد التحميلُ ليقرأ المتغيّر
+    _wire(monkeypatch, mod, forms=0, http=404)
+    monkeypatch.setattr(mod, "_http_code", lambda url: 404)
+    rc, out = _run_main(mod, monkeypatch, capsys, ["--json"])
+    assert rc == 0 and _json.loads(out)["verdict"] == "PURGED"
+    assert len(_json.loads(out)["cached_views"]) == 2, "القائمةُ المقيسة تأتي من الملفّ لا من ثابتٍ في المصدر"
+
+
+def test_a_missing_sha_list_fails_closed(monkeypatch, capsys, tmp_path):
+    """**غيابُ الأدلّة ليس نظافة**: بلا قائمةٍ لا يُقاس الكاش ⇒ `UNMEASURED` (rc=2)."""
+    mod = _load()
+    monkeypatch.setenv("REFS_CACHED_SHAS", str(tmp_path / "لا-يوجد.json"))
+    mod = _load()
+    _wire(monkeypatch, mod, forms=0, http=404)
+    rc, out = _run_main(mod, monkeypatch, capsys, ["--json"])
+    assert rc == 2, f"لا قائمةَ ⇒ 2 (صار {rc})"
+    assert "UNMEASURED" in out
+

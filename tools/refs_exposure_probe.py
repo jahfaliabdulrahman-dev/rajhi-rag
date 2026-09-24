@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -26,12 +27,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 URL = "https://github.com/jahfaliabdulrahman-dev/rajhi-rag"
-# الالتزاماتُ الثلاثة التي قِيست «مرئيّةً» يومَ الطلب (رقمُ الطلب عند GitHub قائمٌ عليها).
-CACHED_SHAS = (
-    "aa8b70cb2ea59aa9413e0ca15a31883f2ee6241a",   # آخرُ التزامٍ حمل المسارَين
-    "17f5daca929e0d0e8af4ef8bdaaea49cd176b76d",
-    "d3dbf2af2662e0becec0b9763a6b50a55da2e987",   # أوّلُ من أدخل قائمة المبالغ
-)
+# **معرّفاتُ ما قبل التنقية تُقرأ من ملفٍّ غيرِ مُتتبَّع** (مراجعة ٥٣ — إسقاطٌ أمنيّ):
+# كتابتُها هنا كانت تنشر **رابطاً موسوماً** إلى ما لم يُطهَّر («أوّلُ من أدخل قائمة المبالغ») في مستودعٍ
+# عامّ ⇒ من قرأ الملفَّ عرف **أيّ التزامٍ** يفتح البيانات. والوصفُ يبقى في `data/security/` المُهمَل.
+SHA_FILE = Path(os.environ.get("REFS_CACHED_SHAS") or (ROOT / "data" / "security" / "refs-cached-shas.json"))
+
+
+def cached_shas() -> list[str]:
+    """قائمةُ الالتزامات من **غير المُتتبَّع**. وغيابُها ⇒ لا قياسَ (يُعلَن، والحكمُ يفشل مُغلَقاً)."""
+    try:
+        data = json.loads(SHA_FILE.read_text(encoding="utf-8"))
+        out = [str((x or {}).get("sha") or "") for x in (data.get("cached_views") or [])]
+        return [s for s in out if s]
+    except Exception:                            # غيابٌ أو عطبٌ ⇒ ليست أدلّةً صامتة
+        return []
 
 
 def _guard():
@@ -73,6 +82,12 @@ def main() -> int:
         print("⚠ UNMEASURED — لا أدلّةَ (مانيفست/مفتاح) ⇒ لا أستطيع مسحَ المرآة ⇒ **فشلٌ مُغلَق**")
         return 2
 
+    shas = cached_shas()
+    if not shas:
+        print(f"⚠ UNMEASURED — لا قائمةَ لالتزامات ما قبل التنقية (تُقرأ من {SHA_FILE} · غيرِ مُتتبَّع) "
+              "⇒ **فشلٌ مُغلَق** (لا أُعلن نظافةً لم أرها)")
+        return 2
+
     out: dict[str, object] = {"repo": URL}
     ls = _run(["git", "ls-remote", "origin", "refs/pull/*"], cwd=str(ROOT))
     if ls.returncode != 0:
@@ -100,7 +115,7 @@ def main() -> int:
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
-    cached = {s[:10]: _http_code(f"{URL}/commit/{s}") for s in CACHED_SHAS}
+    cached = {s[:10]: _http_code(f"{URL}/commit/{s}") for s in shas}
     out["cached_views"] = cached
 
     exposed = bool(out["amount_formats"]) or any(c == 200 for c in cached.values())

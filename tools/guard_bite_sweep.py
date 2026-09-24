@@ -15,11 +15,35 @@ R52-3 · R52-4 · R52-5 (وجهان) · F6 · ومعيارُ الحالة · و�
 from __future__ import annotations
 
 import pathlib
+import re
 import shutil
 import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent   # الجذرُ من الملفّ لا من مسارٍ مكتوب
-PY = str(ROOT / ".venv/bin/python")
+
+
+def _interpreter() -> str:
+    """المفسّرُ يُحلّ كما في `pre-push`: نسخةُ الشجرة ← نسخةُ المستودع الرئيسيّ ← `python3`.
+
+    (كان مساراً مكتوباً `.venv/bin/python` ⇒ يسقط في أيّ نسخةٍ أخرى — **أمسكه المدقّق في مراجعة ٥٣**
+    وكان عليه أن يُنشئ رابطاً ليُعيد القياس؛ والأسوأ: سقوطُ الأداة يخرج **1** فلا يُميَّز عن «بوّابةٍ عَضّت».)
+    """
+    cands = [ROOT / ".venv" / "bin" / "python"]
+    try:
+        gd = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                            cwd=str(ROOT), capture_output=True, text=True).stdout.strip()
+        if gd:
+            cands.append(pathlib.Path(gd).parent / ".venv" / "bin" / "python")
+    except Exception:                            # noqa: BLE001 — لا أمرّ بالحواجز
+        pass
+    cands.append(pathlib.Path(shutil.which("python3") or "python3"))
+    for c in cands:
+        if str(c) and pathlib.Path(c).exists():
+            return str(c)
+    return "python3"
+
+
+PY = _interpreter()
 EQ = ROOT / "tools/eval_questions.py"
 SPEND = ROOT / "tools/spend.py"
 STAMP = ROOT / "tools/eval_stamp.py"
@@ -101,9 +125,27 @@ CASES = [
 ]
 
 
-def _run(test: str) -> int:
+def _verdict(rc: int, out: str) -> str:
+    """«سقط» · «لم يسقط» · **«تعذّر التشغيل»** — والحكمُ من **علامة pytest نفسها** لا من رمز الخروج.
+
+    (لأنّ `python3 -m pytest` بلا pytest مُثبَّتٍ يخرج **1** أيضاً — فيلتبس «تعذّر» بـ«عَضّ»؛
+    وهذا ما جعل المدقّق في مراجعة ٥٣ يجعل `.venv/bin/python` رابطاً ليعرف الفرق.)
+    """
+    if re.search(r"\bFAILED\b", out) or re.search(r"\b\d+ (failed|error)", out):
+        return "bite"
+    if rc == 0:
+        return "no_bite"
+    return "unrunnable"
+
+
+def _run(test: str) -> tuple[int, str]:
+    """يُعيد (رمزَ الخروج، المخرَج). **والسمُّ يقع إذا وفقط إذا كان الرمزُ 1** (سقوطُ ضابط)،
+
+    أمّا رموزُ pytest الأخرى (2 تعذّرُ جمعٍ/مقاطعة · 3 عطبٌ داخليّ · 4 خطأُ استعمال) فهي **تعذّرُ تشغيلٍ**
+    لا «بوّابةٌ عَضّت» — وكان الخلطُ بينهما يجعل الأداةَ تشهد لبوّابةٍ لم تُقَس (عطبُ مراجعة ٥٣).
+    """
     r = subprocess.run([PY, "-m", "pytest", "-q", "-x", test], cwd=ROOT, capture_output=True, text=True)
-    return r.returncode
+    return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
 def _report(name: str, ok: bool, bad: int) -> int:
@@ -113,6 +155,7 @@ def _report(name: str, ok: bool, bad: int) -> int:
 
 
 def main() -> int:
+    print(f"المفسّرُ المستعمل: {PY}")
     print(f"{'البوابة':52s} | {'السمّ':6s} | {'الضابط':6s} | النتيجة")
     print("-" * 92)
     bad = 0
@@ -125,12 +168,18 @@ def main() -> int:
             src = path.read_text(encoding="utf-8")
             assert old in src, f"نصُّ السمّ لم يُطابق في {path.name} — القياسُ لا يُكمَل بالنوايا"
             path.write_text(src.replace(old, new, 1), encoding="utf-8")
-            rc = _run(test)
+            rc, out = _run(test)
         finally:
             shutil.copy2(bak, path)
             bak.unlink()
         total += 1
-        bad = _report(name, rc != 0, bad)
+        kind = _verdict(rc, out)
+        if kind == "unrunnable":
+            print(f"{name:52s} | {'مُطبَّق':6s} | {'?':6s} | 🔴 تعذّر التشغيل (rc={rc}) — "
+                  f"ليست شهادةً لبوّابة: {out.strip().splitlines()[-1][:90] if out.strip() else ''}")
+            bad += 1
+            continue
+        bad = _report(name, kind == "bite", bad)
 
     # م١٢أ: ملفُّ منفّذٍ **غيرِ مُعلَن** في صندوق المدقّق
     INTRUDER.write_text("# س\n", encoding="utf-8")

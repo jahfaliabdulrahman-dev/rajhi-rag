@@ -29,9 +29,19 @@ def test_both_hooks_exist_and_are_executable():
     for h in (PRE_COMMIT, PRE_PUSH):
         assert h.is_file(), f"خطّافٌ مفقود: {h.name}"
         assert os.access(h, os.X_OK), f"خطّافٌ غيرُ قابلٍ للتنفيذ: {h.name} (chmod +x)"
-    cfg = _git("config", "core.hooksPath", cwd=ROOT)
-    assert cfg.stdout.strip() in (".githooks", str(HOOKS)), \
-        f"`core.hooksPath` لا يشير إلى `.githooks` ⇒ الخطّافاتُ لا تُشغَّل (القيمة: {cfg.stdout.strip()!r})"
+    # **والإعدادُ المحلّيّ لا ينتقل مع الاستنساخ** (أمسكه المدقّق في مراجعة ٥٣: نسخةٌ نقيّة ⇒ ضابطٌ يسقط).
+    # فالمقصودُ هنا: ألّا يُشير إلى مكانٍ آخر؛ وكونُه غيرَ مضبوطٍ **حالٌ معلومة**: الخطّافاتُ لا تحرس تلك
+    # النسخة، وCI وحدَه يعمل عند الجميع (وهذا مكتوبٌ في `docs/QA_CHECKLIST.md` و`docs/OPERATIONS.md`).
+    cfg = _git("config", "core.hooksPath", cwd=ROOT).stdout.strip()
+    assert cfg in (".githooks", str(HOOKS), ""), \
+        f"`core.hooksPath` يشير إلى مكانٍ غير متوقَّع ⇒ الخطّافاتُ لا تُشغَّل (القيمة: {cfg!r})"
+
+
+def test_each_hook_documents_its_own_install_line():
+    """**بوّابةٌ لا تُركَّب لا تحرس**: كلُّ ملفّ خطّافٍ يحمل سطرَ التركيب بنفسه (فيُقرأ من مكانه)."""
+    line = "git config core.hooksPath .githooks"
+    for h in (PRE_COMMIT, PRE_PUSH):
+        assert line in h.read_text(encoding="utf-8"), f"{h.name} لا يوثّق سطرَ التركيب ⇒ يُنسى في نسخةٍ نقيّة"
 
 
 def test_the_pre_commit_gate_bites_on_a_staged_evidence_file(tmp_path):
