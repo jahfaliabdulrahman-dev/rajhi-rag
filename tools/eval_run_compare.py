@@ -57,7 +57,7 @@ def compare(spec_path: pathlib.Path, arms: list[pathlib.Path]) -> dict:
 
     # **الأثرُ المقصوص (REVIEW-48 · P-2)**: سجلٌّ ضِمنه ٤٠ صفّاً بالضبط من قبل إصلاح `[:40]` — قد يكون
     # كلَّ الأثر وقد يكون قصَّه ⇒ **يُستبعد من المجموع المنشور ويُعلَن**؛ وإلّا نُشر حكمٌ على أثرٍ مقطوع.
-    excluded = {name: [i for i in ids if per_arm[name][i].get("trace_suspect")]
+    excluded = {name: [i for i in ids if eval_stamp.is_trace_suspect(per_arm[name][i])]
                 for name in per_arm}
     _counted = {name: [i for i in ids if i not in set(excluded[name])] for name in per_arm}
 

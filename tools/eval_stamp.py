@@ -11,12 +11,38 @@
 
 from __future__ import annotations
 
-PLACEHOLDER = "؟"          # `_spec_sha` تُرجعه عند تعذّر التقطيع ⇒ لا يصلح بصمةً
+import re
+
+PLACEHOLDER = "؟"          # قيمةٌ بديلةٌ تُرجعت عند تعذّر التقطيع — لا تصلح بصمةً
+
+# **البصمةُ تُعرَف بصيغتها لا بقيمةٍ بعينها.** الدرسُ المدفوع (الجولة ٤٩): كانت القاعدةُ تقارن بمُبدَّلٍ
+# عربيٍّ واحد (`؟`) بينما المُنتِجُ في `eval_questions._spec_sha` يُخرج **لاتينيّةً** (`?`) عند فشل القراءة
+# ⇒ مرّت بصمةُ الفشل وحُكم بالسجلّ أنه «مطابقٌ للنصّ» وهو لم يُقرأ أصلاً. فالقاعدةُ الآن على **الصيغة**
+# (١٢ خانةً ست عشريّة) ⇒ تموت العلّةُ كلُّها لا موضعٌ منها.
+SHA_RE = re.compile(r"^[0-9a-f]{12}$")
 
 
 def is_publishable(rec: dict, cur_sha: str) -> bool:
-    """**مطابقةٌ حرفيّةٌ وحسب**: بلا بصمةٍ (أو ببصمةٍ بديلة) ⇐ غيرُ قابلةٍ للنشر."""
-    return bool(cur_sha) and cur_sha != PLACEHOLDER and rec.get("spec_sha") == cur_sha
+    """**مطابقةٌ حرفيّةٌ وحسب**، وبصمتَان صحيحتان صيغةً: بلا بصمةٍ (أو بصيغةٍ فاسدةٍ أو بديلة) ⇐ غيرُ قابلةٍ للنشر."""
+    v, cur = rec.get("spec_sha"), cur_sha
+    return (isinstance(v, str) and isinstance(cur, str)
+            and SHA_RE.match(v) is not None and SHA_RE.match(cur) is not None
+            and v == cur)
+
+
+# **قاعدتان مشتركتان** (تُستدعيان من كلّ أداةٍ تقرأ سجلات — فلا تنقسم قاعدةٌ بين موضعين):
+# (١) الأثرُ المشكوكُ قصُّه: ٤٠ مرجعًا **بلا `trace_len`** ⇒ كُتب قبل إصلاح القصّ، ويحتمل أن يكون مقطوعًا.
+#     كانت هذه القاعدةُ في `--rescore` وحدها ⇒ سجلٌّ لم يُعَد حكمُه يمرّ نظيفًا في أداة المقارنة.
+# (٢) السجلُّ المحكوم: لا نائبٌ (`ok is None`) ولا مشكوكُ القصّ.
+TRACE_CAP = 40
+
+
+def is_trace_suspect(rec: dict) -> bool:
+    return rec.get("trace_len") is None and len(rec.get("used_row_nos") or []) == TRACE_CAP
+
+
+def is_judged(rec: dict) -> bool:
+    return rec.get("ok") is not None and not is_trace_suspect(rec)
 
 
 def classify(records: list[dict], cur_sha: str) -> tuple[list[str], list[str], list[str]]:

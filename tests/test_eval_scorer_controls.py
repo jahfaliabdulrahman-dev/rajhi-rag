@@ -197,13 +197,18 @@ def test_publishability_requires_an_exact_stamp():
     sys.path.insert(0, str(ROOT / "tools"))
     import eval_stamp as st
 
-    assert st.is_publishable({"id": "a", "spec_sha": "abc123"}, "abc123")
-    assert not st.is_publishable({"id": "a"}, "abc123")                    # بلا بصمةٍ ⇐ لا يُنشر
-    assert not st.is_publishable({"id": "a", "spec_sha": "؟"}, "abc123")   # بصمةٌ بديلة
-    assert not st.is_publishable({"id": "a", "spec_sha": "old"}, "abc123")
-    assert not st.is_publishable({"id": "a", "spec_sha": "abc123"}, "؟")   # البصمةُ المرجعيّة نفسُها بديلة
-    ok, uns, stale = st.classify([{"id": "a", "spec_sha": "abc123"}, {"id": "b"}, {"id": "c", "spec_sha": "old"}],
-                                 "abc123")
+    # **الجولة ٤٩ · S-4**: البصمةُ تُعرَف **بصيغتها** (١٢ خانةً ست عشريّة) لا بقيمةٍ بعينها — كان المُنتِجُ
+    # يُخرج `?` لاتينيّةً والقاعدةُ تحرس `؟` عربيّةً ⇒ مرّت بصمةُ الفشل.
+    assert st.is_publishable({"id": "a", "spec_sha": "4facf540abd4"}, "4facf540abd4")
+    assert not st.is_publishable({"id": "a"}, "4facf540abd4")                    # بلا بصمةٍ ⇐ لا يُنشر
+    assert not st.is_publishable({"id": "a", "spec_sha": "؟"}, "؟")              # بديلةٌ عربيّة
+    assert not st.is_publishable({"id": "a", "spec_sha": "?"}, "?")              # **ما يُخرجه المُنتِج فعلًا**
+    assert not st.is_publishable({"id": "a", "spec_sha": "abc123"}, "abc123")    # صيغةٌ فاسدة
+    assert not st.is_publishable({"id": "a", "spec_sha": "4facf540abd5"}, "4facf540abd4")   # مخالفةٌ حرفيّة
+    assert not st.is_publishable({"id": "a", "spec_sha": "old"}, "4facf540abd4")
+    assert not st.is_publishable({"id": "a", "spec_sha": "4facf540abd4"}, "؟")   # البصمةُ المرجعيّة نفسُها بديلة
+    ok, uns, stale = st.classify([{"id": "a", "spec_sha": "4facf540abd4"}, {"id": "b"},
+                                  {"id": "c", "spec_sha": "deadbeef0000"}], "4facf540abd4")
     assert ok == ["a"] and uns == ["b"] and stale == ["c"]
-    good, why = st.publishable_or_why([{"id": "a"}, {"id": "c", "spec_sha": "old"}], "abc123")
+    good, why = st.publishable_or_why([{"id": "a"}, {"id": "c", "spec_sha": "deadbeef0000"}], "4facf540abd4")
     assert good == [] and "بلا بصمة" in why and "مخالفة" in why

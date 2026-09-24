@@ -407,10 +407,14 @@ class _Trace:
         self.refused = bool(rec.get("refused"))
 
 
-def _spec_sha() -> str:
-    """بصمةُ ملفّ الأسئلة — تُحفظ مع كلّ جواب ليكون **الربطُ بين النصّ والجواب قابلاً للتدقيق**."""
+def _spec_sha(path: pathlib.Path | None = None) -> str:
+    """بصمةُ **ملفّ الأسئلة المستعملِ فعلًا** — تُحفظ مع كلّ جواب ليكون الربطُ قابلاً للتدقيق.
+
+    الجولة ٤٩ · S-4: كان المسارُ **مكتوبًا في الكود** (`docs/eval_pack/questions.json`) ⇒ تشغيلٌ بملفّ
+    أسئلةٍ آخر يُختم ببصمة ملفٍّ لم يُقرأ ⇒ الشاهدُ يشهد على غير ما وقع. الآن يُمرَّر الملفُّ المستعمل.
+    """
     import hashlib
-    p = pathlib.Path(__file__).resolve().parent.parent / "docs/eval_pack/questions.json"
+    p = pathlib.Path(path) if path else (pathlib.Path(__file__).resolve().parent.parent / "docs/eval_pack/questions.json")
     try:
         return hashlib.sha256(p.read_bytes()).hexdigest()[:12]
     except OSError:
@@ -426,35 +430,45 @@ def rescore(a, qs: list[dict], c: Corpus, pack: dict, spec: dict, rows: list[dic
     out = a.out or (pack_io.data_root() / "data/eval_pack/answers.json")
     data = json.loads(out.read_text())
     by_id = {q["id"]: q for q in qs}
-    cur_sha = _spec_sha()
+    cur_sha = _spec_sha(a.questions)
     stale = 0
     results = []
     for rec in data.get("results", []):
         q = by_id.get(rec["id"])
+        # **النائبُ ليس جواباً** (الجولة ٤٩ · P-3/S-3): `<انتهت المهلة>` كان يُحكم عليه فشلاً فيدخل المقامَ
+        # ويُخفي أنّ الجولةَ لم تُجب. الآن يُعلَن نائبًا ولا يدخل الحكمَ ولا المقاييس.
+        if str(rec.get("answer") or "").startswith("<"):
+            results.append({**rec, "ok": None, "substitute": True,
+                            "why": f"نائبٌ (لا جواب): {str(rec.get('answer'))[:48]}"})
+            continue
         if q is not None:
             truth_val, _ = truth(q, c, pack, rows)
             ok, why = score_answer(q, truth_val, rec.get("answer", ""), _Trace(rec), rows)
             # **لا يُكتب فوق نصّ السؤال المحفوظ**: الملفُّ شاهدٌ على ما طُلب فعلاً (كان يُستبدل فيُفقد الشاهد)
             rec = {**rec, "ok": ok, "why": why, "metric": q["metric"], "expect": q["expect"],
                    "cat": q["cat"], "kind": q["derive"]["kind"]}
-            # **أثرٌ قديمٌ مقصوص** (REVIEW-48 · P-2): كُتب قبل إصلاح `[:40]` ⇒ ٤٠ بالضبط **غيرُ معلومة**:
-            # قد تكون كلَّ الأثر وقد تكون قصَّه. يُعلَن ولا يُدفن، ويُستبعد من المجموع المنشور.
-            if rec.get("trace_len") is None and len(rec.get("used_row_nos") or []) == 40:
+            # **أثرٌ قديمٌ مقصوص** (REVIEW-48 · P-2 · والجولة ٤٩): القاعدةُ في `eval_stamp.is_trace_suspect`
+            # موضعًا واحدًا ⇒ فلا تنقسم بين `--rescore` وأداة المقارنة.
+            if eval_stamp.is_trace_suspect(rec):
                 rec["trace_suspect"] = True
             if not eval_stamp.is_publishable(rec, cur_sha):
                 stale += 1
         results.append(rec)
         print(f"{rec['id']:9s} {'✅' if rec.get('ok') else '❌'} {rec.get('why', '')}")
+    # **الحكمُ قبل الكتابة** (الجولة ٤٩ · S-3): كان الملفُّ يُكتب ثم يُرفض النشر ⇒ يُمحى شاهدٌ بلا مقابل.
+    judged = [r for r in results if not r.get("substitute")]
+    good, why = (eval_stamp.publishable_or_why(judged, cur_sha) if judged
+                 else ([], "لا سجلَّ محكومًا: كُلُّ صفوفِ الملفّ نوائبُ (مهلةٌ/عطبٌ) — لا يُحكم على نائب"))
+    if judged and not good and not getattr(a, "allow_stale", False):
+        print(f"\n{why}\n   ⇒ **لا تُطبع مقاييسُ من سجلٍّ لا شاهدَ له على السؤال المطروح** — "
+              f"للتشخيص وحده: `--allow-stale`.")
+        print(f"   ⇒ **ولا يُكتب الملفّ** ({out}): الشاهدُ لا يُمحى بحكمٍ لا يُنشر.")
+        return 3
     data["results"] = results
     out.write_text(json.dumps(data, ensure_ascii=False, indent=1))
     if stale:
         print(f"\n⚠️ {stale} سجلاً كُتب **قبل** بصمةِ الأسئلة الحاليّة ({cur_sha}) ⇒ نصُّ السؤال في السجل قد يخالف "
               f"ما طُلب فعلاً. الأصلُ: إعادةُ الطرح. **ولا يُنشر رقمٌ من سجلاتٍ غيرِ مطابقةِ البصمة.**")
-    good, why = eval_stamp.publishable_or_why(results, cur_sha)
-    if not good and not getattr(a, "allow_stale", False):
-        print(f"\n{why}\n   ⇒ **لا تُطبع مقاييسُ من سجلٍّ لا شاهدَ له على السؤال المطروح** — "
-              f"للتشخيص وحده: `--allow-stale`.")
-        return 3
     if not good:
         print(f"\n{why}\n   ⇒ تُطبع الآن **تشخيصيّاً** ويُمنع نشرُها.")
     _print_metrics(results)
@@ -489,18 +503,17 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
             prev_all = {r["id"]: r for r in json.loads(out.read_text()).get("results", [])}
         except (OSError, json.JSONDecodeError, KeyError):
             prev_all = {}
-    curent = _spec_sha()
+    curent = _spec_sha(a.questions)
     done = {k: v for k, v in prev_all.items()
             # **النائبُ ليس جواباً** ⇒ يُعاد سؤالُه · **وجوابُ نصٍّ آخر ليس جواباً لهذا السؤال** (قِيس:
             # أربعُ إعاداتِ صياغةٍ في مدىً واحد ⇒ كان يُعاد استخدامُ جوابِ النصّ القديم صامتاً).
             if not str(v.get("answer") or "").startswith("<") and eval_stamp.is_publishable(v, curent)}
     todo = [q for q in qs if q["id"] not in done]
-    if a.budget:                       # **سقفٌ يُعلن ويُقاس**: بمعدّلٍ مُقنَّعٍ من نقطتين مقيسَتين (٠٫٠٠٦–٠٫٠١٠ للسؤال)
-        cap = max(0, int(float(a.budget) / 0.01))
-        if len(todo) > cap:
-            print(f"⛔ السقفُ أوقف الجدولة: {len(todo)} سؤالاً > {cap} (بمعدّل $0.01/سؤال المُقنَّع) ⇒ "
-                  f"التغطيةُ المُعلَنة: {cap} من {len(qs)}", flush=True)
-            todo = todo[:cap]
+    if a.budget:                       # **سقفٌ يُقاس بالمزوّد لا يُقنَّع** (الجولة ٤٩ · S-2)
+        # كان `cap = budget / 0.01` ⇒ ٦٠ لخمسين سؤالًا ⇒ **لا يُلجِم أبدًا** ويُوكَل إلى تقديرٍ مُقنَّع.
+        # الآن: يُقرأ رصيدُ المفتاح **قبل كلّ سؤال**، والوقفُ عند بلوغ السقف **المقيس**، ويُعلَن ما لم يُطرح.
+        if before is None:
+            print("⚠️ رصيدُ المفتاح لا يُقرأ ⇒ لا سقفَ مقيسًا؛ يُتوقَّف عند تقديرٍ وميضيّ صريح.", flush=True)
     if getattr(a, "only", None):           # إعادةُ أسئلةٍ بعينها (بعد تصحيح نطاقِها أو صياغتِها)
         want = {x.strip() for x in a.only.split(",") if x.strip()}
         todo = [q for q in qs if q["id"] in want]
@@ -522,6 +535,20 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
 
     for i, q in enumerate(todo, 1):
         import time
+        if a.budget:                                        # **المقياسُ قبل الطلب** (S-2): لا يُصرف ثم يُحاسب
+            if before is None:
+                if i > 1 and (i - 1) > int(float(a.budget) / 0.05):
+                    print(f"\n⛔ السقفُ الميضيّ (بلا قراءةِ رصيد): {i - 1} سؤالاً > "
+                          f"{int(float(a.budget) / 0.05)} ⇒ التوقّف.", flush=True)
+                    break
+            else:
+                cur_u = _key_usage()
+                if before.get("usage") is not None and cur_u and cur_u.get("usage") is not None:
+                    spent = float(before["usage"]) - float(cur_u["usage"])
+                    if spent >= float(a.budget):
+                        print(f"\n⛔ السقفُ **المقيس** بلغ {spent:.4f} من {float(a.budget):.4f} ⇒ التوقّف قبل "
+                              f"السؤال {i}. **التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** في هذه الجولة.", flush=True)
+                        break
         t0 = time.monotonic()
         truth_val, _ = truth(q, c, pack, rows)
         box: dict = {}
@@ -543,10 +570,10 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                          "trace_len": (len(list(getattr(res, "used_row_nos", None) or [])) if res else 0),
                          "scope": getattr(res, "scope", None) if res else None,
                          "refused": bool(getattr(res, "refused", False)) if res else None,
-                         "spec_sha": _spec_sha(),   # **شاهدُ الربط**: أيُّ نصِّ سؤالٍ أُجيب عنه
+                         "spec_sha": _spec_sha(a.questions),   # **شاهدُ الربط**: أيُّ نصِّ سؤالٍ أُجيب عنه
                          "secs": round(time.monotonic() - t0, 1)}   # **المتزنُ في الدليل**: كم أخذ السؤال
         merged = {**prev_all, **done}      # النائبُ يبقى ما لم يُجَب عنه فعلاً
-        out.write_text(json.dumps({"model": a.model or "افتراضيّ", "spec_sha": _spec_sha(),
+        out.write_text(json.dumps({"model": a.model or "افتراضيّ", "spec_sha": _spec_sha(a.questions),
                                    "budget_usd": a.budget,     # **العقدةُ في الدليل**: ميزانيةُ الجولة مُعلنةٌ في ملفّها
                                    "results": [merged[k] for k in order if k in merged]},
                                   ensure_ascii=False, indent=1))   # **حفظٌ تدريجيّ: قتلُ العملية لا يُهدر جواباً**
@@ -567,14 +594,25 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
 
 
 def _print_metrics(results: list[dict]) -> None:
-    """المقاييسُ الثلاثة + تفصيلٌ بالقاعدة (يُظهر **أين** العطب لا كمّه فقط)."""
+    """المقاييسُ الثلاثة + تفصيلٌ بالقاعدة (يُظهر **أين** العطب لا كمّه فقط).
+
+    **والمقامُ نظيفٌ مُعلَنًا** (الجولة ٤٩ · P-2/P-3): النائبُ (`ok is None` — انتهت مهلةٌ أو عطبٌ) والأثرُ
+    المشكوكُ قصُّه (`trace_suspect`) لا يدخلان المقام — ثم يُطبع عددُ المستبعَد صراحةً، لأنّ استبعادًا صامتًا
+    يقرأ تغطيةً كاذبة.
+    """
+    subs = [r for r in results if r.get("substitute") or r.get("ok") is None]
+    susp = [r for r in results if eval_stamp.is_trace_suspect(r)]
+    judged = [r for r in results if eval_stamp.is_judged(r)]
     for m, label in (("number", "دقّة الرقم"), ("citation", "صدق الاستشهاد من الأثر"), ("abstain", "صحّة الامتناع")):
-        sel = [r for r in results if r.get("metric") == m]
+        sel = [r for r in judged if r.get("metric") == m]
         n_ok = sum(1 for r in sel if r.get("ok"))
         print(f"{label:26s} {n_ok:2d}/{len(sel):2d}  {'█' * n_ok}{'·' * (len(sel) - n_ok)}")
-    print(f"{'المجموع':26s} {sum(1 for r in results if r.get('ok')):2d}/{len(results):2d}")
-    n_abs = sum(1 for r in results if r.get("metric") == "abstain")
-    fell = [r for r in results if r.get("metric") == "abstain" and not r.get("ok")]
+    print(f"{'المجموع':26s} {sum(1 for r in judged if r.get('ok')):2d}/{len(judged):2d}")
+    if subs or susp:
+        print(f"➖ مُستبعَدٌ من المقام: **{len(subs)} نائبًا** (مهلةٌ/عطبٌ — لم يُجب) "
+              f"· **{len(susp)} أثرًا مشكوكَ القصّ** ⇒ المقامُ = {len(judged)} من {len(results)}")
+    n_abs = sum(1 for r in judged if r.get("metric") == "abstain")
+    fell = [r for r in judged if r.get("metric") == "abstain" and not r.get("ok")]
     invented = sum(1 for r in fell if "**اختراع**" in (r.get("why") or ""))
     silent = sum(1 for r in fell if "لم يُعلن" in (r.get("why") or ""))
     # المقامُ يُشتقّ لا يُكتب بيد — **والصنفان يُفصَلان** (وإلّا قرأ القارئُ صنفاً وقيس غيرُه)
@@ -648,18 +686,21 @@ def main(argv=None) -> int:
     if bad:
         print("\n".join(x for x in bad if x), file=sys.stderr)
 
-    if a.rescore:
-        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
-        from tools.refusal_test import build_rows                     # noqa: PLC0415
-        rows, _ = build_rows(a.run)
-        return rescore(a, qs, c, pack, spec, rows)
-
     if bad and (a.execute or a.rescore) and not a.force:
         # **حاجبٌ في المسار المدفوع لا في المجّانيّ وحده**: جولةٌ تُصرف فوق مراسٍ لا تُقاس هي بالضبط ما
         # أنتج الأرقامَ المسحوبة (صفحتان «غائبتان» وهما موجودتان · «سنةٌ غائبة» فيها ٨٦٢ صفًّا).
         print(f"⛔ {len(bad)} عطباً في المراسي ⇒ لا طرحَ مدفوعاً ولا إعادةَ حكمٍ فوق ما لا يُقاس "
               f"(تجاوزٌ صريح: --force). القائمةُ مطبوعةٌ أعلاه.", file=sys.stderr)
         return 2
+    if a.rescore:
+        # **البوّابةُ قبل الفرعَين** (الجولة ٤٩ · S-3): كان الفرعُ يعود **قبل** فحص المراسي ⇒ جولةُ إعادةِ
+        # حكمٍ فوق سؤالٍ يشير إلى صفحةٍ غيرِ موجودةٍ تُحكم وتُطبع «قابلةً للنشر» بـ`rc=0`. الآن: لا فرعَ
+        # يُعبر البوّابة.
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
+        from tools.refusal_test import build_rows                     # noqa: PLC0415
+        rows, _ = build_rows(a.run)
+        return rescore(a, qs, c, pack, spec, rows)
+
     if a.execute:
         sel = qs[: a.limit] if a.limit else qs
         return run_questions(a, sel, c, pack, spec)
