@@ -42,6 +42,15 @@ def _guard():
     return mod
 
 
+def _run(cmd: list[str], cwd: str | None = None) -> subprocess.CompletedProcess:
+    """**سبيلٌ واحد لنداءات git** — وعليه يقوم اختبارُ رمز الخروج بلا شبكة.
+
+    (العطبُ الذي أُمسك 2026-09-24: `--json` كان يُرجع **0** والحكمُ `STILL EXPOSED`، لأنّ `return 1`
+    سكن فرعَ المخرَج النصّيّ ⇒ مستهلكٌ آليّ يقرأ صفرًا فيمرّ على سطحٍ مكشوف = **فشلٌ مفتوح**.)
+    """
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+
+
 def _http_code(url: str) -> int:
     req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "rajhi-refs-probe"})
     try:
@@ -65,8 +74,7 @@ def main() -> int:
         return 2
 
     out: dict[str, object] = {"repo": URL}
-    ls = subprocess.run(["git", "ls-remote", "origin", "refs/pull/*"],
-                        cwd=str(ROOT), capture_output=True, text=True)
+    ls = _run(["git", "ls-remote", "origin", "refs/pull/*"], cwd=str(ROOT))
     if ls.returncode != 0:
         print("⚠ UNMEASURED — تعذّر سؤالُ الريموت ⇒ **فشلٌ مُغلَق** (لا أُعلن تنظيفاً لم أره)")
         return 2
@@ -75,16 +83,13 @@ def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="refs-probe-"))
     try:
         mirror = tmp / "mirror.git"
-        cl = subprocess.run(["git", "clone", "-q", "--mirror", URL, str(mirror)],
-                            capture_output=True, text=True)
+        cl = _run(["git", "clone", "-q", "--mirror", URL, str(mirror)])
         if cl.returncode != 0:
             print(f"⚠ UNMEASURED — تعذّر جلبُ المرآة ⇒ **فشلٌ مُغلَق** ({cl.stderr.strip()[:80]})")
             return 2
-        rv = subprocess.run(["git", "-C", str(mirror), "rev-list", "--all", "--count"],
-                            capture_output=True, text=True)
+        rv = _run(["git", "-C", str(mirror), "rev-list", "--all", "--count"])
         out["mirror_commits"] = int(rv.stdout.strip() or 0)
-        mb = subprocess.run(["git", "-C", str(mirror), "rev-list", "main", "--count"],
-                            capture_output=True, text=True)
+        mb = _run(["git", "-C", str(mirror), "rev-list", "main", "--count"])
         out["main_commits"] = int(mb.stdout.strip() or 0)
         try:
             nblobs, forms = ag.history_forms(deny, repo=mirror)
@@ -110,12 +115,11 @@ def main() -> int:
         print(f"· صيغُ مبالغَ حقيقيّة عبر المرآة   : {out['amount_formats']} داخل {out['mirror_blobs']} blobاً")
         print("· cached views للتزامات ما قبل التنقية: " +
               " · ".join(f"{k} ⇒ HTTP {v}" for k, v in cached.items()))
-        if exposed:
-            print("⛔ STILL EXPOSED — المراجعُ تُرجع ما طلبنا إزالته ⇒ يُعاد الفتحُ بنصٍّ واحد: "
-                  "«the refs still resolve — please expire them»")
-            return 1
-        print("✓ PURGED — لا شكلَ مبلغٍ مرئيّ ولا cached view يردّ 200 ⇒ يُغلق البند **بقياس** لا بوعد.")
-    return 0
+        print("⛔ STILL EXPOSED — المراجعُ تُرجع ما طلبنا إزالته ⇒ يُعاد الفتحُ بنصٍّ واحد: "
+              "«the refs still resolve — please expire them»" if exposed else
+              "✓ PURGED — لا شكلَ مبلغٍ مرئيّ ولا cached view يردّ 200 ⇒ يُغلق البند **بقياس** لا بوعد.")
+    # **والحكمُ هو الحكم** في الوضعين: `PURGED=0` · `STILL EXPOSED=1` (ولا يتبدّل بشكل المخرَج).
+    return 1 if exposed else 0
 
 
 if __name__ == "__main__":

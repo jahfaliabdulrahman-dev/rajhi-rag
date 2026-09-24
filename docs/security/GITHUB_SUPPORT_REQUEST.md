@@ -89,4 +89,62 @@ jahfaliabdulrahman-dev (repository owner)
   views for the pre-rewrite commits) so the old commits are no longer retrievable through `refs/pull/*`.
   The credential was rotated and is considered burned.»
 - **القياسُ بعدهم (لا يُغلق البند بوعد):** `python3 tools/refs_exposure_probe.py` ⇒ `PURGED` (rc=0) أو
-  `STILL EXPOSED` (rc=1) أو `UNMEASURED` (rc=2: تعذّر الجلب ⇒ **فشلٌ مُغلَق**).
+  `STILL EXPOSED` (rc=1) أو `UNMEASURED` (rc=2: تعذّر الجلب ⇒ **فشلٌ مُغلَق**).  ← ونُفِّذ في §٦ أدناه.
+
+---
+
+## ردُّ الدعم وقياسُه — **جزئيّ لا كامل** (٢٠٢٦-٠٩-٢٤)
+
+**قال الدعم (Finch · ٢٤ سبتمبر ٠٨:٢٩ UTC · التذكرة `4785819`):** «I have deleted the pull requests and
+cleared out unreferenced commits. The dangling commits are now removed from GitHub.»
+
+**وما قِيس بأيدينا بعد الردّ (لا بوعد):**
+
+| المقياس | قبل الطلب | بعد ردّ الدعم | الحكم |
+|---|---|---|---|
+| `refs/pull/*` على الريموت | ١٢٢ | **١١٣** | انخفض ٩ |
+| الـPRs المطلوب حذفها (`101..108`) | قائمة | **HTTP 404 للثمانية** | ✓ نُفِّذ |
+| الالتزاماتُ المرئيّة عبر مرآة كاملة | ٦٤٩ | **٦٥٢** (و`main` ٢٨٠) | **لم تنقص** |
+| صيغُ مبالغَ حقيقيّة مرئيه عبر المرآة | ١٢٣ داخل ١٤٤٠ blobاً | **١٢٣ داخل ١٥٦٤ blobاً** | **لم تنقص** |
+| `cached views` لالتزامات ما قبل التنقية | ٣ × HTTP 200 | `aa8b70cb2e` ⇒ **404** ✓ · `17f5daca92` ⇒ **200** · `d3dbf2af26` ⇒ **200** | جزئيّ |
+
+**الحكمُ المقيس:** حُذفت **طلباتُ السحب** وطُويت واحدةٌ من ثلاث `cached views`، لكنّ **الكائناتَ نفسَها
+لا تزال قابلةً للسحب** عبر المراجع الباقية — فلا يُغلق البند. الأمرُ القاطع:
+
+```bash
+.venv/bin/python tools/refs_exposure_probe.py --json     # ⇒ verdict: STILL EXPOSED · rc=1
+```
+
+### نصُّ الردّ المُقترح (يرسله المالك — نفسُ التذكرة)
+
+```
+Hi Finch — thank you for deleting #101–#108: those pull requests now return 404 on our side, confirmed.
+
+However the underlying commits are still retrievable. Re-measured today with the same tooling as the
+original request:
+
+- `git ls-remote` on the repo still reports 113 `refs/pull/*` refs.
+- A full `git clone --mirror` (which fetches those refs) still exposes 652 commits against 280 on the
+  rewritten `main`, and our amount scanner still finds 123 occurrences of real financial figures inside
+  1,564 blobs reachable through them.
+- Two of the three pre-rewrite commit URLs still resolve with HTTP 200: 17f5daca92 and d3dbf2af26
+  (the third, aa8b70cb2e, now correctly returns 404).
+
+So the pull requests are gone but their commits are not: they are still reachable through the remaining
+pull-request refs and cached views.
+
+Request: please expire the remaining `refs/pull/*` refs — or run the garbage collection that makes the
+pre-rewrite commits unretrievable — and clear the cached commit views for 17f5daca92 and d3dbf2af26.
+Please confirm when done; we re-measure after every change.
+
+The credential was rotated and is considered burned; what remains exposed is the financial-figures class.
+Thank you.
+```
+
+### عطبٌ أُمسك في هذه الجولة وأُصلح (وأثرُه أمنيّ)
+
+**الحيّازُ كان يُرجع `rc=0` مع حكم `STILL EXPOSED` في وضع `--json`** (`return 1` سكن فرعَ المخرَج النصّيّ)
+⇒ أيُّ مستهلكٍ آليّ يقرأ صفرًا **يمرّ على سطحٍ مكشوف**: فشلٌ **مفتوح** في الأداة التي يُقرَّر بها إغلاقُ
+بند الانكشاف نفسِه. أُصلح: الحكمُ هو الحكمُ في الوضعين، والضابطُ سلوكيّ (يشغّل `main()` بشبكةٍ مزيّفة
+عبر `_run`/`_http_code`) — `tests/test_refs_probe_exit_code.py` (٣ ضوابط: `PURGED=0` و`STILL EXPOSED=1`
+في الوضعين، و`cached view = 200` وحدَه يكفي للانكشاف).
