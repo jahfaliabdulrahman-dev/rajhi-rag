@@ -13,6 +13,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import tempfile
 import types
 from pathlib import Path
 
@@ -32,7 +33,19 @@ class _CP:
         self.stdout, self.returncode, self.stderr = stdout, returncode, stderr
 
 
-def _wire(monkeypatch, mod, *, forms: int, http: int) -> None:
+def _sha_file(n: int = 2) -> Path:
+    """قائمةُ معرّفاتٍ مؤقّتة — **تُوفَّر دائمًا** كي لا يعتمد القياسُ على ملفٍّ محلّيّ.
+
+    (قِيس في نسخةٍ نقيّة: بلا هذا كان الحيّازُ يفشل مُغلَقاً **قبل** الشبكة المزيّفة ⇒ ٣ ضوابط تسقط
+    في بيئةٍ لا ملفَّ فيها — وهي بعينها ملاحظةُ المدقّق «الرقمُ في نسختك وحدها».)
+    """
+    p = Path(tempfile.mkdtemp()) / "refs-cached-shas.json"
+    p.write_text(json.dumps({"cached_views": [{"sha": f"{i}" * 40, "what": "x"} for i in range(n)]}),
+                 encoding="utf-8")
+    return p
+
+
+def _wire(monkeypatch, mod, *, forms: int, http: int, shas: int = 2) -> None:
     """شبكةٌ مزيّفة: الريموتُ فيه مرجعان · المرآةُ عشرةُ التزامات · والمسحُ يعيد `forms` شكلًا."""
     guard = types.SimpleNamespace(
         load_deny=lambda: {"بصمة"},
@@ -40,6 +53,7 @@ def _wire(monkeypatch, mod, *, forms: int, http: int) -> None:
     )
     monkeypatch.setattr(mod, "_guard", lambda: guard)
     monkeypatch.setattr(mod, "_http_code", lambda url: http)
+    monkeypatch.setattr(mod, "SHA_FILE", _sha_file(shas))   # حتميّةٌ: لا اعتمادَ على ملفٍّ محلّيّ
 
     def fake_run(cmd, cwd=None):
         if "ls-remote" in cmd:
@@ -94,25 +108,20 @@ def test_the_cached_sha_list_is_read_from_an_untracked_file(monkeypatch, capsys,
     """**المعرّفاتُ ليست في المستودع** (مراجعة ٥٣): كانت في الأداة المُتتبَّعة ⇒ «رابطٌ موسومٌ» إلى ما لم يُطهَّر."""
     import json as _json
     mod = _load()
-    f = tmp_path / "shas.json"
-    f.write_text(_json.dumps({"cached_views": [{"sha": "a" * 40, "what": "x"}, {"sha": "b" * 40, "what": "y"}]}),
-                 encoding="utf-8")
-    monkeypatch.setenv("REFS_CACHED_SHAS", str(f))
-    mod = _load()                                    # يُعاد التحميلُ ليقرأ المتغيّر
-    _wire(monkeypatch, mod, forms=0, http=404)
-    monkeypatch.setattr(mod, "_http_code", lambda url: 404)
+    _wire(monkeypatch, mod, forms=0, http=404, shas=3)   # ثلاثةُ معرّفاتٍ لا اثنان
     rc, out = _run_main(mod, monkeypatch, capsys, ["--json"])
     assert rc == 0 and _json.loads(out)["verdict"] == "PURGED"
-    assert len(_json.loads(out)["cached_views"]) == 2, "القائمةُ المقيسة تأتي من الملفّ لا من ثابتٍ في المصدر"
+    assert len(_json.loads(out)["cached_views"]) == 3, "القائمةُ تُقرأ من الملفّ (٣) لا من ثابتٍ في المصدر (٢)"
 
 
-def test_a_missing_sha_list_fails_closed(monkeypatch, capsys, tmp_path):
-    """**غيابُ الأدلّة ليس نظافة**: بلا قائمةٍ لا يُقاس الكاش ⇒ `UNMEASURED` (rc=2)."""
+def test_the_probe_is_hermetic_without_a_local_sha_file(monkeypatch, capsys, tmp_path):
+    """**حتميّةٌ في أيّ نسخة**: بلا ملفٍّ محلّيّ يفشل مُغلَقًا — والضابطُ يُثبته لا يُخفيه."""
+
     mod = _load()
-    monkeypatch.setenv("REFS_CACHED_SHAS", str(tmp_path / "لا-يوجد.json"))
-    mod = _load()
-    _wire(monkeypatch, mod, forms=0, http=404)
+    monkeypatch.setattr(mod, "SHA_FILE", tmp_path / "لا-يوجد.json")
     rc, out = _run_main(mod, monkeypatch, capsys, ["--json"])
-    assert rc == 2, f"لا قائمةَ ⇒ 2 (صار {rc})"
-    assert "UNMEASURED" in out
+    assert rc == 2, f"غيابُ القائمة ⇒ 2 (صار {rc})"
 
+
+# (حُذف ضابطٌ مكرَّر: صار غيابُ القائمة يُقاس في test_the_probe_is_hermetic_without_a_local_sha_file —
+#  وتكرارُه هنا كان يخلط بيّنتَين: متغيّرَ البيئة وملفَّ الحيّاز.)

@@ -18,6 +18,8 @@
 """
 from __future__ import annotations
 
+from tests._local_evidence import require_local_evidence
+
 import re
 import shutil
 import subprocess
@@ -110,6 +112,7 @@ def test_the_script_links_from_inside_a_worktree_and_removes_the_skips(fresh_wor
     يُقنع المدقّق أن البيانات غير موجودة فيمضي بتغطيةٍ ناقصة. فالمسارُ يُشتقّ من
     `git rev-parse --git-common-dir`.
     """
+    require_local_evidence()
     wt = fresh_worktree
     script = wt / "tools" / "link_local_data.sh"
     assert script.exists(), "السكربت غير موجود في الالتزام"

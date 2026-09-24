@@ -17,6 +17,8 @@
 """
 from __future__ import annotations
 
+from tests._local_evidence import require_local_evidence
+
 import ast
 import hashlib
 import importlib.util
@@ -297,6 +299,7 @@ def test_the_source_walk_is_root_invariant_and_an_empty_walk_refuses(tmp_path, m
 
 def test_an_unresolved_push_range_fails_closed():
     """**ثغرةُ ٣٩ رقم ٢:** `rev-list` يفشل على رأسٍ بعيدٍ غيرِ مجلوب ⇒ كان يمرّ `rc=0` بلا فحص."""
+    require_local_evidence()
     cmd = [sys.executable, str(ROOT / "tools" / "amount_guard.py"), "--pre-push"]
     bogus = "refs/heads/x " + "1" * 40 + " refs/heads/x " + "2" * 40 + "\n"
     r = subprocess.run(cmd, input=bogus, capture_output=True, text=True, cwd=ROOT)
@@ -611,6 +614,7 @@ def test_the_whole_history_is_scanned_not_only_the_working_tree(tmp_path):
 
 def test_a_history_rewrite_without_a_proven_origin_is_blocked(tmp_path):
     """إعادةُ كتابةٍ لا تُثبت أصلَها من نسخةٍ احتياطيّة = تاريخٌ بلا شهادة ⇒ تُسقط."""
+    require_local_evidence()
     repo = _git_repo(tmp_path / "r2")
     (repo / "a.txt").write_text("x\n", encoding="utf-8")
     _commit(repo, "i")
@@ -622,6 +626,7 @@ def test_a_history_rewrite_without_a_proven_origin_is_blocked(tmp_path):
 
 def test_a_truncated_batch_stream_fails_closed(monkeypatch):
     """**قصُّ الحقّ:** قياسٌ ناقصٌ ليس قياساً — تدفّقٌ مقصوصٌ يسقط ولا يمرّ بـ«ما رأيتُه نظيفاً»."""
+    require_local_evidence()
     class _Out:
         def __init__(self, out: bytes) -> None:
             self.stdout, self.stderr, self.returncode = out, b"", 0
