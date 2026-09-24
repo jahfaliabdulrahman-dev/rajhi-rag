@@ -99,17 +99,34 @@ def test_a_missing_file_fails_closed(tmp_path, capsys):
 # ── P-4 · «الرابطُ المُوسَم»: معرّفٌ لا وجودَ له في هذا المستودع (تبنّاه المدقّق في مراجعة ٥٤) ──
 
 def test_a_foreign_commit_id_is_flagged():
-    """٤٠ خانةً سِتّ عشريّة لا وجودَ لها في المستودع + سياقُ «التزام» ⇒ **إشارةٌ إلى خارجه**."""
+    """٤٠ خانةً سِتّ عشريّة لا وجودَ لها في المستودع + **سياقُ التزام** ⇒ إشارةٌ إلى خارجه."""
     m = _load()
     foreign = "f" * 39 + "a"
-    hits = m.scan_foreign_ids([(3, f"sha={foreign} هو مصدر البيانات")], exists=lambda t: False)
-    assert hits == [(3, "foreign_commit_id")], hits
+    for line in (f"commit = {foreign} هو مصدر البيانات", f"الالتزام {foreign} مدموجٌ سابقاً"):
+        hits = m.scan_foreign_ids([(3, line)], exists=lambda t: False)
+        assert hits == [(3, "foreign_commit_id")], (line, hits)
+
+
+def test_a_file_hash_stamp_is_not_a_commit_id():
+    """**R55-3 (الدليلُ الحيّ)**: بصمةُ حزمة الأسئلة (`spec_sha`) و`sha256` هاشُ **ملفٍّ** لا كائنَ git.
+
+    قبل الإصلاح: كلمةُ `sha` وحدها في السياق كانت تجعلهما «معرّفَ التزامٍ غريباً» ⇒ **الخطّافُ أوقف التزامَ
+    مراجعة المدقّق** على سطرين يقتبسان البصمة، بلا أيّ معرّفِ التزام. وقياسُ الاثنين معاً = الحدّ الفاصل.
+    """
+    m = _load()
+    stamp = "4facf540abd4"                      # بصمةُ ملفّ الأسئلة (هاشُ محتوى، لا كائنَ git)
+    wide = "b" * 40
+    for line in (f"`spec_sha` = {stamp} محسوبةٌ من ملفّ الأسئلة",
+                 f"sha256={wide} للنسخة المُنزَّلة",
+                 f"sha={wide} بصمةُ المحتوى"):
+        hits = m.scan_foreign_ids([(7, line)], exists=lambda t: False)
+        assert hits == [], (line, hits)
 
 
 def test_an_id_that_exists_in_the_repo_is_not_flagged():
     m = _load()
     real = "a" * 40
-    assert m.scan_foreign_ids([(1, f"commit sha={real} مدموج")], exists=lambda t: True) == []
+    assert m.scan_foreign_ids([(1, f"commit {real} مدموج")], exists=lambda t: True) == []
 
 
 def test_a_long_number_is_not_a_commit_id():

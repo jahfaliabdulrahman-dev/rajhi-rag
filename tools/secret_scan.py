@@ -28,7 +28,12 @@ from pathlib import Path
 # رسم هذا المستودع = إشارةٌ إلى خارجه**. وحدُّه الذي طلبه المدقّق: يُطبع **الملفُّ والسطرُ فقط، لا المعرّف**
 # (سجلّاتُ CI في مستودعٍ عامٍّ عامّةٌ أيضاً).
 HEXISH = re.compile(r"\b[0-9a-f]{10,40}\b")
-ID_CONTEXT = re.compile(r"(?i)(sha|commit|\u0627\u0644\u062a\u0632\u0627\u0645|revision|blob|tree|/commit/)")
+#: **سياقُ التزامٍ لا سياقُ هاش** (R55-3): كلمةُ `sha` وحدها جعلت `spec_sha`/`sha256` تُعامل معرّفاتِ التزامٍ
+#: غريبة — والبصمةُ هاشُ ملفٍّ **لا يوجد في git أبداً** ⇒ إيجابٌ كاذبٌ يُغلق البوّابةَ على النثر المشروع
+#: (والدليلُ الحيّ: الخطّافُ أوقف التزامَ مراجعة المدقّق على سطرين يقتبسان بصمةَ حزمة الأسئلة، بلا أيّ
+#: معرّفِ التزام). ⇒ السياقُ صار **خاصّاً بالالتزام**، ويُستثنى ما كان قيمةَ حقلِ هاشٍ بنصِّه.
+ID_CONTEXT = re.compile(r"(?i)(commit|\u0627\u0644\u062a\u0632\u0627\u0645|revision|\brev\b|/commit/)")
+HASH_FIELD = re.compile(r"(?i)(sha256|sha1|md5|spec_sha|content_sha|checksum|hash|\u0628\u0635\u0645\u0629)[\"'=: ]*$")
 
 
 def _looks_like_id(tok: str) -> bool:
@@ -53,9 +58,15 @@ def scan_foreign_ids(lines: list[tuple[int, str]], exists=_exists_in_repo) -> li
     hits: list[tuple[int, str]] = []
     for n, text in lines:
         if not ID_CONTEXT.search(text):
-            continue                             # سياقٌ صريح: يقلّل الإيجابيّات الكاذبة إلى ما يُراجَع
-        if any(_looks_like_id(t) and not exists(t) for t in HEXISH.findall(text)):
+            continue                             # سياقٌ صريح يخصّ الالتزام: يقلّل الإيجابيّات الكاذبة
+        for match in HEXISH.finditer(text):
+            tok = match.group(0)
+            if not _looks_like_id(tok) or exists(tok):
+                continue
+            if HASH_FIELD.search(text[:match.start()]):
+                continue                         # قيمةُ حقلِ هاش (sha256/spec_sha) ليست كائنَ git
             hits.append((n, "foreign_commit_id"))
+            break
     return hits
 
 ROOT = Path(__file__).resolve().parents[1]

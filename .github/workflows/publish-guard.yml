@@ -45,7 +45,11 @@ jobs:
           python3 -m pytest tests/test_compile_all.py \
                            tests/test_requirements_lock.py \
                            tests/test_public_claims.py \
-                           tests/test_gate_bites.py -q
+                           tests/test_gate_bites.py \
+                           tests/test_gate_registry.py \
+                           tests/test_secret_scan.py \
+                           tests/test_report_names.py \
+                           tests/test_turn_derivation.py -q
       - name: Real-data files must never be tracked
         run: |
           bad=$(git ls-files | grep -E '^data/(local_sample|training|eval_pack)/' || true)

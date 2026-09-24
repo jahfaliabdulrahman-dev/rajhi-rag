@@ -1,11 +1,14 @@
-"""**الدورُ يُشتقّ من الوقائع** (P-6 · تبنّاه المدقّق في مراجعة ٥٤) — وضابطُ التقادُم الحيّ.
+"""**الدورُ يُشتقّ من الوقائع** (P-6 · تبنّاه المدقّق في مراجعة ٥٤) — **ولا تُحفَظ قيمتُه** (R55-1).
 
-**ما وُلد منه:** `handoff/STATE.md` أوّلُ ملفٍّ يُقرأ، وكان يُحدَّث بيد الطرف الذي أنهى دوره ⇒ قِيس تقادُمُه:
-ظلّ يقول «`P-1..P-3` تنتظر قرارَ المدقّق» بعد أن قُرِّرت ونُفِّذت. ⇒ الدورُ صار **مُشتقّاً**:
-آخرُ فاعلٍ (من زمن اسمِ تقريره) ⇒ الدورُ للآخر… إلّا إذا طلب آخرُ تقريرٍ قراراً من المالك ⇒ فالدورُ **للمالك**
-(وهو الموضعُ الذي تأخّر فيه دمجُ #119 بلا مالكٍ ظاهر).
+**ما وُلد منه:** `handoff/STATE.md` أوّلُ ما يُقرأ، وكان يُحدَّث **بيد** الطرف الذي أنهى دوره ⇒ قِيس تقادُمُه:
+ظلّ يقول «`P-1..P-3` تنتظر قرارَ المدقّق» بعد أن قُرِّرت ونُفِّذت. ⇒ الدورُ صار **مُشتقّاً** من زمن أسماء التقارير.
 
-والضابطُ الأخير **حيّ**: يقيس `handoff/STATE.md` نفسه — فيمنع الصنفَ لا الحادثةَ وحدها.
+ثم أمسك المدقّق في مراجعة ٥٥ **صنفَين** في التصميم الأوّل — وكلاهما مُثبتٌ بقياسٍ هنا:
+- **R55-1 (أ):** نمطُ الاسم كان يشترط **أربع** خاناتٍ للوقت، وأسماءُ المدقّق **ستّ** (`HHMMSS`) — وهي الصيغةُ
+  الموثَّقة في البروتوكول ⇒ كان **أعمى عن صندوقه كاملاً**، والدورُ لا ينتقل إليه أبداً.
+- **R55-1 (ب):** ولو أُصلح النمط، فقيمةٌ **محفوظةٌ** في ملفٍّ يكتبه طرفٌ واحد كانت ستتقادم **بعد كلّ دفعةٍ من
+  الطرف الآخر** فيسقط الفحصُ بلا ذنب. ⇒ **لا تُحفَظ القيمة**: السطرُ **مُؤشِّرٌ** إلى الأمر، والقيمةُ تُقاس
+  لحظةَ الطلب ⇒ **صنفُ التقادُم يموت** بدل أن يُعالَج بعد وقوعه.
 """
 from __future__ import annotations
 
@@ -24,7 +27,7 @@ def _load():
 
 
 def _tree(tmp: Path, reports: dict[str, list[tuple[str, str]]]) -> None:
-    """(الطرف ⇒ [(الاسم، متن)]): يبني صناديقَ تقاريرَ مصغّرة بنفس اصطلاح الأسماء."""
+    """(الطرف ⇒ [(الاسم، متن)]): صناديقُ تقاريرَ مصغّرة بنفس اصطلاح الأسماء."""
     for side, files in reports.items():
         d = tmp / "handoff" / side
         d.mkdir(parents=True, exist_ok=True)
@@ -37,8 +40,33 @@ def test_last_actor_passes_the_turn_to_the_other_side(monkeypatch, tmp_path, cap
     monkeypatch.setattr(m, "ROOT", tmp_path)
     _tree(tmp_path, {"sulaiman": [("20260925-0130-REPORT", "لا شيء")],
                      "claude": [("20260925-0100-review", "قديم")]})
-    assert m.main([]) == 0
-    assert "claude" in capsys.readouterr().out
+    assert m.main(["--json"]) == 0
+    assert '"turn": "claude"' in capsys.readouterr().out
+
+
+def test_a_six_digit_name_is_seen_like_a_four_digit_one(monkeypatch, tmp_path, capsys):
+    """**R55-1 (أ) بعينه**: اسمُ المدقّق بستّ خانات (`HHMMSS`) يجب أن يُرى ويُزيح الدور — وإلّا فالأداةُ عمياء."""
+    m = _load()
+    monkeypatch.setattr(m, "ROOT", tmp_path)
+    _tree(tmp_path, {"sulaiman": [("20260925-0203-REPORT", "لا طلب")],
+                     "claude": [("20260925-021953-third-eye-review-55", "بلا طلب")]})
+    assert m.main(["--json"]) == 0
+    out = capsys.readouterr().out
+    assert '"last_actor": "claude"' in out, f"صندوقُ المدقّق لم يُرَ (R55-1): {out}"
+    assert '"turn": "sulaiman"' in out, out
+
+
+def test_the_two_name_lengths_are_ordered_on_one_scale(monkeypatch, tmp_path, capsys):
+    """**مقياسٌ واحد**: `-020359` أحدثُ من `-0203` (والمكمَّلةُ بـ`00` = 02:03:00 ⇒ تسبقه).
+
+    ولو قُورنت الخانتان الخامّتان لكان الترتيبُ حظّاً من ترتيب الحروف لا من الزمن.
+    """
+    m = _load()
+    monkeypatch.setattr(m, "ROOT", tmp_path)
+    _tree(tmp_path, {"claude": [("20260925-020359-review", "الأحدث")],
+                     "sulaiman": [("20260925-0203-REPORT", "نفسُ الدقيقة، بلا ثوانٍ ⇒ الأقدم")]})
+    assert m.main(["--json"]) == 0
+    assert '"last_actor": "claude"' in capsys.readouterr().out, "اختلّ الترتيبُ بين الطولين"
 
 
 def test_a_report_asking_the_owner_makes_the_turn_the_owners(monkeypatch, tmp_path, capsys):
@@ -46,30 +74,31 @@ def test_a_report_asking_the_owner_makes_the_turn_the_owners(monkeypatch, tmp_pa
     m = _load()
     monkeypatch.setattr(m, "ROOT", tmp_path)
     _tree(tmp_path, {"sulaiman": [("20260925-0130-REPORT", "اكتب «ادفع» وأنفّذ — وبيدك أيضاً تدويرُ الرمز")]})
-    assert m.main([]) == 0
-    out = capsys.readouterr().out
-    assert "المالك" in out, out
+    assert m.main(["--json"]) == 0
+    assert '"turn": "المالك"' in capsys.readouterr().out
 
 
-def test_check_reports_staleness_and_prints_the_right_line(monkeypatch, tmp_path, capsys):
+def test_check_flags_a_stored_value_that_would_go_stale(monkeypatch, tmp_path, capsys):
+    """**R55-1 (ب)**: قيمةٌ محفوظة ⇒ ستتقادم بعد كلّ دفعةٍ من الطرف الآخر ⇒ تُكشَف **قبل** أن تقادم."""
     m = _load()
     monkeypatch.setattr(m, "ROOT", tmp_path)
-    # آخرُ فاعلٍ = claude ⇒ الدورُ المُشتقُّ على sulaiman، والملفُّ يُعلن claude ⇒ **متقادم**
     _tree(tmp_path, {"claude": [("20260925-0200-review", "بلا طلب")]})
-    (tmp_path / "handoff" / "STATE.md").write_text("turn: **المدقّق** (`claude`) — قديم\n", encoding="utf-8")
-    assert m.main(["--check"]) == 1, "تقادُمٌ مُقاس ⇒ 1"
-    out = capsys.readouterr().out
-    assert "'sulaiman'" in out and "'claude'" in out, out   # المُعلَنُ والمُشتقُّ في السطر نفسه
+    (tmp_path / "handoff" / "STATE.md").write_text(
+        "turn: **المدقّق** (`claude`) — قيمةٌ محفوظة\n", encoding="utf-8")
+    assert m.main(["--check"]) == 1, "قيمةٌ محفوظة ⇒ 1 (وإلّا تقادمت بصمت بعد أوّل دفعةٍ من الطرف الآخر)"
+    assert "tools/turn.py --write" in capsys.readouterr().out
 
 
-def test_write_repairs_the_line_then_check_passes(monkeypatch, tmp_path, capsys):
+def test_write_writes_a_pointer_not_a_value(monkeypatch, tmp_path):
+    """`--write` يكتب **مُؤشِّراً**: لا معرّفَ طرفٍ بين علامتين خلفيّتين ⇒ لا مادّةَ للتقادُم."""
     m = _load()
     monkeypatch.setattr(m, "ROOT", tmp_path)
     _tree(tmp_path, {"claude": [("20260925-0200-review", "بلا طلب")]})
     (tmp_path / "handoff" / "STATE.md").write_text("turn: **المدقّق** (`claude`) — قديم\n", encoding="utf-8")
     assert m.main(["--write"]) == 0
-    assert m.main(["--check"]) == 0, "بعد الإصلاح: مطابق"
-    assert (tmp_path / "handoff" / "STATE.md").read_text(encoding="utf-8").count("turn:") == 1
+    body = (tmp_path / "handoff" / "STATE.md").read_text(encoding="utf-8")
+    assert m.POINTER in body and "`claude`" not in body, "كُتبت قيمةٌ لا مُؤشِّراً ⇒ ستعود العلّةُ نفسُها"
+    assert m.main(["--check"]) == 0
 
 
 def test_no_reports_fails_closed(monkeypatch, tmp_path, capsys):
@@ -81,7 +110,7 @@ def test_no_reports_fails_closed(monkeypatch, tmp_path, capsys):
     assert "UNMEASURED" in capsys.readouterr().out
 
 
-def test_the_live_state_file_is_not_stale():
-    """**البوّابةُ الحيّة**: `handoff/STATE.md` المُتتبَّع سطرُ دورِه مطابقٌ للمُشتقّ الآن."""
+def test_the_live_state_file_stores_no_value():
+    """**البوّابةُ الحيّة**: `handoff/STATE.md` المُتتبَّع لا يحفظ قيمةَ دورٍ ⇒ لا تقادُمَ بعده أبداً."""
     m = _load()
-    assert m.main(["--check"]) == 0, "سطرُ الدور في handoff/STATE.md متقادمٌ عن الواقع ⇒ يُصلَح بـ`tools/turn.py --write`"
+    assert m.main(["--check"]) == 0, "سطرُ الدور يحفظ قيمةً ⇒ ستتقادم؛ أصلِحْه بـ`tools/turn.py --write`"

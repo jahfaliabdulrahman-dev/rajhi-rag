@@ -9,9 +9,14 @@
 - **الدور**: للطرف الآخر… **إلّا** إذا حمل آخرُ تقريرٍ طلبَ قرارٍ من المالك («بيدك» · `AWAITING_FOUNDER`)
   ⇒ فالدورُ **للمالك** — وهذا هو الموضعُ الذي تأخّر فيه دمجُ #119 بلا مالكٍ ظاهر (P-6 صريحاً).
 
-    tools/turn.py                # السطرُ المُشتقّ + سببه
-    tools/turn.py --check        # 0 مطابق · 1 متقادم (يطبع الصواب) · 2 تعذّر القياس (فشلٌ مُغلَق)
-    tools/turn.py --write        # يُصلح سطرَ `turn:` في handoff/STATE.md
+    tools/turn.py                # سطرُ الملفّ المشترك (مُؤشِّر) + الدورُ الآنيّ وسببُه
+    tools/turn.py --json         # الحكمُ كاملاً (الطرف · آخرُ فاعل · زمنُه · السبب)
+    tools/turn.py --check        # 0 لا قيمةَ محفوظة (لا تقادُمَ ممكن) · 1 قيمةٌ محفوظةٌ ستتقادم · 2 تعذّر القياس
+    tools/turn.py --write        # يكتب **المُؤشِّر** في handoff/STATE.md (ولا قيمةَ فيه)
+
+**ولا تُحفَظ قيمتُه** (R55-1 ب): سطرُ الدور في الملفّ المشترك **مُؤشِّرٌ إلى الأمر**، لأنّ قيمًة محفوظةً
+يتقادم **بعد كلّ دفعةٍ من الطرف الآخر** (كاتبُ السطر واحدٌ بالبروتوكول) ⇒ فحصٌ يسقط بلا ذنبٍ لأحد. والسطرُ
+بنفسه يُقاس: وجودُ قيمةٍ بين علامتين خلفيّتين = عطب.
 
 **والحدُّ المُعلَن:** يقرأ **الأسماءَ** (زمنُ الاسم) لا زمنَ الالتزام — فالتقادمُ يُقاس على ما أُعلن؛
 ولو غاب تقريرٌ من صندوقٍ صار الحكمُ `UNMEASURED` لا «الدورُ على الطرف الآخر».
@@ -27,7 +32,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SHARED = "handoff/STATE.md"
 SIDES = {"sulaiman": "المنفّذ", "claude": "المدقّق"}
 OWNER = "المالك"
-NAME_RE = re.compile(r"^(\d{8})-(\d{4})-")
+#: زمنُ الاسم: أربعُ خانات (HHMM) أو **ستّ** (HHMMSS) — والصيغةُ الثانيةُ هي الموثَّقة في البروتوكول،
+#: وأسماءُ المدقّق كلُّها بها ⇒ نمطٌ بأربعٍ فقط كان **يُعميه عن صندوقِ الطرف الآخر كاملاً** (R55-1).
+NAME_RE = re.compile(r"^(\d{8})-(\d{4})(\d{2})?-")
 #: علاماتُ «الدورُ عند المالك»: طلبُ قرارٍ صريح لا يملكه غيرُه.
 OWNER_SIGNALS = ("بيدك", "AWAITING_FOUNDER", "AWAITING FOUNDER", "قرار المالك", "قرارُ المالك")
 
@@ -38,7 +45,8 @@ def _reports(side: str) -> list[tuple[str, str, Path]]:
     for p in sorted((ROOT / "handoff" / side).glob("*.md")):
         m = NAME_RE.match(p.name)
         if m and not p.name.upper().startswith("STATE"):
-            out.append((f"{m.group(1)}-{m.group(2)}", side, p))
+            # توحيدُ الطولين إلى ستّ خانات قبل المقارنة (وإلا قارنّا «0203» بـ«021953» بترتيبٍ مختلّ)
+            out.append((f"{m.group(1)}-{m.group(2)}{m.group(3) or '00'}", side, p))
     return out
 
 
@@ -59,22 +67,30 @@ def derive() -> dict[str, object]:
             "last_actor": side, "last_report": str(path.relative_to(ROOT)), "as_of": ts, "why": why}
 
 
+#: **ولا تُحفَظ القيمة** (R55-1 الطبقةُ الثانية): لو كُتبت في الملفّ المشترك لتقادمت **بعد كلّ دفعةٍ من
+#: الطرف الآخر** (كاتبُه واحدٌ بالبروتوكول) فيسقط `--check` بلا ذنبٍ لأحد. ⇒ السطرُ **مُؤشِّر** يُشير إلى
+#: الأمر، والقيمةُ تُقاس لحظةَ الطلب. وهذا يقتل صنفَ التقادُم من أصله لا حادثتَه.
+POINTER = "turn: **يُقاس لا يُكتب** — `python tools/turn.py` يعرض الدورَ الآنيّ وسببَه (ولا قيمةَ محفوظةً تتقادم)"
+
+
 def line_for(d: dict[str, object]) -> str:
-    label = d["turn_label"] if d["verdict"] == "MEASURED" else "غيرُ مقيس"
-    return f"turn: **{label}** (`{d.get('turn', '?')}`) — {d['why']} · يُشتقّ بـ`tools/turn.py`. **لا يُكتب بيد.**"
+    """السطرُ الذي يُكتب في الملفّ المشترك: **مُؤشِّرٌ لا قيمة**. والقيمةُ تُطبع في المخرَج."""
+    return POINTER
 
 
-def _declared(text: str) -> str | None:
+def _stored_value(text: str) -> str | None:
+    """هل حُفظت قيمةٌ (معرّفُ طرفٍ بين علامتين خلفيّتين) في سطر الدور؟ ⇒ عطبٌ سيُنتج تقادُماً."""
     for ln in text.splitlines():
         if ln.startswith("turn:"):
             m = re.search(r"`([a-z]+)`", ln)
-            return m.group(1) if m else ln
+            return m.group(1) if m else None
     return None
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="اشتقاقُ الدور من الوقائع (P-6)")
-    ap.add_argument("--check", action="store_true", help="يقارن المُشتقّ بسطر الملفّ المشترك")
+    ap.add_argument("--check", action="store_true",
+                    help="يكشف قيمةً محفوظةً للدور (ستتقادم بعد كلّ دفعةٍ من الطرف الآخر)")
     ap.add_argument("--write", action="store_true", help="يُصلح سطرَ `turn:` في الملفّ المشترك")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
@@ -103,12 +119,13 @@ def main(argv: list[str] | None = None) -> int:
         if not shared.exists():
             print(f"⚠ تعذّر الفحص: لا {SHARED} ⇒ فشلٌ مُغلَق")
             return 2
-        declared = _declared(shared.read_text(encoding="utf-8"))
-        if declared == d["turn"]:
-            print(f"✓ الدورُ المُعلَن مطابقٌ للمُشتقّ: {d['turn']} ({d['why']})")
+        stored = _stored_value(shared.read_text(encoding="utf-8"))
+        if stored is None:
+            print(f"✓ {SHARED}: لا قيمةَ محفوظةً للدور (مُؤشِّرٌ لا قيمة) ⇒ لا تقادُمَ ممكن. "
+                  f"والدورُ الآنيّ: {d['turn']} ({d['why']})")
             return 0
-        print(f"⛔ الدورُ المُعلَن في {SHARED} = {declared!r} والمُشتقُّ = {d['turn']!r} ⇒ تقادُمٌ مُقاس.")
-        print(f"   الصواب: {want}")
+        print(f"⛔ {SHARED} يحفظ قيمةً للدور (`{stored}`) ⇒ ستتقادم بعد كلّ دفعةٍ من الطرف الآخر. "
+              f"أصلِحْها بـ`tools/turn.py --write` (مُؤشِّرٌ لا قيمة). والدورُ الآنيّ: `{d['turn']}`")
         return 1
 
     if a.json:
