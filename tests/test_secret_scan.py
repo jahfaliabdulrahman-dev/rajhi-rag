@@ -94,3 +94,49 @@ def test_a_missing_file_fails_closed(tmp_path, capsys):
     rc = m.main(["--text", str(tmp_path / "لا-يوجد.txt")])
     assert rc == 2, f"تعذّر الفحص ⇒ 2 (صار {rc})"
     assert "مُغلَق" in capsys.readouterr().out
+
+
+# ── P-4 · «الرابطُ المُوسَم»: معرّفٌ لا وجودَ له في هذا المستودع (تبنّاه المدقّق في مراجعة ٥٤) ──
+
+def test_a_foreign_commit_id_is_flagged():
+    """٤٠ خانةً سِتّ عشريّة لا وجودَ لها في المستودع + سياقُ «التزام» ⇒ **إشارةٌ إلى خارجه**."""
+    m = _load()
+    foreign = "f" * 39 + "a"
+    hits = m.scan_foreign_ids([(3, f"sha={foreign} هو مصدر البيانات")], exists=lambda t: False)
+    assert hits == [(3, "foreign_commit_id")], hits
+
+
+def test_an_id_that_exists_in_the_repo_is_not_flagged():
+    m = _load()
+    real = "a" * 40
+    assert m.scan_foreign_ids([(1, f"commit sha={real} مدموج")], exists=lambda t: True) == []
+
+
+def test_a_long_number_is_not_a_commit_id():
+    """**ضابطٌ سالب**: سلاسلُ الأرقام الطويلة (كسلسلة العائم الشهيرة) وأشباهُها ليست لا معرّفات (لا حرفَ سِتّ عشريّاً)."""
+    m = _load()
+    digits = "3" * 17          # تُبنى ولا تُكتب (القاعدة ١٢: تغييرُ القيمة لا إعفاءُ الموضع)
+    for line in (f"القيمة {digits} مكتوبة", f"sha={digits} بلا حرف"):
+        assert m.scan_foreign_ids([(1, line)], exists=lambda t: False) == [], line
+
+
+def test_without_context_a_hex_token_is_not_flagged():
+    """حدٌّ مُعلَن: يُشترَط سياقُ المعرّف — أقلُّ إيجابٍ كاذبٍ في نثرٍ عربيّ عاديّ."""
+    m = _load()
+    token = "b" * 40
+    assert m.scan_foreign_ids([(1, f"عبارةٌ عابرةٌ فيها {token} بلا سياقٍ")], exists=lambda t: False) == []
+
+
+def test_the_foreign_id_report_never_prints_the_id(tmp_path, capsys):
+    """**حدُّ المدقّق**: يُطبع الملفُّ والسطرُ فقط — لأنّ سجلّاتِ CI في مستودعٍ عامٍّ عامّةٌ أيضاً."""
+    m = _load()
+    foreign = "c" * 40
+    p = tmp_path / "leak.md"
+    p.write_text(f"التزام sha={foreign}\n", encoding="utf-8")
+    m._is_shallow = lambda: False                      # نفحص المنطقَ لا البيئة
+    rc = m.main(["--text", str(p)])
+    out = capsys.readouterr().out
+    assert rc == 1, f"معرّفٌ غريب ⇒ 1 (صار {rc})"
+    assert foreign not in out, "طُبع المعرّف! (حدُّ المدقّق: السطرُ فقط)"
+    assert "foreign_commit_id" in out
+

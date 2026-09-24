@@ -22,6 +22,42 @@ import re
 import subprocess
 from pathlib import Path
 
+# ── P-4 · «الرابطُ المُوسَم»: معرّفٌ يدلّ على ما ليس في هذا المستودع (تبنّاه المدقّق في مراجعة ٥٤) ──
+# الحادثةُ التي وُلد منها: ثلاثةُ معرّفاتِ التزاماتٍ **ما قبل التنقية** كانت مكتوبةً بأوصافها في ملفٍّ
+# مُتتبَّع ⇒ صارت «رابطاً موسوماً» إلى ما لم يُطهَّر. والقاعدةُ الميكانيكيّة: **معرّفٌ لا وجودَ له في
+# رسم هذا المستودع = إشارةٌ إلى خارجه**. وحدُّه الذي طلبه المدقّق: يُطبع **الملفُّ والسطرُ فقط، لا المعرّف**
+# (سجلّاتُ CI في مستودعٍ عامٍّ عامّةٌ أيضاً).
+HEXISH = re.compile(r"\b[0-9a-f]{10,40}\b")
+ID_CONTEXT = re.compile(r"(?i)(sha|commit|\u0627\u0644\u062a\u0632\u0627\u0645|revision|blob|tree|/commit/)")
+
+
+def _looks_like_id(tok: str) -> bool:
+    """٤٠ خانةً دائماً · أو أقلُّ بشرطِ **حرفٍ** سِتّ عشريّ (فيمنع سلاسلَ الأرقام الطويلة كسلاسل العائم)."""
+    if not (10 <= len(tok) <= 40):
+        return False
+    return len(tok) == 40 or bool(re.search(r"[a-f]", tok))
+
+
+def _exists_in_repo(tok: str) -> bool:
+    r = subprocess.run(["git", "cat-file", "-e", tok], cwd=str(ROOT), capture_output=True)
+    return r.returncode == 0
+
+
+def _is_shallow() -> bool:
+    r = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=str(ROOT), capture_output=True, text=True)
+    return r.stdout.strip() == "true"
+
+
+def scan_foreign_ids(lines: list[tuple[int, str]], exists=_exists_in_repo) -> list[tuple[int, str]]:
+    """(رقمُ السطر، اسمُ الصنف) — **بلا المعرّف**: يكفي أنّ السطرَ يحمل معرّفاً غريباً."""
+    hits: list[tuple[int, str]] = []
+    for n, text in lines:
+        if not ID_CONTEXT.search(text):
+            continue                             # سياقٌ صريح: يقلّل الإيجابيّات الكاذبة إلى ما يُراجَع
+        if any(_looks_like_id(t) and not exists(t) for t in HEXISH.findall(text)):
+            hits.append((n, "foreign_commit_id"))
+    return hits
+
 ROOT = Path(__file__).resolve().parents[1]
 
 # (اسمُ الصنف، النمط) — الأنماطُ تُطابَق على الأسطر المُضافة وحدها.
@@ -78,7 +114,18 @@ def staged_diff() -> str:
     return r.stdout
 
 
-def _report(hits: list[tuple[int, str]], where: str) -> int:
+def _report(hits: list[tuple[int, str]], where: str, kind: str = "secret") -> int:
+    if kind == "id":
+        if not hits:
+            print(f"✓ المعرّفات: لا معرّفَ غريباً في {where} (وُجودُ كلّ معرّفٍ مُتحقَّقٌ منه في هذا المستودع)")
+            return 0
+        print(f"⛔ المعرّفات: {len(hits)} سطراً يحمل معرّفاً **لا وجودَ له في هذا المستودع** في {where} "
+              "(رقمُ السطر فقط — ولا يُطبع المعرّف):")
+        for n, name in hits[:10]:
+            print(f"   {name} (سطر {n})")
+        print("   ⇒ معرّفٌ غريبٌ = إشارةٌ إلى كائنٍ خارجَ هذا المستودع (وهو صنفُ «الرابط المُوسَم»)."
+              " أزلْه أو أعلِنه من مصدرٍ غيرِ مُتتبَّع.")
+        return 1
     if not hits:
         print(f"✓ ماسحُ الأسرار: لا سِرَّ في {where} ({len(PATTERNS)} صنفاً مفحوصاً — بلا طباعةِ قيمة)")
         return 0
@@ -96,20 +143,28 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--text", metavar="PATH", default="", help="ملفٌّ مباشرةً")
     a = ap.parse_args(argv)
 
+    if _is_shallow():
+        print("⚠ تعذّر فحصُ المعرّفات الغريبة: نسخةٌ ناقصةُ العمق (`--is-shallow-repository` = true) "
+              "⇒ **فشلٌ مُغلَق** (كائنٌ قد يكون موجوداً بعيداً يُقرأ غريباً)")
+        return 2
+
     if a.text:
         p = Path(a.text)
         if not p.is_file():
             print(f"⚠ تعذّر الفحص: لا ملفَّ في {a.text} ⇒ **فشلٌ مُغلَق**")
             return 2
         lines = [(i, l) for i, l in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), 1)]
-        return _report(scan_lines(lines), a.text)
+        rc = _report(scan_lines(lines), a.text)
+        return max(rc, _report(scan_foreign_ids(lines), a.text, kind="id"))
 
     try:
         diff = staged_diff()
     except Exception as e:                       # noqa: BLE001 — أيُّ عطبٍ ⇒ لا أمرّ
         print(f"⚠ تعذّر الفحص: {e} ⇒ **فشلٌ مُغلَق** (لا أُعلن نظافةً لم أرها)")
         return 2
-    return _report(scan_lines(_added_lines(diff)), "الفهرس")
+    lines = _added_lines(diff)
+    rc = _report(scan_lines(lines), "الفهرس")
+    return max(rc, _report(scan_foreign_ids(lines), "الفهرس", kind="id"))
 
 
 if __name__ == "__main__":
