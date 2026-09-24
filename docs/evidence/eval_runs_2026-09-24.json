@@ -123,5 +123,8 @@
   "records_never_truncated": true,
   "no_unpublishable_arm": true
  },
- "total_cost_usd": 4.3573
+ "total_cost_usd_WITHDRAWN": 4.3573,
+ "isolated_run_cost_usd": 0.4891,
+ "key_movement_usd": 2.9333,
+ "cost_note": "A/B/C متزامنةٌ على المفتاح نفسه ⇒ كلفتُها غيرُ قابلةٍ للعزل. المعزولُ D = 0.4891، وحركةُ العدّاد كاملةً 2.9333 — والرقمُ القديمُ 4.3573 كان جمعًا مزدوجًا (يُبقى موسومًا مُسحوبًا)."
 }
