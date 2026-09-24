@@ -50,7 +50,17 @@ def compare(spec_path: pathlib.Path, arms: list[pathlib.Path]) -> dict:
             mismatched[name] = {"stale": stale, "unstamped": unstamped}
 
     # (٢) الثباتُ لكلّ سؤال (على الجولات المطابقةِ للبصمة فقط)
+    # **والسقوطُ عطبٌ لا صمت**: جولةٌ لا تحمل سؤالاً ⇒ تغطيةٌ ناقصةٌ **تُعلَن** ولا تُقاس على تقاطعٍ أضيق
+    # (تقاطعٌ أنظفُ ظاهرياً وأعمى فعلياً — REVIEW-48 · S-1).
+    missing = {name: [i for i in qs if i not in recs] for name, recs in per_arm.items()}
     ids = [i for i in qs if all(i in per_arm[n] for n in per_arm)]
+
+    # **الأثرُ المقصوص (REVIEW-48 · P-2)**: سجلٌّ ضِمنه ٤٠ صفّاً بالضبط من قبل إصلاح `[:40]` — قد يكون
+    # كلَّ الأثر وقد يكون قصَّه ⇒ **يُستبعد من المجموع المنشور ويُعلَن**؛ وإلّا نُشر حكمٌ على أثرٍ مقطوع.
+    excluded = {name: [i for i in ids if per_arm[name][i].get("trace_suspect")]
+                for name in per_arm}
+    _counted = {name: [i for i in ids if i not in set(excluded[name])] for name in per_arm}
+
     stability, flaky = {}, []
     for i in ids:
         verdicts = [bool(per_arm[n][i].get("ok")) for n in per_arm]
@@ -62,16 +72,17 @@ def compare(spec_path: pathlib.Path, arms: list[pathlib.Path]) -> dict:
             stability[i] = "flaky"
             flaky.append(i)
 
-    # (٣) المقاييسُ لكلّ جولة + المدى
+    # (٣) المقاييسُ لكلّ جولة + المدى (على المقيسِ فعلُه: بلا المقصوص)
     metrics, totals = {}, {}
     for name, recs in per_arm.items():
-        rows = [recs[i] for i in ids]
+        rows = [recs[i] for i in _counted[name]]
         m = {}
         for metric in ("number", "citation", "abstain"):
             sel = [r for r in rows if r.get("metric") == metric]
             m[metric] = {"ok": sum(1 for r in sel if r.get("ok")), "n": len(sel)}
         metrics[name] = m
-        totals[name] = {"ok": sum(1 for r in rows if r.get("ok")), "n": len(rows)}
+        totals[name] = {"ok": sum(1 for r in rows if r.get("ok")), "n": len(rows),
+                        "trace_excluded": len(excluded[name])}
     tot_ok = [v["ok"] for v in totals.values()]
 
     # (٤) الزمن: الوسيطُ والذيلُ (لا الوسيطُ وحده)
@@ -89,10 +100,13 @@ def compare(spec_path: pathlib.Path, arms: list[pathlib.Path]) -> dict:
 
     return {"spec_sha_expected": want, "arms": [a.name for a in arms],
             "spec_mismatch": mismatched, "questions_compared": len(ids),
+            "missing_ids": {k: v for k, v in missing.items() if v},
+            "trace_excluded": {k: v for k, v in excluded.items() if v},
             "flaky": flaky, "stability": stability, "metrics_per_arm": metrics,
             "totals_per_arm": totals, "total_range": [min(tot_ok), max(tot_ok)] if tot_ok else [],
             "latency": lat, "sizes": sizes,
             "invariants": {"records_never_truncated": all(v["records"] <= v["ids_expected"] for v in sizes.values()),
+                           "arms_cover_the_pack": not any(missing.values()),
                            "no_unpublishable_arm": not mismatched}}
 
 
@@ -110,12 +124,20 @@ def main() -> int:
         for name, bad in out["spec_mismatch"].items():
             print(f"⛔ {name}: بلا بصمةٍ {len(bad['unstamped'])} · ببصمةٍ مخالفة {len(bad['stale'])} "
                   f"⇒ **لا يُنشر رقمٌ منها** (أعِد الطرح)")
-    print("\n| الجولة | رقم | استشهاد | امتناع | المجموع |")
-    print("|---|---|---|---|---|")
+    print("\n| الجولة | رقم | استشهاد | امتناع | المجموع | مقصوصٌ مُستبعَد |")
+    print("|---|---|---|---|---|---|")
     for name, m in out["metrics_per_arm"].items():
         t = out["totals_per_arm"][name]
         print(f"| {name} | {m['number']['ok']}/{m['number']['n']} | {m['citation']['ok']}/{m['citation']['n']} | "
-              f"{m['abstain']['ok']}/{m['abstain']['n']} | **{t['ok']}/{t['n']}** |")
+              f"{m['abstain']['ok']}/{m['abstain']['n']} | **{t['ok']}/{t['n']}** | {t['trace_excluded']} |")
+    if out["missing_ids"]:
+        for name, ids in out["missing_ids"].items():
+            print(f"⛔ {name}: ينقصه {len(ids)} سؤالاً من الحزمة ⇒ **تغطيةٌ ناقصة** (تقاطعٌ أضيق لا نظافة)")
+
+    if out["trace_excluded"]:
+        for name, ids in out["trace_excluded"].items():
+            print(f"⚠️ {name}: {len(ids)} سجلاً بأثرٍ **مشكوكِ القصّ** (٤٠ صفّاً بلا `trace_len`) ⇒ مُستبعَدٌ "
+                  f"من المجموع ومُعلَن — أعِد الطرح بأثرٍ كامل.")
     if out["total_range"]:
         lo, hi = out["total_range"]
         print(f"\nمدى المجموع على الجولات: **{lo}–{hi}** (وعرضُ التذبذب {hi - lo} سؤالاً)")
@@ -127,7 +149,7 @@ def main() -> int:
     if a.json:
         a.json.write_text(json.dumps(out, ensure_ascii=False, indent=1))
         print(f"↵ حُكمٌ كاملٌ في {a.json}")
-    return 0 if out["invariants"]["no_unpublishable_arm"] else 1
+    return 0 if all(out["invariants"].values()) else 1
 
 
 if __name__ == "__main__":

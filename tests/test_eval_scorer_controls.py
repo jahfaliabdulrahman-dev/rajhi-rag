@@ -71,12 +71,14 @@ def test_argmax_wrong_index_fails():
     assert not ok and "خطأ" in why, why
 
 
-def test_argmax_page_local_index_accepted():
+def test_argmax_page_local_index_rejected():
     """نصُّ السؤال يحتمل «رقمَ الصفّ» عامّاً أو داخلَ الصفحة ⇒ الصيغتان مقبولتان (وفهرسان مُعلنان)."""
     t = {"amount": 220.00, "tops": [5, 6], "tie": False}
     ok, why = eq.score_answer(_q("argmax_row", page=7), t, "القمة 220.00 ريال في الصفّ 2 من الصفحة 7",
                               _Trace(used=[2]), ROWS)
-    assert ok, why
+    # **انقلابُ القاعدة بحكمٍ مؤرَّخ (REVIEW-48 · P-1):** ترقيمُ الصفحةِ المحلّيّ لم يبقَ مقبولاً —
+    # هويّةُ الصفّ بترقيم النظام (`(صفحة N، صف row_no)`) وحده. هذا الضابطُ سالبٌ الآن.
+    assert not ok, why
 
 
 def test_argmax_wrong_amount_fails():

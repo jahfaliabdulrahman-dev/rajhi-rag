@@ -111,8 +111,14 @@ class Corpus:
         return sorted(int(f.stem.split("-")[1]) for f in (self.dir / "results").glob("pg-*.json"))
 
 
-def truth(q: dict, c: Corpus, pack: dict) -> tuple[object, dict]:
-    """يُشتقّ الجوابُ من القرص. يُعيد (الجواب, ملخّصٌ آمنٌ بلا مبالغ)."""
+def truth(q: dict, c: Corpus, pack: dict, rows: list[dict]) -> tuple[object, dict]:
+    """يُشتقّ الجوابُ من القرص. يُعيد (الجواب, ملخّصٌ آمنٌ بلا مبالغ).
+
+    **`rows` إلزاميٌّ وهو عالمُ الصفوف الواحد**: صفوفُ السلسلة كما يراها النموذج
+    (`tools.refusal_test.build_rows` ثم `qa_tools._number_rows`) — صفُّ الفهرس `i` رقمُه `i+1`.
+    ولا يُشتقّ شيءٌ من صفوف الصفحة وحدها: ذاك ترقيمٌ ثانٍ كان يُنتج حكماً على جوابٍ صحيحٍ بالرفض
+    (REVIEW-48 · P-1: «أكثرُ من نصف المنظومة لا تجيب» كانت **غلطةَ الحاكم**).
+    """
     d = q["derive"]
     k = d["kind"]
     if k == "footer":
@@ -129,7 +135,10 @@ def truth(q: dict, c: Corpus, pack: dict) -> tuple[object, dict]:
         rs = c.rows(d["page"])
         return (num(rs[-1].get("balance")) if rs else None), {"kind": k, "page": d["page"], "rows": len(rs)}
     if k == "argmax_row":
-        vals = [(i, num(r.get("movement"))) for i, r in enumerate(c.rows(d["page"]))]
+        # **هويّةُ الصفّ بترقيم النظام لا بترقيم الصفحة** (REVIEW-48 · P-1): الصفُّ `i` في `rows` رقمُه `i+1`
+        # — وهو بعينه ما يقرؤه النموذج في `(صفحة N، صف row_no)`. وكان يُشتقّ من صفوف الصفحة وحدها،
+        # فيُرفض جوابُ الأدوات الصحيح (قِيس: ٨/٨ في العائلة — والضابطُ في `tests/test_eval_row_numbering.py`).
+        vals = [(i + 1, num(r.get("movement"))) for i, r in enumerate(rows) if r.get("page") == d["page"]]
         vals = [(i, v) for i, v in vals if v is not None]
         if not vals:
             return None, {"kind": k, "page": d["page"], "rows": 0}
@@ -353,16 +362,12 @@ def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[b
             return False, f"لا قمةَ مُشتقّةً للصفحة {need} (صفحةٌ بلا مبالغ)"
         floor = float(amt)
         names = any(abs(float(mv) - floor) < 0.05 for mv in cands)  # **مبلغٌ بمبلغ لا فهرسٌ بمبلغ**
-        # **والفهرسُ يُقابَل بالفهرس**: `expect: row_index` يطلب صفّاً بعينه، وقياسُ الأثر وحده لا يقيسه.
-        # ويُقبَل الصيغتان — فهرسٌ عامٌّ في `tops` أو ترتيبُ الصفّ داخل صفحته — لأنّ نصَّ السؤال يحتملهما.
+        # **والفهرسُ يُقابَل بالفهرس — بترقيمٍ واحد**: `tops` بترقيم النظام (`(صفحة N، صف row_no)`)،
+        # ولا يُقبَل ترقيمُ الصفحة المحلّيّ. (REVIEW-48 · P-1: قبولُ الترقيمين معاً كان يُسقط ٨/٨ من عائلة
+        # `argmax_row`، وضابطُه القديم لم يكشفه لأنّ صفحتَه الأولى في بياناتها فالتطابقُ فيها حتميّ.)
         claimed_idx = _claimed_row_index(ans)
         tops_g = {int(x) for x in (t.get("tops") or [])}
-        local_top = None
-        if 1 <= want <= len(rows):
-            page_rows = [r for r in rows if r["page"] == need]
-            local_top = next((i for i, r in enumerate(page_rows, 1)
-                              if r.get("movement") is not None and abs(float(r["movement"]) - floor) < 0.05), None)
-        idx_ok = claimed_idx is not None and (claimed_idx in tops_g or claimed_idx == local_top)
+        idx_ok = claimed_idx is not None and claimed_idx in tops_g
         tie_ok = (not t.get("tie")) or _declares_tie(ans)
         ok = bool(names and tie_ok and idx_ok)
         why = (f"{'ذكر' if names else 'لم يذكر'} قمةَ الصفحة {need} ({len(cands)} صفًّا مُستشهَداً)"
@@ -427,11 +432,15 @@ def rescore(a, qs: list[dict], c: Corpus, pack: dict, spec: dict, rows: list[dic
     for rec in data.get("results", []):
         q = by_id.get(rec["id"])
         if q is not None:
-            truth_val, _ = truth(q, c, pack)
+            truth_val, _ = truth(q, c, pack, rows)
             ok, why = score_answer(q, truth_val, rec.get("answer", ""), _Trace(rec), rows)
             # **لا يُكتب فوق نصّ السؤال المحفوظ**: الملفُّ شاهدٌ على ما طُلب فعلاً (كان يُستبدل فيُفقد الشاهد)
             rec = {**rec, "ok": ok, "why": why, "metric": q["metric"], "expect": q["expect"],
                    "cat": q["cat"], "kind": q["derive"]["kind"]}
+            # **أثرٌ قديمٌ مقصوص** (REVIEW-48 · P-2): كُتب قبل إصلاح `[:40]` ⇒ ٤٠ بالضبط **غيرُ معلومة**:
+            # قد تكون كلَّ الأثر وقد تكون قصَّه. يُعلَن ولا يُدفن، ويُستبعد من المجموع المنشور.
+            if rec.get("trace_len") is None and len(rec.get("used_row_nos") or []) == 40:
+                rec["trace_suspect"] = True
             if not eval_stamp.is_publishable(rec, cur_sha):
                 stale += 1
         results.append(rec)
@@ -514,7 +523,7 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     for i, q in enumerate(todo, 1):
         import time
         t0 = time.monotonic()
-        truth_val, _ = truth(q, c, pack)
+        truth_val, _ = truth(q, c, pack, rows)
         box: dict = {}
         t = threading.Thread(target=_ask, args=(q["q"], box), daemon=True)
         t.start()
@@ -530,7 +539,8 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                          "q": q["q"], "answer": ans, "ok": ok, "why": why,
                          "cited_pages": sorted({rows[n - 1]["page"] for n in (getattr(res, "used_row_nos", None) or [])
                                                 if 1 <= n <= len(rows)}) if res else [],
-                         "used_row_nos": (list(getattr(res, "used_row_nos", None) or [])[:40] if res else []),
+                         "used_row_nos": (list(getattr(res, "used_row_nos", None) or []) if res else []),
+                         "trace_len": (len(list(getattr(res, "used_row_nos", None) or [])) if res else 0),
                          "scope": getattr(res, "scope", None) if res else None,
                          "refused": bool(getattr(res, "refused", False)) if res else None,
                          "spec_sha": _spec_sha(),   # **شاهدُ الربط**: أيُّ نصِّ سؤالٍ أُجيب عنه
@@ -659,14 +669,16 @@ def main(argv=None) -> int:
         print("المراسي: %s" % ("كلُّها تقع ✓" if not broken else f"{len(broken)} مرسًى مكسور ✗"))
         return 1 if broken else 0
 
-    rows = []
+    from tools.refusal_test import build_rows as _build_rows      # noqa: PLC0415 — عالمُ الصفوف الواحد
+    chain_rows, _ = _build_rows(a.run)
+    table = []
     for i, q in enumerate(qs, 1):
         if a.page and i != a.page:
             continue
-        val, safe = truth(q, c, pack)
+        val, safe = truth(q, c, pack, chain_rows)
         shown = json.dumps(val, ensure_ascii=False) if a.truth else ""
-        rows.append((i, q["id"], q["cat"], q["metric"], q["expect"], safe.get("kind"), shown))
-    for i, qid, cat, metric, exp, kind, shown in rows:
+        table.append((i, q["id"], q["cat"], q["metric"], q["expect"], safe.get("kind"), shown))
+    for i, qid, cat, metric, exp, kind, shown in table:
         print(f"{i:02d} {qid:9s} {cat:8s} {metric:14s} {exp:9s} {kind:14s} {shown}")
     if not a.truth:
         print("\n(بلا مبالغ — والتفصيلُ الكاملُ بـ`--truth` على الشاشة وحدها)")
