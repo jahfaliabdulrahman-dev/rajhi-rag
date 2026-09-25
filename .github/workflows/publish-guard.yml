@@ -63,6 +63,14 @@ jobs:
                            tests/test_gate_flake_policy.py \
                            tests/test_flake_ledger.py \
                            tests/test_eval_pack.py \
+      # P-11 (مراجعة ٥٩ · بقرار المالك): **قِس الثابتَ لا العدّادات.** ثلاثةُ إصلاحاتٍ للصنف نفسه
+      # (R57-1 حارسُ المكان · R58-1 عدّادُ الكشيدة · R59-1 ضابطُ مواضع النثر) سقط كلٌّ منها في
+      # جولة، لأن **نصَّ المدقّق صار مُدخَلاً إلى راتشتٍ يملكه المنفّذ** ⇒ فمجردُ هبوط مراجعةٍ يُحمرّ
+      # الـCI. هذا المسبارُ يبني نسخةً، يُودِع فيها مراجعةً اصطناعيّةً تحمل كلَّ ما تصطاده العدّادات،
+      # ثم يُشغّل قائمةَ الضوابط هناك — والقائمةُ تُقرأ من هذا الملفّ نفسِه (مصدرٌ واحد).
+      - name: Landing probe — a landing review must leave the guards green
+        id: gate_landing
+        run: python3 tools/landing_probe.py --quiet
       - name: Real-data files must never be tracked
         id: gate_data_untracked
         run: |

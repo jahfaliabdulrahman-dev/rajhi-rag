@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import shlex
 import shutil
 import subprocess
 
@@ -62,6 +63,15 @@ INTRUDER = ROOT / "handoff/claude/20260924-9999-REPORT-to-claude-poison.md"
 PROOF_T = "tests/test_eval_proof_rows.py"
 QG = ROOT / "tools/qa_gate.py"
 EP = ROOT / "tools/eval_pack.py"
+TSEC = ROOT / "tests/test_secret_scan.py"
+LP = ROOT / "tools/landing_probe.py"
+
+#: **ما يجب أن يُسمّى في العَضّة** (R61-2 · اختياريّ): حالةٌ سكربتيّةٌ «تعضّ» بلا الاسم المتوقَّع في مخرَجها
+#: عَضَّت **لسببٍ آخر** ⇒ فلا تُقبل شهادةً (الوسمُ لا يعدو دليله): تُطبع باسمها وتُحصى «تعذّر قياس».
+MUST_NAME: dict[str, str] = {
+    "م٢١ · مسبارُ الهبوط يكشف مراجعةً لا تهبط (P-11)": "tests/test_report_names.py",
+    "م٢٢ · تراجعُ ضابط الهبوط (مقارنةٌ حيّةٌ تشمل الصناديق) يمسكه المسبار (R59-1)": "tests/test_secret_scan.py",
+}
 
 CASES = [
     ("م١ · الموضعُ خارج النطاق يُرفض (R52-2)", EQ,
@@ -194,6 +204,26 @@ CASES = [
      '    return not inter\n\n\ndef gate3_price_within_cap',
      '    return True\n\n\ndef gate3_price_within_cap',
      "tests/test_eval_pack.py::test_an_overlap_is_a_named_defect_even_with_a_dated_owner_decision"),
+
+    # **م٢١ · مسبارُ الهبوط يعضّ (P-11 · تبنّاه المالك من توصية مراجعة ٥٩):** الضابطُ الحقيقيُّ ليس عدّاداً
+    # بل **الثابت**: «هل تهبط مراجعة؟». فسمُّه يجعل المراجعةَ الاصطناعيّة **لا تهبط** (زمنُ اسمها منزاحٌ
+    # عن إيداعها) ⇒ يجب أن يُسقط المسبارُ ضابطَ أسماء التقارير **باسمه**، لا أن يعضَّ لسببٍ آخر (MUST_NAME).
+    ("م٢١ · مسبارُ الهبوط يكشف مراجعةً لا تهبط (P-11)", LP,
+     '    return measure(args.ref, args.from_worktree, args.poison, args.keep, quiet=args.quiet)',
+     '    return measure(args.ref, args.from_worktree, "name-stamp", args.keep, quiet=args.quiet)',
+     "tools/landing_probe.py"),
+
+    # **م٢٢ · الصنفُ نفسُه يعود فيُمسَك (R59-1 · حاجبُ مراجعة ٥٩):** يُعاد **حرفيًّا** ما كان: قياسٌ حيٌّ
+    # لرقمٍ **يشمل صناديق المراسلة** (`excluded_prefix=""`) ⇒ نصُّ المدقّق يصير مُدخَلاً إلى راتشتٍ يملكه
+    # المنفّذ. والمسبارُ يجب أن يسقط — **باسم ضابط الماسح** — لأن نسختَه تحمل مراجعةً تقتبس الصيغة.
+    # (وهذا هو الفرقُ بين إصلاحٍ سطحيّ وإغلاقِ صنف: الأوّلُ يصلح الحالةَ، وهذا يقيس أنّ الصنفَ لا يعود.)
+    ("م٢٢ · تراجعُ ضابط الهبوط (مقارنةٌ حيّةٌ تشمل الصناديق) يمسكه المسبار (R59-1)", TSEC,
+     '    assert _undated_snapshot_pairs(proto) == [], (\n'
+     '        f"أرقامٌ تشمل صناديق المراسلة بلا وسمِ تأريخٍ وتاريخ: {_undated_snapshot_pairs(proto)} ⇒ "\n'
+     '        "يُكتب كلُّ رقمٍ مع شجرته (R59-1)، ولا يُدخَل نصُّ المدقّق في راتشتٍ يملكه المنفّذ")',
+     '    lines_all, files_all, _, _ = _tatweel_form_counts(files, excluded_prefix="")\n'
+     '    assert _pair_at(proto, r"(\\d+)·(\\d+)\\s*بلا حسّاس") == (lines_all, files_all), "R59-1: مقارنةٌ حيّةٌ تشمل الصناديق"',
+     "tools/landing_probe.py --from-worktree"),
 ]
 
 
@@ -245,15 +275,25 @@ def _run(test: str) -> tuple[int, str]:
 
     أمّا رموزُ pytest الأخرى (2 تعذّرُ جمعٍ/مقاطعة · 3 عطبٌ داخليّ · 4 خطأُ استعمال) فهي **تعذّرُ تشغيلٍ**
     لا «بوّابةٌ عَضّت» — وكان الخلطُ بينهما يجعل الأداةَ تشهد لبوّابةٍ لم تُقَس (عطبُ مراجعة ٥٣).
+
+    **وهدفٌ سكربتيّ (R61-2 · مسبارُ الهبوط P-11):** الضابطُ قد يكون **أمرًا** لا ملفَّ `pytest` (المسبارُ
+    يبني نسخةً ويُشغّل قائمةَ الضوابط فيها). فيُشغَّل السكربتُ بمفسّر الشجرة نفسِه، **وأمرُه يُنقسم بـ`shlex`**
+    (وسائطُ كـ`--poison name-stamp` تُمرَّر كما تُكتب — لا يُعاد تفسيرُها بيد).
     """
-    r = subprocess.run([PY, "-m", "pytest", "-q", "-x", test], cwd=ROOT, capture_output=True, text=True)
+    if ".py" in test and not test.startswith("tests/"):
+        cmd = [PY, *shlex.split(test)]
+    else:
+        cmd = [PY, "-m", "pytest", "-q", "-x", test]
+    r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
-def _emit(name: str, rc: int, out: str, counts: dict[str, int], unmeasured: list[str]) -> None:
+def _emit(name: str, rc: int, out: str, counts: dict[str, int], unmeasured: list[str]) -> str:
     """يطبع سطرَ ضابطٍ واحد ويُحصيه — **والحكمُ من `_verdict` وحدَها** (رمزُ الخروج أوّلًا).
 
     (كانت ثلاثةُ مساراتٍ في `main` تحكم بـ`rc != 0` وحدَه ⇒ أيُّ فشلٍ — ومنه غيابُ pytest — «عَضّ»؛ ST-2.)
+
+    **ويُعيد الحالة** (R61-2) ليُقابَل الاسمُ المتوقَّع في `MUST_NAME` **بعد** الحكم لا قبله.
     """
     kind = _verdict(rc, out)
     counts[kind] += 1
@@ -262,6 +302,7 @@ def _emit(name: str, rc: int, out: str, counts: dict[str, int], unmeasured: list
     tail = out.strip().splitlines()[-1][:90] if out.strip() else ""
     extra = f" (rc={rc}) — {tail}" if kind == "unrunnable" else ""
     print(f"{name:52s} | {'مُطبَّق':6s} | {kind:7s} | {_verdict_label(kind)}{extra}")
+    return kind
 
 
 def _summary(counts: dict[str, int], total: int, equipped: bool) -> str:
@@ -325,7 +366,13 @@ def main() -> int:
             shutil.copy2(bak, path)
             bak.unlink()
         total += 1
-        _emit(name, rc, out, counts, unmeasured)
+        kind = _emit(name, rc, out, counts, unmeasured)
+        want = MUST_NAME.get(name)
+        if want and kind == "bite" and want not in out:
+            # **عَضَّ لسببٍ آخر** ⇒ لا شهادة (R61-2): يُطبع باسمه ويُحصى «تعذّر قياس» (لا «عضّ»).
+            counts["bite"] -= 1
+            counts["unrunnable"] += 1
+            print(f"      🔴 عَضَّ بلا الاسم المتوقَّع «{want}» ⇒ عَضٌّ لسببٍ آخر: لا شهادةَ لهذا الضابط")
 
     # م١٢أ: ملفُّ منفّذٍ **غيرِ مُعلَن** في صندوق المدقّق
     INTRUDER.write_text("# س\n", encoding="utf-8")
