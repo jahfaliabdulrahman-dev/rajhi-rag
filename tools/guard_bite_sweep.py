@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import pathlib
 import re
-import shlex
 import shutil
 import subprocess
 
@@ -63,6 +62,12 @@ INTRUDER = ROOT / "handoff/claude/20260924-9999-REPORT-to-claude-poison.md"
 PROOF_T = "tests/test_eval_proof_rows.py"
 QG = ROOT / "tools/qa_gate.py"
 EP = ROOT / "tools/eval_pack.py"
+# **مالكُ القرار والثمن انتقل إلى وحدةٍ مجرّدة** (`tools/gate3.py` · مقعدُ البنية · مراجعة ٦١) ⇒ سمومُه
+# (م١٩ · م٢٠ · م٢٤) تُحقن هناك. وإلّا بقيت السمومُ تُعدّل نصًّا غيرَ موجود فتُصنَّف «تعذّر تشغيل» —
+# أي بوّاباتٌ تسقط من القياس بصمتٍ وهي تظنّ نفسها مُطبَّقة.
+G3 = ROOT / "tools/gate3.py"
+_LP_CMD = ["tools/landing_probe.py"]
+_LP_CMD_FROM_WT = ["tools/landing_probe.py", "--from-worktree"]
 TSEC = ROOT / "tests/test_secret_scan.py"
 LP = ROOT / "tools/landing_probe.py"
 
@@ -171,8 +176,11 @@ CASES = [
 
     # **وسجلُّ اللاحتميّة** (شرطُ مراجعة ٥٨): الحارسُ يعدّ **ويحمّر**؛ فسمُّه يُلغي العدَّ فيصير السجلُّ
     # تزييناً (وسمٌ يُطبع ولا يُقيَّد)، وهو بعينه ما وُجد السجلُّ ليمنعه.
+    # **م١٦ · ميزانيّةُ اللاحتميّة تحمرّ عند التجاوز (شرطُ مراجعة ٥٨):** والسطرُ يُعدَّل مع تعديل
+    # دالّة العدّ نفسِها (S6 · مراجعة ٦١: الأحداثُ = تشغيلاتٌ محفوظة ∪ قيودٌ بلا دليل) — وسمٌّ يشير
+    # إلى نصٍّ زائل **يُصنَّف «تعذّر تشغيل»** (يعضّه المشغّل نفسه فعلًا عند تعديل الدالّة — وهو مقياسه).
     ("م١٦ · ميزانيّةُ اللاحتميّة تحمرّ عند التجاوز (شرطُ مراجعة ٥٨)", TFL,
-     '    if len(dirty) <= budget:\n        return []\n    return dirty',
+     '    if len(dirty) + len(orphans) <= budget:\n        return []',
      '    return []',
      "tests/test_flake_ledger.py::test_the_budget_actually_bites_on_a_synthetic_window"),
 
@@ -192,15 +200,15 @@ CASES = [
 
     # **م١٩ · سقفُ ثمن قرار المالك (R60-1 · مراجعة ٦٠):** القرارُ يقع على **ثمن الإفراج** داخل سقفه
     # المُعلَن ولا يتمدّد؛ فسمُّه يُلغي السقفَ فيصير القرارُ رخصةً لأي ثمن — ويجب أن يُسقط ضابطَه.
-    ("م١٩ · قرارُ المالك لا يتمدّد فوق سقف ثمنه المُعلَن", EP,
-     '    return price_pages <= int(decision["price_cap_pages"])',
+    ("م١٩ · قرارُ المالك لا يتمدّد فوق سقف ثمنه المُعلَن", G3,
+     '    return int(price_pages) <= int(decision["price_cap_pages"])',
      '    return True',
      "tests/test_eval_pack.py::test_the_owner_decision_closes_the_price_not_the_overlap"),
 
     # **م٢٠ · البوابةُ (٣) لا تُرخى بقرار (R60-1 · حاجبُ مراجعة ٦٠):** كان السقفُ يُرخي **التقاطعَ نفسَه**
     # ⇒ قِيس أن ١٣٣ صفحةً تداخلًا تُعطي `PASS` (رخصةُ إدخال ثلثَي الحزمة إلى التدريب). فسمُّ
     # `gate3_overlap_ok` يُعيد الرخصةَ، ويجب أن يُسقط ضابطَ «التداخلُ عطبٌ مُسمًّى لا قرارُ مالك».
-    ("م٢٠ · التداخلُ عطبٌ يُسقط البوابةَ ولا يُرخيه قرار (حاجبُ مراجعة ٦٠)", EP,
+    ("م٢٠ · التداخلُ عطبٌ يُسقط البوابةَ ولا يُرخيه قرار (حاجبُ مراجعة ٦٠)", G3,
      '    return not inter\n\n\ndef gate3_price_within_cap',
      '    return True\n\n\ndef gate3_price_within_cap',
      "tests/test_eval_pack.py::test_an_overlap_is_a_named_defect_even_with_a_dated_owner_decision"),
@@ -211,7 +219,7 @@ CASES = [
     ("م٢١ · مسبارُ الهبوط يكشف مراجعةً لا تهبط (P-11)", LP,
      '    return measure(args.ref, args.from_worktree, args.poison, args.keep, quiet=args.quiet)',
      '    return measure(args.ref, args.from_worktree, "name-stamp", args.keep, quiet=args.quiet)',
-     "tools/landing_probe.py"),
+     _LP_CMD),
 
     # **م٢٢ · الصنفُ نفسُه يعود فيُمسَك (R59-1 · حاجبُ مراجعة ٥٩):** يُعاد **حرفيًّا** ما كان: قياسٌ حيٌّ
     # لرقمٍ **يشمل صناديق المراسلة** (`excluded_prefix=""`) ⇒ نصُّ المدقّق يصير مُدخَلاً إلى راتشتٍ يملكه
@@ -223,7 +231,7 @@ CASES = [
      '        "يُكتب كلُّ رقمٍ مع شجرته (R59-1)، ولا يُدخَل نصُّ المدقّق في راتشتٍ يملكه المنفّذ")',
      '    lines_all, files_all, _, _ = _tatweel_form_counts(files, excluded_prefix="")\n'
      '    assert _pair_at(proto, r"(\\d+)·(\\d+)\\s*بلا حسّاس") == (lines_all, files_all), "R59-1: مقارنةٌ حيّةٌ تشمل الصناديق"',
-     "tools/landing_probe.py --from-worktree"),
+     _LP_CMD_FROM_WT),
 
     # **م٢٣ · ثقبُ مقام التغطية عطبُ نظافة (R60-2 · قاسه المدقّق في مراجعة ٦٠):** كان يُقرأ «نظيفًا» عند
     # السياسة ⇒ لا إعادةَ قراءةٍ ولا وسم، ثمّ تسقط البوّابةُ على تأكيدٍ صلب ⇒ «٤/٥» ثمّ إعادةُ البوّابة
@@ -232,6 +240,14 @@ CASES = [
      '            and bool(cov) and f_possible == cov[1])',
      '            and True)',
      "tests/test_gate_flake_policy.py::test_a_footer_denominator_hole_is_a_dirty_read_not_a_silent_gate_failure"),
+
+    # **م٢٤ · «عددٌ» ليس كلَّ ما `isinstance(x, int)` (مراجعة ٦١ · قاسه مقعدا المعايير والبنية):** `bool`
+    # صنفٌ من `int` في بايثون ⇒ `True <= 133` صحيحة، فمانيفستٌ حقلُه `true` كان يُقرأ «ثمنًا مقيسًا»
+    # داخل السقف ويُطبع `PASS`. فسمُّ الحرس يُعيد التساهل، ويجب أن يُسقط ضابطَ العدد الحقيقيّ.
+    ("م٢٤ · العددُ الحقيقيّ ليس `bool` (ثمنٌ `true` لا يمرّ مقيسًا)", G3,
+     '    return isinstance(x, int) and not isinstance(x, bool)',
+     '    return isinstance(x, int)',
+     "tests/test_eval_pack.py::test_a_boolean_field_is_not_a_measured_price"),
 ]
 
 
@@ -278,21 +294,30 @@ def _verdict_label(kind: str) -> str:
     return LABELS[kind]
 
 
-def _run(test: str) -> tuple[int, str]:
+def _command_for(test: str | list) -> list[str]:
+    """**أمرُ الحالة — تمييزٌ صريحٌ لا استنتاجٌ من النصّ** (مقعدُ البنية · مراجعة ٦١).
+
+    كان `_run` يقرأ **نوعَ الأمر من نصّه**: `".py" in test and not test.startswith("tests/")` ⇒ أيُّ ضابطٍ
+    يحمل `.py` في اسمه أو في وسيطٍ له (ملفُّ بيانات، معرّفُ حالة) كان يُشغَّل **سكربتًا** بلا pytest فيُقاس
+    «تعذّرُ تشغيل» ويُسمّى حالةً أخرى — عطبٌ صامتٌ يظهر يومَ يُضاف ضابطٌ جديد. والآن **القائمةُ أمرٌ**
+    (تُشغَّل بمفسّر الشجرة، ووسائطُها لا يُعاد تفسيرُها بيد) **والنصُّ ضابطُ pytest** بمعرّفه.
+    """
+    if isinstance(test, list):
+        return [PY, *test]
+    return [PY, "-m", "pytest", "-q", "-x", test]
+
+
+def _run(test: str | list) -> tuple[int, str]:
     """يُعيد (رمزَ الخروج، المخرَج). **والسمُّ يقع إذا وفقط إذا كان الرمزُ 1** (سقوطُ ضابط)،
 
     أمّا رموزُ pytest الأخرى (2 تعذّرُ جمعٍ/مقاطعة · 3 عطبٌ داخليّ · 4 خطأُ استعمال) فهي **تعذّرُ تشغيلٍ**
     لا «بوّابةٌ عَضّت» — وكان الخلطُ بينهما يجعل الأداةَ تشهد لبوّابةٍ لم تُقَس (عطبُ مراجعة ٥٣).
 
     **وهدفٌ سكربتيّ (R61-2 · مسبارُ الهبوط P-11):** الضابطُ قد يكون **أمرًا** لا ملفَّ `pytest` (المسبارُ
-    يبني نسخةً ويُشغّل قائمةَ الضوابط فيها). فيُشغَّل السكربتُ بمفسّر الشجرة نفسِه، **وأمرُه يُنقسم بـ`shlex`**
-    (وسائطُ كـ`--poison name-stamp` تُمرَّر كما تُكتب — لا يُعاد تفسيرُها بيد).
+    يبني نسخةً ويُشغّل قائمةَ الضوابط فيها). فيُشغَّل السكربتُ بمفسّر الشجرة نفسِه عبر `_command_for`
+    (والتمييزُ بين «أمرٍ» و«ضابط» صريحٌ هناك — قائمةٌ أم نصّ).
     """
-    if ".py" in test and not test.startswith("tests/"):
-        cmd = [PY, *shlex.split(test)]
-    else:
-        cmd = [PY, "-m", "pytest", "-q", "-x", test]
-    r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+    r = subprocess.run(_command_for(test), cwd=ROOT, capture_output=True, text=True)
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 

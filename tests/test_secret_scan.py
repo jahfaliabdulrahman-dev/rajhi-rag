@@ -433,18 +433,47 @@ def test_the_tatweel_counter_uses_the_scanner_case_rule():
         "أثرُ القاعدة غيرُ مرئيّ على حالة الحروف ⇒ الاشتقاقُ ادّعاءٌ لا قياس")
 
 
+def _pairs_in(text: str, pattern: str) -> list[tuple[int, int]]:
+    """**كلُّ** أزواج النمط في النصّ — لا أوّلَها (والأرقامُ العربيةُ تُوحَّد).
+
+    (كان الضابطُ يقرأ **أوّلَ** موضعٍ وحدَه بـ`re.search` ⇒ موضعٌ ثانٍ متقادمٌ يمرّ صامتًا: عينُ صنفِ
+    «نسختان من الحقيقة» الذي كلَّف المستودعَ مرّاتٍ — قاسه مقعدُ المعايير في مراجعة ٦١.)
+    """
+    return [(int(m.group(1)), int(m.group(2)))
+            for m in re.finditer(pattern, text.translate(_AR_DIGITS))]
+
+
+def _live_pairs(text: str, pattern: str) -> list[tuple[int, int]]:
+    """أزواجُ النمط الواقعة في فقرةٍ **حيّة**: بلا وسمِ «مؤرَّخ» وبلا تاريخ ⇒ يجب أن تطابق المقياس.
+
+    والفقرةُ المؤرَّخةُ (`مؤرَّخ` + `YYYY-MM-DD`) تُقرأ **تاريخًا** لا قياسَ اليوم — وهذا هو التخفيضُ
+    الوحيدُ المُعلَن (وإلّا صار توثيقُ ما كان ممنوعًا).
+    """
+    out: list[tuple[int, int]] = []
+    for para in text.split("\n\n"):
+        if "مؤرَّخ" in para and re.search(r"\d{4}-\d{2}-\d{2}", para):
+            continue
+        out += _pairs_in(para, pattern)
+    return out
+
+
 def _undated_snapshot_pairs(text: str) -> list[str]:
     """يُعيد كلَّ زوجٍ **يشمل الشجرةَ كلَّها** (`N·M`) في فقرةٍ بلا وسمِ «مؤرَّخ» وبلا تاريخ ⇒ عطبٌ مُسمًّى.
 
     **القاعدة (§٢٣ · وحكمُ مراجعة ٥٩):** كلُّ رقمٍ مع شجرته. وقياسُ الصناديق يتغيّر مع كلّ مراجعةٍ تهبط
     (فيه رقمٌ يُقتبس) ⇒ يُقرأ **تاريخًا مؤرَّخًا** لا حكمًا: يلزمه وسمُ التأريخ **وتاريخٌ** في الفقرة نفسِها،
     وإلّا فهو رقمٌ حيٌّ بلا مقياسٍ يحرسه — وهو الصنفُ الذي كسر الـCI ثلاثَ مرّات.
+
+    **والنموذجان معًا** (مقعدُ المعايير · مراجعة ٦١): `N·M حسّاساً` **و**`N سطراً في M ملفّ` — كان
+    الثاني خارجَ الدالّة أصلًا، فكان رقمٌ حيٌّ بالصيغة الشقيقة يمرّ بلا وسمٍ ولا تاريخ (والنسخةُ الشقيقة
+    هي التي كُسر الـCI بها فعلًا في §٢٦).
     """
     bad: list[str] = []
     for para in text.split("\n\n"):
         if "مؤرَّخ" in para and re.search(r"\d{4}-\d{2}-\d{2}", para):
             continue
         bad += [m.group(0) for m in re.finditer(r"\d+·\d+\s*(?:حسّاساً|بلا حسّاس)", para)]
+        bad += [m.group(0) for m in re.finditer(r"\d+\s*سطراً في\s*\d+\s*ملفّ", para)]
     return bad
 
 
@@ -452,6 +481,10 @@ def test_the_three_prose_sites_are_compared_to_the_measurement():
     """**الرقمُ يُقاس في مواضعه الثلاثة لا في موضعٍ واحد (P2-4 · مقعدُ المواصفة):** «١١ سطراً في ٤ ملفّات»
     مكتوبٌ في **§٥ من البروتوكول** و**ترويسة الماسح** — ويُقابَلان بالمقياس على **المقام المُعلَن**:
     «الشجرةُ المتتبَّعة **بلا `handoff/`**».
+
+    **وكلُّ موضعٍ يُقابَل — لا أوّلُه** (مقعدُ المعايير · مراجعة ٦١): كان `_pair_at` يقرأ أوّلَ زوجٍ
+    بـ`re.search` ⇒ نسخةٌ ثانيةٌ متقادمةٌ في الوثيقة نفسِها تمرّ صامتة. والآن كلُّ زوجٍ **حيّ** (في فقرةٍ
+    بلا وسمِ تأريخٍ ولا تاريخ) يجب أن يساوي المقياس، والمتقادمُ يُسمّى بموضعه.
 
     **والرقمان 27·11 و36·18 (الشجرةُ كلُّها) صارا تاريخًا مؤرَّخًا لا يُقابَلان (R59-1 · حاجبُ مراجعة ٥٩):**
     المقارنةُ كانت تشمل `handoff/claude/` ⇒ **نصُّ المدقّق مُدخَلٌ إلى راتشتٍ يملكه المنفّذ**: قِيس أنّ
@@ -464,13 +497,16 @@ def test_the_three_prose_sites_are_compared_to_the_measurement():
                            cwd=str(ROOT), capture_output=True, text=True).stdout.split()
     lines_ex, files_ex, _, excluded_files = _tatweel_form_counts(files)
     assert (lines_ex, files_ex) == (TATWEEL_FORM_LINES, TATWEEL_FORM_FILES), "الثابتان ≠ المقيس (المقامُ بلا handoff/)"
-    assert excluded_files > 0, "المُستثنى صفرٌ ⇒ المقامُ لم يُقَس على ما يقول (ولا استثناءَ صامت)"
+    assert excluded_files > 0, "المستثنى صفرٌ ⇒ المقامُ لم يُقَس على ما يقول (ولا استثناءَ صامت)"
     pat = r"(\d+)\s*سطراً في\s*(\d+)\s*ملفّ"
     for doc in ("docs/handoff-protocol.md", "tools/secret_scan.py"):
         text = (ROOT / doc).read_text(encoding="utf-8")
-        assert _pair_at(text, pat) == (TATWEEL_FORM_LINES, TATWEEL_FORM_FILES), (
-            f"{doc}: «… سطراً في … ملفّات» المنطوق يخالف المقيس "
-            f"{(TATWEEL_FORM_LINES, TATWEEL_FORM_FILES)} ⇒ نصٌّ مُتقادم")
+        assert _pairs_in(text, pat), f"{doc}: لا زوجَ «… سطراً في … ملفّات» ⇒ النصُّ فقد مقياسه"
+        stale = [p for p in _live_pairs(text, pat) if p != (TATWEEL_FORM_LINES, TATWEEL_FORM_FILES)]
+        assert not stale, (
+            f"{doc}: موضعٌ حيٌّ (لا وسمَ تأريخٍ ولا تاريخ) يخالف المقيس "
+            f"{(TATWEEL_FORM_LINES, TATWEEL_FORM_FILES)}: {stale} ⇒ نصٌّ مُتقادم "
+            "(وكان الضابطُ يقرأ أوّلَ موضعٍ فقط ⇒ الثاني يمرّ)")
     # **وما يشمل الصناديق لا يُقابَل — بل يُلزَم تاريخًا** (R59-1): وحكمُه دالّةٌ تُقاس في الاتجاهين.
     proto = (ROOT / "docs" / "handoff-protocol.md").read_text(encoding="utf-8")
     assert _undated_snapshot_pairs(proto) == [], (
@@ -485,4 +521,10 @@ def test_the_three_prose_sites_are_compared_to_the_measurement():
     assert _undated_snapshot_pairs(
         "**قياسٌ مؤرَّخ** (2026-09-25 · بلا `handoff/`): 27·11 حسّاساً و36·18 بلا حسّاس.") == [], \
         "الزوجُ المؤرَّخُ بتاريخه وسمِه يجب أن يمرّ — وإلّا فالضابطُ يمنع التوثيق"
+    # **والصيغةُ الشقيقةُ صارت مشمولة** (مقعدُ المعايير · مراجعة ٦١): كان `N سطراً في M ملفّ` خارجَ
+    # الدالّة كلَّها ⇒ رقمٌ حيّ بلا تاريخٍ يمرّ. وتُقاس في الاتجاهين أيضًا.
+    assert _undated_snapshot_pairs("الصيغةُ الشقيقة: 31 سطراً في 12 ملفّاً.") == ["31 سطراً في 12 ملفّ"], \
+        "الصيغةُ الشقيقة لا يُكشَف رقمُها الحيّ ⇒ ثقبٌ في القاعدة نفسها"
+    assert _undated_snapshot_pairs(
+        "**قياسٌ مؤرَّخ** (2026-09-25): 31 سطراً في 12 ملفّاً.") == [], "والمؤرَّخةُ منها تمرّ"
 

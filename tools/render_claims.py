@@ -34,6 +34,13 @@ RESULTS = PROJ / "data" / "local_sample" / "slice_629p" / "results"
 # and calls the fresh document the drift (this happened with the test count).
 SNAPSHOT = PROJ / "docs" / "claims.json"
 
+# **كائنُ القرار يُستورد في أعلى الملفّ — بلا `try/except` يُخفي** (مقعدُ البنية · مراجعة ٦١): كان
+# يُستورد داخل دالّةٍ عبر `sys.path.insert` **ويبتلع الخطأ** فيُعيد `None` ⇒ تُصاغ الوثيقةُ بـ`{None}`
+# ويُكتب في اللقطة `null` بصمت. والآن الوحدةُ المجرّدةُ (`tools/gate3.py` — لا تبعيّةَ خارج المكتبة
+# القياسية، فلا خدمةَ ولا نموذج) تُستورد بنفس النمط المُعلَن المُستعمل لـ`scale_slice` أدناه.
+sys.path.insert(0, str(PROJ / "tools"))
+from gate3 import GATE3_DECISION                                    # noqa: E402
+
 
 def _test_count() -> int | None:
     """عدُّ الاختبارات — ببيئةٍ نظيفة.
@@ -58,15 +65,15 @@ def _gate3_price_cap() -> int | None:
     """**سقفُ ثمن الإفراج يُشتقّ من كائنه لا من النثر** (review-60 · R60-1).
 
     الرقمُ ١٣٣ كان يُكتب بيدٍ في الوثائق — وقد سُحب مرّةً إلى «١٠٠» لأن البوابةَ كانت تقيس مجتمعًا
-    ناقصًا. فالآن يُشتقّ من `GATE3_DECISION` (مصدرٌ واحد: كائنُ القرار في `tools/eval_pack.py`)
-    ويُقابَل في موضعين معلَنين، فمن غيّر السقفَ في الشيفرة يجد الوثائقَ تحمرّ.
+    ناقصًا. فالآن يُشتقّ من `GATE3_DECISION` (مصدرٌ واحد: **`tools/gate3.py`**) ويُقابَل في موضعين
+    معلَنين، فمن غيّر السقفَ في الشيفرة يجد الوثائقَ تحمرّ.
+
+    **وحدُّ الاستيراد (مقعدُ البنية · مراجعة ٦١):** كان يقع في `try/except` يبتلع كلَّ خطأ ويُعيد
+    `None`، فيُصاغ الطلبُ ويُكتب في اللقطة `{None} صفحة` **بصمت**. والآن يُستورد **الوحدةَ المجرّدة**
+    (`tools/gate3.py`: لا تبعيّةَ خارج المكتبة القياسية) في **أعلى الملفّ** — فإن اختفى كائنُ القرار
+    سقطت الأداةُ بالاسم (`ModuleNotFoundError`) لا أن تكتب `null` في وثيقةٍ معلَنة.
     """
-    try:
-        sys.path.insert(0, str(PROJ))
-        from tools.eval_pack import GATE3_DECISION                      # noqa: PLC0415
-        return int(GATE3_DECISION["price_cap_pages"])
-    except Exception:                                                   # noqa: BLE001
-        return None
+    return int(GATE3_DECISION["price_cap_pages"])
 
 
 def derive() -> dict | None:

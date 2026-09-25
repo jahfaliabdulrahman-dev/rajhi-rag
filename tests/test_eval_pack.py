@@ -1,6 +1,11 @@
 """مُنشئُ حزمة التقييم: البواباتُ والعرفُ والسموم — كلُّها تُقاس لا تُدَّعى.
 
-الأرضيةُ هنا **صناعية** عمداً: اختبارٌ يعتمد على `data/local_sample` (غير متتبَّع)
+**والطبقةُ النقيّةُ انتقلت إلى `tools/gate3.py`** (مراجعة ٦١ · مقعدُ البنية): كائنُ القرار `GATE3_DECISION`
+ودالّتاه (`gate3_overlap_ok` · `gate3_price_within_cap`) وقارئُ الثمن (`capture_withheld` · `price_of_release`)
+وصيغتُه (`price_label`) وحرسُ العدد (`is_count`) — تُستورَد هنا (إعادةَ تصديرٍ لا نسخًا) فتبقى النداءاتُ
+في هذا الملفّ كما هي، **والضوابطُ في هذا الملفِّ هي التي تحرسها**.
+
+الأرضيّةُ هنا **صناعية** عمداً: اختبارٌ يعتمد على `data/local_sample` (غير متتبَّع)
 لا يعمل في CI، واختبارٌ لا يعمل ليس اختباراً. والصفحاتُ الأربع مُصمَّمة لتحمل
 **حالتي الحدّ** التي كلَّفتنا قياساً حقيقياً:
 
@@ -25,7 +30,7 @@ for _p in (str(PROJ), str(PROJ / "src")):
 from tools.eval_pack import (  # noqa: E402
     CLASS_SOURCES, DEFINITIONS, GATE3_DECISION, PACK_SIZE, Run, _sha16, build_census,
     capture_withheld, census_classes, gate3_overlap_ok, gate3_price_within_cap, longest_run, main,
-    measure_range, poisons, classify_verdict,
+    measure_range, poisons, classify_verdict, price_label,
 )
 
 DOC = "aaaaaaaaaaaaaaaa"
@@ -401,7 +406,7 @@ def test_the_recorded_decision_cannot_rot_on_disk():
     assert measured == 0, \
         ("التقاطعُ المقيسُ على القرص صفرٌ اليوم؛ ولو صار غيرَه فالبوابةُ لا تُرخى بقرار: "
          "يُعاد `--build` ويُقرأ السبب باسمه")
-    price = rec.get("measured_price_pages")
+    price = rec.get("measured_price_of_release_pages")
     assert isinstance(price, int) and 0 <= price <= GATE3_DECISION["price_cap_pages"], \
         "والثمنُ المقيسُ داخل السقف المُعلَن (`--verify` يقابله بثمن اليوم من مانيفست الالتقاط)"
 
@@ -431,26 +436,26 @@ def test_a_drifted_pack_fails_the_real_verify_with_a_named_reason(tmp_path, caps
     # (ورمزُ الخروج هنا **1 لأرضيّتنا لا للحكم**: المُلتزمُ في `docs/evidence/` ختمُ شجرةٍ أخرى —
     # 200 صفحةً مقابل حزمةٍ صناعيّةٍ من صفحةٍ واحدة — وهو محورٌ آخر يُسمّى في المخرَج نفسه، فلا
     # يُخلَط بمحور القرار. فالمقيسُ هنا **نصُّ المقابلة** لا الرمز، وهو ما يقيسه هذا الضابط.)
-    honest = {**GATE3_DECISION, "measured_intersection": 0, "measured_price_pages": 2}
+    honest = {**GATE3_DECISION, "measured_intersection": 0, "measured_price_of_release_pages": 2}
     _, out_ok = _verify_with(honest, "honest")
     assert "مطابقٌ لقرار الأداة ✓" in out_ok and "داخلَ السقف ✓" in out_ok, \
         "الشاهدُ المضادّ: القرارُ المطابقُ يُقاس مطابقًا وقرارُ الثمنِ داخِلًا ⇒ فالضابطُ يقيس الانحرافَ لا الأرضيّة"
     assert "يخالف قرارَ الأداة" not in out_ok, "ولا مخالفةَ تُسمّى على محور القرار"
     # **والانحرافُ يُسمّى**: توسيعُ **سقف الثمن** (رخصةُ R60-1 نفسُها) ⇒ `rc=1` باسمه لا PASS.
     rc, out = _verify_with({**GATE3_DECISION, "price_cap_pages": 9999,
-                            "measured_intersection": 0, "measured_price_pages": 2}, "drifted")
+                            "measured_intersection": 0, "measured_price_of_release_pages": 2}, "drifted")
     assert rc == 1, f"حزمةٌ مُحرَّفة ⇒ `rc=1` لا `rc={rc}` (وهو ما يَعِد به صفُّ السجلّ ١٥)"
     assert "يخالف قرارَ الأداة" in out and "الحكم: PASS" not in out, \
         "المخالفةُ تُسمّى في `failures` ولا تُختم بـPASS"
     # **والثمنُ المنحرفُ يُقاس حيًّا**: حزمةٌ قيّدت ثمنَ يومِها برقمٍ آخر (والسقفُ لم يتغيّر) ⇒ مخالفةٌ مُسمّاة.
     rc_p, out_p = _verify_with({**GATE3_DECISION, "measured_intersection": 0,
-                                "measured_price_pages": 999}, "price-drift")
-    assert rc_p == 1 and "measured_price_pages" in out_p, \
+                                "measured_price_of_release_pages": 999}, "price-drift")
+    assert rc_p == 1 and "measured_price_of_release_pages" in out_p, \
         "القياسُ المشتقُّ المُخزَّن يُقابَل بحاضره من مانيفست الالتقاط — لا يُصدَّق"
     # **وسقفٌ آخر ⇒ مخالفةٌ مُسمّاة**: الحزمةُ لا تُعلن سقفًا من عندها — لا توسيعًا (9999 أعلاه)
     # ولا تضييقًا؛ والحكمُ لا ينزل إلى محور الثمن أصلًا لأن الأداة ترفض سقفًا غيرَ سقفها قبل أن تحكم به.
     rc_c, out_c = _verify_with({**GATE3_DECISION, "price_cap_pages": 1,
-                                "measured_intersection": 0, "measured_price_pages": 2}, "other-cap")
+                                "measured_intersection": 0, "measured_price_of_release_pages": 2}, "other-cap")
     assert rc_c == 1 and "price_cap_pages" in out_c and "الحكم: PASS" not in out_c, \
         "سقفُ الثمن لا يُقرأ من الحزمة — تُقابَل بسقف الأداة وتُسمّى المخالفة"
 
@@ -476,8 +481,19 @@ def test_a_price_without_a_manifest_fails_closed(tmp_path, capsys):
     # **والثمنُ مركَّبٌ من مصدرين مقيسين**: 2 حجبها الالتقاطُ بنيويًّا (`pack_reserved`) + 1 صفحةٌ في
     # الحزمة والالتقاط معًا (يجب إفراجُها) ⇒ فالرقمُ يُقاس بتركيبه لا يُحفَظ.
     assert packed["price_gate"]["sources"]["withheld_pages"] == 2
+    assert "capture_remedy_price_pages" not in packed, \
+        ("P2-٦ · مراجعة ٦١: كان في الحزمة «ثمنان» — `capture_remedy_price_pages` (= ما يجب إفراجُه) "
+         "و`price_gate.price_pages` (= المحجوب + ما يجب إفراجُه) — بلا اسمٍ يفصل، فيُنسب الصفرُ "
+         "إلى الثمن. الآن: `to_release` · `withheld_pages` · `price_of_release_pages` — كلٌّ باسمه، "
+         "**والمهمَلُ لا يعود**")
+    assert "price_pages" not in packed["price_gate"], \
+        ("و`price_pages` المجرّدُ لا يُكتب في الحزمة: هو الاسمُ الذي كان يُقرأ على معنيَين "
+         "(P2-٦ · مقعد البنية)")
+    assert packed["to_release"]["pages"] != packed["price_gate"]["price_of_release_pages"] or \
+        packed["price_gate"]["sources"]["withheld_pages"] == 0, \
+        "والمعنيان يُقاسان مفترقَين حين يفترقان فعلًا (لا يُصدَّق الاسمُ وحدَه)"
     assert packed["price_gate"]["sources"]["to_release_pages"] == 1
-    assert packed["price_gate"]["price_pages"] == 3 and packed["price_gate"]["pass"] is True, \
+    assert packed["price_gate"]["price_of_release_pages"] == 3 and packed["price_gate"]["pass"] is True, \
         "الشاهدُ المضادّ: ثمنٌ مقيسٌ داخل السقف يُقيَّد مقيسًا و`pass=true`"
     assert "والثمنُ داخل السقف" in out_ok and "غيرُ مقيس" not in out_ok
 
@@ -485,10 +501,67 @@ def test_a_price_without_a_manifest_fails_closed(tmp_path, capsys):
     w = capture_withheld(cap, DOC)
     assert w["pages"] is None and "غيرُ مقيس" in w["why"], "مانيفستٌ غائب ⇒ الثمنُ غيرُ مقيس (لا صفر)"
     rc, packed, out = _build("unmeasured")
-    assert packed["price_gate"]["price_pages"] is None and packed["price_gate"]["pass"] is False, \
+    assert packed["price_gate"]["price_of_release_pages"] is None and packed["price_gate"]["pass"] is False, \
         "والملفُّ يُقيّد الغيابَ كما يُقيّد الرقم: `None` و`pass=false` — لا صفرٌ يُبرّئ"
-    assert packed["intersection_gate"]["owner_decision"]["measured_price_pages"] is None, \
+    assert packed["intersection_gate"]["owner_decision"]["measured_price_of_release_pages"] is None, \
         "والقياسُ المشتقُّ يقتبس الغيابَ نفسَه (لا صفراً)"
     assert "غيرُ مقيس" in out and "الحكم: PASS" not in out, \
         "الأداةُ تُسمّي سببَ الوقوف ولا تُختم PASS على قياسٍ غائب"
     assert rc == 1, f"ثمنٌ غيرُ مقيس ⇒ `rc=1` (فشلٌ مُغلَق) لا `rc={rc}`"
+
+
+def test_a_boolean_field_is_not_a_measured_price(tmp_path):
+    """**`True` ليس عدداً** (مقعدا المعايير والبنية · مراجعة ٦١): `bool` صنفٌ من `int` في بايثون،
+
+    فـ`isinstance(True, int)` صحيحة و`True <= 133` صحيحة ⇒ مانيفستٌ حقلُه `"pack_reserved": true`
+    (قيمةٌ منطقيّةٌ من كاتبٍ آليّ أو ملفٍّ مُحوَّل) كان يُقرأ «ثمنًا مقيسًا» ويُطبع
+    `PASS (True ≤ 133 صفحة محجوبة)` — أي شهادةٌ على قياسٍ لم يقع. والحرسُ الآن في موضعٍ واحد
+    (`tools/gate3.is_count`) يُغذّي القارئَ والحكمَ والصيغةَ معاً.
+    """
+    cap = _capture(tmp_path)
+    mf = cap / DOC / "manifest.json"
+    d = json.loads(mf.read_text(encoding="utf-8"))
+    d["pages"]["pack_reserved"] = True
+    mf.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+
+    w = capture_withheld(cap, DOC)
+    assert w["pages"] is None and "عدداً" in w["why"], \
+        f"حقلٌ منطقيٌّ يُقرأ ثمنًا ⇒ القياسُ وهمٌ (و`why`)= {w['why']}"
+    assert gate3_price_within_cap(price_pages=True, decision=GATE3_DECISION) is False, \
+        "`True` داخل السقف ⇒ رخصةٌ تُختم PASS على قياسٍ لم يقع"
+    assert "غيرُ مقيس" in price_label(True, "لم يُقَس") and "True" not in price_label(True, "لم يُقَس"), \
+        "وصيغةُ العرض تُسمّي الغيابَ ولا تطبع قيمةً لم تُقَس"
+
+
+def test_a_counter_that_disagrees_with_its_list_is_a_named_defect(tmp_path, capsys):
+    """**شهادةُ الالتقاط لنفسه تُقابَل لا تُصدَّق** (مراجعة ٦١ · قاسه مقعدا المعايير والبنية):
+
+    كان `capture_withheld` يحسب `listed_matches` (عدّادُ `pack_reserved` مقابل عناصر `skipped`
+    المُعلَّلة بالسبب نفسه) ويُخزّنه ويُطبعه **بلا قارئ** ⇒ مانيفستٌ عدّادُه ٢ وقائمتُه فارغة يمرّ
+    `PASS` ويُبنى عليه قرارُ ثمن. والآن يُقرأ في `--build` و`--verify` **معاً**، واسمُه في المخرَج.
+    """
+    run = _corpus(tmp_path, pages=_chain(630))
+    cap = _capture(tmp_path)
+    mf = cap / DOC / "manifest.json"
+    d = json.loads(mf.read_text(encoding="utf-8"))
+    d["pages"]["skipped"] = []                       # العدّادُ ٢ والقائمةُ صفر
+    mf.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+
+    rc = main(["--build", "--run", str(run), "--capture", str(cap),
+               "--out", str(tmp_path / "out-list"), "--census", "50", "--capture-mode", "strict"])
+    out = capsys.readouterr().out
+    assert rc == 1 and "قائمةُ الالتقاط تخالف عدّادَه" in out, \
+        f"عدّادٌ بلا قائمةٍ مُعلَّلة يمرّ ⇒ شهادةٌ بلا مقابلة (rc={rc})"
+
+    # **والقارئُ الثاني: `--verify`** — وإلّا بقي الحقلُ مقروءًا في البناء وحدَه.
+    honest = {**GATE3_DECISION, "measured_intersection": 0, "measured_price_of_release_pages": 2}
+    pack = tmp_path / "pack-list.json"
+    pack.write_text(json.dumps({
+        "identity": DOC, "census": {"pages": [{"page": 1}], "size": 1, "fingerprint": _sha16("[1]")},
+        "ranges": [], "size_gate": {"value": 1, "pass": True},
+        "price_gate": {"cap_pages": GATE3_DECISION["price_cap_pages"], "pass": True},
+        "intersection_gate": {"pass": True, "owner_decision": honest}}), encoding="utf-8")
+    rc_v = main(["--verify", "--run", str(run), "--pack", str(pack), "--capture", str(cap)])
+    out_v = capsys.readouterr().out
+    assert rc_v == 1 and "الالتقاطُ لا يشهد لنفسه" in out_v, \
+        "قارئُ المسبار `--verify` لا يقرأ المقابلة ⇒ حقلٌ يُحسب بلا حكم"

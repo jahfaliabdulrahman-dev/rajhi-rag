@@ -26,6 +26,10 @@
   المال/الثوابت/اللقطة على خطوات الـworkflow (تقرأ الشيفرةَ لا صندوقَ المراسلة)، و«هل المراجعةُ
   الاصطناعيّةُ تشبه مراجعةً حقيقيّةً بالكامل» — الشكلُ متّفقٌ عليه بين الطرفَين (شرطُ المدقّق نفسه).
 - **والمقيسُ شجرةٌ مُودَعة**: `--from-worktree` يُودِع شجرةَ العمل في النسخة (للمسح والسموم).
+- **ورأسٌ مفصولٌ ليس فرعًا:** `actions/checkout` في `pull_request` يُنتج رأسًا مفصولًا (`--abbrev-ref HEAD`
+  ⇒ `HEAD`) ⇒ فاسمُ الفرع `HEAD`/الفراغ **لا يُمرَّر** `--branch`، بل نسخةٌ بلا `--branch` ثمّ
+  `checkout --detach <sha>`؛ وإلّا فشلُ النسخ يقرأ «تعذّر قياس» (وهو ما يُحمرّ الـCI بلا عطبِ هبوط —
+  حاجبُ مقعد المعايير · مراجعة ٦١).
 """
 from __future__ import annotations
 
@@ -88,6 +92,24 @@ def _git(repo: Path, *args: str, env: dict | None = None) -> tuple[int, str]:
 
 
 # ── بناءُ النسخة ────────────────────────────────────────────────────────────
+def _branch_for_clone(name: str) -> str | None:
+    """**اسمُ الفرع المُمرَّر للنسخ — أو `None`** (حاجبُ مقعد المعايير · مراجعة ٦١).
+
+    `actions/checkout` في `pull_request` يُنتج **رأسًا مفصولًا** (لا فرع): فيُعيد
+    `git rev-parse --abbrev-ref HEAD` النصَّ `HEAD` بالحرف، و`git clone --branch HEAD` يفشل بـ`128`
+    («Remote branch HEAD not found in upstream origin») ⇒ المسبارُ يُعلن «تعذّر قياس» (2) ⇒ **خطوةُ
+    الـCI `gate_landing` تحمرّ في كلّ pull_request** ولو كان العملُ سليمًا — أي إشارةُ فشلٍ من البيئة لا
+    من السلوك، وهي أخطرُ من عطبٍ حقيقيّ لأنّها تُعلّم القارئَ تجاهلَ الأحمر.
+
+    والقاعدة: **`HEAD` ليس اسمَ فرع** ⇒ تُبنى النسخةُ بلا `--branch` (فرعٌ واحد: الافتراضيّ للنسخة)
+    ثمّ يقع `checkout --detach <sha>` القائمُ أصلًا، فيُقاس الالتزامُ المعنيُّ بعينه.
+    """
+    name = (name or "").strip()
+    if name in ("", "HEAD", "(no branch)"):
+        return None
+    return name
+
+
 def _clone(src: Path, dst: Path, ref: str, branch: str | None) -> tuple[int, str]:
     """نسخةٌ كاملةُ التاريخ (بلا `--depth`: الضوابطُ تقرأ `git ls-tree` والالتزامات) و**فرعٌ واحد**.
 
@@ -186,12 +208,20 @@ def _synthetic_review(stamp: str, ref: str, branch: str, poison: str | None) -> 
     return "\n".join(lines) + "\n"
 
 
+def _stamp_dt(stamp: str) -> datetime:
+    """`%Y%m%d-%H%M%S` ⇒ لحظة (**مُحلِّلٌ واحد** · P3-١١ مراجعة ٦١ · مقعد البنية).
+
+    كانت الصيغةُ تُشريح يدويًّا في موضعَين (`_name` و`_commit`) ⇒ تغييرُ الصيغة يكسر مُحلِّلَين
+    يجب أن يتقادما معًا؛ والآن يمرّ الاثنان من هنا.
+    """
+    return datetime.fromisoformat(f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}T"
+                                  f"{stamp[9:11]}:{stamp[11:13]}:{stamp[13:15]}")
+
+
 def _name(stamp: str, poison: str | None) -> str:
     """اسمُ الملفّ — بزمنه في مقدّمته (قاعدةُ أسماء التقارير)، وبلا كلمة REPORT في الاسم."""
     if poison == "name-stamp":                      # زمنُ اسمٍ منزاحٌ ٣ ساعات ⇒ يجب أن يسقط ضابطُ الأسماء
-        shifted = datetime.fromisoformat(f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}T"
-                                         f"{stamp[9:11]}:{stamp[11:13]}:{stamp[13:15]}")
-        shifted = (shifted - timedelta(hours=3)).strftime("%Y%m%d-%H%M%S")
+        shifted = (_stamp_dt(stamp) - timedelta(hours=3)).strftime("%Y%m%d-%H%M%S")
         return f"{shifted}-third-eye-review-99-landing-probe.md"
     return f"{stamp}-third-eye-review-99-landing-probe.md"
 
@@ -201,8 +231,7 @@ def _commit(review: Path, dst: Path, stamp: str) -> tuple[int, str]:
 
     والزمنُ من **مصدرٍ واحد** (`stamp` نفسُه الذي في الاسم) ⇒ لا ساعتان تفترقان.
     """
-    when = datetime.fromisoformat(f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}T"
-                                  f"{stamp[9:11]}:{stamp[11:13]}:{stamp[13:15]}").astimezone()
+    when = _stamp_dt(stamp).astimezone()
     env = {"GIT_AUTHOR_DATE": when.isoformat(), "GIT_COMMITTER_DATE": when.isoformat(),
            "GIT_AUTHOR_NAME": "landing-probe", "GIT_AUTHOR_EMAIL": "probe@invalid",
            "GIT_COMMITTER_NAME": "landing-probe", "GIT_COMMITTER_EMAIL": "probe@invalid"}
@@ -230,6 +259,7 @@ def measure(ref: str, from_worktree: bool, poison: str | None, keep: bool,
         print(f"⛔ تعذّر القياس: `{py}` بلا pytest ⇒ لا شهادةَ (والـCI يُثبّته قبل هذه الخطوة).")
         return 2
     branch = _git(PROJ, "rev-parse", "--abbrev-ref", "HEAD")[1].strip()
+    clone_branch = _branch_for_clone(branch)
     sha = _git(PROJ, "rev-parse", ref)[1].strip()
     if not sha:
         print(f"⛔ تعذّر القياس: المرجعُ `{ref}` غيرُ موجود ⇒ لا نسخةَ تُقاس.")
@@ -238,7 +268,7 @@ def measure(ref: str, from_worktree: bool, poison: str | None, keep: bool,
     tmp = Path(tempfile.mkdtemp(prefix="landing-probe-"))
     dst = tmp / "tree"
     try:
-        rc, out = _clone(PROJ, dst, sha, branch)
+        rc, out = _clone(PROJ, dst, sha, clone_branch)
         if rc != 0:
             print(f"⛔ تعذّر القياس: فشلُ بناء النسخة عند {sha[:12]}:\n{out.strip()[:600]}")
             return 2
@@ -263,7 +293,8 @@ def measure(ref: str, from_worktree: bool, poison: str | None, keep: bool,
             print(f"⛔ تعذّر القياس: لم يُودَع الشاهدُ في النسخة:\n{out.strip()[:600]}")
             return 2
         print(f"[landing-probe] النسخة: {dst} · الشجرة: {sha[:12]} · الحالة: "
-              f"{'شجرةُ العمل' if from_worktree else 'المُودَعة'} · الشاهد: {BOX}/{name}"
+              f"{'شجرةُ العمل' if from_worktree else 'المُودَعة'} · "
+              f"الفرعُ الممرَّر: {clone_branch or '— (رأسٌ مفصول ⇒ بلا `--branch`)'} · الشاهد: {BOX}/{name}"
               + (f" · **سمّ: {poison}**" if poison else ""))
         failures: list[str] = []
         # ① خطواتُ الشجرة (تقرأ النصَّ والصندوق مباشرةً)
@@ -310,7 +341,12 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     files, steps = ci_files(), tree_steps()
     if args.list:
-        print(f"قائمةُ الـCI ({len(files)} ملفّاً · مقروءةٌ من {WORKFLOW.relative_to(PROJ)}):")
+        # **`--list` يُعلن شجرتَه** (مقعدُ البنية · مراجعة ٦١): كان يَقرأ قائمةَ **شجرة المنفّذ** ويطبعها
+        # بلا نسبة، والقياسُ يقرأ قائمةَ **النسخة** ⇒ قارئُ المخرَج يظنّهما شيئًا واحدًا فيُبنى حكمٌ على
+        # ورقٍ غيرِ الذي يُقاس (وهو أصلُ سمّ م٢١ أيضًا).
+        print(f"الشجرةُ المقروءةُ الآن (المنفّذ): {PROJ}")
+        print(f"والقياسُ يقرأ القائمةَ من الشجرة المقيسة نفسِها: <نسخة>/{WORKFLOW_REL}")
+        print(f"قائمةُ الـCI ({len(files)} ملفّاً · من {WORKFLOW.relative_to(PROJ)}):")
         for f in files:
             print(f"  - {f}")
         print("خطواتُ الشجرة:")

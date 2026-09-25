@@ -52,19 +52,52 @@ EVIDENCE_DIR = PROJ / "handoff" / "sulaiman"
 EVIDENCE_SUFFIX = "gate-evidence-full-run.txt"
 
 
+def _stamp(now=None):
+    """**الزمنُ من مصدرٍ واحد** — مسارُ الدليل وترويستُه يتقاسمان اللحظة نفسَها (مراجعة ٦١: كان كلٌّ
+    يستدعي `datetime.now()` في موضعه ⇒ اسمُ الملفّ وترويستُه ساعتان تفترقان بثوانٍ فيُقرأ افتراقُهما عطبًا)."""
+    from datetime import datetime
+
+    return now or datetime.now()
+
+
+def _counts(results: list[tuple[str, bool, str]]) -> tuple[int, int]:
+    """(الناجح، الكلّ) — **موضعٌ واحدٌ للعدّ** (كان محسوبًا في `_table` و`evidence_body` و`main` ثلاثًا)."""
+    return sum(1 for _, p, _ in results if p), len(results)
+
+
 def _table(results: list[tuple[str, bool, str]]) -> list[str]:
     """سطورُ جدول البوّابات — **موضعٌ واحد** يُطبع على الشاشة ويُكتب في الدليل (لا نسختان تفترقان)."""
     width = max((len(n) for n, _, _ in results), default=0)
-    ok_n = sum(1 for _, p, _ in results if p)
+    ok_n, total = _counts(results)
     return [f"[{'PASS' if p else 'FAIL'}] {n:<{width}}  {d}" for n, p, d in results] + \
-           ["", f"GATES: {ok_n}/{len(results)} passed"]
+           ["", f"GATES: {ok_n}/{total} passed"]
 
 
-def evidence_path(now=None, directory: Path = EVIDENCE_DIR) -> Path:
-    """مسارُ دليل التشغيل بزمن اللحظة — **دالّةٌ خالصةٌ** (تُقاس بمُدخَلٍ مصنوع بلا انتظار ساعة)."""
-    from datetime import datetime
+def _sanitize(text: str) -> str:
+    """**يُنزع من الدليل ما يجعله عطبًا في السطح العامّ** (مقعدُ البنية · مراجعة ٦١): تفصيلُ بوّابةٍ قد
 
-    stamp = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
+    يحمل مسارًا مطلقًا (`missing /Users/<user>/…/x.pdf` من استثناءٍ أو رسالةِ فشل) ⇒ فدليلُ تشغيلٍ
+    يُودَع تحت `handoff/` يجعل `publish_guard --tree` يعطي **BLOCK `home_path`** ⇒ يسقط «هبوطُ المراجعة»
+    والعطبُ في الحارس لا في الشاهد (وهو بعينه ما وقع مع `sys.executable` في R60-2). والنزعُ هنا **عند
+    الكتابة** لا في كلّ رسالة: موضعٌ واحد، ويُقاس بمسارٍ مطلقٍ مصنوع.
+    """
+    import tempfile
+
+    for raw, label in ((str(PROJ), "<repo>"), (str(Path.home()), "~"),
+                       (str(Path(tempfile.gettempdir()).resolve()), "<tmp>")):
+        if raw:
+            text = text.replace(raw, label)
+    return text
+
+
+def run_log_path(now=None, directory: Path = EVIDENCE_DIR) -> Path:
+    """مسارُ **سجلّ** التشغيل بزمن اللحظة — **دالّةٌ خالصةٌ** (تُقاس بمُدخَلٍ مصنوع بلا انتظار ساعة).
+
+    (الاسمُ `run_log_path` لا `evidence_path`: في المستودع **شهادتان**: `pack_io.evidence_path` =
+    الشهادةُ المختومةُ في `docs/evidence/`، وهذا = سجلُّ تشغيل البوّابة. واتّحادُ الاسمين كان يجعل
+    قارئَ الشيفرة يظنّ سجلَّ تشغيلٍ مُودَعًا في `handoff/` شهادةً مختومة — قاسه مقعدُ البنية · مراجعة ٦١.)
+    """
+    stamp = _stamp(now).strftime("%Y%m%d-%H%M%S")
     return directory / f"{stamp}-{EVIDENCE_SUFFIX}"
 
 
@@ -89,19 +122,20 @@ def evidence_body(ok: bool, results: list[tuple[str, bool, str]], full: bool,
 
     ولا يُقتطع: الحارسُ يستنتج «غيابَ الوسم» من ملفٍّ يحمل المخرجَ كاملًا (ووسمُ `[flaky_read]` يقع
     داخل سطر النتيجة نفسِه) ⇒ فملفٌّ مقتطعٌ يجعل الغيابَ صمتًا لا دليلًا (حدٌّ مُعلَن في السجلّ).
-    """
-    from datetime import datetime
 
-    ts = (when or datetime.now()).isoformat(timespec="seconds")
-    ok_n = sum(1 for _, p, _ in results if p)
+    **ويُنزَّه بـ`_sanitize`** (مقعدُ البنية · مراجعة ٦١): تفصيلُ بوّابةٍ قد يحمل مسارًا مطلقًا ذا اسم
+    منزلٍ فيصير الملفُّ عطبًا في السطح العامّ (`BLOCK home_path`) لا شاهدًا.
+    """
+    ts = _stamp(when).isoformat(timespec="seconds")
+    ok_n, total = _counts(results)
     lines = [
         f"# qa_gate {'--full' if full else '--quick'} — {ts}",
-        f"# rc={0 if ok else 1} · GATES: {ok_n}/{len(results)} passed · المفسّر={_interpreter_label()}",
+        f"# rc={0 if ok else 1} · GATES: {ok_n}/{total} passed · المفسّر={_interpreter_label()}",
         "# كُتب هذا الملفُّ **بالأداة** لا بيد الكاتب (R60-2) ⇒ تشغيلٌ بلا دليلٍ = تشغيلٌ خارج النافذة.",
         "",
         *_table(results),
     ]
-    return "\n".join(lines) + "\n"
+    return _sanitize("\n".join(lines)) + "\n"
 sys.path.insert(0, str(PROJ / "src"))
 
 RESULTS: list[tuple[str, bool, str]] = []
@@ -456,25 +490,40 @@ def main() -> None:
                          "وقد تتضاعف الزمنُ والكلفةُ مرّةً واحدة إن لم تكن القراءةُ الأولى نظيفة — إعادةٌ واحدة لا أكثر)")
     args = ap.parse_args()
 
-    gate("unit suite", g_tests)
-    gate("parser goldens", g_parser_goldens)
-    gate("service health", g_service)
-    gate("surface redirect", g_surface_redirect)
-    if args.full:
-        gate("end-to-end sample (values locked)", g_end_to_end)
-
-    ok = sum(1 for _, p, _ in RESULTS if p) == len(RESULTS)
+    crashed: str | None = None
+    # **وكلُّ نداءات البوّابات داخل `try`** (مقعدُ المواصفة · مراجعة ٦١): كانت الكتابةُ **بعد** نداءات
+    # البوّابات كلِّها ⇒ استثناءٌ قبلها = «تشغيلٌ بلا دليل» — البابُ الضيّقُ الذي وُلد منه R60-2. الآن:
+    # الاستثناءُ يُقيَّد **صفًّا باسمه** في الجدول، والدليلُ يُكتب على كلّ حال، ثمّ يُخرج بغير صفر.
+    try:
+        gate("unit suite", g_tests)
+        gate("parser goldens", g_parser_goldens)
+        gate("service health", g_service)
+        gate("surface redirect", g_surface_redirect)
+        if args.full:
+            gate("end-to-end sample (values locked)", g_end_to_end)
+        ok_n, total = _counts(RESULTS)      # **عدٌّ واحد** (P3-١٠ · مراجعة ٦١)
+        ok = ok_n == total
+    except Exception as exc:                 # noqa: BLE001 — يُقيَّد ويُسمّى، ولا يُسقط الدليل
+        crashed = f"{type(exc).__name__}: {exc}"
+        RESULTS.append((f"انهيارُ الأداة ({type(exc).__name__})", False, crashed[:300]))
+        ok = False
     print()
     print("\n".join(_table(RESULTS)))
-    # **والدليلُ يُكتب بالأداة في كلّ تشغيلٍ شامل — ناجحًا أو ساقطًا (R60-2):** كان `tee` بيد الكاتب،
-    # ومرّةً واحدة لم يُحفَظ فيها دليلُ تشغيلٍ ساقطٍ (٤/٥) ⇒ ضاع رصدُ اللاحتميّة. والكتابةُ **قبل**
+    # **والدليلُ يُكتب بالأداة في كلّ تشغيلٍ شامل — ناجحًا أو ساقطًا أو منهارًا (R60-2):** كان `tee` بيد
+    # الكاتب، ومرّةً واحدة لم يُحفَظ فيها دليلُ تشغيلٍ ساقطٍ (٤/٥) ⇒ ضاع رصدُ اللاحتميّة. والكتابةُ **قبل**
     # الخروجَين حتى لا يضيع دليلُ السقوط — وهو الدليلُ الذي يُهمّ أكثر.
-    if args.full:
-        path = evidence_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(evidence_body(ok, RESULTS, full=True), encoding="utf-8")
-        print(f"\n[evidence] دليلُ التشغيل مكتوبٌ بالأداة: {path.relative_to(PROJ)}")
-    sys.exit(0 if ok else 1)
+    try:
+        if args.full:
+            # **زمنٌ واحدٌ للمسار والترويسة** (مقعدُ البنية): كان كلٌّ يستدعي `now()` في موضعه.
+            when = _stamp()
+            path = run_log_path(when)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(evidence_body(ok, RESULTS, full=True, when=when), encoding="utf-8")
+            print(f"\n[evidence] دليلُ التشغيل مكتوبٌ بالأداة: {path.relative_to(PROJ)}")
+    finally:
+        if crashed:
+            print(f"\n[crash] {crashed}", file=sys.stderr)
+        sys.exit(0 if ok else 1)
 
 
 if __name__ == "__main__":

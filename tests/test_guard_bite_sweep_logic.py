@@ -115,3 +115,46 @@ def test_the_summary_counts_each_state_in_its_own_slot():
     dead = {"bite": 14, "no_bite": 0, "skipped": 0, "unrunnable": 1}
     assert m._exit_code(dead, equipped=False) == 1, "تعذّرُ التشغيل مرورٌ مقنّع"
     assert "تعذّر تشغيل" in m._summary(dead, 15, equipped=False)
+
+
+def test_every_named_expectation_points_at_a_real_case():
+    """**الاسمُ المتوقَّع لا يُصبح ميتًا بصمت** (مقعدُ البنية · مراجعة ٦١).
+
+    كان `MUST_NAME` خريطةً **مستقلّةً** عن `CASES` تُقابَل بالاسم نصًّا: فإعادةُ تسمية حالةٍ في `CASES`
+    (أو تصحيحُ حرفٍ في مفتاح) تُبقي المدخلةَ حيّةً في القاموس **وميتةً في القياس** ⇒ يتحوّل «عضّةٌ
+    مُسمّاة» إلى «عضّةٍ عابرةٍ» بلا ضابطٍ يُنبّه. وهذا الضابطُ يجعل إعادةَ التسمية **حمراء**.
+
+    وحدُّه المُعلَن: يمنع المدخلةَ الميتة، **ولا** يكشف حالةً جديدةً كان ينبغي أن تُسمّى فلم تُسمَّ
+    (لا سبيلَ للآلة أن تعرف نيّةَ الكاتب) — يُراجَع في المقعد.
+    """
+    m = _load()
+    names = [c[0] for c in m.CASES]
+    assert len(names) == len(set(names)), f"اسمُ حالةٍ مكرّر ⇒ قياسٌ يبتلع آخر: {names}"
+    dead = sorted(set(m.MUST_NAME) - set(names))
+    assert not dead, f"اسمٌ متوقَّعٌ لا حالةَ له في CASES (إعادةُ تسميةٍ صامتة؟): {dead}"
+    for name, want in m.MUST_NAME.items():
+        assert want.startswith("tests/"), f"{name}: الاسمُ المتوقَّع ليس ضابطاً: {want}"
+
+
+def test_the_command_kind_is_explicit_not_sniffed_from_text():
+    """**نوعُ الأمر صريحٌ لا مُستنتَجٌ من النصّ** (مقعدُ البنية · مراجعة ٦١).
+
+    كان `_run` يقرأ النوعَ بـ`".py" in test and not test.startswith("tests/")` ⇒ ضابطٌ يحمل `.py` في
+    وسيطه كان يُشغَّل **سكربتًا** بلا pytest فيُصنَّف «تعذّر تشغيل» (أي «لم تُقَس») بلا أن يعرف أحد.
+    والآن: **قائمةٌ ⇒ أمرٌ** بمفسّر الشجرة · **نصٌّ ⇒ ضابطُ pytest**. ويُقاس هنا أنّ كلَّ حالةٍ على
+    أحد الشكلين، وأنّ `_command_for` تفصل بينهما فعلًا.
+    """
+    m = _load()
+    pytest_cmd = m._command_for("tests/test_x.py::test_y")
+    script_cmd = m._command_for(["tools/landing_probe.py", "--from-worktree"])
+    assert pytest_cmd[1:3] == ["-m", "pytest"], pytest_cmd
+    assert pytest_cmd[-1] == "tests/test_x.py::test_y", pytest_cmd
+    assert script_cmd == [m.PY, "tools/landing_probe.py", "--from-worktree"], script_cmd
+    kinds = {}
+    for name, _target, _old, _new, test in m.CASES:
+        kinds[name] = "أمر" if isinstance(test, list) else "ضابطُ pytest"
+        assert isinstance(test, (list, str)), f"{name}: شكلُ حالةٍ غيرُ معروف: {type(test)}"
+        if isinstance(test, str):
+            assert test.startswith("tests/"), (
+                f"{name}: نصٌّ لا يبدأ بـ`tests/` ⇒ `_command_for` ستُشغّله كضابطٍ ولن يجد ملفًّا")
+    assert sum(1 for k in kinds.values() if k == "أمر") == 2, f"عددُ الحالات الأمريةّ تغيّر: {kinds}"

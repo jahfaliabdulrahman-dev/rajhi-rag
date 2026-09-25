@@ -11,21 +11,25 @@
    **أولُ مستهلكٍ حقيقيّ لـ`doc_id`**: كانت الحقيقةُ تُكتب ولا تُقرأ.
 4. **الاصطلاحُ مطبوعٌ بجانب كل رقم** (الحركة · الجهة · الإشارة · العدّ) — لا في ذيل تقرير.
 5. **القائمةُ (50/71/17) والمدياتُ تُقاس من مخرَج الأداة** لا من نصّ.
-6. **ضابطٌ سلبيّ من القرص**: صفحةٌ من عشر صفحاتٍ مشتركةِ الرقم بين مستندين ⇒ **مفتاحُ
-7. **عبورُ ١٠٠٠ سطر مُبرَّرٌ لا مُتجاوَز** (مراجعةُ المقاعد ٢٠٢٦-٠٩-٢٤: ٩٢٥ ⇒ ١٠٤٦ · **و١٠٤٦ ⇒ ١١٥١ في إغلاق البوابة (٣) ٢٠٢٦-٠٩-٢٥ — والمقيسُ يُقرأ بـ`wc -l` لا يُحفَظ**): الملفُّ هو
+6. **ضابطٌ سلبيّ من القرص**: صفحةٌ من عشر صفحاتٍ مشتركةِ الرقم بين مستدونين ⇒ **مفتاحُ
+   الصفحةِ وحده كان سيُسقطها**، والمفتاحُ الثنائي `(doc_id, page)` يُبقيها ⇒ يثبت أن
+   المفتاح الثنائي ضرورةٌ مقيسة لا تفضيل.
+7. **عبورُ ١٠٠٠ سطر مُبرَّرٌ لا مُتجاوَز** (مراجعةُ المقاعد ٢٠٢٦-٠٩-٢٤: ٩٢٥ ⇒ ١٠٤٦ · **وما بعده
+   يُقرأ بـ`wc -l` ولا يُحفَظ هنا** — فالرقمُ المحفوظ يتعفّن، وقد تعفّن فعلًا: «١١٥١» بقيت بعد أن
+   نقلتُ كائنَ القرار ومالكي الثمن إلى `tools/gate3.py` · مقعدُ البنية · مراجعة ٦١): الملفُّ هو
    **مالكُ حُكم الختم** (`seal_findings`) لا قارئُ الصفحات — ونقلُ الحُكم إلى `pack_io` يُدخل منطقَ
-   تقاطعِ الطلب في وحدةِ القراءة. والزيادةُ: دالّةٌ نقيّةٌ مُختبَرة (١١ سمًّا) + التوصيلُ بـ`pack_io`
-   · **وزيادةُ البوابة (٣):** كائنُ القرار `GATE3_DECISION` (تاريخه وسقفُ ثمنه ومجتمعه) + دالّتان
-   نقيّتان (`gate3_overlap_ok` للتقاطع · `gate3_price_within_cap` للثمن) + قارئُهما في `--verify` +
-   وقوفٌ بالاسم عند حزمةٍ ناقصة.
+   تقاطعِ الطلب في وحدةِ القراءة. والزيادةُ: دالّةٌ نقيّةٌ مُختبَرة (١١ سمًّا) + التوصيلُ بـ`pack_io`.
+   **والبوابةُ (٣) صارت وحدةً مستقلّة** (`tools/gate3.py`: كائنُ القرار `GATE3_DECISION` وتاريخُه وسقفُ
+   ثمنه ومجتمعُه + دالّتاه النقيّتان `gate3_overlap_ok`/`gate3_price_within_cap` + قارئُ الثمن
+   `capture_withheld`/`price_of_release` وصيغتُه `price_label` + حرسُ العدد `is_count`): اعتُمدت هنا
+   في موضعين (`--build`/`--verify`) وصار القارئُ الثالث (أداةُ الوثائق) يستوردها بلا وحدة البناء —
+   فمن عدّل قاعدةَ الثمن يجد موضعًا واحدًا لا نسختين (مراجعة ٦١ · مقعدُ البنية).
 8. **وسقفُ القرار يقع على الثمن لا على التقاطع (R60-1 · مراجعة ٦٠ · `REQUEST CHANGES`):** كان
    `accepted_pages` يُرخي التقاطعَ نفسَه ⇒ **رخصةٌ** لدخول ١٣٣ صفحةً من ٢٠٠ (ثلثَي الحزمة) إلى
    بيانات التدريب والحكمُ `PASS` (قِيس بدالّةٍ خالصة: ٥٠ و١٣٣ ⇒ `PASS`، و١٣٤ ⇒ شرطيٌّ). ومعنى القرار
    بتأكيد المالك (٢٠٢٦-٠٩-٢٥) **حزمةٌ نظيفة**: لا صفحةَ من الحزمة في التدريب أبدًا، والسقفُ حدٌّ على
    **ثمن** الإفراج (الصفحاتُ المحجوبة عن التدريب: `pack_reserved` + ما يجب إفراجُه) لا على عطبٍ يُمَرَّر.
    فالبوابةُ صارت: `∩ = ∅` **دائمًا** وبقرارٍ أو بلا قرار، والسقفُ يُقاس على الثمن ويُقابَل به.
-   الصفحةِ وحده كان سيُسقطها**، والمفتاحُ الثنائي `(doc_id, page)` يُبقيها ⇒ يثبت أن
-   المفتاح الثنائي ضرورةٌ مقيسة لا تفضيل.
 
 **وكلُّه $0**: القراءةُ من `results/pg-*.json` و`footer` المطبوع — لا نداءَ نموذج.
 """
@@ -45,6 +49,13 @@ from tools.pack_io import pack_facts as _pack_facts, pack_path as _pack_path, ev
 from tools.pack_io import data_root as _data_root, seal as _seal  # noqa: E402
 from tools.pack_io import content_seal as _content_seal  # noqa: E402 — **ختمُ المحتوى بالقارئ الواحد**
 from tools.pack_io import run_page as _run_page  # noqa: E402 — **قارئُ الملفّ المحصَّن** (لا Traceback)
+# **وحدةُ البوابة (٣) — مالِكٌ واحدٌ للقرار والثمن** (مقعدُ البنية · مراجعة ٦١): كائنُ القرار ودالّتا
+# الحكم وقارئُ الثمن وصيغتُه. وكانت قاعدةُ الثمن مكتوبةً هنا في موضعين، ومعها صيغتا عرضٍ ثانيتان ⇒
+# فعُدِّلت موضعًا ونُسي الآخَر ⇒ انحرافٌ كاذبٌ بين `--build` و`--verify`. والأداةُ هنا تُعيد تصديرَها
+# (لا نسخَها) فتبقى النداءاتُ الحاليةُ كما هي.
+from tools.gate3 import (  # noqa: E402,F401 — المذكورةُ تُستعمل هنا، و`capture_withheld` **يُعاد تصديرُه**
+    GATE3_DECISION, capture_withheld, gate3_overlap_ok, gate3_price_within_cap,
+    is_count, price_label, price_of_release)
 
 PROJ = Path(__file__).resolve().parent.parent
 DEFAULTS = {                       # تُحلّ من **الجذر المشترك** (git-common-dir): شجرةُ العمل ترى data/ الأمّ
@@ -63,29 +74,11 @@ CENSUS_SIZES_FOR_SURFACE = (17, 50, 71)
 RANGE_LENGTHS_FOR_SURFACE = (20, 30, 50)
 CENSUS_CANDIDATES = (50, 71, 17)
 
-#: **قرارُ المالك 2026-09-25 — إغلاقُ حكم البوابة (٣): الحزمةُ نظيفة، والسقفُ على الثمن لا على التداخل.**
-#: البوابةُ نفسُها `∩ = ∅` **لا تُرخى بقرار**: أيُّ تقاطعٍ عطبٌ مُسمًّى. والسقفُ `price_cap_pages` يقع على
-#: **ثمن** الإفراج: الصفحاتُ المحجوبة عن التدريب (`pack_reserved` + ما يجب إفراجُه) ≤ ١٣٣. و**لا يُغطّي عطباً**.
-#: · «١٠٠ صفحة» كان **رقماً مُسحوباً**: البوابةُ كانت تقيس المدياتِ وحدَها (١٥٠) والإحصاءُ خارجَ
-#:   مجتمعها ⇒ صُحِّح في review-32 إلى **١٣٣ صفحة · ١,٢٥٣ صفّاً · ٣٢.٦٪** من صفوف التدريب.
-#: · والقياسُ يومَ القرار: التقاطع **٠** بالبناء (`capture_mode=strict` + استثناءُ الحزمة بنيويًّا)
-#:   والثمنُ **١٣٣** (`pack_reserved` في مانيفست الالتقاط) ⇒ فالسقفُ حدُّ أمانٍ لاحق، لا ثمنٌ يُدفع اليوم.
-#: · **وتصحيحٌ مؤرَّخ (مراجعة ٦٠ · R60-1):** كان السقفُ `accepted_pages` على **التقاطع نفسِه** ⇒ رخصةٌ
-#:   لدخول ١٣٣ صفحةً إلى التدريب مع `PASS`. والمعنى بتأكيد المالك: **حزمةٌ نظيفة** ⇒ نُقل السقفُ إلى الثمن،
-#:   وبقي التقاطعُ عطبًا في كلّ الحالات. وانتقالُ `--build` إلى `explicit-list` لا يُبيّض تداخلًا: الشرطُ
-#:   `∩ = ∅` يُقاس على القرص في النمطين معًا.
-GATE3_DECISION = {
-    "date": "2026-09-25",
-    "text": "حكمُ البوابة (٣): حزمةٌ نظيفة — لا صفحةَ من الحزمة في بيانات التدريب، والثمنُ المقبولُ إفراجُ ما لا يزيد على ١٣٣ صفحةً منها عن التدريب",
-    "scope": "المجتمعُ = الحزمةُ كاملةً (الإحصاء ٥٠ + المديات ١٥٠) ∩ صفحاتُ الالتقاط (والمفتاحُ `(doc_id, page)`)",
-    "price_cap_pages": 133,
-    "basis": ("review-32 (REQUEST_CHANGES): ثمنُ الإفراج ١٣٣ صفحةً · ١,٢٥٣ صفّاً · ٣٢.٦٪ — "
-              "والـ«١٠٠» كانت تقيس المديات وحدَها والإحصاءُ خارجَ مجتمعها؛ "
-              "وreview-60 (R60-1): السقفُ كان على التقاطع فرُدَّ إلى الثمن"),
-    "measured_on_decision_day": {"intersection_pages": 0, "price_pages": 133},
-    "limits": ("لا يُرخي التقاطع (∩ = ∅ دائمًا وبقرارٍ أو بلا قرار) · ولا يتمدّد فوق سقف الثمن · "
-               "ولا يُغطّي عطباً · ولا يُعفى من ختم المحتوى ولا من بوابة الحجم ولا من تغطية السموم"),
-}
+#: **قرارُ المالك وثمنُ الإفراج انتقلا إلى `tools/gate3.py`** (مقعدُ البنية · مراجعة ٦١: مالِكٌ واحد
+#: للقاعدة، وأداةُ الوثائق لا تستورد وحدةَ البناء كلَّها لقراءة عدد). وكان التصحيحُ المؤرَّخ هنا:
+#: كان السقفُ `accepted_pages` على **التقاطع نفسِه** ⇒ رخصةٌ لدخول ١٣٣ صفحةً إلى التدريب مع `PASS`
+#: (R60-1 · مراجعة ٦٠). والمعنى بتأكيد المالك: **حزمةٌ نظيفة** ⇒ السقفُ على الثمن، والتقاطعُ عطبٌ
+#: في كلّ الحالات، وانتقالُ `--build` إلى `explicit-list` لا يُبيّض تداخلًا.
 
 DEFINITIONS = (
     ("الحركة", "صفٌّ يحمل مبلغاً نصّيّاً (`movement` غير `null`) — وصفُّ «الرصيد الافتتاحى» ليس حركةً",
@@ -449,35 +442,6 @@ def captured_totals(capture_dir: Path, doc_id: str) -> tuple[int, int]:
     return rows, pages
 
 
-def capture_withheld(capture_dir: Path, doc_id: str) -> dict:
-    """**ثمنُ الحزمة كما ينطق به الالتقاط نفسُه** — الصفحاتُ المحجوبةُ عن التدريب بسبب الحزمة.
-
-    المصدرُ **مانيفستُ الالتقاط** (`<doc_id>/manifest.json` · حقلُ `pages.pack_reserved` وقائمةُ
-    `skipped` بأسبابها) لا نصٌّ ولا اشتقاقٌ آخر: الحزمةُ تُكلِّف التدريبَ صفحاتٍ لم تُلتقَط لأنّها في
-    الحزمة، والرقمُ الذي يُقابَل بسقف القرار يجب أن يأتي من الالتقاط لا من الحزمة (وإلّا شهدت الحزمةُ لنفسها).
-
-    والقيمةُ `None` معناها **غيرُ مقيسة** (لا مانيفست) ⇒ الحكمُ يفشل مُغلَقًا بالاسم، لا يُفترض صفر.
-    """
-    mf = capture_dir / doc_id / "manifest.json"
-    if not mf.exists():
-        return {"pages": None, "source": str(mf), "why": "لا مانيفستَ التقاطٍ ⇒ الثمنُ غيرُ مقيس"}
-    try:
-        d = json.loads(mf.read_text(encoding="utf-8"))
-    except Exception as e:                                        # noqa: BLE001
-        return {"pages": None, "source": str(mf), "why": f"مانيفستٌ غيرُ مقروء: {type(e).__name__}"}
-    pages = ((d.get("pages") or {}).get("pack_reserved"))
-    if not isinstance(pages, int):
-        return {"pages": None, "source": str(mf),
-                "why": "حقلُ `pages.pack_reserved` غائبٌ أو ليس عدداً ⇒ الثمنُ غيرُ مقيس"}
-    listed = sorted(int(s.get("page")) for s in ((d.get("pages") or {}).get("skipped") or [])
-                    if s.get("why") == "pack_reserved" and s.get("page") is not None)
-    return {"pages": pages, "listed": listed, "source": str(mf),
-            "listed_matches": len(listed) == pages,
-            "why": ("القائمةُ المُعلَّلة تطابق العدّاد" if len(listed) == pages else
-                    f"القائمةُ ({len(listed)}) تخالف العدّاد ({pages}) ⇒ تُقرأ لا تُصدَّق")}
-
-
-
 # ── أصنافُ الإحصاء — تُقاس من القرص، ولا تُنقل من نصّ ───────────────────────
 # شرطُ review-29 §٦/٢: «القائمة — 50 (22 بنيوية + 30 صنفَ قارئ) · 71 مع الشواذّ ·
 # التقاطع 17؛ **والعددُ من الأداة، ونصُّ الخطة يُصحَّح عليه لا العكس**».
@@ -722,7 +686,7 @@ def cmd_price_surface(args) -> int:
             sub.out.mkdir(parents=True, exist_ok=True)
             cmd_build(sub)
             pack = json.loads((sub.out / "pack.json").read_text(encoding="utf-8"))
-            price = pack["capture_remedy_price"]
+            price = pack["to_release"]
             rows.append({"census": census_size, "range_length": length,
                          "pack_size": census_size + 3 * length,
                          "released_pages": price["pages"], "released_rows": price["rows"],
@@ -746,30 +710,8 @@ def cmd_price_surface(args) -> int:
     return 0
 
 
-def gate3_overlap_ok(*, inter: list) -> bool:
-    """**البوابة (٣) نفسُها: `∩ = ∅`** — دالّةٌ نقيّةٌ واحدةٌ تُغذّي النصَّ و`rc` والملفّ (لا مصدرين).
-
-    والقرارُ **لا يمرّ من هنا**: كان السقفُ يُرخي التقاطعَ نفسَه فيصير القرارُ رخصةً (R60-1 · مراجعة ٦٠:
-    قِيس أن ٥٠ بل ١٣٣ صفحةً تداخلًا تُعطي `PASS`) — والآن أيُّ تداخلٍ يُسقط البوابةَ بقرارٍ أو بلا قرار.
-    """
-    return not inter
-
-
-def gate3_price_within_cap(*, price_pages: int | None, decision: dict | None) -> bool:
-    """**وهنا يقع القرار**: هل ثمنُ الإفراج (الصفحاتُ المحجوبة عن التدريب) داخل السقف المُعلَن؟
-
-    ثلاثُ حدودٍ تُقاس في الدالّة نفسها فلا تُوصف في النصّ:
-    ① **سقفٌ مُعلَن** (`price_cap_pages`) — القرارُ لا يتمدّد فوقه.
-    ② **وُجودُ قرار**: بلا قرارٍ لا يُغلق الثمنُ (القرارُ للمالك).
-    ③ **والقياسُ لازم**: ثمنٌ غيرُ مقيس (`None`) لا يُقرأ صفرًا ولا يُبرَّأ — **فشلٌ مُغلَق**.
-    """
-    if not decision or not isinstance(price_pages, int):
-        return False
-    return price_pages <= int(decision["price_cap_pages"])
-
-
 def classify_verdict(*, ok: bool, inter: list, blockers: list, remedy_rows: int,
-                     price_pages: int | None = 0, decision: dict | None = None) -> str:
+                     price_pages: int | None = None, decision: dict | None = None) -> str:
     """حكمٌ مُصنَّف — لأن «FAIL» كلمةٌ واحدة لحالتين مختلفتين، والفرقُ بينهما كلُّ المعنى.
 
     * **عطبٌ (عندنا، يُصلَح):** أيُّ محرّكِ بواباتٍ سقط · **وأيُّ تقاطعٍ بين الحزمة والالتقاط** (R60-1:
@@ -779,9 +721,16 @@ def classify_verdict(*, ok: bool, inter: list, blockers: list, remedy_rows: int,
 
     والحرسُ المهمّ: وجودُ عطبٍ **يُبطل** وصفَ «شرطيًّ» — وإلا صار الاسمُ ممرَّ عبورٍ يُخفي عطباً
     خلف عذرٍ إداريّ (وهو صنفُ «الاستبدال الصامت» في §٦).
+
+    **والافتراضُ `price_pages=None` فشلٌ مُغلَق** (كان `0` ⇒ الغائبُ يُقرأ «صفرًا» داخل السقف فيُطبع
+    `PASS (0 ≤ 133)` — وهو عينُ ما منعه المدى في `gate3_price_within_cap` · مقعدُ البنية · مراجعة ٦١).
+
+    **والسطرُ الأوّلُ يسمّي كلَّ حاجب** — ومنه التداخل: كان فرعُ التداخل متأخّرًا عن فرع العطب، فسطرُ
+    الحكم يطبع الحاجبَ الآخرَ وحدَه إذا اجتمعا ⇒ قارئُ سطرٍ واحدٍ لا يرى التداخل (مقعدُ المواصفة · مراجعة ٦١).
     """
     if blockers:
-        return f"FAIL — عطبٌ مُسمّى أعلاه ({' · '.join(blockers)})"
+        overlap = (f" · **تداخلٌ مع الالتقاط** ({len(inter)} صفحة: {inter[:5]})" if inter else "")
+        return f"FAIL — عطبٌ مُسمّى أعلاه ({' · '.join(blockers)}{overlap})"
     if inter:
         return (f"FAIL — **تداخلٌ مع الالتقاط** ({len(inter)} صفحة: {inter[:5]}) ⇒ الحزمةُ ليست نظيفة، "
                 f"والبوابةُ (٣) «∩ = ∅» لا يُرخيها قرارُ مالك — والثمنُ يُدفع بحجب الصفحات عن التدريب "
@@ -791,7 +740,7 @@ def classify_verdict(*, ok: bool, inter: list, blockers: list, remedy_rows: int,
                 f"({price_pages} ≤ {decision['price_cap_pages']} صفحة محجوبةٍ عن التدريب) "
                 f"بقرارِ مالكٍ مؤرَّخ {decision['date']} — لا عطبَ عندنا "
                 f"(و−{remedy_rows} صفًّا خرجت من التدريب)")
-    if decision and not isinstance(price_pages, int):
+    if decision and not is_count(price_pages):
         return ("FAIL — **القياسُ غائب**: التقاطعُ فارغٌ لكنّ ثمنَ الإفراج غيرُ مقيس "
                 "(مانيفستُ الالتقاط غائبٌ أو ناقص) ⇒ لا شهادةَ بلا قياس (فشلٌ مُغلَق)")
     if decision:
@@ -853,8 +802,7 @@ def cmd_build(args) -> int:
     # **ثمنُ الحزمة** (R60-1 · مراجعة ٦٠): ما كلَّفَته الحزمةُ التدريبَ = صفحاتٌ حجبها الالتقاطُ بنيويًّا
     # (`pack_reserved` — مقيسةٌ من مانيفست الالتقاط) **+** صفحاتٌ يجب إفراجُها (`remedy` — نمطُ
     # `explicit-list` حيث الالتقاطُ سابقٌ للحزمة). والمصدرُ الالتقاطُ لا الحزمة: وإلا شهدت لنفسها.
-    withheld = capture_withheld(_path(args.capture), run.identity)
-    price_pages = (withheld["pages"] + len(remedy)) if isinstance(withheld["pages"], int) else None
+    price_pages, withheld = price_of_release(_path(args.capture), run.identity, len(remedy))
     if remedy:
         # ولا يُقسم على صفر: نسبةٌ بمقامٍ صفريّ **مجهولةٌ** لا صفر — وهذا الحارسُ كشفه
         # الضابطُ الحقيقيّ (review-33 §٦/١) الذي نادى `--build` على أرضيةٍ بلا صفوف.
@@ -930,7 +878,8 @@ def cmd_build(args) -> int:
         "identity_history": run.history,
         "identity_source": f"{args.run}/slice_report.json → corpus_provenance.doc_id",
         "capture_mode": mode_used,
-        "capture_remedy_price": {
+        "to_release": {
+            "means": "ما يجب إفراجُه من صفحات الالتقاط — **ليس ثمنَ الإفراج** (الثمنُ في `price_gate`)",
             "pages": len(remedy), "rows": remedy_rows,
             "share_of_training_rows": (round(remedy_rows / train_rows, 4) if train_rows else None),
             "share_unknown_because": (None if train_rows else "صفوفُ حزمة الالتقاط 0 ⇒ النسبةُ مجهولةٌ لا صفر"),
@@ -941,13 +890,12 @@ def cmd_build(args) -> int:
                 remedy_rows / train_rows * 100) if train_rows else
                 "يُعرض بعمودين: نقدٌ $0 · وبياناتٌ −عددُ صفوف (والنسبةُ مجهولة: لا صفوفَ للالتقاط)"),
         },
-        "capture_remedy_price_pages": len(remedy),
         "census": chosen_census, "ranges": measured,
         "census_classes": comp if comp.get("classes") else {"why": comp.get("why", "غيرُ قابلٍ للقياس")},
         "size_gate": chosen["size_gate"],
         "intersection_gate": {"population": "الحزمةُ كاملةً (الإحصاء + المديات)",
                               "pack_pages": len(pack_pages), "captured": len(cap["mine"]),
-                              "intersection": inter, "pass": not inter,
+                              "intersection": inter,
                               "key": "(doc_id, page) — لا page"},
         "poisons": pois,
         # **ختمُ المحتوى** (مراجعة ٤٧ · R47-2): العضويّةُ وبصمةُ أرقام الإحصاء لا تربطان **محتوى**
@@ -971,6 +919,11 @@ def cmd_build(args) -> int:
         blockers.append("تغطيةُ السموم")
     if anchor_drift:
         blockers.append("المجمَّعةُ المُلتزمة (محتوى القرص تغيّر بعد الشهادة)")
+    if not withheld.get("listed_matches", True):
+        # **مقابلةُ العدّاد بقائمته المُعلَّلة تُحكَم لا تُخزَّن** (مراجعة ٦١): كان الحقلُ يُحسب ويُطبَع
+        # ولا يقرؤه أحد ⇒ مانيفستٌ عدّادُه ٥ وقائمتُه فارغة يمرّ `PASS`. وهي شهادةُ الالتقاط لنفسِه.
+        blockers.append(f"قائمةُ الالتقاط تخالف عدّادَه ({len(withheld.get('listed') or [])} "
+                        f"مقابل {withheld.get('pages')})")
     gate3_overlap_shut = gate3_overlap_ok(inter=inter)
     price_shut = gate3_price_within_cap(price_pages=price_pages, decision=GATE3_DECISION)
     gate3_state = ("مُغلَقةٌ — لا تداخل" if gate3_overlap_shut else "**مفتوحةٌ — تداخلٌ قائم**") + (
@@ -981,9 +934,15 @@ def cmd_build(args) -> int:
     # على بوابة الثمن وحدَها — فلا يُكتب في الملفّ ما يخالف ما يُطبع.
     pack["intersection_gate"]["pass"] = gate3_overlap_shut
     pack["intersection_gate"]["owner_decision"] = {
-        **GATE3_DECISION, "measured_intersection": len(inter), "measured_price_pages": price_pages}
+        **GATE3_DECISION, "measured_intersection": len(inter),
+        "measured_price_of_release_pages": price_pages}
     pack["price_gate"] = {
-        "price_pages": price_pages,
+        # **`price_of_release_pages`** لا `price_pages` (P2-٦ · مراجعة ٦١ · مقعدُ البنية): كان في
+        # `pack.json` «ثمنان» بالاسم نفسه — `capture_remedy_price` (= ما يجب إفراجُه، 0 في `strict`)
+        # و`price_gate.price_pages` (= المحجوبُ + ما يجب إفراجُه) — فيقرأ القارئُ كلمتَين متجاورتَين
+        # ورقمَين متضادَّين بلا فارق. الآن: `to_release` (ما يجب إفراجُه) · `withheld_pages` (ما
+        # حُجِب بنيويًّا) · `price_of_release_pages` (الثمنُ = مجموعهما) — كلٌّ باسمه.
+        "price_of_release_pages": price_pages,
         "cap_pages": GATE3_DECISION["price_cap_pages"],
         "pass": price_shut,
         "sources": {"capture_withheld": withheld["source"], "withheld_pages": withheld["pages"],
@@ -1017,8 +976,7 @@ def cmd_build(args) -> int:
         print(f"   {'القائمة المختارة':>22} : {len(chosen_census['pages'])} صفحة"
               f"  (والإحصاءُ المختارُ يُطبع بمصادره أعلاه)")
     # **إغلاقُ البوابة (٣) يُطبع مع قياسه** — فالقرارُ له قارئٌ في المخرَج لا في النثر وحده (مراجعة ٦٠).
-    _price_txt = (f"{price_pages} صفحة" if isinstance(price_pages, int) else
-                  f"غيرُ مقيس ({withheld['why']})")
+    _price_txt = price_label(price_pages, withheld["why"])
     print(f"\nبوابةُ التقاطع (٣): {len(inter)} صفحةً ⇒ {gate3_state}")
     print(f"   وثمنُها المقيسُ: {_price_txt} محجوبةٍ عن التدريب "
           f"(من الالتقاط: {withheld['pages']} · ويجب إفراجُه: {len(remedy)}) · "
@@ -1175,17 +1133,16 @@ def cmd_verify(args) -> int:
     packed_decision = ((pack.get("intersection_gate") or {}).get("owner_decision") or {})
     decision_mismatch = [k for k, v in GATE3_DECISION.items() if packed_decision.get(k) != v]
     # **القياسُ المشتقُّ يُقابَل بحاضره** (نقلةُ مقعد البنية · ومراجعة ٦٠): `measured_intersection`
-    # و`measured_price_pages` رقمان يكتبهما البناء ⇒ يُقاسان الآن ضدّ حاضرهما؛ وإلّا فهما قيمةٌ مُخزَّنةٌ
+    # و`measured_price_of_release_pages` رقمان يكتبهما البناء ⇒ يُقاسان الآن ضدّ حاضرهما؛ وإلّا فهما قيمةٌ مُخزَّنةٌ
     # بلا قارئ (ويُقاس ثمنُ اليوم من مانيفست الالتقاط لا من الحزمة، فلا تشهد الحزمةُ لنفسها).
-    _live_withheld = capture_withheld(_path(args.capture), pack["identity"])
-    live_price = ((_live_withheld["pages"] + len(remedy_live))
-                  if isinstance(_live_withheld["pages"], int) else None)
+    _live_price, _live_withheld = price_of_release(_path(args.capture), pack["identity"], len(remedy_live))
+    live_price = _live_price
     if packed_decision.get("measured_intersection") != len(inter):
         decision_mismatch.append(
             f"measured_intersection «{packed_decision.get('measured_intersection')}» ≠ المقيس «{len(inter)}»")
-    if packed_decision.get("measured_price_pages") != live_price:
+    if packed_decision.get("measured_price_of_release_pages") != live_price:
         decision_mismatch.append(
-            f"measured_price_pages «{packed_decision.get('measured_price_pages')}» ≠ المقيس «{live_price}»")
+            f"measured_price_of_release_pages «{packed_decision.get('measured_price_of_release_pages')}» ≠ المقيس «{live_price}»")
     if ((pack.get("price_gate") or {}).get("cap_pages")) != GATE3_DECISION["price_cap_pages"]:
         decision_mismatch.append(
             f"سقفُ الثمن في الحزمة «{(pack.get('price_gate') or {}).get('cap_pages')}» "
@@ -1197,17 +1154,21 @@ def cmd_verify(args) -> int:
     # كانت مشروطةً بتقاطعٍ غيرِ مُغلق ⇒ فحزمةٌ مُحرَّفةٌ والتقاطعُ صفريّ تُطبع «مُخالفٌ ⇒ يُعاد
     # `--build`» ثمّ «PASS» و`rc=0` — صنفُ «يطبع ✗ ثم يقول PASS» بعينه، وصفُّ السجلّ ١٥ يَعِد بـ`rc=1`.
     ok = (gate3_ok and pack["size_gate"]["pass"]
-          and census_ok and ranges_ok and seal_ok_members and seal_ok)
+          and census_ok and ranges_ok and seal_ok_members and seal_ok
+          and _live_withheld.get("listed_matches", False))
     failures = ([f"التقاطع {len(inter)} صفحةً مع الالتقاط ⇒ الحزمةُ ليست نظيفة (والبوابةُ لا تُرخى بقرار)"]
                 if inter else []) \
                + ([f"ثمنُ الإفراج {live_price} > السقف المُعلَن {GATE3_DECISION['price_cap_pages']} "
                    f"(ويُقاس من الالتقاط: {_live_withheld['source']})"] if not price_shut
-                  and isinstance(live_price, int) else []) \
+                  and is_count(live_price) else []) \
                + ([f"ثمنُ الإفراج غيرُ مقيس ({_live_withheld['why']}) ⇒ فشلٌ مُغلَق"]
-                  if not isinstance(live_price, int) else []) \
+                  if not is_count(live_price) else []) \
+               + ([f"قائمةُ الالتقاط تخالف عدّادَه ({len(_live_withheld.get('listed') or [])} مقابل "
+                   f"{_live_withheld.get('pages')}) ⇒ الالتقاطُ لا يشهد لنفسه"]
+                  if not _live_withheld.get("listed_matches", False) else []) \
                + ([f"قرارُ الحزمة يخالف قرارَ الأداة في: {' · '.join(decision_mismatch)}"]
                   if decision_mismatch else []) + other_failures
-    _price_show = f"{live_price} صفحة" if isinstance(live_price, int) else f"غيرُ مقيس ({_live_withheld['why']})"
+    _price_show = price_label(live_price, _live_withheld["why"])
     print(f"بوابةُ التقاطع (٣): {len(inter)} صفحةً · القرارُ المُلتزم: «{GATE3_DECISION['text']}» "
           f"(مالك · {GATE3_DECISION['date']} · سقفُ الثمن {GATE3_DECISION['price_cap_pages']}) ⇒ "
           + ("مُغلَقةٌ — لا تداخل ✓" if gate3_overlap_shut else "✗ تداخلٌ قائمٌ لا يُرخى بقرار")

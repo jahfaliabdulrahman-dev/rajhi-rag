@@ -106,9 +106,52 @@ def test_the_probe_refuses_to_measure_when_it_cannot_read_the_list(capsys):
     assert "تعذّر القياس" in out, out
 
 
+def test_one_parser_for_the_stamp_format():
+    """**مُحلِّلٌ واحد لصيغة الختم** (P3-١١ · مراجعة ٦١ · مقعد البنية).
+
+    الصيغةُ (`%Y%m%d-%H%M%S`) تُبنى في موضع وتُحلَّل في موضعَين — وفي المقعد كان التشريحُ اليدويُّ
+    مكتوبًا مرّتين ⇒ تغييرُ الصيغة يكسر مُحلِّلَين يجب أن يتقادما معًا (وهو صنفُ «نسختان تفترقان»).
+    والضابطُ: الاسمُ وزمنُ الإيداع يمرّان من المُحلِّل نفسه، وسمُّ `name-stamp` يُزحزح من المُحلِّل
+    نفسِه (٣ ساعات) — فلو تفرّق المُحلِّلان لظهر الفرقُ في الاسم.
+    """
+    assert lp._stamp_dt("20260925-211945").strftime("%Y%m%d-%H%M%S") == "20260925-211945", \
+        "المُحلِّلُ لا يعيد الصيغةَ نفسَها ⇒ الاسمُ وزمنُ الإيداع يفترقان"
+    shifted = lp._name("20260925-211945", "name-stamp")
+    assert shifted.startswith("20260925-181945"), f"السمُّ لا يُزحزح ٣ ساعات: {shifted}"
+    assert lp._name("20260925-211945", None).startswith("20260925-211945")
+    src = (lp.__file__ and Path(lp.__file__).read_text(encoding="utf-8")) or ""
+    assert src.count("stamp[9:11]") == 1, \
+        "تشريحُ الختم مكتوبٌ في أكثر من موضع ⇒ تغييرُ الصيغة يكسر نسخةً تُنسى (يُمرَّر من `_stamp_dt`)"
+
+
 def test_list_prints_the_measured_list_and_the_poisons(capsys):
-    """`--list` يُعلن ما سيقيسه (القائمةُ والخطواتُ والسموم) بلا نسخٍ ولا تشغيل — فالمسبارُ يُقرأ قبل أن يُشغَّل."""
+    """`--list` يُعلن ما سيقيسه (القائمةُ والخطواتُ والسموم) بلا نسخٍ ولا تشغيل — فالمسبارُ يُقرأ قبل أن يُشغَّل.
+
+    **ويُعلن شجرتَه** (مقعدُ البنية · مراجعة ٦١): القائمةُ تُقرأ الآن من شجرة المنفّذ ويُقاس من نسخةٍ
+    منها ⇒ فالقارئُ يجب أن يعرف أيَّ شجرةٍ يقرأ، وإلّا نسب حكمًا لورقٍ غيرِ المقيس.
+    """
     assert lp.main(["--list"]) == 0
     out = capsys.readouterr().out
-    for needle in ("قائمةُ الـCI", "tools/publish_guard.py", "name-stamp", lp.BOX):
+    for needle in ("قائمةُ الـCI", "tools/publish_guard.py", "name-stamp", str(lp.BOX),
+                   str(lp.PROJ), str(lp.WORKFLOW_REL)):
         assert needle in out, f"`--list` لا يُعلن «{needle}»"
+
+
+def test_a_detached_head_does_not_ask_for_a_branch_called_head():
+    """**`HEAD` ليس اسمَ فرع** (حاجبُ مقعد المعايير · مراجعة ٦١ — عطبٌ في الـCI لا في القياس).
+
+    `actions/checkout` في `pull_request` يُنتج رأسًا مفصولًا ⇒ `rev-parse --abbrev-ref HEAD` يُعيد
+    `HEAD` بالحرف ⇒ `git clone --branch HEAD` يفشل بـ`128` ⇒ المسبارُ يُعيد «تعذّر قياس» (2) ⇒
+    **`gate_landing` تحمرّ في كلّ طلب دمجٍ ولو كان العملُ سليمًا** (إشارةُ فشلٍ من البيئة لا من السلوك).
+    والقاعدةُ الآن صريحة: `HEAD`/الفراغ ⇒ `None` ⇒ نسخةٌ بلا `--branch` ثمّ `checkout --detach <sha>`.
+    """
+    assert lp._branch_for_clone("HEAD") is None, "`HEAD` يُمرَّر اسمَ فرعٍ ⇒ الـCI أحمر في كلّ pull_request"
+    assert lp._branch_for_clone("") is None and lp._branch_for_clone("   ") is None
+    assert lp._branch_for_clone("(no branch)") is None, "حالةُ git الأخرى للرأس المفصول"
+    assert lp._branch_for_clone("chore/round56-evidence") == "chore/round56-evidence", \
+        "فرعٌ حقيقيّ يجب أن يُمرَّر كما هو (وإلّا قِيس فرعٌ آخر)"
+    # **والوصلُ لا الوعد**: `measure` يجب أن يمرّر الناتجَ لا الاسمَ الخام.
+    src = (ROOT / "tools" / "landing_probe.py").read_text(encoding="utf-8")
+    assert "_clone(PROJ, dst, sha, _branch_for_clone(branch))" in src.replace("clone_branch", "_branch_for_clone(branch)") \
+        or "clone_branch = _branch_for_clone(branch)" in src, \
+        "`measure` ما زال يمرّر اسمَ الفرع الخام ⇒ الإصلاحُ في دالّةٍ لا تُنادى"
