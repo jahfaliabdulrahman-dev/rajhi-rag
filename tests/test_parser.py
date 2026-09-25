@@ -1,9 +1,21 @@
 """Unit tests: parser + verifier (no API key, no network)."""
 
-from decimal import Decimal
+from __future__ import annotations
 
-from statement_qa.parser import _to_decimal, normalize_digits, parse_text
-from statement_qa.verifier import verify_statement
+import sys
+from decimal import Decimal
+from pathlib import Path
+
+#: تهيئةُ مسارٍ صريحة (نمطُ `tests/test_oracle_confirm.py`): الضابطُ يستورد من `tools/` — ومتى لم يكن
+#: جذرُ المشروع على المسار (تشغيلُ الملفّ وحدَه: `.venv/bin/pytest tests/test_parser.py`) سقط بـ
+#: `ModuleNotFoundError` **لا بحكمٍ على المُحلّل** ⇒ تهيئةٌ صريحة، فالضابطُ يقيس ما وُلد لقياسه.
+PROJ = Path(__file__).resolve().parents[1]
+for _p in (str(PROJ), str(PROJ / "src")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from statement_qa.parser import _to_decimal, normalize_digits, parse_text  # noqa: E402
+from statement_qa.verifier import verify_statement  # noqa: E402
 
 
 # ---------- digit normalization ----------

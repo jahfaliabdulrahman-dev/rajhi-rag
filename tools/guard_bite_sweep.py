@@ -56,6 +56,7 @@ RS = ROOT / "tools/render_state.py"
 RENAMES = ROOT / "handoff/RENAMES.md"
 INTRUDER = ROOT / "handoff/claude/20260924-9999-REPORT-to-claude-poison.md"
 PROOF_T = "tests/test_eval_proof_rows.py"
+QG = ROOT / "tools/qa_gate.py"
 
 CASES = [
     ("م١ · الموضعُ خارج النطاق يُرفض (R52-2)", EQ,
@@ -127,6 +128,12 @@ CASES = [
      "    for x in lines:\n        if x.startswith(\"status:\"):\n            d = ISO_DATE.search(x)",
      "    for x in lines:\n        if True:\n            d = ISO_DATE.search(x)",
      "tests/test_state_union.py::test_a_date_on_a_log_line_does_not_decide"),
+
+    # **الجدولُ الذهبيّ** (مقعدُ المعايير · جولة ٥٨): القفلُ الجديد لم يكن له سمٌّ ⇒ يُضاف.
+    ("م١٢ · الجدولُ الذهبيّ يطابق الوثيقة (R13)", QG,
+     '"٦١,١٦٥١٢": "61165.12"',
+     '"٦١,١٦٥١٢": "35832.43"',
+     "tests/test_parser.py::test_the_gate_goldens_agree_with_this_locked_test"),
 ]
 
 

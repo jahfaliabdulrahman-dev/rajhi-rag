@@ -59,6 +59,7 @@ jobs:
                            tests/test_static_gate.py \
                            tests/test_amount_guard.py \
                            tests/test_answer_names_witness.py \
+                           tests/test_parser.py \
       - name: Real-data files must never be tracked
         id: gate_data_untracked
         run: |
