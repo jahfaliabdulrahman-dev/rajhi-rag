@@ -109,6 +109,45 @@ def test_the_registry_declares_where_each_layer_runs():
         assert claim in doc, f"السجلُّ لا يُعلن حدَّه: «{claim}» غائبة ⇒ ادّعاءُ تغطيةٍ بلا إعلان"
 
 
+# ── الاتّجاهُ السادس (R56-6 · كشفه القياسُ لا المراجعة) ─────────────────────────────────────────────
+#: **الصنف**: صفُّ سجلٍّ يذكر علَماً (`--x`) **غيرَ موجود** في أداته — وُلد من اقتراحٍ قديمٍ كُتب في وثيقةٍ
+#: كأنّه مُنفَّذ (`--foreign-ids`)، ومرّ عليه أمرٌ حقيقيٌّ فأعطى `unrecognized arguments`. والوثيقةُ التي
+#: تسمّي مَدخلاً لا وجودَ له **تُرسل القارئَ إلى أمرٍ يفشل** — وهو أسوأُ من السكوت.
+ROW_RE = re.compile(r"^\|\s*\d+\s*\|.*$", re.M)
+FLAG_RE = re.compile(r"--[a-z][a-z0-9-]+")
+
+
+def vanishing_flags(doc_text: str, sources: dict[str, str]) -> list[tuple[str, str]]:
+    """(الأداة، العَلم) لكلّ عَلمٍ مذكورٍ في صفّ سجلٍّ ولا وجودَ له في مصدر أداته."""
+    out: set[tuple[str, str]] = set()
+    for row in ROW_RE.findall(doc_text):
+        m = TOOL_RE.search(row)
+        if not m:
+            continue
+        src = sources.get(m.group(1), "")
+        for flag in set(FLAG_RE.findall(row)):
+            if f'"{flag}"' not in src and f"'{flag}'" not in src:
+                out.add((m.group(1), flag))
+    return sorted(out)
+
+
+def test_every_flag_named_in_the_registry_exists_in_its_tool():
+    """لا يسمّي السجلُّ علَماً إلا إذا كان مصدرُ أداته يحمله (المصدرُ يُقرأ، لا يُفترض)."""
+    sources = {p.name: p.read_text(encoding="utf-8") for p in (ROOT / "tools").glob("*.py")}
+    assert sources, "لم أقرأ أدوات ⇒ فشلٌ مُغلَق"
+    bad = vanishing_flags(_doc(), sources)
+    assert not bad, (f"أعلامٌ في السجلّ لا وجودَ لها في أدواتها: {bad} ⇒ الوثيقةُ تُرسل إلى أمرٍ يفشل "
+                     f"(وإمّا تبنيها أو تصحّح نصَّك)")
+
+
+def test_the_flag_direction_actually_bites():
+    """سمٌّ مصنوع: صفٌّ يذكر علَماً غريباً ⇒ يُكتشَف (وبدونه يصير الاتّجاهُ ادّعاءً)."""
+    sources = {"turn.py": 'ap.add_argument("--check")'}
+    doc = "| 1 | `tools/turn.py` | يفحص (`--check`) | x | y | z |\n"
+    assert vanishing_flags(doc, sources) == []
+    assert vanishing_flags(doc.replace("--check", "--ghost-flag"), sources) == [("turn.py", "--ghost-flag")]
+
+
 def test_the_registry_reports_its_own_blind_spot():
     """وسجلٌّ يدّعي الكمال يُناقض غرضه: إعلانُ الحدود إلزاميّ."""
     doc = _doc()

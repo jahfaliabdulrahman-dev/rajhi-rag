@@ -235,6 +235,27 @@ def test_without_context_a_hex_token_is_not_flagged():
     assert m.scan_foreign_ids([(1, f"عبارةٌ عابرةٌ فيها {token} بلا سياقٍ")], exists=lambda t: False) == []
 
 
+def test_the_documented_foreign_ids_mode_exists_and_narrows(tmp_path, capsys):
+    """**صنفٌ كشفه القياس لا المراجعة**: `--foreign-ids` كان مذكوراً في `docs/GATES.md` و`docs/ROADMAP.md`
+    (وفي تلقينةٍ للمدقّق) **قبل أن يوجد** — مرّ عليه أمرٌ حقيقيٌّ فأعطى `unrecognized arguments`.
+
+    والإصلاحُ **بناءٌ لا تحريرُ نصّ**: المدخلُ صار موجوداً، وهذا الضابطُ يقيس أنّه **يُضيَّق ولا يُخفي**:
+    في الوضع العاديّ يُبلَّغ عن السِرِّ، وفي وضع P-4 **لا يُبلَّغ** عنه (وإلّا كان علماً يُطفئ طبقةً بصمت).
+    """
+    m = _load()
+    m._is_shallow = lambda: False
+    p = tmp_path / "mixed.txt"
+    foreign = "f" * 39 + "d"
+    p.write_text(f"ANTHROPIC_API_KEY={_fakes()['anthropic']}\ncommit = {foreign} مدموج\n", encoding="utf-8")
+    assert m.main(["--text", str(p)]) == 1
+    full = capsys.readouterr().out
+    assert "anthropic" in full and "المعرّفات" in full, full
+    assert m.main(["--text", str(p), "--foreign-ids"]) == 1
+    only_ids = capsys.readouterr().out
+    assert "المعرّفات" in only_ids and "anthropic" not in only_ids, (
+        f"وضعُ P-4 لم يُضيِّق (ظهر صنفُ سِرٍّ): {only_ids}")
+
+
 def test_the_foreign_id_report_never_prints_the_id(tmp_path, capsys):
     """**حدُّ المدقّق**: يُطبع الملفُّ والسطرُ فقط — لأنّ سجلّاتِ CI في مستودعٍ عامٍّ عامّةٌ أيضاً."""
     m = _load()

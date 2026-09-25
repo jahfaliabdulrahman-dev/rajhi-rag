@@ -170,6 +170,12 @@ def main(argv: list[str] | None = None) -> int:
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--staged", action="store_true", help="الفهرس (ما سيصير التزامًا)")
     g.add_argument("--text", metavar="PATH", default="", help="ملفٌّ مباشرةً")
+    #: **وضعُ P-4 وحده** (كان مذكوراً في `docs/GATES.md` و`docs/ROADMAP.md` **قبل أن يوجد** — اقتراحٌ
+    #: قديمٌ تسرّب إلى الوثائق كأنّه مُنفَّذ، فكشفته ملاحظةٌ مؤرَّخة: `secret_scan.py --foreign-ids` ⇒
+    #: `unrecognized arguments`). والإصلاحُ **بناءٌ لا تحريرُ نصّ**: الوثيقةُ وعدت بمَدخلٍ فصار له وجود،
+    #: وضابطٌ يقيس أنّه **يُضيّق ولا يُخفي** (نمطُ المفاتيح لا يُبلَّغ عنه في هذا الوضع).
+    ap.add_argument("--foreign-ids", action="store_true",
+                    help="وضعُ المعرّفات الغريبة وحده (P-4) — على الفهرس، أو على `--text PATH`")
     a = ap.parse_args(argv)
 
     if _is_shallow():
@@ -183,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"⚠ تعذّر الفحص: لا ملفَّ في {a.text} ⇒ **فشلٌ مُغلَق**")
             return 2
         lines = [(i, l) for i, l in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), 1)]
-        rc = _report(scan_lines(lines), a.text)
+        rc = 0 if a.foreign_ids else _report(scan_lines(lines), a.text)
         return max(rc, _report(scan_foreign_ids(lines), a.text, kind="id"))
 
     try:
@@ -192,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"⚠ تعذّر الفحص: {e} ⇒ **فشلٌ مُغلَق** (لا أُعلن نظافةً لم أرها)")
         return 2
     lines = _added_lines(diff)
-    rc = _report(scan_lines(lines), "الفهرس")
+    rc = 0 if a.foreign_ids else _report(scan_lines(lines), "الفهرس")
     return max(rc, _report(scan_foreign_ids(lines), "الفهرس", kind="id"))
 
 
