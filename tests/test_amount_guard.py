@@ -208,6 +208,8 @@ def test_an_unreadable_threshold_blocks_by_name_instead_of_crashing():
         "غيابُ العتبة يجب أن يُسقط **باسمه** (وإلا فالحُكمُ لا يُقرأ)"
     assert ag.ratchet_violations(None, {}, "x"), "وغيابُ العدّاد كذلك — لا `.items()` على `None`"
     assert ag.ratchet_violations({}, {}, "x") == [], "وغيابُ الظهورات كلِّها نظيفٌ شرعاً (لا دَين)"
+    assert "العدّاد" not in bad[0], \
+        "ولا يُخمَّن الدورُ من موضع الوسيط: في `--pre-push` الوسيطُ الأولُ **خطُّ الأساس المنشور** لا عدّاد"
 
 
 def test_without_a_manifest_the_guard_fails_closed_unless_ci_is_declared(tmp_path, monkeypatch, capsys):
