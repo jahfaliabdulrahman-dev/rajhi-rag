@@ -70,6 +70,7 @@ tests/test_gate_flake_policy.py
 tests/test_flake_ledger.py
 tests/test_landing_probe.py
 tests/test_eval_pack.py
+tests/test_local_reader_probe.py
 ```
 
 **ومعرّفُ كلّ خطوةٍ مُسجَّلٌ هنا — تُقابَل بالـworkflow في الاتّجاهين (لا خطوةَ بلا معرّفٍ مُسجَّل، ولا معرّفَ شبح):**

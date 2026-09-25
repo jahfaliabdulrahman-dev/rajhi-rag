@@ -554,23 +554,29 @@ def write_baseline(deny: set[str], accept_increase: bool = False) -> int:
     return 0
 
 
+UNREADABLE_MARK = "غيرُ مقروء"          # **مصدرٌ واحدٌ للوسم:** تُبنى به الرسالةُ وتُصنَّف به اللافتة
+
+
 def block_claim(bad: list[str], subject: str = "الدفعُ يحمل") -> tuple[str, list[str], bool]:
     """**وسمٌ لا يعدو دليله:** تُصنَّف بنودُ الإسقاط قبل أن تُصاغ اللافتة.
 
     «مدخلٌ غيرُ مقروء في السقاطة» (عتبةٌ أو خطُّ أساسٍ مفقودٌ في الفرع) **ليس** ظهورًا لمبلغ؛ وكانت
     اللافتةُ تحكم «مبالغَ حقيقيّة» على هذا السبب وحده فتعدو دليلَها. الآن:
     - بنودٌ حقيقيّة موجودة ⇒ اللافتةُ نفسُها (ومعها عددُ غير المقروء صريحًا).
-    - ولا بنودَ حقيقيّة ⇒ لافتةٌ تقول «لا أُثبت نظافةً ولا ظهورًا» — **بلا** ادّعاءٍ على المبالغ.
+    - ولا بنودَ حقيقيّة ⇒ لافتةٌ تقول «لا يُثبت نظافةً ولا ظهورًا» — **بلا** ادّعاءٍ على المبالغ.
+
+    والتصنيفُ بـ`UNREADABLE_MARK` — وهو الرمزُ نفسُه الذي تُبنى به الرسالةُ في `ratchet_violations`،
+    فلا تُعيد إعادةُ صياغةِ رسالةٍ العطبَ صامتًا (الوسمُ بالمصدر لا بحضور نصٍّ حرّ).
     """
-    unreadable = [b for b in bad if "غيرُ مقروء" in b]
+    unreadable = [b for b in bad if UNREADABLE_MARK in b]
     real = [b for b in bad if b not in unreadable]
     if real:
         extra = f" — ومعه {len(unreadable)} مدخلٌ غيرُ مقروء" if unreadable else ""
         return (f"⛔ BLOCK — {subject} ظهوراتٍ لمبالغَ حقيقيّة (نصوصٌ لا تُطبع){extra}:",
                 real + unreadable, True)
-    return (f"⛔ BLOCK — {subject} لا يُثبت نظافةً ولا ظهورًا: مدخلُ السقاطة غيرُ مقروء "
-            f"({len(unreadable)}) ⇒ «غيرُ المقروء ليس نظيفاً» (القاعدة ١٢) — ولا ادّعاءَ على المبالغ هنا:",
-            unreadable, False)
+    return (f"⛔ BLOCK — لا يُثبت هذا الفحصُ نظافةً ولا ظهورًا: مدخلُ السقاطة "
+            f"{UNREADABLE_MARK} ({len(unreadable)}) ⇒ «غيرُ المقروء ليس نظيفاً» (القاعدة ١٢) — "
+            f"ولا ادّعاءَ على المبالغ هنا:", unreadable, False)
 
 
 def ratchet_violations(counts: dict[str, dict] | None, base: dict[str, dict] | None,
@@ -589,7 +595,7 @@ def ratchet_violations(counts: dict[str, dict] | None, base: dict[str, dict] | N
         # بهذه الدالّة مرّتان بترتيبين مختلفَي المعنى — فالأولُ هناك **خطُّ الأساس المنشورُ في
         # الالتزام** لا «العدّاد»؛ فكان وسمُ «العدّاد» يُشير إلى غير موضعه. الوسمُ الآن دورٌ
         # محايد، والموضعُ المُصلَح يُسمّيه `where` بنفسه.
-        return [f"⛔ مدخلٌ غيرُ مقروء في السقاطة (عتبةٌ أو عدّاد) ⇒ لا أُثبت نظافةَ الظهورات — "
+        return [f"⛔ مدخلٌ {UNREADABLE_MARK} في السقاطة (عتبةٌ أو عدّاد) ⇒ لا أُثبت نظافةَ الظهورات — "
                 f"«غيرُ المقروء ليس نظيفاً» (القاعدة ١٢) — {where}"]
     bad: list[str] = []
     for rel, cur in sorted(counts.items(), key=lambda x: -x[1]["count"]):
@@ -1203,10 +1209,12 @@ def main(argv=None) -> int:
         counts = counts_with_commitment(deny)
         bad = ratchet_violations(counts, read_baseline(), "الشجرةُ العاملة")
         if bad:
-            head, shown, _ = block_claim(bad, subject="الشجرةُ تحمل")
+            head, shown, remedy = block_claim(bad, subject="الشجرةُ تحمل")
             print(head)
             for b in shown[:25]:
                 print("   " + b)
+            if remedy:      # **تناظرٌ:** النصيحةُ لا تسقط لمّا يُنادى من مسار السقاطة (كانت `_` فتُهمَل)
+                print("   ⇒ صحّح القيمةَ أو خفّض خطَّ الأساس بعد إعادة الكتابة (القاعدة ١٢: لا يُعفى موضع)")
             return 1
         print(f"PASS — لا ملفَّ تجاوز خطَّ الأساس ({sum(v['count'] for v in counts.values())} ظهوراً مُعلَنٌ في "
               f"{len(counts)} ملفّاً كما هو)")
