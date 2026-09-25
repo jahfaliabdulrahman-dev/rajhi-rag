@@ -24,15 +24,18 @@
 2. عددُ المُخاطَبين بالقاعدة يُقاس ويُقابَل بالثابت (`SUBJECTS_LANDED`) ⇒ لا قاعدةَ صامتةٌ على فراغ
    (وحين يهبط أوّلُ جوابٍ يصرخ الضابطُ فيُقرَن الشاهدُ ويُحدَّث الثابتُ في الالتزام نفسه — وهو صنفُ
    «سقفِ معدّلِ المعرّفات الغريبة» القائم في المستودع).
-3. يُقابَل **وجودُ المسار** و**مقامُه** (تحت `handoff/claude/`: الحُكمُ يُصدره المدقّق)، لا صحّةُ كونِه
-   المراجعةَ **المقصودة بعينها** (غيرُ قابلٍ للقياس آليّاً — يُعلَن).
+3. يُقابَل **وجودُ المسار** و**مقامُه** (تحت `handoff/claude/`: الحُكمُ يُصدره المدقّق) **وأنّه حُكمٌ
+   فعلًا بربطٍ مقيس (R59-2 · قاسه المدقّق في مراجعة ٥٩)**: الحُكمُ **يحمل زمنَه في اسمه** (فمراجعة)،
+   **وهو أحدثُ حُكمٍ زمنُه قبل زمن الجواب** — فلا يمرّ ملفٌّ ساكنٌ في الصندوق (`STATE.md` ·
+   `gate-injection-harness.py` قِيس أنّهما كانا يمرّان) ولا حُكمٌ قديمٌ تجاوزه أحدثُ منه.
 4. والقياسُ على **الشجرة المُودَعة (`HEAD`)** لا على قرص الكاتب: ما لم يُودَع لا يُقاس. وهذا حدُّ الاتّجاهين
    معاً — لا «تذكيرٌ محلّيّ» يُتجاهَل، ولا موتٌ دائريٌّ للفروع.
 5. صندوقُ المدقّق (`handoff/claude/`) خارج هذا الاتّجاه: المراجعةُ **تُصدر** حُكماً ولا تُجيب عنه.
-6. **وحدُّ الصنف (SP-2 · قاسه مقعد المواصفة):** المُخاطَبون = ما اسمُه يحمل `ANSWER_MARK`؛ وجوابٌ سُمّي بغير
-   ذلك (`…-ANSWER-58-…`) لا يُطالَب — **لكنّه حدٌّ يُقاس لا صامت** (`NON_ANSWER_FILES_SINCE_RULE`): كلُّ
-   ملفٍّ في الصندوق هبط بعد القاعدة وليس من الصنف يُقابَل بالعدّاد، فالزيادةُ تُصرخ ليقرّر الكاتبُ: يُسمّيه
-   جواباً بشاهد، أو يُعلن صنفَه ويُحدّث العدّاد في الالتزام نفسِه.
+6. **وحدُّ الصنف (SP-2 · قاسه مقعد المواصفة · ثمّ R61-1):** المُخاطَبون = ما اسمُه يحمل `ANSWER_MARK`؛ وجوابٌ
+   سُمّي بغير ذلك (`…-ANSWER-58-…`) لا يُطالَب — **لكنّه حدٌّ يُقاس لا صامت** (`NON_ANSWER_FILES_SINCE_RULE`):
+   كلُّ ملفٍّ في الصندوق هبط بعد القاعدة وليس من الصنف **يُسمّى هنا باسمه وصنفه**. وكان **عدّادًا** حتّى
+   R61-1: ورفعُ رقمٍ («٦ ⇒ ٧») يُدخل ملفًّا **بلا أن يُسمّى صنفُه ولا اسمُه** ⇒ فيُدخَل ملفٌّ جديدٌ بلا سؤال،
+   وهو بعينه ما يُرخي البوّابة. فالصنفُ **هويّةٌ** لا عدد (كـ`DECLARED_NON_VERDICT` في البند ٨).
 7. و`WITNESS_FROM` **مكتوبٌ بيدٍ لا مُشتقّ** (الالتزامُ الحاملُ للحارس قد يُعاد تركيبُه فيتغيّر زمنُه) —
    ويُقاس **موضعُه** بدلاً من وصْفِه: بعد آخرِ جوابٍ قديم، ولا جوابَ في الفراغ بينهما.
 8. **والشاهدُ الذاتيُّ لا يعدو دليلَه (R58-2 · قاسه المدقّق في مراجعة ٥٨):** `in-reply-to` يشير إلى **الملفّ
@@ -78,14 +81,43 @@ WITNESS_FROM = "20260925-044600"
 #: وملفّاتُ الصندوق بعد القاعدة خارج الصنف المُعلَن (البند ٦).
 PRE_RULE_ANSWERS = 15
 SUBJECTS_LANDED = 1
-NON_ANSWER_FILES_SINCE_RULE = 6
-#: (١ = تقريرُ الإغلاق إلى المالك `20260925-0520-REPORT-to-owner-…` · ٢ = قرارُ التكليف
-#: `20260925-0540-DECISION-to-claude-…` · ٣ = تقريرُ البندين ①/② إلى المالك
-#: `20260925-1330-REPORT-to-owner-flake-policy-closed-and-encrypted-backup-to-drive.md`
-#: · ٤ = تقريرُ إغلاق بنود المقاعد الثلاثة `20260925-1340-REPORT-to-owner-three-seat-closures-…`
-#: · ٥ = تقريرُ الجولة ٥٩ (إغلاقُ بنود مراجعة الكود) `20260925-1520-REPORT-to-owner-round-59-…`
-#: · ٦ = تقريرُ إغلاق البوابة (٣) بقرارٍ مؤرَّخ `20260925-1808-REPORT-to-owner-gate3-closed-…`
-#: — وكلُّها **صنفٌ مُعلَنٌ بالاسم** لا صامت.)
+#: **أصنافُ ما ليس جوابًا — بالهويّة لا بالعدد (R61-1).** كلُّ ملفٍّ في صندوق المنفّذ هبط بعد
+#: `WITNESS_FROM` وليس من صنف `ANSWER_MARK` **يُسمّى هنا باسمه وصنفه**. وكان عدّادًا (`6`): ورفعُ رقمٍ
+#: يُدخل ملفًّا بلا أن يُسمّى اسمُه ولا صنفُه — فيُدخَل الجديدُ بلا سؤال، وهو ما يُرخي البوّابة.
+#: (والقياسُ يبقى على `HEAD`، والقائمةُ تُقابَل **في الاتّجاهين**: ناقصٌ يُسقط، وزائدٌ يُسقط.)
+NON_ANSWER_FILES_SINCE_RULE = {
+    "handoff/sulaiman/20260925-0520-REPORT-to-owner-round57-closure-and-the-landing-decision.md":
+        "تقريرٌ للمالك — لا يُجيب حُكماً",
+    "handoff/sulaiman/20260925-0540-DECISION-to-claude-land-on-the-pushed-branch.md":
+        "قرارُ المنفّذ للمدقّق (سياسةُ الهبوط) — لا يُجيب حُكماً",
+    "handoff/sulaiman/20260925-1330-REPORT-to-owner-flake-policy-closed-and-encrypted-backup-to-drive.md":
+        "تقريرٌ للمالك — لا يُجيب حُكماً",
+    "handoff/sulaiman/20260925-1340-REPORT-to-owner-three-seat-closures-on-the-flake-policy-and-the-deliberate-relaxation.md":
+        "تقريرٌ للمالك — لا يُجيب حُكماً",
+    "handoff/sulaiman/20260925-1520-REPORT-to-owner-round-59-three-seat-findings-closed.md":
+        "تقريرٌ للمالك — لا يُجيب حُكماً",
+    "handoff/sulaiman/20260925-1808-REPORT-to-owner-gate3-closed-by-dated-owner-decision.md":
+        "تقريرٌ للمالك — لا يُجيب حُكماً",
+    "handoff/sulaiman/20260925-2009-PLAN-round61-review59-60-blockers-and-the-landing-probe.md":
+        "خطةُ جولةٍ (وثيقةُ تنفيذٍ قبل العمل) — لا تُجيب حُكماً ولا تُودِع شاهداً",
+    # **وملفّا الجولة ٦١ الأخيران (مقعدا المعايير والبنية · مراجعة ٦١):** المسبارُ كشفهما قبل الدفع —
+    # `landing_probe --from-worktree` يُودِع ما يراه `git add -A` (ومنه غيرُ المُتتبَّع) ثمّ يقيس قائمةَ
+    # الـCI على النسخة ⇒ فملفّان جديدان بلا صنفٍ مُعلَن **يُسقطان الهبوط** (وهذا هو الصنفُ الرابع:
+    # R57-1 · R58-1 · R59-1 · وهذه). فالدرسُ مُقيَّد هنا: كلُّ ملفٍّ جديدٍ في الصندوق يُسمّى **قبل** أن يُقاس.
+    "handoff/sulaiman/20260925-213407-SEATS-round61-three-seats-verbatim-standards-spec-structure.md":
+        "نصُّ المقاعد الثلاثة بالحرف (نقلٌ للمُدخَل) — لا يُجيب حُكماً",
+    "handoff/sulaiman/20260925-2140-REPORT-round61-closure-of-three-seats-and-final-quality.md":
+        "تقريرٌ للمالك (تقريرُ الجولة) — لا يُجيب حُكماً",
+    "handoff/sulaiman/20260925-2358-PLAN-round62-ci-per-pushed-ref-and-the-two-red-auditor-branches.md":
+        "خطةُ جولةٍ (وثيقةُ تنفيذٍ قبل العمل) — لا تُجيب حُكماً ولا تُودِع شاهداً",
+    # **وملفّا الجولة ٦٢ (نفسُ الصنف الرابع المقيس في الجولة ٦١):** يُسمّيان **قبل** أن يُقاسا — فالدرسُ
+    # القائم «كلُّ ملفٍّ جديدٍ في الصندوق يُسمّى قبل أن يُقاس» لا يُمحى بمجرد أن مرّ مرّة.
+    "handoff/sulaiman/20260926-0045-SEATS-round62-three-seats-verbatim-standards-spec-structure.md":
+        "نصُّ المقاعد الثلاثة بالحرف (نقلٌ للمُدخَل) — لا يُجيب حُكماً",
+    "handoff/sulaiman/20260926-0045-REPORT-round62-closure-of-the-three-seat-blocker-and-final-quality.md":
+        "تقريرٌ للمالك (تقريرُ الجولة) — لا يُجيب حُكماً",
+}
+#: وأصنافُها مذكورةٌ **في القاموس نفسِه** (`NON_ANSWER_FILES_SINCE_RULE` — البند ٦) لا في تعليقٍ ثانٍ.
 #: **ومُخاطَبٌ واحدٌ هبط بالقاعدة، وهو صنفٌ مُعلَنٌ بالاسم:** `20260925-0723-REPORT-to-claude-r13-…`
 #: (يُعلن `class:` ولا يُجيب حُكماً — R58-2). وبعده (مراجعة ٥٩ · مقعدا المعايير والبنية) صار الشاهدُ في
 #: حقله يُسقطه: **الإعلانُ مع استشهادٍ = غطاء، لا صنف** ⇒ فلم يبقَ مُخاطَبٌ بشاهدٍ حُكم في الشجرة،
@@ -156,6 +188,17 @@ def _witness_path(raw: str) -> str:
     return parts[0] if parts else ""
 
 
+def newest_verdict_before(tree: set[str], answer_stamp: str) -> str | None:
+    """**أحدثُ حُكمٍ** زمنُه لا يتجاوز زمنَ الجواب — أو `None` إن لم يسبقه حُكم.
+
+    (R59-2 · والحدُّ ٢ المُعلَن: «حُكمٌ قديمٌ يمرّ» — فصار **مربوطًا**: الشاهدُ هو أحدثُ مراجعةٍ سبقت
+    الجواب. والحدُّ مُعلَن: هذا **ربطٌ لا إثباتُ نيّة** — أيُّهما كان المقصودَ فعلًا لا يُقاس آليًّا.)
+    """
+    cands = sorted((s, p) for p in tree
+                   if p.startswith(WITNESS_ROOT) and p.endswith(".md") and (s := stamp_of(p)) and s <= answer_stamp)
+    return cands[-1][1] if cands else None
+
+
 def ungated_answers(answers: dict[str, str], tree: set[str], since: str = WITNESS_FROM) -> list[str]:
     """كلُّ جوابٍ هبط بعد القاعدة **ولا يُسمّي حُكماً موجوداً في الشجرة** — (دالّةٌ خالصةٌ ⇒ تُقاس بسمّ).
 
@@ -197,10 +240,52 @@ def ungated_answers(answers: dict[str, str], tree: set[str], since: str = WITNES
                        f"(الحُكمُ يُصدِره المدقّق؛ والقرارُ والتوجيهُ ليسا حُكماً)")
             continue
         w_stamp = stamp_of(witness)
-        if w_stamp and w_stamp > stamp:
+        if not w_stamp:
+            # **R59-2:** «الشاهدُ حُكم» كان يُقارَب بـ«الشاهدُ في صندوق المدقّق» ⇒ فملفٌّ ساكنٌ هناك
+            # (بلا زمنٍ في اسمه) يمرّ شاهداً وهو ليس حُكماً. والحُكمُ مراجعةٌ تحمل زمنَها.
+            out.append(f"{path} · الشاهدُ «{witness}» **بلا زمنٍ في اسمه** ⇒ ليس حُكماً (R59-2: "
+                       f"الحُكمُ مراجعةٌ تحمل زمنَها، لا ملفٌّ ساكنٌ في صندوق المدقّق)")
+            continue
+        if w_stamp > stamp:
             out.append(f"{path} · الشاهدُ «{witness}» أُودِع **بعد** الجواب ({w_stamp} > {stamp}) — "
                        f"§٢٧: الشاهدُ يُدفَع قبل أن يُجاب")
+            continue
+        newest = newest_verdict_before(tree, stamp)
+        if newest and witness != newest:
+            out.append(f"{path} · الشاهدُ «{witness}» ليس أحدثَ حُكمٍ قبل الجواب — والأحدثُ «{newest}» "
+                       f"(الحدُّ ٢ كان مُعلَنًا: «حُكمٌ قديمٌ يمرّ» ⇒ فصار مربوطًا · R59-2)")
     return sorted(out)
+
+
+def test_a_witness_without_a_time_is_not_a_verdict():
+    """**R59-2 (P3 · قاسه المدقّق في مراجعة ٥٩):** شرطُ «الشاهدُ حُكم» كان يُقارَب بـ«الشاهدُ تحت
+    `handoff/claude/`» ⇒ فملفٌّ **ساكنٌ** هناك بلا زمنٍ في اسمه يمرّ شاهداً وهو ليس حُكماً. وقِيس أنّ
+    `handoff/claude/STATE.md` و`handoff/claude/gate-injection-harness.py` **يمرّان** قبل الإصلاح.
+    والآن: الحُكمُ **يحمل زمنَه** (فمراجعة)، **وهو أحدثُ حُكمٍ قبل الجواب** (ربطُ الحدّ ٢ المُعلَن).
+    """
+    old = "handoff/claude/20260925-021953-third-eye-review-55-x.md"
+    new = "handoff/claude/20260925-0900-third-eye-review-56-y.md"
+    tree = {old, new, "handoff/claude/STATE.md", "handoff/claude/gate-injection-harness.py",
+            "handoff/sulaiman/20260925-1000-REPORT-to-claude-z.md"}
+    answer = "handoff/sulaiman/20260925-1000-REPORT-to-claude-z.md"
+
+    def only_one(target: str) -> str:
+        got = ungated_answers({answer: f"in-reply-to: {target}\n"}, tree)
+        assert len(got) == 1, (target, got)
+        return got[0]
+
+    # (١) **ملفٌّ ساكنٌ في الصندوق ليس حُكماً** — وهما الملفّان اللذان كانا يمرّان (برهانُ المدقّق)
+    assert "بلا زمن" in only_one("handoff/claude/STATE.md")
+    assert "بلا زمن" in only_one("handoff/claude/gate-injection-harness.py")
+    # (٢) **حُكمٌ قديمٌ تجاوزه أحدثُ منه** ⇒ يسقط («الحدُّ ٢» كان مُعلَنًا غيرَ مقيس)
+    assert "ليس أحدث" in only_one(old)
+    # (٣) وأحدثُ حُكمٍ قبل الجواب ⇒ يمرّ (فلا موتَ دائريًّا للفروع)
+    assert ungated_answers({answer: f"in-reply-to: {new}\n"}, tree) == []
+    # (٤) والربطُ يُقاس مباشرةً: أحدثُ ما قبل الجواب هو الجديد، وأحدثُ ما قبل حُكمٍ أقدمَ هو القديم
+    assert newest_verdict_before(tree, "20260925-100000") == new
+    assert newest_verdict_before(tree, "20260925-050000") == old
+    # (٥) وجوابٌ لا حُكمَ قبلَه ⇒ لا ربطَ (فالربطُ على مقامٍ، وما لا مقامَ له لا يُلزَم باسمٍ)
+    assert newest_verdict_before(tree, "20260925-010000") is None
 
 
 def test_the_witness_must_be_a_verdict_not_any_path_in_the_tree():
@@ -319,9 +404,10 @@ def test_the_answer_class_is_measured_not_assumed():
                    if p.startswith(BOX) and p.endswith(".md")
                    and (s := stamp_of(p)) and s >= WITNESS_FROM)
     others = [p for p in since if p not in known]
-    assert len(others) == NON_ANSWER_FILES_SINCE_RULE, (
-        f"ملفّاتٌ في صندوق المنفّذ هبطت بعد القاعدة وليست من صنف `{ANSWER_MARK}`: {others} ⇒ "
-        f"إمّا يُسمّى جواباً يُعلن شاهدَه، وإمّا يُعلن صنفُه بالعدّاد في الالتزام نفسِه")
+    assert sorted(others) == sorted(NON_ANSWER_FILES_SINCE_RULE), (
+        f"ملفّاتٌ في صندوق المنفّذ هبطت بعد القاعدة وليست من صنف `{ANSWER_MARK}`: المُقاسُ {others} "
+        f"والمُعلَنُ {sorted(NON_ANSWER_FILES_SINCE_RULE)} ⇒ إمّا يُسمّى جواباً يُعلن شاهدَه، وإمّا "
+        f"**يُسمّى هنا باسمه وصنفه** — ولا يُرفع عددٌ وحدَه (العددُ المُرخى يُخفي صنفاً جديداً · R61-1)")
 
 
 def test_the_gate_bites_on_the_class_it_closes():

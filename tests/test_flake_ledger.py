@@ -8,16 +8,20 @@
 
 **الحدودُ المُعلَنة (ما لم يُثبت):**
 1. النافذةُ تُقرأ من **ملفّات أدلّةٍ محفوظة** (`handoff/sulaiman/*gate-evidence-*.txt`) ⇒ تشغيلٌ لم تُحفظ
-   أدلّتُه **خارج النافذة** (فالنافذةُ «آخر N تشغيلٍ محفوظ»، لا «آخر N تشغيل»).
-2. وغيابُ الوسم من ملفّ الدليل = نظافة **فقط إن كان الملفُّ يحمل المخرجَ كاملًا** (وهو كذلك: `tee` لمخرج
-   `qa_gate --full` في سطرٍ واحد) — ولو كان مقتطعًا لصار الغيابُ صمتًا لا دليلًا.
-3. **والتسجيلُ بيد المنفّذ لا بيد الأداة:** البوّابةُ لا تكتب في الشجرة المتتبَّعة (تشغيلٌ نظيفٌ لا يجوز أن
-   يوسّخ المستودع) ⇒ فالثابتُ المعلَن هو ما يمنع الإضافةَ الصامتة، لا الكتابةُ الآلية.
+   أدلّتُه **خارج النافذة** (فالنافذةُ «آخر N تشغيلٍ محفوظ»، لا «آخر N تشغيل»). وكان حفظُها بيد المنفّذ،
+   وصار **بالأداة** (R60-2: `qa_gate --full` يكتب دليلَه في كلّ تشغيل) — فاحتمالُ الخروج من النافذة
+   صار محصورًا في تشغيلٍ لم تُشغَّل فيه الأداة أصلًا.
+2. وغيابُ الوسم من ملفّ الدليل = نظافة **فقط إن كان الملفُّ يحمل المخرجَ كاملًا** (وهو كذلك: سطرُ
+   `GATES: n/n passed` + جدولُ البوّابات) — ولو كان مقتطعًا لصار الغيابُ صمتًا لا دليلًا.
+3. **والتسجيلُ صار بيد الأداة لا بيد المنفّذ (R60-2)** والكاتبُ والقارئُ على موضعٍ واحد يُقابَلان هنا:
+   كان الشرطُ «البوّابةُ لا تكتب في الشجرة» (تشغيلٌ نظيفٌ لا يوسّخ المستودع)، **وثمنُها قِيس**: واقعةُ ٤/٥
+   خرجت من النافذة لأنّ أحدًا لم يحفظ مخرجَها. والثمنُ المتبقّى مُعلَن: كلُّ تشغيلٍ شاملٍ يُنشئ ملفًا.
 4. **وأثرُ ما قبل السجلّ لا يُحسب** (فتحُ حسابٍ على الماضي يُغرق الراتشت بأثرٍ لا يُصلَح) — يُذكر في متن
    السجلّ للتاريخ فقط.
 """
 from __future__ import annotations
 
+import fnmatch
 import re
 import sys
 from pathlib import Path
@@ -34,7 +38,8 @@ EVIDENCE_GLOB = "*gate-evidence-*.txt"
 WINDOW = 5
 MAX_FLAKY_RUNS_IN_WINDOW = 1
 #: **عددُ قيود السجلّ المُعلَن** — إضافةُ قيدٍ بلا رفعِ هذا الثابت في الالتزام نفسه ⇒ حمراء (راتشت).
-DECLARED_LEDGER_ENTRIES = 0
+#: (١ = واقعةُ «٤/٥»: ثقبُ مقام التغطية الذي قُرئ نظيفًا فخرج من النافذة — قُيِّد في R60-2.)
+DECLARED_LEDGER_ENTRIES = 1
 #: صفُّ قيدٍ حقيقيّ في جدول السجلّ: يبدأ بالرقم ثمّ التاريخ (وصفُ «لا قيدَ» ليس قيدًا).
 ENTRY_RE = r"^\|\s*\d+\s*\|"
 ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
@@ -83,17 +88,96 @@ def evidence_runs(root: Path = ROOT) -> list[tuple[str, str]]:
     return [(p.name, p.read_text(encoding="utf-8", errors="replace")) for p in files]
 
 
+def orphan_entries(entries: list[str], runs: list[tuple[str, str]]) -> list[str]:
+    """**قيودٌ بلا دليلٍ محفوظ** — أحداثٌ استهلكت الميزانيّةَ ولا يقرؤها العدّاد (S6 · مراجعة ٦١).
+
+    كانت النافذةُ تُقرأ من **ملفّات الأدلّة** وحدَها، وقيدُ السجلّ الوحيدُ (واقعةُ ٤/٥) دليلُه
+    «لم يُحفَظ» ⇒ فقُرئت «0/1» وسجلٌّ فيه واقعةٌ مقيَّدة: أي أنّ الميزانيّةَ — وهي شرطُ منع «أعِدْ حتى
+    تخضرّ» — لا ترى الحالةَ التي وُضعت لها. والقاعدةُ الآن: **الحدثُ يُحصى بدليله أو بقيّدِه**؛ فقيدٌ
+    لا يُسمّي ملفَّ دليلٍ موجودًا في النافذة يُحصى حدثًا مستقلًّا (لا يُسقَط).
+    """
+    names = {name for name, _ in runs}
+    return [e for e in entries if not any(n in e for n in names)]
+
+
 def over_budget(runs: list[tuple[str, str]], window: int = WINDOW,
-                budget: int = MAX_FLAKY_RUNS_IN_WINDOW) -> list[str]:
+                budget: int = MAX_FLAKY_RUNS_IN_WINDOW, *,
+                entries: list[str] | None = None) -> list[str]:
     """التشغيلاتُ المُلوَّثة داخل **آخر** `window` تشغيلٍ محفوظ — إن تجاوزت `budget` فالقائمةُ غيرُ فارغة.
+
+    **والميزانيّةُ تُقاس على (التشغيلات المحفوظة ∪ القيود بلا دليل)** (S6): قيدٌ بلا دليلٍ محفوظٍ كان
+    يخرج من النافذة بإسقاطه، فيُقرأ سجلٌّ فيه واقعةٌ وميزانيّةٌ «0/1». والحدثُ الواحدُ يُحصى **مرّةً**:
+    القيدُ الذي يُسمّي ملفَّ دليلٍ موجودًا هو الحدثُ نفسُه (وقد يُحصى بالوسم في ملفّه إن كان يحمله).
 
     دالّةٌ خالصةٌ ⇒ تُقاس بسمٍّ مصنوع (لا بالشجرة الحيّة وحدها).
     """
     tail = runs[-window:] if window > 0 else runs
     dirty = [name for name, body in tail if FLAKY_MARK in body]
-    if len(dirty) <= budget:
+    orphans = orphan_entries(entries or [], runs)
+    if len(dirty) + len(orphans) <= budget:
         return []
-    return dirty
+    return dirty + [f"قيدٌ بلا دليلٍ محفوظ: {e.split('|')[1].strip() if e.count('|') > 1 else e[:24]}…"
+                    for e in orphans]
+
+
+def test_the_writer_and_the_reader_agree_on_where_evidence_lives():
+    """**R60-2 (حركة ٢): الكاتبُ والقارئُ على موضعٍ واحد** — الأداةُ تكتب دليلَها بنفسها، والحارسُ
+    يقرأ النافذةَ من النمط نفسه. وافتراقُهما = نافذةٌ تقرأ **أقلَّ** ممّا جرى بصمت (وهو ما وقع: تشغيلُ
+    ٤/٥ لم تُحفظ أدلّتُه ⇒ خرج من النافذة)، فالمقابلةُ هنا تمنع الافتراقَ صامتًا.
+    """
+    from qa_gate import EVIDENCE_DIR as TOOL_EVIDENCE_DIR
+    from qa_gate import EVIDENCE_SUFFIX, run_log_path
+
+    assert TOOL_EVIDENCE_DIR == EVIDENCE_DIR, (
+        f"الأداةُ تكتب في {TOOL_EVIDENCE_DIR} والحارسُ يقرأ {EVIDENCE_DIR} ⇒ دليلٌ خارج النافذة")
+    name = run_log_path().name
+    assert fnmatch.fnmatch(name, EVIDENCE_GLOB), (
+        f"اسمُ دليل الأداة «{name}» لا يوافق النمطَ «{EVIDENCE_GLOB}» الذي تقرأ به النافذةُ")
+    assert name.endswith(EVIDENCE_SUFFIX) and name[:8].isdigit() and name[8] == "-", (
+        f"اسمُ الدليل يجب أن يبدأ بزمنٍ («YYYYMMDD-HHMMSS-…») ⇒ الترتيبُ الزمنيُّ للنافذة: {name}")
+
+
+def test_the_evidence_header_carries_no_home_path():
+    """**قاسه مسبارُ الهبوط قبل الدفع (R60-2):** ترويسةُ الدليل كانت تكتب `sys.executable` مطلقًا ⇒
+    فدليلُ تشغيلٍ مُودَعٌ تحت `handoff/` أعطى **`BLOCK home_path`** في `publish_guard --tree` ⇒ سقط
+    «هبوطُ المراجعة» (`rc=1`) والعطبُ في الحارس نفسِه لا في الشاهد. فالضابطُ: المفسّرُ في الترويسة
+    **نسبيٌّ أو اسمٌ بلا مسار**، ولا مسارَ منزلٍ في الملفّ كلِّه."""
+    from datetime import datetime
+
+    from qa_gate import evidence_body
+
+    body = evidence_body(True, [("بوّابة", True, "تفصيل")], full=True,
+                         when=datetime(2026, 9, 25, 20, 0, 0))
+    header = body.splitlines()[1]
+    label = header.split("المفسّر=")[-1].strip()
+    assert label, "الترويسةُ لا تذكر المفسّر ⇒ ضاع ما يُعيد القياس"
+    assert not label.startswith("/"), f"مفسّرٌ بمسار مطلق في دليلٍ يُودَع: {label}"
+    assert str(Path.home()) not in body, "الدليلُ يحمل مسارَ المنزل ⇒ BLOCK في السطح العامّ"
+    # **والنزعُ يشمل تفصيلَ البوّابة لا الترويسةَ وحدَها** (مقعدُ البنية · مراجعة ٦١): رسالةُ فشلٍ
+    # تحمل مسارًا مطلقًا (مثل `missing <home>/…/x.pdf`) كانت تُكتب في الملفّ كما هي ⇒ `BLOCK home_path`
+    # في الشجرة المدفوعة. والاختبارُ كان يفحص ترويسةً مصنوعةً وحدَها فلا يرى الثقب.
+    leaky = evidence_body(False, [("بوّابة", False, f"missing {Path.home()}/case/x.pdf")],
+                          full=True, when=datetime(2026, 9, 25, 20, 0, 0))
+    assert str(Path.home()) not in leaky, "تفصيلُ بوّابةٍ ساقطة يُسرّب مسارَ المنزل إلى دليلٍ يُودَع"
+    assert str(ROOT) not in leaky, "وتفصيلٌ يحمل جذرَ المستودع مطلقًا لا يُكتَب كما هو"
+
+
+def test_the_log_name_and_the_header_share_one_clock():
+    """**الزمنُ من مصدرٍ واحد** (مقعدُ البنية · مراجعة ٦١): اسمُ الملفّ وترويسةُ الملفّ كانا يستدعيان
+
+    `now()` كلٌّ في موضعه ⇒ ساعتان تفترقان بجزءٍ من الثانية، فاسمُ الدليل لا يشهد لترويسته. والآن
+    لحظةٌ واحدةٌ تُمرَّر للاثنين (وهو ما يفعله `main`)، والدالّةُ الخالصةُ تُقاس بمُدخَلٍ مصنوع.
+    """
+    from datetime import datetime
+
+    from qa_gate import evidence_body, run_log_path
+
+    when = datetime(2026, 9, 25, 21, 30, 5)
+    path = run_log_path(when)
+    body = evidence_body(True, [("بوّابة", True, "تفصيل")], full=True, when=when)
+    assert body.splitlines()[0].endswith(when.isoformat(timespec="seconds")), body.splitlines()[0]
+    assert path.name.startswith(when.strftime("%Y%m%d-%H%M%S")), path.name
+    assert when.strftime("%Y%m%d-%H%M%S") == path.name[:15], "صيغتان لزمنٍ واحد ⇒ تفترقان يومًا ما"
 
 
 def test_a_flaky_run_must_be_entered_in_the_ledger():
@@ -113,16 +197,27 @@ def test_a_flaky_run_must_be_entered_in_the_ledger():
 
 
 def test_the_declared_budget_is_not_exceeded_in_the_window():
-    """**والميزانيّةُ تحمرّ**: تجاوزُ {MAX_FLAKY_RUNS_IN_WINDOW} تشغيلٍ مُلوَّثٍ في نافذة {WINDOW} ⇒ أحمر مُسمّى."""
+    """**والميزانيّةُ تحمرّ**: تجاوزُ {MAX_FLAKY_RUNS_IN_WINDOW} حدثًا في نافذة {WINDOW} ⇒ أحمر مُسمّى.
+
+    **والحدثُ = تشغيلٌ مُلوَّثٌ محفوظ أو قيدٌ بلا دليلٍ محفوظ** (S6 · مراجعة ٦١): كانت الميزانيّةُ
+    تُقاس على ملفّات الأدلّة وحدَها، وقيدُ السجلّ الحيّ دليلُه «لم يُحفَظ» ⇒ قُرئت 0/1 وسجلٌّ فيه واقعة.
+    """
     runs = evidence_runs()
-    bad = over_budget(runs)
+    entries = ledger_entries(LEDGER.read_text(encoding="utf-8")) if LEDGER.exists() else []
+    bad = over_budget(runs, entries=entries)
+    orphans = orphan_entries(entries, runs)
+    assert len(entries) - len(orphans) <= MAX_FLAKY_RUNS_IN_WINDOW or bad, "قيدٌ يُسمّي دليلَه ولا يُحصى"
     assert not bad, (
-        f"اللاحتميّةُ تجاوزت الميزانيّةَ المُعلَنة ({len(bad)} تشغيلٍ مُلوَّث في آخر {WINDOW}): {bad} ⇒ "
+        f"اللاحتميّةُ تجاوزت الميزانيّةَ المُعلَنة ({len(bad)} حدثًا في آخر {WINDOW} تشغيلًا/قيدًا): {bad} ⇒ "
         f"لا تصير «المتذبذب» عاديًّا: أصلِح العطبَ الجذريّ أو ارفعِ الميزانيّةَ **مُعلَنةً** في الالتزام نفسه")
 
 
 def test_the_budget_actually_bites_on_a_synthetic_window():
-    """**سمٌّ مصنوع** (بلا تسجيلٍ صار ادّعاءً): نافذةٌ فيها تشغيلان مُلوَّثان وثلاثةُ نظيفة ⇒ تُكشَف."""
+    """**سمٌّ مصنوع** (بلا تسجيلٍ صار ادّعاءً): نافذةٌ فيها تشغيلان مُلوَّثان وثلاثةُ نظيفة ⇒ تُكشَف.
+
+    **وحالةُ S6 داخل السمّ**: قيدٌ واحدٌ بلا دليلٍ محفوظٍ **يستهلك الميزانيّةَ** — فلا يُقرأ السجلُّ
+    «0/1» وهو يحمل واقعة (وهو ما جعل الشرطَ لا يرى الحالةَ التي وُضع لها).
+    """
     clean = ("r1.txt", "5/5 passed"), ("r2.txt", "5/5 passed"), ("r3.txt", "5/5 passed")
     assert over_budget([*clean, ("r4.txt", FLAKY_MARK + " page 3 row 12"), ("r5.txt", "5/5")]) == []
     two_dirty = [*clean, ("r4.txt", FLAKY_MARK + " x"), ("r5.txt", FLAKY_MARK + " y")]
@@ -130,6 +225,18 @@ def test_the_budget_actually_bites_on_a_synthetic_window():
     # **والنافذةُ تُقصّ**: تشغيلٌ قذرٌ **قديمٌ** خارج النافذة لا يُحمّر اليوم (وإلّا صار التاريخُ سجناً)
     old = [("r0.txt", FLAKY_MARK + " قديم")] + [("r%d.txt" % i, "5/5") for i in range(1, 6)]
     assert over_budget(old, window=5, budget=1) == [], "قيدٌ قديمٌ خارج النافذة حُمِّر خطأً"
+    # **والقيدُ بلا دليلٍ حدثٌ**: وحده مع ميزانيّةٍ صفريّة ⇒ يُكشَف بالاسم؛ **والحدثُ الواحدُ يُحصى مرّةً**
+    # (قيدٌ يُسمّي دليلًا موجودًا لا يُضاف إلى وسم ذلك الدليل) — وإلّا صار العدُّ مضاعفًا فيُحمِّر زورًا.
+    orphan = ["| 1 | 2026-09-25 | `ca2986d` | **لم يُحفَظ** | ثقبُ المقام | لم تُطلَب | 0/1 |"]
+    assert over_budget(list(clean), budget=0) == [], "نافذةٌ نظيفةٌ لا تُحمَّر"
+    assert over_budget(list(clean), budget=0, entries=orphan) != [], \
+        "قيدٌ بلا دليلٍ محفوظٍ لا يستهلك الميزانيّةَ ⇒ السجلُّ يُقرأ 0/1 وهو يحمل واقعة"
+    named = ["| 1 | 2026-09-25 | `ca2986d` | `r4.txt` | وسمٌ مُقيَّد | قراءةٌ ثانية | 1/1 |"]
+    runs_with_mark = [("r4.txt", FLAKY_MARK + " page 3 row 12"), *clean]
+    assert over_budget(runs_with_mark, budget=1, entries=named) == [], \
+        "القيدُ الذي يُسمّي دليلَه هو الحدثُ نفسُه ⇒ يُحصى مرّةً لا مرّتين"
+    assert over_budget(runs_with_mark, budget=0, entries=named) != [], \
+        "ومع ذلك يُحصى: الميزانيّةُ صفريّةٌ والحدثُ قائم"
 
 
 def test_the_ledger_prose_matches_the_constants_it_declares():
@@ -139,6 +246,10 @@ def test_the_ledger_prose_matches_the_constants_it_declares():
     """
     text = LEDGER.read_text(encoding="utf-8")
     gates = GATES.read_text(encoding="utf-8")
+    # **والقاعدةُ تُعلَن في السجلّ بنصّها** (S6 · مراجعة ٦١): الحدثُ يُحصى بدليله أو بقيّدِه — والوثيقةُ
+    # تقولها بالحرف، فلا تُقاس الميزانيّةُ على قاعدةٍ لا تنطقها الوثيقة.
+    assert "الحدثُ يُحصى بدليله أو بقيده" in text, \
+        "السجلُّ لا يعلن قاعدةَ العدّ (التشغيلات ∪ القيود بلا دليل) ⇒ الميزانيّةُ تُقاس على ما لا تقوله"
     assert FLAKY_MARK in text, "السجلُّ لا يسمّي الوسمَ الذي يُقيَّد"
     pairs = declared_pairs(text, gates)
     for where, b_key, w_key in (("السجلّ", "ledger_budget", "ledger_window"),
@@ -159,3 +270,36 @@ def test_the_ledger_prose_matches_the_constants_it_declares():
     assert "DECLARED_LEDGER_ENTRIES" in text, "السجلُّ لا يُعلن ثابتَ عدد القيود ⇒ إضافةٌ صامتة ممكنة"
     # **وحدُّ ما قبل السجلّ مُعلَن**: لا يُحسب أثرُ الماضي
     assert "قبل" in text and "لا يُقيَّد" in text, "السجلُّ لا يُعلن حدَّه الزمنيّ (أثرُ ما قبل السياسة)"
+
+
+def test_a_crashing_gate_run_still_writes_its_evidence(tmp_path, monkeypatch, capsys):
+    """**الدليلُ يبقى حين تنهار الأداة** (مقعدُ المواصفة · مراجعة ٦١ · R60-2).
+
+    كانت كتابةُ الدليل **بعد** نداءات البوّابات كلِّها ⇒ عطبٌ قبلها (خروجٌ مبكر · استثناءٌ من البوّابة
+    نفسِها) يُنتج «تشغيلًا بلا دليل» — وهو البابُ الضيّقُ الذي وُلد منه R60-2 (واقعةُ ٤/٥ ضاعت لأنّ
+    أحدًا لم يحفظ مخرجَها). والضابطُ **يشغّل الأداةَ فعلًا** ببوّاباتٍ مُستبدَلة: `gate` يُرمي كما لو
+    انهارت، ثمّ يُلزم: دليلٌ مكتوبٌ باسم الانهيار، ورمزُ خروجٍ غيرُ صفريّ.
+    """
+    import importlib.util
+    import pytest
+
+    spec = importlib.util.spec_from_file_location("qg_crash", ROOT / "tools" / "qa_gate.py")
+    assert spec is not None and spec.loader is not None
+    qg = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(qg)
+
+    log = tmp_path / "20260925-000000-gate-evidence-crash.txt"
+    monkeypatch.setattr(qg, "run_log_path", lambda *a, **k: log)
+
+    def boom(*a, **k):                       # الانهيارُ يقع حيث كان يسبق الكتابة
+        raise RuntimeError("انهيارٌ مصنوع (مقعدُ المواصفة)")
+
+    monkeypatch.setattr(qg, "gate", boom)
+    monkeypatch.setattr(sys, "argv", ["qa_gate.py", "--full"])
+    with pytest.raises(SystemExit) as ei:
+        qg.main()
+    assert ei.value.code == 1, "تشغيلٌ منهارٌ يجب أن يخرج برمزٍ غير صفريّ"
+    assert log.exists(), "الأداةُ انهارت فلم تكتب دليلَها ⇒ عاد البابُ الضيّق الذي أُغلق في R60-2"
+    body = log.read_text(encoding="utf-8")
+    assert "انهيارُ الأداة (RuntimeError)" in body, "الدليلُ لا يسمّي الانهيار ⇒ دليلٌ لا يُقرأ به عطبٌ"
+    assert "GATES: 0/1 passed" in body, "الجردُ في الدليل لا يعكس الحصيلةَ الفعليّة"

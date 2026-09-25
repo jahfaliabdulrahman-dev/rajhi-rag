@@ -10,8 +10,11 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOKS = ROOT / ".githooks"
@@ -87,3 +90,63 @@ def test_the_pre_commit_gate_fails_closed_when_the_scanner_is_absent(tmp_path):
     _git("add", "a.txt", cwd=repo)
     r = subprocess.run([str(PRE_COMMIT)], cwd=str(repo), capture_output=True, text=True)
     assert r.returncode != 0, "خطّافُ أمنٍ مرّر ملفًّا بلا أن يمسحه ⇒ فشلٌ مفتوح"
+
+
+# ---------------------------------------------------------------------------------------------
+# R62-F1: **الخطّافُ لا يُسقط دفعاً مشروعاً** — يُنفَّذ الخطّافُ **الحقيقيّ** (لا نصٌّ منسوخ)
+# بمدخلاتٍ مقيسةٍ من git نفسِه. الحادثة: سطرُ التذكير كان آخرَ سطرٍ بلا `exit 0` ⇒ خروجُ الخطّاف
+# = خروجُه ⇒ دفعُ وسمٍ/حذفِ فرعٍ/دفعٍ بلا جديد يُرفض صامتاً، ويُصنع بذلك حافزُ `--no-verify`
+# الذي يُسقط الحارسَين الأمنيّين — وهو ما حذّر منه رأسُ الخطّاف نفسُه.
+# ---------------------------------------------------------------------------------------------
+_Z = "0" * 40          # sha الوجهة لمرجعٍ جديد — يُبنى ولا يُكتب (قاعدةُ الأرقام الطويلة)
+_A = "f191a935c6ebe3536337678e91104ca5e2310c40"
+_B = "17fc94a76958d96b385dfdcdd01b56c88a1a45a3"
+_PUSH_SHAPES = (
+    ("update", f"refs/heads/main {_A} refs/heads/main {_Z}"),
+    ("tag", f"refs/tags/v1 {_A} refs/tags/v1 {_Z}"),
+    ("delete", f"(delete) {_Z} refs/heads/old {_A}"),
+    ("detached-head", f"HEAD {_B} refs/heads/new {_Z}"),
+    ("no-op (stdin فارغ)", ""),
+)
+
+
+def _pre_push_sandbox(tmp_path: Path) -> Path:
+    """نسخةٌ تحمل الخطّافَ الحقيقيَّ وأدواتٍ بديلة (تُخرج 0) ⇒ يُقاس **خروجُ الخطّاف** لا حرّاسُه."""
+    repo = tmp_path / "pushbox"
+    (repo / "tools").mkdir(parents=True)
+    _git("init", "-q", cwd=repo)
+    _git("config", "user.email", "t@t", cwd=repo)
+    _git("config", "user.name", "t", cwd=repo)
+    _git("config", "core.hooksPath", ".githooks", cwd=repo)
+    hooks = repo / ".githooks"
+    hooks.mkdir()
+    shutil.copy2(PRE_PUSH, hooks / "pre-push")                    # الخطّافُ الحقيقيّ كما هو
+    for name in ("publish_guard.py", "amount_guard.py", "static_gate.py"):
+        (repo / "tools" / name).write_text("raise SystemExit(0)\n", encoding="utf-8")
+    shutil.copy2(ROOT / "tools" / "ci_report.py", repo / "tools" / "ci_report.py")   # والأداةُ الحقيقيّة
+    (repo / "f.txt").write_text("x\n", encoding="utf-8")
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-qm", "init", cwd=repo)
+    return repo
+
+
+@pytest.mark.parametrize("name,stdin", _PUSH_SHAPES)
+def test_the_pre_push_hook_never_blocks_a_legitimate_push(tmp_path, name, stdin):
+    """**الحاجبُ نفسُه:** كلُّ شكلِ دفعٍ مشروعٍ يخرج **صفراً**، والتذكيرُ يذكر ما يُقاس."""
+    repo = _pre_push_sandbox(tmp_path)
+    r = subprocess.run([str(repo / ".githooks" / "pre-push"), "origin", "git@example.invalid:x/y.git"],
+                       cwd=str(repo), input=stdin, capture_output=True, text=True)
+    assert r.returncode == 0, f"{name}: الخطّافُ أسقط دفعاً مشروعاً (rc={r.returncode}) — {r.stdout[-200:]}"
+    assert "تذكيرُ الدفع" in r.stdout, f"{name}: والتذكيرُ موجود (لا صمت)"
+
+
+def test_a_real_tag_push_passes_through_the_hook(tmp_path):
+    """**الواقعةُ كما وقعت:** `git push` لوسمٍ — بمُدخَل git الحقيقيّ، بلا `--no-verify`."""
+    bare = tmp_path / "rem.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], capture_output=True, text=True)
+    repo = _pre_push_sandbox(tmp_path)
+    _git("remote", "add", "origin", str(bare), cwd=repo)
+    _git("tag", "v1", cwd=repo)
+    r = subprocess.run(["git", "push", "origin", "v1"], cwd=str(repo), capture_output=True, text=True)
+    assert r.returncode == 0, f"دفعُ وسمٍ رُفض بلا سبب: {r.stderr[-300:]}"
+    assert "تذكيرُ الدفع" in r.stdout + r.stderr

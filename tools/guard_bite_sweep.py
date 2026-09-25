@@ -62,6 +62,25 @@ INTRUDER = ROOT / "handoff/claude/20260924-9999-REPORT-to-claude-poison.md"
 PROOF_T = "tests/test_eval_proof_rows.py"
 QG = ROOT / "tools/qa_gate.py"
 EP = ROOT / "tools/eval_pack.py"
+# **مالكُ القرار والثمن انتقل إلى وحدةٍ مجرّدة** (`tools/gate3.py` · مقعدُ البنية · مراجعة ٦١) ⇒ سمومُه
+# (م١٩ · م٢٠ · م٢٤) تُحقن هناك. وإلّا بقيت السمومُ تُعدّل نصًّا غيرَ موجود فتُصنَّف «تعذّر تشغيل» —
+# أي بوّاباتٌ تسقط من القياس بصمتٍ وهي تظنّ نفسها مُطبَّقة.
+G3 = ROOT / "tools/gate3.py"
+CIR = ROOT / "tools" / "ci_report.py"
+# **ومُدقِّقُ الدفع مالكُ حُكمٍ في موضعين** (أداةٍ + تذكيرٍ في الخطّاف · R61-1 «ملحقُ الدفع») ⇒
+# فسمّاه في الموضعين: `tools/ci_report.py` و`.githooks/pre-push` — لأنّ الصفّ ١٧ يحمل الاثنين.
+PUSH_HOOK = ROOT / ".githooks" / "pre-push"
+_LP_CMD = ["tools/landing_probe.py"]
+_LP_CMD_FROM_WT = ["tools/landing_probe.py", "--from-worktree"]
+TSEC = ROOT / "tests/test_secret_scan.py"
+LP = ROOT / "tools/landing_probe.py"
+
+#: **ما يجب أن يُسمّى في العَضّة** (R61-2 · اختياريّ): حالةٌ سكربتيّةٌ «تعضّ» بلا الاسم المتوقَّع في مخرَجها
+#: عَضَّت **لسببٍ آخر** ⇒ فلا تُقبل شهادةً (الوسمُ لا يعدو دليله): تُطبع باسمها وتُحصى «تعذّر قياس».
+MUST_NAME: dict[str, str] = {
+    "م٢١ · مسبارُ الهبوط يكشف مراجعةً لا تهبط (P-11)": "tests/test_report_names.py",
+    "م٢٢ · تراجعُ ضابط الهبوط (مقارنةٌ حيّةٌ تشمل الصناديق) يمسكه المسبار (R59-1)": "tests/test_secret_scan.py",
+}
 
 CASES = [
     ("م١ · الموضعُ خارج النطاق يُرفض (R52-2)", EQ,
@@ -161,8 +180,11 @@ CASES = [
 
     # **وسجلُّ اللاحتميّة** (شرطُ مراجعة ٥٨): الحارسُ يعدّ **ويحمّر**؛ فسمُّه يُلغي العدَّ فيصير السجلُّ
     # تزييناً (وسمٌ يُطبع ولا يُقيَّد)، وهو بعينه ما وُجد السجلُّ ليمنعه.
+    # **م١٦ · ميزانيّةُ اللاحتميّة تحمرّ عند التجاوز (شرطُ مراجعة ٥٨):** والسطرُ يُعدَّل مع تعديل
+    # دالّة العدّ نفسِها (S6 · مراجعة ٦١: الأحداثُ = تشغيلاتٌ محفوظة ∪ قيودٌ بلا دليل) — وسمٌّ يشير
+    # إلى نصٍّ زائل **يُصنَّف «تعذّر تشغيل»** (يعضّه المشغّل نفسه فعلًا عند تعديل الدالّة — وهو مقياسه).
     ("م١٦ · ميزانيّةُ اللاحتميّة تحمرّ عند التجاوز (شرطُ مراجعة ٥٨)", TFL,
-     '    if len(dirty) <= budget:\n        return []\n    return dirty',
+     '    if len(dirty) + len(orphans) <= budget:\n        return []',
      '    return []',
      "tests/test_flake_ledger.py::test_the_budget_actually_bites_on_a_synthetic_window"),
 
@@ -180,12 +202,79 @@ CASES = [
      '            return True',
      "tests/test_turn_derivation.py::test_the_fenced_header_is_read_not_ignored"),
 
-    # **م١٩ · سقفُ قرار المالك (إغلاقُ البوابة (٣) · 2026-09-25):** القرارُ يُغلق التقاطعَ **داخل سقفه**
-    # ولا يتمدّد؛ فسمُّه يُلغي السقفَ فيصير القرارُ ممرَّ عبورٍ لأيّ تقاطعٍ كان — ويجب أن يُسقط ضابطَه.
-    ("م١٩ · قرارُ المالك لا يتمدّد فوق سقفه المُعلَن", EP,
-     '    return len(inter) <= int(decision["accepted_pages"])',
+    # **م١٩ · سقفُ ثمن قرار المالك (R60-1 · مراجعة ٦٠):** القرارُ يقع على **ثمن الإفراج** داخل سقفه
+    # المُعلَن ولا يتمدّد؛ فسمُّه يُلغي السقفَ فيصير القرارُ رخصةً لأي ثمن — ويجب أن يُسقط ضابطَه.
+    ("م١٩ · قرارُ المالك لا يتمدّد فوق سقف ثمنه المُعلَن", G3,
+     '    return int(price_pages) <= int(decision["price_cap_pages"])',
      '    return True',
-     "tests/test_eval_pack.py::test_the_owner_decision_closes_the_intersection_only_within_its_ceiling"),
+     "tests/test_eval_pack.py::test_the_owner_decision_closes_the_price_not_the_overlap"),
+
+    # **م٢٠ · البوابةُ (٣) لا تُرخى بقرار (R60-1 · حاجبُ مراجعة ٦٠):** كان السقفُ يُرخي **التقاطعَ نفسَه**
+    # ⇒ قِيس أن ١٣٣ صفحةً تداخلًا تُعطي `PASS` (رخصةُ إدخال ثلثَي الحزمة إلى التدريب). فسمُّ
+    # `gate3_overlap_ok` يُعيد الرخصةَ، ويجب أن يُسقط ضابطَ «التداخلُ عطبٌ مُسمًّى لا قرارُ مالك».
+    ("م٢٠ · التداخلُ عطبٌ يُسقط البوابةَ ولا يُرخيه قرار (حاجبُ مراجعة ٦٠)", G3,
+     '    return not inter\n\n\ndef gate3_price_within_cap',
+     '    return True\n\n\ndef gate3_price_within_cap',
+     "tests/test_eval_pack.py::test_an_overlap_is_a_named_defect_even_with_a_dated_owner_decision"),
+
+    # **م٢١ · مسبارُ الهبوط يعضّ (P-11 · تبنّاه المالك من توصية مراجعة ٥٩):** الضابطُ الحقيقيُّ ليس عدّاداً
+    # بل **الثابت**: «هل تهبط مراجعة؟». فسمُّه يجعل المراجعةَ الاصطناعيّة **لا تهبط** (زمنُ اسمها منزاحٌ
+    # عن إيداعها) ⇒ يجب أن يُسقط المسبارُ ضابطَ أسماء التقارير **باسمه**، لا أن يعضَّ لسببٍ آخر (MUST_NAME).
+    ("م٢١ · مسبارُ الهبوط يكشف مراجعةً لا تهبط (P-11)", LP,
+     '    return measure(args.ref, args.from_worktree, args.poison, args.keep, quiet=args.quiet)',
+     '    return measure(args.ref, args.from_worktree, "name-stamp", args.keep, quiet=args.quiet)',
+     _LP_CMD),
+
+    # **م٢٢ · الصنفُ نفسُه يعود فيُمسَك (R59-1 · حاجبُ مراجعة ٥٩):** يُعاد **حرفيًّا** ما كان: قياسٌ حيٌّ
+    # لرقمٍ **يشمل صناديق المراسلة** (`excluded_prefix=""`) ⇒ نصُّ المدقّق يصير مُدخَلاً إلى راتشتٍ يملكه
+    # المنفّذ. والمسبارُ يجب أن يسقط — **باسم ضابط الماسح** — لأن نسختَه تحمل مراجعةً تقتبس الصيغة.
+    # (وهذا هو الفرقُ بين إصلاحٍ سطحيّ وإغلاقِ صنف: الأوّلُ يصلح الحالةَ، وهذا يقيس أنّ الصنفَ لا يعود.)
+    ("م٢٢ · تراجعُ ضابط الهبوط (مقارنةٌ حيّةٌ تشمل الصناديق) يمسكه المسبار (R59-1)", TSEC,
+     '    assert _undated_snapshot_pairs(proto) == [], (\n'
+     '        f"أرقامٌ تشمل صناديق المراسلة بلا وسمِ تأريخٍ وتاريخ: {_undated_snapshot_pairs(proto)} ⇒ "\n'
+     '        "يُكتب كلُّ رقمٍ مع شجرته (R59-1)، ولا يُدخَل نصُّ المدقّق في راتشتٍ يملكه المنفّذ")',
+     '    lines_all, files_all, _, _ = _tatweel_form_counts(files, excluded_prefix="")\n'
+     '    assert _pair_at(proto, r"(\\d+)·(\\d+)\\s*بلا حسّاس") == (lines_all, files_all), "R59-1: مقارنةٌ حيّةٌ تشمل الصناديق"',
+     _LP_CMD_FROM_WT),
+
+    # **م٢٣ · ثقبُ مقام التغطية عطبُ نظافة (R60-2 · قاسه المدقّق في مراجعة ٦٠):** كان يُقرأ «نظيفًا» عند
+    # السياسة ⇒ لا إعادةَ قراءةٍ ولا وسم، ثمّ تسقط البوّابةُ على تأكيدٍ صلب ⇒ «٤/٥» ثمّ إعادةُ البوّابة
+    # كلِّها **باليد**. فسمُّه يُلغي شرطَ المقام من دالّة النظافة، ويجب أن يُسقط ضابطَ الثقب.
+    ("م٢٣ · ثقبُ مقام التغطية عطبُ نظافة لا سقوطٌ صامت (R60-2)", QG,
+     '            and bool(cov) and f_possible == cov[1])',
+     '            and True)',
+     "tests/test_gate_flake_policy.py::test_a_footer_denominator_hole_is_a_dirty_read_not_a_silent_gate_failure"),
+
+    # **م٢٤ · «عددٌ» ليس كلَّ ما `isinstance(x, int)` (مراجعة ٦١ · قاسه مقعدا المعايير والبنية):** `bool`
+    # صنفٌ من `int` في بايثون ⇒ `True <= 133` صحيحة، فمانيفستٌ حقلُه `true` كان يُقرأ «ثمنًا مقيسًا»
+    # داخل السقف ويُطبع `PASS`. فسمُّ الحرس يُعيد التساهل، ويجب أن يُسقط ضابطَ العدد الحقيقيّ.
+    ("م٢٤ · العددُ الحقيقيّ ليس `bool` (ثمنٌ `true` لا يمرّ مقيسًا)", G3,
+     '    return isinstance(x, int) and not isinstance(x, bool)',
+     '    return isinstance(x, int)',
+     "tests/test_eval_pack.py::test_a_boolean_field_is_not_a_measured_price"),
+
+    # **م٢٥ · «أخضر» بلا مرساة (R62-F4 · قاسه المقاعد الثلاثة):** كان `if head and not _same_commit(…)`
+    # يُسقط المقابلةَ إن **غاب** `headSha` من خَرْج `gh` ⇒ تُوسَم الأداةُ «أخضر» ولا تقيس شيئًا — وهو
+    # عينُ صنفِ R61-1 (حُكمٌ بلا موضعِ قياس) طبقةً أعمق. فسمُّه يُعيد الشرطَ المتساهل، ويجب أن يُسقط
+    # ضابطَ الفشل المُغلَق. (وشرطُ `and` هو الفرقُ بين «لا أدري» و«نظيف».)
+    ("م٢٥ · تشغيلٌ بلا `headSha` لا يُقال له أخضر (فشلٌ مُغلَق · R62)", CIR,
+     '    if not head:\n'
+     '        return {"ref": ref, "state": "غيرُ مقروء",\n'
+     '                "why": f"تشغيلٌ بلا `headSha` ⇒ لا مرساةَ تقيسها (والمدفوعُ {want[:7]})"}\n'
+     '    if not _same_commit(want, head):',
+     '    if head and not _same_commit(want, head):',
+     "tests/test_ci_report.py::test_a_run_without_a_headsha_cannot_be_called_green"),
+
+    # **م٢٦ · الخطّافُ يُسقط دفعاً مشروعاً (R62-F1 · حاجبُ الجولة ٦٢ · صاده المقاعدُ الثلاثة):** كان
+    # سطرُ التذكير آخرَ سطرٍ ويستخرج المراجعَ بـ`awk` على **الحقل الأول** ⇒ وسمٌ/حذفُ فرع/دفعٌ بلا جديد
+    # يُفرِغ `BRANCHES` فيخرج الخطّاف **1 بلا سبب** ⇒ دفعٌ مشروعٌ يُرفض صامتاً، ويُصنع الحافزُ على
+    # `--no-verify` الذي يُسقط حارسَي الأمن. فسمُّه يُعيد الأسطرَ التي كانت، ويجب أن يُسقط ضابطَ
+    # «الخطّافُ لا يُسقط دفعاً مشروعاً» — بعد أن كان يُقاس بمقعدِ مدقّقٍ لا بضابط.
+    ("م٢٦ · خطّافُ الدفع لا يُسقط دفعاً مشروعاً (R62-F1)", PUSH_HOOK,
+     "printf '%s\\n' \"$REFS\" | \"$PY\" tools/ci_report.py --pre-push || true\nexit 0",
+     "BRANCHES=$(printf '%s\\n' \"$REFS\" | awk '{print $1}' | sed -n 's#^refs/heads/##p' | sort -u)\n"
+     "[ -n \"$BRANCHES\" ] && \"$PY\" tools/ci_report.py --remind $BRANCHES",
+     "tests/test_hook_gates.py::test_the_pre_push_hook_never_blocks_a_legitimate_push"),
 ]
 
 
@@ -232,20 +321,39 @@ def _verdict_label(kind: str) -> str:
     return LABELS[kind]
 
 
-def _run(test: str) -> tuple[int, str]:
+def _command_for(test: str | list) -> list[str]:
+    """**أمرُ الحالة — تمييزٌ صريحٌ لا استنتاجٌ من النصّ** (مقعدُ البنية · مراجعة ٦١).
+
+    كان `_run` يقرأ **نوعَ الأمر من نصّه**: `".py" in test and not test.startswith("tests/")` ⇒ أيُّ ضابطٍ
+    يحمل `.py` في اسمه أو في وسيطٍ له (ملفُّ بيانات، معرّفُ حالة) كان يُشغَّل **سكربتًا** بلا pytest فيُقاس
+    «تعذّرُ تشغيل» ويُسمّى حالةً أخرى — عطبٌ صامتٌ يظهر يومَ يُضاف ضابطٌ جديد. والآن **القائمةُ أمرٌ**
+    (تُشغَّل بمفسّر الشجرة، ووسائطُها لا يُعاد تفسيرُها بيد) **والنصُّ ضابطُ pytest** بمعرّفه.
+    """
+    if isinstance(test, list):
+        return [PY, *test]
+    return [PY, "-m", "pytest", "-q", "-x", test]
+
+
+def _run(test: str | list) -> tuple[int, str]:
     """يُعيد (رمزَ الخروج، المخرَج). **والسمُّ يقع إذا وفقط إذا كان الرمزُ 1** (سقوطُ ضابط)،
 
     أمّا رموزُ pytest الأخرى (2 تعذّرُ جمعٍ/مقاطعة · 3 عطبٌ داخليّ · 4 خطأُ استعمال) فهي **تعذّرُ تشغيلٍ**
     لا «بوّابةٌ عَضّت» — وكان الخلطُ بينهما يجعل الأداةَ تشهد لبوّابةٍ لم تُقَس (عطبُ مراجعة ٥٣).
+
+    **وهدفٌ سكربتيّ (R61-2 · مسبارُ الهبوط P-11):** الضابطُ قد يكون **أمرًا** لا ملفَّ `pytest` (المسبارُ
+    يبني نسخةً ويُشغّل قائمةَ الضوابط فيها). فيُشغَّل السكربتُ بمفسّر الشجرة نفسِه عبر `_command_for`
+    (والتمييزُ بين «أمرٍ» و«ضابط» صريحٌ هناك — قائمةٌ أم نصّ).
     """
-    r = subprocess.run([PY, "-m", "pytest", "-q", "-x", test], cwd=ROOT, capture_output=True, text=True)
+    r = subprocess.run(_command_for(test), cwd=ROOT, capture_output=True, text=True)
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
-def _emit(name: str, rc: int, out: str, counts: dict[str, int], unmeasured: list[str]) -> None:
+def _emit(name: str, rc: int, out: str, counts: dict[str, int], unmeasured: list[str]) -> str:
     """يطبع سطرَ ضابطٍ واحد ويُحصيه — **والحكمُ من `_verdict` وحدَها** (رمزُ الخروج أوّلًا).
 
     (كانت ثلاثةُ مساراتٍ في `main` تحكم بـ`rc != 0` وحدَه ⇒ أيُّ فشلٍ — ومنه غيابُ pytest — «عَضّ»؛ ST-2.)
+
+    **ويُعيد الحالة** (R61-2) ليُقابَل الاسمُ المتوقَّع في `MUST_NAME` **بعد** الحكم لا قبله.
     """
     kind = _verdict(rc, out)
     counts[kind] += 1
@@ -254,6 +362,7 @@ def _emit(name: str, rc: int, out: str, counts: dict[str, int], unmeasured: list
     tail = out.strip().splitlines()[-1][:90] if out.strip() else ""
     extra = f" (rc={rc}) — {tail}" if kind == "unrunnable" else ""
     print(f"{name:52s} | {'مُطبَّق':6s} | {kind:7s} | {_verdict_label(kind)}{extra}")
+    return kind
 
 
 def _summary(counts: dict[str, int], total: int, equipped: bool) -> str:
@@ -317,7 +426,13 @@ def main() -> int:
             shutil.copy2(bak, path)
             bak.unlink()
         total += 1
-        _emit(name, rc, out, counts, unmeasured)
+        kind = _emit(name, rc, out, counts, unmeasured)
+        want = MUST_NAME.get(name)
+        if want and kind == "bite" and want not in out:
+            # **عَضَّ لسببٍ آخر** ⇒ لا شهادة (R61-2): يُطبع باسمه ويُحصى «تعذّر قياس» (لا «عضّ»).
+            counts["bite"] -= 1
+            counts["unrunnable"] += 1
+            print(f"      🔴 عَضَّ بلا الاسم المتوقَّع «{want}» ⇒ عَضٌّ لسببٍ آخر: لا شهادةَ لهذا الضابط")
 
     # م١٢أ: ملفُّ منفّذٍ **غيرِ مُعلَن** في صندوق المدقّق
     INTRUDER.write_text("# س\n", encoding="utf-8")

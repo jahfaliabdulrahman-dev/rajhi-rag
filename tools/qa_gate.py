@@ -9,6 +9,11 @@ Run BEFORE every delivery claim ("تم", "يعمل", "جاهز"):
 
 Exit 0 = all gates pass; any FAIL blocks delivery.
 
+**والدليلُ يُكتب بالأداة لا بيدك (R60-2 · مراجعة ٦٠):** كلُّ تشغيلٍ `--full` يكتب ملفَّ دليله في
+`handoff/sulaiman/<زمن>-gate-evidence-full-run.txt` — ناجحًا **أو ساقطًا** — ويطبع مسارَه. فالكتابةُ
+لم تبقَ `... | tee …` بيد المنفّذ: مرّةً واحدة لم يُحفَظ فيها دليلُ تشغيلٍ ساقطٍ (٤/٥) فضاع رصدُ
+اللاحتميّة من نافذة السجلّ (`handoff/FLAKY_READS.md`).
+
 The --full gate locks VALUES that were verified by eye against the document
 renders (page 1: opening dots=0.00 → transfer +300.00 → 300.00 → 200.00 →
 100.00; page 2: 0.00 → +50.00). Do NOT edit those constants without
@@ -38,6 +43,99 @@ MIN_FOOTER_COMPARABLE = 9     # pages whose printed totals could be compared
 #: السجلّ (`tests/test_flake_ledger.py`) ⇒ إعادةُ تسميته تُعمي السجلَّ **صامتاً** (صفرُ تشغيلٍ مُلوَّث =
 #: أخضرُ كاذب). فيُبنى السطرُ بهذا الثابت، ويستورده الحارسُ من هنا.
 FLAKY_MARK = "[flaky_read]"
+#: **موضعُ دليل التشغيل — يُبنى هنا ويُقرأ من هنا (R60-2 · إغلاقُ حركة ٢ من مراجعة ٦٠):** كان حفظُ
+#: الدليل **بيد المنفّذ** (`... | tee handoff/sulaiman/<تاريخ>-gate-evidence-full-run.txt`)، وقد وُجد
+#: مرّةً واحدة لم تُحفَظ فيها أدلّةُ تشغيلٍ ساقطٍ (٤/٥) ⇒ فضاع رصدُ اللاحتميّة، وبقيت «النافذة» تقرأ
+#: أقلَّ ممّا جرى. فالبوّابةُ الآن **تكتب دليلَها بنفسها في كلّ تشغيلٍ `--full`، ناجحًا أو ساقطًا**،
+#: والمسارُ يُطبع في المخرَج. والحارسُ (`tests/test_flake_ledger.py`) يقرأ النمطَ نفسَه من هنا.
+EVIDENCE_DIR = PROJ / "handoff" / "sulaiman"
+EVIDENCE_SUFFIX = "gate-evidence-full-run.txt"
+
+
+def _stamp(now=None):
+    """**الزمنُ من مصدرٍ واحد** — مسارُ الدليل وترويستُه يتقاسمان اللحظة نفسَها (مراجعة ٦١: كان كلٌّ
+    يستدعي `datetime.now()` في موضعه ⇒ اسمُ الملفّ وترويستُه ساعتان تفترقان بثوانٍ فيُقرأ افتراقُهما عطبًا)."""
+    from datetime import datetime
+
+    return now or datetime.now()
+
+
+def _counts(results: list[tuple[str, bool, str]]) -> tuple[int, int]:
+    """(الناجح، الكلّ) — **موضعٌ واحدٌ للعدّ** (كان محسوبًا في `_table` و`evidence_body` و`main` ثلاثًا)."""
+    return sum(1 for _, p, _ in results if p), len(results)
+
+
+def _table(results: list[tuple[str, bool, str]]) -> list[str]:
+    """سطورُ جدول البوّابات — **موضعٌ واحد** يُطبع على الشاشة ويُكتب في الدليل (لا نسختان تفترقان)."""
+    width = max((len(n) for n, _, _ in results), default=0)
+    ok_n, total = _counts(results)
+    return [f"[{'PASS' if p else 'FAIL'}] {n:<{width}}  {d}" for n, p, d in results] + \
+           ["", f"GATES: {ok_n}/{total} passed"]
+
+
+def _sanitize(text: str) -> str:
+    """**يُنزع من الدليل ما يجعله عطبًا في السطح العامّ** (مقعدُ البنية · مراجعة ٦١): تفصيلُ بوّابةٍ قد
+
+    يحمل مسارًا مطلقًا (`missing /Users/<user>/…/x.pdf` من استثناءٍ أو رسالةِ فشل) ⇒ فدليلُ تشغيلٍ
+    يُودَع تحت `handoff/` يجعل `publish_guard --tree` يعطي **BLOCK `home_path`** ⇒ يسقط «هبوطُ المراجعة»
+    والعطبُ في الحارس لا في الشاهد (وهو بعينه ما وقع مع `sys.executable` في R60-2). والنزعُ هنا **عند
+    الكتابة** لا في كلّ رسالة: موضعٌ واحد، ويُقاس بمسارٍ مطلقٍ مصنوع.
+    """
+    import tempfile
+
+    for raw, label in ((str(PROJ), "<repo>"), (str(Path.home()), "~"),
+                       (str(Path(tempfile.gettempdir()).resolve()), "<tmp>")):
+        if raw:
+            text = text.replace(raw, label)
+    return text
+
+
+def run_log_path(now=None, directory: Path = EVIDENCE_DIR) -> Path:
+    """مسارُ **سجلّ** التشغيل بزمن اللحظة — **دالّةٌ خالصةٌ** (تُقاس بمُدخَلٍ مصنوع بلا انتظار ساعة).
+
+    (الاسمُ `run_log_path` لا `evidence_path`: في المستودع **شهادتان**: `pack_io.evidence_path` =
+    الشهادةُ المختومةُ في `docs/evidence/`، وهذا = سجلُّ تشغيل البوّابة. واتّحادُ الاسمين كان يجعل
+    قارئَ الشيفرة يظنّ سجلَّ تشغيلٍ مُودَعًا في `handoff/` شهادةً مختومة — قاسه مقعدُ البنية · مراجعة ٦١.)
+    """
+    stamp = _stamp(now).strftime("%Y%m%d-%H%M%S")
+    return directory / f"{stamp}-{EVIDENCE_SUFFIX}"
+
+
+def _interpreter_label() -> str:
+    """وصفُ المفسّر **بلا مسار منزل** (R60-2 · قاسه مسبارُ الهبوط قبل الدفع):
+
+    الترويسةُ كانت تكتب `sys.executable` مطلقًا — والمسارُ المطلق يحمل اسمَ المستخدم ⇒ فدليلُ تشغيلٍ
+    مُودَعٌ تحت `handoff/` يجعل `publish_guard --tree` يعطي **BLOCK `home_path`** في الشجرة المدفوعة
+    (وهو ما أسقط «هبوطَ المراجعة» في المسبار: `rc=1` من خطوة الحارس). والمعلومةُ (أيُّ مفسّر) باقية:
+    **نسبيٌّ إلى جذر المستودع** إن كان داخله، وإلّا الاسمُ وحدَه.
+    """
+    exe = Path(sys.executable)
+    try:
+        return str(exe.relative_to(PROJ))
+    except ValueError:
+        return exe.name
+
+
+def evidence_body(ok: bool, results: list[tuple[str, bool, str]], full: bool,
+                  when=None) -> str:
+    """نصُّ الدليل: الترويسةُ (الزمنُ · الحكمُ · الوضعُ) ثمّ جدولُ البوّابات — **المخرَجُ كاملًا**.
+
+    ولا يُقتطع: الحارسُ يستنتج «غيابَ الوسم» من ملفٍّ يحمل المخرجَ كاملًا (ووسمُ `[flaky_read]` يقع
+    داخل سطر النتيجة نفسِه) ⇒ فملفٌّ مقتطعٌ يجعل الغيابَ صمتًا لا دليلًا (حدٌّ مُعلَن في السجلّ).
+
+    **ويُنزَّه بـ`_sanitize`** (مقعدُ البنية · مراجعة ٦١): تفصيلُ بوّابةٍ قد يحمل مسارًا مطلقًا ذا اسم
+    منزلٍ فيصير الملفُّ عطبًا في السطح العامّ (`BLOCK home_path`) لا شاهدًا.
+    """
+    ts = _stamp(when).isoformat(timespec="seconds")
+    ok_n, total = _counts(results)
+    lines = [
+        f"# qa_gate {'--full' if full else '--quick'} — {ts}",
+        f"# rc={0 if ok else 1} · GATES: {ok_n}/{total} passed · المفسّر={_interpreter_label()}",
+        "# كُتب هذا الملفُّ **بالأداة** لا بيد الكاتب (R60-2) ⇒ تشغيلٌ بلا دليلٍ = تشغيلٌ خارج النافذة.",
+        "",
+        *_table(results),
+    ]
+    return _sanitize("\n".join(lines)) + "\n"
 sys.path.insert(0, str(PROJ / "src"))
 
 RESULTS: list[tuple[str, bool, str]] = []
@@ -182,10 +280,21 @@ def _is_clean(run: dict) -> bool:
 
     الشرطُ الأخيرُ لم يكن فيها أوّلًا، وأدخله قياسُ مقعد المواصفة: بدونه **تُغسَل مخالفةُ أوراكل
     الفوتر** (أقوى حارسٍ خارجيّ) بإعادةِ قراءةٍ نظيفةٍ ثانية، فتُمرَّر بلا إعلان.
+
+    **والثقبُ الرابع (R60-2 · قاسه المدقّق في مراجعة ٦٠):** شرطُ **إغلاق مقام التغطية**
+    (`f_possible == cov[1]` — «صفحاتٌ خرجت من الأوراكل بلا حكم») كان يُفحص **لاحقًا** تأكيدًا صلبًا في
+    `g_end_to_end` وحدَه، وليس داخل «النظافة» ⇒ فقراءةٌ فيها ثقبُ مقامٍ تُقرأ **نظيفةً عند السياسة**:
+    لا إعادةَ قراءةٍ ولا وسمَ `[flaky_read]`، ثمّ تسقط البوّابةُ على التأكيد ⇒ «٤/٥» ثمّ إعادةُ
+    البوّابة كلِّها **باليد** — وهو بعينه صنفُ «أعِدْ حتى تخضرّ» الذي بُني السجلُّ والميزانيّةُ لمنعه.
+    والآن الثقبُ **عطبُ نظافة**: تُطلَب قراءةٌ ثانيةٌ، وإن أبرّأت فالإبراءُ **مُعلَنٌ بوسمٍ يُقيَّد**
+    في `handoff/FLAKY_READS.md` — لا إعادةٌ سرّيّة. (وقراءةٌ بلا مقامِ تغطيةٍ مقروء ⇒ ليست نظيفة:
+    فشلٌ مُغلَق.)
     """
     f_ok, f_possible = run["footer_pair"]
+    cov = run["coverage_pair"]
     return (run["susp"] == 0 and run["clean"] == run["total"]
-            and not run["footer_flag"] and f_ok == f_possible)
+            and not run["footer_flag"] and f_ok == f_possible
+            and bool(cov) and f_possible == cov[1])
 
 
 #: **سياسةُ اللاحتميّة — مُعلَنةٌ لا مُخمَّنة.** كانت البوّابةُ تحكم من قراءةٍ واحدة فتبدّل لونَها بلا
@@ -381,20 +490,40 @@ def main() -> None:
                          "وقد تتضاعف الزمنُ والكلفةُ مرّةً واحدة إن لم تكن القراءةُ الأولى نظيفة — إعادةٌ واحدة لا أكثر)")
     args = ap.parse_args()
 
-    gate("unit suite", g_tests)
-    gate("parser goldens", g_parser_goldens)
-    gate("service health", g_service)
-    gate("surface redirect", g_surface_redirect)
-    if args.full:
-        gate("end-to-end sample (values locked)", g_end_to_end)
-
-    width = max(len(n) for n, _, _ in RESULTS)
-    ok = sum(1 for _, p, _ in RESULTS if p)
+    crashed: str | None = None
+    # **وكلُّ نداءات البوّابات داخل `try`** (مقعدُ المواصفة · مراجعة ٦١): كانت الكتابةُ **بعد** نداءات
+    # البوّابات كلِّها ⇒ استثناءٌ قبلها = «تشغيلٌ بلا دليل» — البابُ الضيّقُ الذي وُلد منه R60-2. الآن:
+    # الاستثناءُ يُقيَّد **صفًّا باسمه** في الجدول، والدليلُ يُكتب على كلّ حال، ثمّ يُخرج بغير صفر.
+    try:
+        gate("unit suite", g_tests)
+        gate("parser goldens", g_parser_goldens)
+        gate("service health", g_service)
+        gate("surface redirect", g_surface_redirect)
+        if args.full:
+            gate("end-to-end sample (values locked)", g_end_to_end)
+        ok_n, total = _counts(RESULTS)      # **عدٌّ واحد** (P3-١٠ · مراجعة ٦١)
+        ok = ok_n == total
+    except Exception as exc:                 # noqa: BLE001 — يُقيَّد ويُسمّى، ولا يُسقط الدليل
+        crashed = f"{type(exc).__name__}: {exc}"
+        RESULTS.append((f"انهيارُ الأداة ({type(exc).__name__})", False, crashed[:300]))
+        ok = False
     print()
-    for n, p, d in RESULTS:
-        print(f"[{'PASS' if p else 'FAIL'}] {n:<{width}}  {d}")
-    print(f"\nGATES: {ok}/{len(RESULTS)} passed")
-    sys.exit(0 if ok == len(RESULTS) else 1)
+    print("\n".join(_table(RESULTS)))
+    # **والدليلُ يُكتب بالأداة في كلّ تشغيلٍ شامل — ناجحًا أو ساقطًا أو منهارًا (R60-2):** كان `tee` بيد
+    # الكاتب، ومرّةً واحدة لم يُحفَظ فيها دليلُ تشغيلٍ ساقطٍ (٤/٥) ⇒ ضاع رصدُ اللاحتميّة. والكتابةُ **قبل**
+    # الخروجَين حتى لا يضيع دليلُ السقوط — وهو الدليلُ الذي يُهمّ أكثر.
+    try:
+        if args.full:
+            # **زمنٌ واحدٌ للمسار والترويسة** (مقعدُ البنية): كان كلٌّ يستدعي `now()` في موضعه.
+            when = _stamp()
+            path = run_log_path(when)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(evidence_body(ok, RESULTS, full=True, when=when), encoding="utf-8")
+            print(f"\n[evidence] دليلُ التشغيل مكتوبٌ بالأداة: {path.relative_to(PROJ)}")
+    finally:
+        if crashed:
+            print(f"\n[crash] {crashed}", file=sys.stderr)
+        sys.exit(0 if ok else 1)
 
 
 if __name__ == "__main__":

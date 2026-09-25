@@ -34,6 +34,13 @@ RESULTS = PROJ / "data" / "local_sample" / "slice_629p" / "results"
 # and calls the fresh document the drift (this happened with the test count).
 SNAPSHOT = PROJ / "docs" / "claims.json"
 
+# **كائنُ القرار يُستورد في أعلى الملفّ — بلا `try/except` يُخفي** (مقعدُ البنية · مراجعة ٦١): كان
+# يُستورد داخل دالّةٍ عبر `sys.path.insert` **ويبتلع الخطأ** فيُعيد `None` ⇒ تُصاغ الوثيقةُ بـ`{None}`
+# ويُكتب في اللقطة `null` بصمت. والآن الوحدةُ المجرّدةُ (`tools/gate3.py` — لا تبعيّةَ خارج المكتبة
+# القياسية، فلا خدمةَ ولا نموذج) تُستورد بنفس النمط المُعلَن المُستعمل لـ`scale_slice` أدناه.
+sys.path.insert(0, str(PROJ / "tools"))
+from gate3 import GATE3_DECISION                                    # noqa: E402
+
 
 def _test_count() -> int | None:
     """عدُّ الاختبارات — ببيئةٍ نظيفة.
@@ -52,6 +59,21 @@ def _test_count() -> int | None:
         if len(parts) >= 2 and parts[0].isdigit() and "test" in parts[1]:
             return int(parts[0])
     return None
+
+
+def _gate3_price_cap() -> int | None:
+    """**سقفُ ثمن الإفراج يُشتقّ من كائنه لا من النثر** (review-60 · R60-1).
+
+    الرقمُ ١٣٣ كان يُكتب بيدٍ في الوثائق — وقد سُحب مرّةً إلى «١٠٠» لأن البوابةَ كانت تقيس مجتمعًا
+    ناقصًا. فالآن يُشتقّ من `GATE3_DECISION` (مصدرٌ واحد: **`tools/gate3.py`**) ويُقابَل في موضعين
+    معلَنين، فمن غيّر السقفَ في الشيفرة يجد الوثائقَ تحمرّ.
+
+    **وحدُّ الاستيراد (مقعدُ البنية · مراجعة ٦١):** كان يقع في `try/except` يبتلع كلَّ خطأ ويُعيد
+    `None`، فيُصاغ الطلبُ ويُكتب في اللقطة `{None} صفحة` **بصمت**. والآن يُستورد **الوحدةَ المجرّدة**
+    (`tools/gate3.py`: لا تبعيّةَ خارج المكتبة القياسية) في **أعلى الملفّ** — فإن اختفى كائنُ القرار
+    سقطت الأداةُ بالاسم (`ModuleNotFoundError`) لا أن تكتب `null` في وثيقةٍ معلَنة.
+    """
+    return int(GATE3_DECISION["price_cap_pages"])
 
 
 def derive() -> dict | None:
@@ -83,6 +105,8 @@ def derive() -> dict | None:
         "arbitrations": len(facts.get("arbitrations", [])),
         "median_page_s": facts.get("median_page_s"),
         "tests": _test_count(),
+        # **ومصدرٌ ثالثٌ مُعلَن**: كائنُ قرار البوابة (٣) — يُشتقّ منه سقفُ الثمن ويُقابَل في الوثائق.
+        "gate3_price_cap_pages": _gate3_price_cap(),
     }
 
 
@@ -101,6 +125,13 @@ def claims(d: dict) -> list[tuple[str, str, str]]:
         # accounted for every page: the number a stranger reads first had no
         # guard at all (external audit).
         ("app.py", f"{d['ok']} صفحة", "الصفحات المطابقة بإطارها (شاشة ABOUT)"),
+        # **وسقفُ ثمن الإفراج يُقابَل في موضعين** (review-60 · R60-1): الرقمُ ١٣٣ كان يُكتب بيدٍ،
+        # فسُحب مرّةً إلى «١٠٠» لمّا قاست البوابةُ مجتمعًا ناقصًا. والصيغةُ تحمل الرقمَ **معناه**
+        # (سقفُ ثمنِ الإفراج) فلا يُنسَخ رقمٌ آخر في مكانه؛ والمصدرُ كائنُ القرار لا نصّ.
+        ("docs/EVAL_PACK.md", f"سقفُ ثمنِ الإفراج {d.get('gate3_price_cap_pages')} صفحة",
+         "سقفُ ثمن الإفراج (البوابة ٣)"),
+        ("docs/GATES.md", f"سقفُ ثمنِ الإفراج {d.get('gate3_price_cap_pages')} صفحة",
+         "سقفُ ثمن الإفراج (سجلّ البوابات)"),
     ]
 
 

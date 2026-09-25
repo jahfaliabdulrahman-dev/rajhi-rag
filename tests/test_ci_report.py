@@ -1,0 +1,212 @@
+"""ضوابطُ `tools/ci_report.py` — «ولا يُقال أخضرُ بلا دليل» (مراجعة ٦١ · R61-1).
+
+الملاحظةُ التي وُلدت منها هذه الأداة: تقريرُ دفعٍ قال «CI ناجح» وقِيس مرجعٌ واحدٌ من خمسة،
+وفرعان مدفوعان كانا أحمرَين. فالضوابطُ هنا تُثبّت **ما لا يُقبل أن يُقال**: لا أخضرَ لمرجعٍ
+أحمر، ولا أخضرَ لتشغيلٍ على التزامٍ **قديم** (درسُ §٢٧)، ولا أخضرَ بلا تشغيل، ولا صمتَ عند تعذّر
+القياس — «غيرُ المقروء ليس نظيفاً».
+"""
+from __future__ import annotations
+
+import importlib.util
+import io
+import json
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location("ci_report", ROOT / "tools" / "ci_report.py")
+assert spec and spec.loader, "لا يُحمَّل الضابطُ على نيّة: الملفُّ يجب أن يوجد"
+cr = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(cr)
+
+HEAD = "cbc8f40" + "a" * 33          # شكلُ sha كاملٌ، وقيمةٌ وهميّة
+OTHER = "da6403b" + "b" * 33
+
+
+def _fake(monkeypatch, payload, *, rc=0, sha: str | None = HEAD, local=None):
+    """يُستبدَل نداءُ `gh` وقراءةُ الالتزام — فلا شبكةَ ولا GitHub في الضابط."""
+    monkeypatch.setattr(cr, "_gh",
+                        lambda args: (rc, json.dumps(payload) if rc == 0 else "gh: not found"))
+    monkeypatch.setattr(cr, "_pushed_sha", lambda ref: sha)
+    monkeypatch.setattr(cr, "_local_sha", lambda ref: local if local is not None else sha)
+
+
+def _run(conclusion, *, status="completed", head=HEAD, name="publish-guard"):
+    return [{"conclusion": conclusion, "status": status, "headSha": head, "workflowName": name}]
+
+
+def test_a_green_run_on_the_same_commit_passes(monkeypatch, capsys):
+    _fake(monkeypatch, _run("success"))
+    assert cr.main(["chore/round56-evidence"]) == 0
+    assert "PASS" in capsys.readouterr().out
+
+
+def test_a_red_ref_is_named_and_blocks(monkeypatch, capsys):
+    _fake(monkeypatch, _run("failure"))
+    assert cr.main(["claude/handoff-execution-196328"]) == 1, \
+        "مرجعٌ أحمرُ يجب أن يُسقط — ومن هنا وُلد البندُ (R61-1)"
+    out = capsys.readouterr().out
+    assert "أحمر" in out and "claude/handoff-execution-196328" in out, "ويُسمّى باسمه لا بجملةٍ عامّة"
+
+
+def test_a_stale_run_never_blesses_a_new_head(monkeypatch, capsys):
+    """**§٢٧ بالآلة:** تشغيلٌ أخضرُ على التزامٍ آخرَ ليس شهادةً لهذا الرأس."""
+    _fake(monkeypatch, _run("success", head=OTHER))
+    assert cr.main(["chore/round56-evidence"]) == 1
+    assert "قديم" in capsys.readouterr().out
+
+
+def test_no_run_at_all_is_not_green(monkeypatch, capsys):
+    _fake(monkeypatch, [])
+    assert cr.main(["claude/review-56"]) == 1
+    assert "بلا تشغيل" in capsys.readouterr().out
+
+
+def test_a_run_still_going_is_not_green_yet(monkeypatch, capsys):
+    _fake(monkeypatch, _run(None, status="in_progress"))
+    assert cr.main(["claude/review-56"]) == 1
+    assert "جارٍ" in capsys.readouterr().out
+
+
+def test_an_unreadable_gh_blocks_with_two(monkeypatch, capsys):
+    """«غيرُ المقروء ليس نظيفاً»: تعذّرُ القياس رمزُه 2 — لا صفرٌ ولا صمت."""
+    _fake(monkeypatch, [], rc=1)
+    assert cr.main(["chore/round56-evidence"]) == 2
+    assert "غيرُ مقروء" in capsys.readouterr().out
+
+
+def test_one_red_among_greens_is_enough_to_block(monkeypatch, capsys):
+    """**الدفعةُ كلُّها تُقاس** — وجودُ أخضرَ واحدٍ لا يُبرّئ الدفع (وهو نصُّ الملاحظة)."""
+    _fake(monkeypatch, _run("success"))
+    states = []
+
+    def gh(args):
+        ref = args[args.index("--branch") + 1]
+        states.append(ref)
+        bad = ref == "claude/handoff-execution-196328"
+        return 0, json.dumps(_run("failure" if bad else "success"))
+
+    monkeypatch.setattr(cr, "_gh", gh)
+    assert cr.main(["chore/round56-evidence", "claude/handoff-execution-196328"]) == 1
+    assert states == ["chore/round56-evidence", "claude/handoff-execution-196328"], \
+        "الأداةُ تمرّ على كلِّ مرجعٍ مدفوع — لا على أوّلِه"
+
+
+def test_the_compared_commit_is_the_pushed_one_not_the_local_one(monkeypatch):
+    """**مُثبَتٌ بقياسٍ حيّ:** القياسُ كان على المرجع المحلّيّ، وفرعٌ محلّيٌّ متقدّمٌ على المدفوع
+    يُوسَم «قديمًا» وهو **أحمرُ** في الحقيقة ⇒ وسمٌ مضلِّل. المقصودُ صدقُ تقرير الدفع،
+    وتقريرُ الدفع يتكلّم عن **المدفوع** ⇒ `origin/<ref>` أوّلًا."""
+    calls: list[str] = []
+
+    def run(cmd):
+        calls.append(cmd[-1])
+        return (0, OTHER) if cmd[-1] == "origin/x" else (0, HEAD)
+
+    monkeypatch.setattr(cr, "_run", run)
+    assert cr._pushed_sha("x") == OTHER, "المدفوعُ هو ما يُقاس، لا ما في اليد"
+    assert calls[0] == "origin/x", "ويُقرأ `origin/<ref>` أوّلًا"
+
+
+def test_an_unresolvable_ref_cannot_be_called_green(monkeypatch, capsys):
+    """ولا صمتَ: مرجعٌ لا نعرف التزامَه ⇒ «غيرُ مقروء» (رمزٌ 2) لا «أخضر»."""
+    _fake(monkeypatch, _run("success"), sha=None)
+    assert cr.main(["ghost/ref"]) == 2
+    assert "غيرُ مقروء" in capsys.readouterr().out
+
+
+def test_a_green_push_notes_an_unpushed_local_commit(monkeypatch, capsys):
+    """الأخضرُ يبقى أخضرَ، **ويُعلَن** أنّ محلّيًّا متقدّمٌ على المدفوع (لا يُخفى ولا يُسقط)."""
+    _fake(monkeypatch, _run("success"), local=OTHER)
+    assert cr.main(["chore/round56-evidence"]) == 0
+    out = capsys.readouterr().out
+    assert "غيرُ مدفوع" in out and "PASS" in out
+
+
+def test_the_reminder_names_the_command_and_judges_nothing(monkeypatch, capsys):
+    """**لماذا تذكيرٌ لا حُكم:** الـCI يعمل **بعد** الدفع، فخطّافُ ما قبل الدفع لا يملك ما يقيسه
+    ⇒ يقف التذكيرُ في المسار الذي يُنسى فيه، ويبقى الحُكمُ لأداةٍ تُشغَّل بعده. وشبكةٌ في
+    خطّاف الدفع عطبٌ في المسار الحسّاس ⇒ لا نداءَ شبكةٍ هنا."""
+    def boom(args):
+        raise AssertionError("التذكيرُ لا يستدعي `gh` — لا شبكةَ في مسار الدفع")
+
+    monkeypatch.setattr(cr, "_gh", boom)
+    assert cr.main(["--remind", "chore/round56-evidence", "claude/review-56"]) == 0
+    out = capsys.readouterr().out
+    assert "ci_report.py chore/round56-evidence claude/review-56" in out, "ويُسمّي الأمرَ بمراجعه كما هي"
+    assert "PASS" not in out, "ولا يُدّعى حُكم"
+
+
+# ---------------------------------------------------------------------------------------------
+# R62: مُحلِّلُ سطور `pre-push` — **والأشكالُ هنا مقيسةٌ حيًّا من git نفسِه** لا من ظنّ
+# (نسخةٌ اختباريّةٌ محليّة: دفعُ فرعٍ · وسمٌ · حذفُ مرجع · رأسٌ مفصول). ومن هذه الأشكال وُلد
+# الحاجبُ الأوّل في مراجعة الجولة ٦٢: `awk '{print $1}'` كان يقرأ `(delete)`/`HEAD`/`refs/tags/…`
+# كأنّها أسماءُ فروع ⇒ تذكيرٌ بلا معنى، وسطرٌ يُسقط دفعاً مشروعاً صامتاً.
+# ---------------------------------------------------------------------------------------------
+Z = "0" * 40          # sha الوجهة لمرجعٍ جديد — يُبنى ولا يُكتب (قاعدةُ الأرقام الطويلة)
+SHA_A = "f191a935c6ebe3536337678e91104ca5e2310c40"
+SHA_B = "17fc94a76958d96b385dfdcdd01b56c88a1a45a3"
+
+MEASURED_STDIN = (
+    ("update", f"refs/heads/main {SHA_A} refs/heads/main {Z}", ["main"], 0, 0),
+    ("tag", f"refs/tags/v1 {SHA_A} refs/tags/v1 {Z}", [], 1, 0),
+    ("delete", f"(delete) {Z} refs/heads/old {SHA_A}", [], 0, 1),
+    ("detached-head", f"HEAD {SHA_B} refs/heads/new {Z}", ["new"], 0, 0),
+    ("rename", f"refs/heads/a {SHA_B} refs/heads/b {Z}", ["b"], 0, 0),
+    ("empty", "", [], 0, 0),
+)
+
+
+@pytest.mark.parametrize("name,line,refs,non_branch,deleted", MEASURED_STDIN)
+def test_pushed_refs_are_read_by_destination_not_by_field_one(name, line, refs, non_branch, deleted):
+    """**وجهةُ الدفع هي المقصودة** (الحقلُ الثالث): `HEAD:refs/heads/new` يُقاس عليه `new`،
+    والوسمُ والحذفُ لا يُقاسان كأنّهما فرعان (ويُعلَن عدُّهما)."""
+    assert cr.parse_pushed_refs(line) == (refs, non_branch, deleted), name
+
+
+def test_a_mixed_push_counts_every_ref_and_declares_what_is_not_measured():
+    """دفعةٌ مختلطة: فرعٌ يُقاس، ووسمٌ يُعلَن أنّه ليس فرعاً (لا يُسقَط ولا يُوسَم فرعاً)."""
+    line = (f"refs/heads/main {SHA_A} refs/heads/main {Z}\n"
+            f"refs/tags/v1 {SHA_A} refs/tags/v1 {Z}\n")
+    assert cr.parse_pushed_refs(line) == (["main"], 1, 0)
+
+
+@pytest.mark.parametrize("name,line,refs,non_branch,deleted", MEASURED_STDIN)
+def test_the_pre_push_reminder_never_blocks_a_push(monkeypatch, capsys, name, line, refs, non_branch, deleted):
+    """**R62-F1 (الحاجب):** خطّافٌ يُسقط دفعاً مشروعاً (وسمٌ · حذفُ فرع · رأسٌ مفصول · دفعٌ بلا
+    جديد) يُصنع به الحافزُ على `--no-verify` الذي يُسقط حرّاسَ الأمن ⇒ فالتذكيرُ يخرج **صفراً**
+    في كلّ شكل، ولا يمسّ الشبكة."""
+    def boom(args):
+        raise AssertionError("التذكيرُ لا يستدعي `gh` — لا شبكةَ في مسار الدفع")
+
+    monkeypatch.setattr(cr, "_gh", boom)
+    monkeypatch.setattr(cr.sys, "stdin", io.StringIO(line))
+    assert cr.main(["--pre-push"]) == 0, f"{name}: الدفعُ المشروع لا يُسقَط"
+    out = capsys.readouterr().out
+    for r in refs:
+        assert r in out, f"{name}: يُسمّى المرجعُ المقصود ({r})"
+    if non_branch or deleted:
+        assert "لا تشغيلَ يُقاس عليهما" in out, f"{name}: ويُعلَن ما لا يُقاس (لا يُخفي)"
+
+
+def test_a_run_without_a_headsha_cannot_be_called_green(monkeypatch, capsys):
+    """**فشلٌ مُغلَق:** تشغيلٌ بلا `headSha` (أو بحقلٍ فارغ) لا يُقابَل بالمدفوع ⇒ «غيرُ مقروء»
+    ورمزُه 2 — لا «أخضر». حُكمٌ بلا مرساةٍ ليس حكماً، وهو عينُ صنفِ R61-1 طبقةً أعمق."""
+    for payload in ({"conclusion": "success", "status": "completed", "workflowName": "publish-guard"},
+                    {"conclusion": "success", "status": "completed", "headSha": "",
+                     "workflowName": "publish-guard"}):
+        monkeypatch.setattr(cr, "_gh", lambda args, p=payload: (0, json.dumps([p])))
+        monkeypatch.setattr(cr, "_pushed_sha", lambda ref: HEAD)
+        assert cr.main(["chore/round56-evidence"]) == 2, payload
+        assert "غيرُ مقروء" in capsys.readouterr().out
+
+
+def test_json_mode_is_machine_readable_and_keeps_the_limit_on_stderr(monkeypatch, capsys):
+    """`--json` مُعلَنٌ «للسجلّ» ⇒ يجب أن يُستهلك آليًّا: stdout = JSON وحده، والبيانُ البشريّ
+    (ومنها إعلانُ الحدّ) على stderr — فلا يُخفى ولا يُفسد السجلّ."""
+    _fake(monkeypatch, _run("success"))
+    assert cr.main(["--json", "chore/round56-evidence"]) == 0
+    cap = capsys.readouterr()
+    data = json.loads(cap.out)                       # كان يسقط: جملةُ الحدّ تُطبَع بعد فرع `--json`
+    assert isinstance(data, list) and data[0]["state"] == "أخضر"
+    assert "حدُّ هذا الفحص" in cap.err and "حدُّ هذا الفحص" not in cap.out

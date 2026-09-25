@@ -194,6 +194,24 @@ def test_the_ratchet_blocks_an_increase_and_pardons_the_declared_debt():
         "**تبديلُ قيمةٍ بأخرى عند العدّ نفسِه (ثغرةُ ٣٩ رقم ٣ج)** ⇒ ما لا يراه عدّادٌ يقارن الأعدادَ وحدها"
 
 
+def test_an_unreadable_threshold_blocks_by_name_instead_of_crashing():
+    """**عطبٌ صنفيّ (الجولة ٦١ · ظهر في دفعِ مراجعَ قديمة):** `baseline_at()` تُعيد `None` شرعاً
+    حين لا يكون خطُّ الأساس موجوداً في ذلك الالتزام (فرعٌ أساسُه أقدمُ من الخطّ)، وكان `None`
+    يُمرَّر إلى `.items()` فيسقط الخطّافُ بـ`AttributeError` **قبل** أن يحكم ⇒ يُقرأ **انهيارٌ**
+    مكان **حُكمٍ**، ويُمنع دفعٌ بلا اسمِ سبب — وهو أسوأُ من السقوط: لا يعرف الدافعُ ما يُصلح.
+
+    والقاعدةُ المعلنة: «غيرُ المقروء ليس نظيفاً» ⇒ **BLOCK بالاسم**، ولا انهيار.
+    """
+    bad = ag.ratchet_violations({"handoff/x.md": {"count": 1}}, None,
+                                "خطُّ الأساس المنشورُ في deadbeef")
+    assert bad and "غيرُ مقروء" in bad[0] and "deadbeef" in bad[0], \
+        "غيابُ العتبة يجب أن يُسقط **باسمه** (وإلا فالحُكمُ لا يُقرأ)"
+    assert ag.ratchet_violations(None, {}, "x"), "وغيابُ العدّاد كذلك — لا `.items()` على `None`"
+    assert ag.ratchet_violations({}, {}, "x") == [], "وغيابُ الظهورات كلِّها نظيفٌ شرعاً (لا دَين)"
+    assert "العدّاد" not in bad[0], \
+        "ولا يُخمَّن الدورُ من موضع الوسيط: في `--pre-push` الوسيطُ الأولُ **خطُّ الأساس المنشور** لا عدّاد"
+
+
 def test_without_a_manifest_the_guard_fails_closed_unless_ci_is_declared(tmp_path, monkeypatch, capsys):
     """**«يفشل مُغلَقاً» تُقاس:** بلا مانيفست ⇒ `rc=2` — ولا يُفتح إلّا بعلَمٍ صريحٍ `--ci`."""
     monkeypatch.setattr(ag, "MANIFEST", tmp_path / "nope.json")
