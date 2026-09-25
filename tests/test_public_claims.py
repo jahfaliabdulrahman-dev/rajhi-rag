@@ -43,8 +43,26 @@ def test_claims_lists_every_metric_it_promises():
             "ok": 621, "mismatch": 0, "gap": 2, "absent": 4, "unchecked": 2,
             "documented_ratio": "621/629", "clean_ratio": "5770/5793",
             "recoveries": 23, "rereads": 15, "arbitrations": 3,
-            "median_page_s": 22.18, "tests": 113}
+            "median_page_s": 22.18, "tests": 113, "gate3_price_cap_pages": 133}
     pairs = rc.claims(fake)
     assert len(pairs) >= 8
     assert any(n == "621/629" for _f, n, _l in pairs)
     assert any("مرساة" in n for _f, n, _l in pairs)
+    # **وسقفُ القرار له مقابلةٌ في الوثائق** (review-60): يُشتقّ من كائن القرار ويُقابَل في موضعين.
+    caps = [(f, n) for f, n, _l in pairs if "سقفُ ثمنِ الإفراج" in n]
+    assert len(caps) == 2 and all("133" in n for _f, n in caps), caps
+
+
+def test_the_withdrawn_gate3_license_is_not_restated_in_public_docs():
+    """**مفتاحُ الرخصة المسحوبة لا يعود** (review-60 · R60-1): كان القرارُ يُرخي **التقاطعَ نفسَه**
+    بمفتاح `accepted_pages` ⇒ رخصةُ إدخال صفحةٍ من الحزمة إلى بيانات التدريب والحكمُ `PASS`.
+    فالمصدرُ الواحدُ (`GATE3_DECISION`) يحرس مفتاحَه في اختبار الأداة، **والوثائقُ المعلَنةُ** تحرس
+    ألّا تُعيد الرخصةَ بآليّتها (وقد شرحناها مؤرَّخةً في `docs/EVAL_PACK.md` — الشرحُ ليس إعادةَ تفعيل).
+    """
+    for rel in ("docs/GATES.md", "README.md", "PLAN.md"):
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        assert "accepted_pages" not in text, \
+            f"{rel}: مفتاحُ الرخصة المسحوبة رجع ⇒ البوابةُ (٣) تُرخى بقرارٍ من جديد (R60-1)"
+    # **و`docs/EVAL_PACK.md` خارجَ القائمة عن قصد**: هو الموضعُ الوحيد الذي **يشرح** الرخصةَ المسحوبة
+    # بتاريخها (والمذيَّلُ «التصحيحُ الحاكم») ⇒ فيه اسمُ المفتاح اقتباسًا لا تعليمًا. والحكمُ عليه محروسٌ
+    # من جهة الشيفرة (`tests/test_eval_pack.py`: المفتاحُ ممنوعٌ في `GATE3_DECISION` نفسِه).

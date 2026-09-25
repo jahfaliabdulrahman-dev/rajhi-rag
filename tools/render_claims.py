@@ -54,6 +54,21 @@ def _test_count() -> int | None:
     return None
 
 
+def _gate3_price_cap() -> int | None:
+    """**سقفُ ثمن الإفراج يُشتقّ من كائنه لا من النثر** (review-60 · R60-1).
+
+    الرقمُ ١٣٣ كان يُكتب بيدٍ في الوثائق — وقد سُحب مرّةً إلى «١٠٠» لأن البوابةَ كانت تقيس مجتمعًا
+    ناقصًا. فالآن يُشتقّ من `GATE3_DECISION` (مصدرٌ واحد: كائنُ القرار في `tools/eval_pack.py`)
+    ويُقابَل في موضعين معلَنين، فمن غيّر السقفَ في الشيفرة يجد الوثائقَ تحمرّ.
+    """
+    try:
+        sys.path.insert(0, str(PROJ))
+        from tools.eval_pack import GATE3_DECISION                      # noqa: PLC0415
+        return int(GATE3_DECISION["price_cap_pages"])
+    except Exception:                                                   # noqa: BLE001
+        return None
+
+
 def derive() -> dict | None:
     if not REPORT.exists():
         return None
@@ -83,6 +98,8 @@ def derive() -> dict | None:
         "arbitrations": len(facts.get("arbitrations", [])),
         "median_page_s": facts.get("median_page_s"),
         "tests": _test_count(),
+        # **ومصدرٌ ثالثٌ مُعلَن**: كائنُ قرار البوابة (٣) — يُشتقّ منه سقفُ الثمن ويُقابَل في الوثائق.
+        "gate3_price_cap_pages": _gate3_price_cap(),
     }
 
 
@@ -101,6 +118,13 @@ def claims(d: dict) -> list[tuple[str, str, str]]:
         # accounted for every page: the number a stranger reads first had no
         # guard at all (external audit).
         ("app.py", f"{d['ok']} صفحة", "الصفحات المطابقة بإطارها (شاشة ABOUT)"),
+        # **وسقفُ ثمن الإفراج يُقابَل في موضعين** (review-60 · R60-1): الرقمُ ١٣٣ كان يُكتب بيدٍ،
+        # فسُحب مرّةً إلى «١٠٠» لمّا قاست البوابةُ مجتمعًا ناقصًا. والصيغةُ تحمل الرقمَ **معناه**
+        # (سقفُ ثمنِ الإفراج) فلا يُنسَخ رقمٌ آخر في مكانه؛ والمصدرُ كائنُ القرار لا نصّ.
+        ("docs/EVAL_PACK.md", f"سقفُ ثمنِ الإفراج {d.get('gate3_price_cap_pages')} صفحة",
+         "سقفُ ثمن الإفراج (البوابة ٣)"),
+        ("docs/GATES.md", f"سقفُ ثمنِ الإفراج {d.get('gate3_price_cap_pages')} صفحة",
+         "سقفُ ثمن الإفراج (سجلّ البوابات)"),
     ]
 
 

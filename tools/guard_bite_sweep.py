@@ -180,12 +180,20 @@ CASES = [
      '            return True',
      "tests/test_turn_derivation.py::test_the_fenced_header_is_read_not_ignored"),
 
-    # **م١٩ · سقفُ قرار المالك (إغلاقُ البوابة (٣) · 2026-09-25):** القرارُ يُغلق التقاطعَ **داخل سقفه**
-    # ولا يتمدّد؛ فسمُّه يُلغي السقفَ فيصير القرارُ ممرَّ عبورٍ لأيّ تقاطعٍ كان — ويجب أن يُسقط ضابطَه.
-    ("م١٩ · قرارُ المالك لا يتمدّد فوق سقفه المُعلَن", EP,
-     '    return len(inter) <= int(decision["accepted_pages"])',
+    # **م١٩ · سقفُ ثمن قرار المالك (R60-1 · مراجعة ٦٠):** القرارُ يقع على **ثمن الإفراج** داخل سقفه
+    # المُعلَن ولا يتمدّد؛ فسمُّه يُلغي السقفَ فيصير القرارُ رخصةً لأي ثمن — ويجب أن يُسقط ضابطَه.
+    ("م١٩ · قرارُ المالك لا يتمدّد فوق سقف ثمنه المُعلَن", EP,
+     '    return price_pages <= int(decision["price_cap_pages"])',
      '    return True',
-     "tests/test_eval_pack.py::test_the_owner_decision_closes_the_intersection_only_within_its_ceiling"),
+     "tests/test_eval_pack.py::test_the_owner_decision_closes_the_price_not_the_overlap"),
+
+    # **م٢٠ · البوابةُ (٣) لا تُرخى بقرار (R60-1 · حاجبُ مراجعة ٦٠):** كان السقفُ يُرخي **التقاطعَ نفسَه**
+    # ⇒ قِيس أن ١٣٣ صفحةً تداخلًا تُعطي `PASS` (رخصةُ إدخال ثلثَي الحزمة إلى التدريب). فسمُّ
+    # `gate3_overlap_ok` يُعيد الرخصةَ، ويجب أن يُسقط ضابطَ «التداخلُ عطبٌ مُسمًّى لا قرارُ مالك».
+    ("م٢٠ · التداخلُ عطبٌ يُسقط البوابةَ ولا يُرخيه قرار (حاجبُ مراجعة ٦٠)", EP,
+     '    return not inter\n\n\ndef gate3_price_within_cap',
+     '    return True\n\n\ndef gate3_price_within_cap',
+     "tests/test_eval_pack.py::test_an_overlap_is_a_named_defect_even_with_a_dated_owner_decision"),
 ]
 
 
