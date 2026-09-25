@@ -84,8 +84,8 @@ def test_the_three_rules_are_named_and_do_diverge():
 
 def test_numeric_sets_collects_from_free_text():
     got = lrp.numeric_sets(f"رصيد {THOU_AR_LINE} ثم {SMALL} بعده")
-    assert CANON_THOU in got["قيمة"]
-    assert SMALL in got["قيمة"]
+    assert Decimal(CANON_THOU) in got["قيمة"]
+    assert Decimal(SMALL) in got["قيمة"]
 
 
 THOU_AR_LINE = f"{_AR * 3}٬{_AR * 3}٫{_D * 2}"
@@ -94,12 +94,21 @@ THOU_AR_LINE = f"{_AR * 3}٬{_AR * 3}٫{_D * 2}"
 def test_numeric_sets_keeps_the_rules_apart():
     """الخلطُ يكذب: «أرقام» تحمل المجرَّد، و«قيمة» تحمل المكسور — فلا تُسأل واحدةٌ عن الأخرى."""
     got = lrp.numeric_sets(THOU_LAT)
-    assert got["قيمة"] == {CANON_THOU}
+    assert got["قيمة"] == {Decimal(CANON_THOU)}
     assert got["شكل"] == {CANON_THOU}
     assert got["أرقام"] == {DIGITS_THOU}
 
 
-# ---------------------------------------------------------------- الحقيقةُ الأرضيّة
+def test_value_unifies_shapes_that_carry_the_same_number():
+    """**عطبٌ مقيسٌ في مراجعة الجولة ٦٣:** الأداةُ كانت تُخزّن «قيمة» نصًّا ⇒ «٩٩٩» ≠ «٩٩٩٫٠٠».
+
+    فالرقمُ نفسُه يفترق شكلًا ويتّفق قيمةً — ومن قارن النصَّ أهدر استرجاعًا كان بيده (٣٧.١٪ ⟶ ٤٨.٦٪).
+    """
+    plain, padded = f"{_D * 3}", f"{_D * 3}." + "0" * 2
+    assert Decimal(plain) == Decimal(padded) and plain != padded
+    assert lrp.numeric_sets(plain)["قيمة"] == lrp.numeric_sets(padded)["قيمة"] == {Decimal(plain)}
+    assert lrp.numeric_sets(plain)["شكل"] != lrp.numeric_sets(padded)["شكل"]
+
 
 def test_truth_form_prints_json_numbers_like_the_paper():
     """`label.json` يحمل أعدادًا لا نصوصًا: 999.9 يجب أن يصير 999.90 لا 999.9 (عطبٌ مقيس)."""
@@ -112,11 +121,11 @@ def test_truth_sets_read_the_same_three_shapes_separately():
     rows = [{"printed_amount": THOU, "balance": 999.9},
             {"printed_amount": None, "balance": SMALL}]
     got = lrp.truth_sets(rows)
-    assert CANON_THOU in got["مبالغ"]["قيمة"] and CANON_THOU in got["مبالغ"]["شكل"]
+    assert Decimal(CANON_THOU) in got["مبالغ"]["قيمة"] and CANON_THOU in got["مبالغ"]["شكل"]
     assert DIGITS_THOU in got["مبالغ"]["أرقام"]
-    assert f"999.{_D}0" in got["أرصدة"]["قيمة"]        # العطبُ المرصود أعلاه مغلق
+    assert Decimal(f"999.{_D}0") in got["أرصدة"]["قيمة"]     # العطبُ المرصود أعلاه مغلق
     assert set(got["أرصدة"]) == {"شكل", "قيمة", "أرقام"}
-    assert len(got["مبالغ"]["قيمة"]) == 1              # القيمةُ الغائبة لا تُخترع
+    assert len(got["مبالغ"]["قيمة"]) == 1                    # القيمةُ الغائبة لا تُخترع
 
 
 # ---------------------------------------------------------------- الصفحاتُ والقاعدة

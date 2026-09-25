@@ -80,31 +80,43 @@ def digits_of(tok: str) -> str | None:
     return (d.lstrip("0") or "0") if d else None
 
 
-def numeric_sets(text: str) -> dict[str, set[str]]:
-    """يجمع ثلاثَ مجموعاتٍ من نصٍّ واحد: شكل · قيمة · أرقام."""
-    out: dict[str, set[str]] = {"شكل": set(), "قيمة": set(), "أرقام": set()}
+def numeric_sets(text: str) -> dict[str, set]:
+    """يجمع ثلاثَ مجموعاتٍ من نصٍّ واحد: شكل · قيمة · أرقام.
+
+    **و«قيمة» تحمل `Decimal` لا نصًّا** — لأنّ `Decimal("436") == Decimal("436.00")` بينما
+    `"436" != "436.00"`؛ ومن قارن النصَّ أهدر استرجاعًا كان بيده (قِيست الفجوة: ٣٧.١٪ ⟶ ٤٨.٦٪).
+    """
+    out: dict[str, set] = {"شكل": set(), "قيمة": set(), "أرقام": set()}
     for raw in TOKEN.findall(to_ascii_digits(text)):
         c = canonical(raw)
         if c:
             out["شكل"].add(c)
         v = value_of(raw)
         if v is not None:
-            out["قيمة"].add(str(v))
+            out["قيمة"].add(v)
         d = digits_of(raw)
         if d and len(d) >= 2:
             out["أرقام"].add(d)
     return out
 
 
-def design_dir(design: str | None = None) -> pathlib.Path:
-    """مجلّدُ التصميم: صريحًا، أو **مُكتشفًا من القرص** (فتصميمُ الحزمة لا يُكتب في الشيفرة)."""
+def design_candidates() -> list[pathlib.Path]:
+    """كلُّ تصميمٍ في `data/training/` فيه صفحاتٌ (قد يوجد أكثر من واحد)."""
     base = ROOT / DESIGN_ENV
+    return sorted(p for p in base.glob("*") if p.is_dir() and any(p.glob("pg-*")))
+
+
+def design_dir(design: str | None = None) -> pathlib.Path:
+    """مجلّدُ التصميم: صريحًا، أو **الأوّلُ الذي يحمل الصفحاتِ المنشورة** فلا يُعاد قياسٌ على غيرها."""
     if design:
-        return base / design
-    dirs = sorted(p for p in base.glob("*") if p.is_dir() and any(p.glob("pg-*")))
-    if not dirs:
-        return base / "-"                     # لا وجود ⇒ يُعالجه `eligible` بالفراغ لا بالانفجار
-    return dirs[0]
+        return (ROOT / DESIGN_ENV) / design
+    dirs = design_candidates()
+    for d in dirs:
+        # من الأرقام التي تحملها الحقيقةُ لا من اسم المجلّد (الأسماءُ قد تكون مُصفَّرة: pg-001)
+        pool = {int(lab["page"]) for _, lab, _ in eligible(d.name)}
+        if set(PAGES) <= pool:
+            return d
+    return dirs[0] if dirs else (ROOT / DESIGN_ENV / "-")
 
 
 def eligible(design: str | None = None) -> list[tuple[pathlib.Path, dict, list]]:
@@ -140,10 +152,10 @@ def _truth_form(val) -> str:
     return str(int(d)) if d == d.to_integral_value() else f"{d:.2f}"
 
 
-def truth_sets(rows: list) -> dict[str, dict[str, set[str]]]:
+def truth_sets(rows: list) -> dict[str, dict[str, set]]:
     """الحقيقةُ الأرضيّة **مفصولةً بكل قاعدةٍ على حِدة** — خلطُ القواعد في مجموعةٍ واحدة يخلق مطابقاتٍ كاذبة."""
-    out: dict[str, dict[str, set[str]]] = {k: {"شكل": set(), "قيمة": set(), "أرقام": set()}
-                                           for k in ("مبالغ", "أرصدة")}
+    out: dict[str, dict[str, set]] = {k: {"شكل": set(), "قيمة": set(), "أرقام": set()}
+                                      for k in ("مبالغ", "أرصدة")}
     for r in rows:
         amt = r.get("printed_amount") or r.get("proven_amount")
         for group, val in (("مبالغ", amt), ("أرصدة", r.get("balance"))):
@@ -152,7 +164,7 @@ def truth_sets(rows: list) -> dict[str, dict[str, set[str]]]:
             s = _truth_form(val)
             for name, form in (("شكل", canonical(s)), ("قيمة", value_of(s)), ("أرقام", digits_of(s))):
                 if form not in (None, ""):
-                    out[group][name].add(str(form))
+                    out[group][name].add(form)
     return out
 
 
