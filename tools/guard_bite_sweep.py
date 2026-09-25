@@ -134,6 +134,13 @@ CASES = [
      '"٦١,١٦٥١٢": "61165.12"',
      '"٦١,١٦٥١٢": "35832.43"',
      "tests/test_gate_goldens.py::test_the_gate_goldens_agree_with_the_locked_rule"),
+
+    # **سياسةُ اللاحتميّة** (جولة ٥٩): القاعدةُ الحاسمةُ فيها («لا براءةَ بلا قراءةٍ نظيفة») بلا سمٍّ
+    # ليست حارسًا بل نصًّا — والسمُّ يجعلها تقرأ كلَّ قراءةٍ نظيفة، فتُمرّر غيرَ النظيفة.
+    ("م١٣ · سياسةُ اللاحتميّة لا تُمرّر قراءةً غيرَ نظيفة (R13)", QG,
+     '    if _is_clean(first):\n        return True, f"قراءةٌ نظيفةٌ من المحاولة الأولى',
+     '    if True:\n        return True, f"قراءةٌ نظيفةٌ من المحاولة الأولى',
+     "tests/test_gate_flake_policy.py::test_the_decisive_rule_is_no_clean_read_no_acquittal"),
 ]
 
 

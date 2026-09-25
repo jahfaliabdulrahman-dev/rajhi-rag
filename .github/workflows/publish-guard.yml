@@ -60,6 +60,7 @@ jobs:
                            tests/test_amount_guard.py \
                            tests/test_answer_names_witness.py \
                            tests/test_gate_goldens.py \
+                           tests/test_gate_flake_policy.py \
       - name: Real-data files must never be tracked
         id: gate_data_untracked
         run: |

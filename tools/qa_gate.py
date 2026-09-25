@@ -115,11 +115,13 @@ def g_surface_redirect() -> str:
     return f":7867 -> 302 {loc}"
 
 
-def g_end_to_end() -> str:
+def _e2e_measure(pdf) -> dict:
+    """قراءةٌ واحدةٌ كاملةٌ من الخدمة الحيّة: تُعيد القياسات ولا تُصدر حكمًا.
+
+    (والحكمُ في `decide_two_runs` — دالّةٌ خالصةٌ تُقاس بسمٍّ في `tools/guard_bite_sweep.py` م١٣.)
+    """
     from gradio_client import Client, handle_file
 
-    pdf = PROJ / "data/local_sample/sample_10p.pdf"
-    assert pdf.exists(), f"missing {pdf}"
     res = Client("http://127.0.0.1:7860", verbose=False).predict(
         handle_file(str(pdf)), api_name="/process_pdf")
     summary, table = res[0], res[1]
@@ -133,11 +135,6 @@ def g_end_to_end() -> str:
     total = int(nums[0].replace(",", ""))
     clean = int(nums[1].replace(",", ""))
     susp = int(nums[2].replace(",", ""))
-    assert susp == 0, f"{susp} suspects in the full run"
-    assert clean == total, f"{clean}/{total} clean"
-    assert total >= MIN_ROWS, (
-        f"only {total} rows — العتبة {MIN_ROWS}: صفحات أقل غزارة من المتوقع، "
-        f"راجع خطوات المعايرة في docs/ONBOARDING_NEW_FILE.md §3")
 
     assert isinstance(table, dict), "table shape changed"
     headers, data = table.get("headers") or [], table.get("data") or []
@@ -145,6 +142,64 @@ def g_end_to_end() -> str:
     for col in ("#", "الصفحة", "الوصف", "النوع", "مدين", "دائن", "الرصيد", "الحالة"):
         assert col in idx, f"missing column {col!r}: {headers}"
     assert len(data) >= 95, f"table carries {len(data)} rows"
+
+    # **هويّةُ الشكوك لا عدّادُها:** «صفحة:صفّ» لكلّ صفٍّ حالتُه «⚠ مشبوه». والعدّادُ في اللافتة
+    # يُقابَل بالهويّة (اختلافُهما عطبٌ في اللافتة نفسها لا ضجيجُ قراءة)، والهويّةُ هي ما يجعل
+    # الفصلَ بين «عطبٍ يتكرّر» و«ضجيجٍ لا يتكرّر» ممكنًا في سياسة اللاحتميّة أدناه.
+    ids = sorted(f'{r[idx["الصفحة"]]}:{r[idx["#"]]}'
+                 for r in data if str(r[idx["الحالة"]]).startswith("⚠"))
+    assert susp == len(ids), (
+        f"عدّادُ اللافتة ({susp}) لا يطابق الصفوفَ المشبوهة ({len(ids)}): {ids[:5]}")
+    return {"summary": str(summary), "data": data, "idx": idx, "total": total,
+            "clean": clean, "susp": susp, "ids": ids}
+
+
+def _is_clean(run: dict) -> bool:
+    """نظافةُ قراءةٍ واحدة: صفرُ شكوكٍ **و** لا صفَّ مفقودًا من العدّ (فلا صفرَ يُقرأ نجاحًا)."""
+    return run["susp"] == 0 and run["clean"] == run["total"]
+
+
+#: **سياسةُ اللاحتميّة — مُعلَنةٌ لا مُخمَّنة.** كانت البوّابةُ تحكم من قراءةٍ واحدة فتبدّل لونَها بلا
+#: تبدّلِ شفرة: قياسٌ مؤرَّخ (٢٠٢٦-٠٩-٢٥ · R13) — `--full` أعطى «١ مشتبه» في تشغيلٍ و«٠» في التالي.
+#: والقراءةُ البصريّةُ غيرُ حتميّة، والبوّابةُ لا تُصوّت للون ⇒ الحكمُ يُبنى على **مالكِ الافتراق**:
+#: العطبُ الحتميّ (مُحلّلٌ · سلسلةٌ · انحرافُ عدّ) **يتكرّر بمعرّفه**، وضجيجُ القراءة **لا يتكرّر**.
+#: والقاعدةُ الحاسمةُ واحدة: **لا براءةَ بلا قراءةٍ نظيفة** — والتقاطعُ **تشخيصيٌّ** لا حاسم (لأنّ
+#: أيَّ تقاطعٍ يعني أنّ الثانيةَ غيرُ نظيفةٍ حتمًا)؛ وقيمتُه أنّه **يسمّي العطبَ المتكرّرَ بمعرّفه**.
+def decide_two_runs(first: dict, second: dict | None = None) -> tuple[bool, str]:
+    if _is_clean(first):
+        return True, f"قراءةٌ نظيفةٌ من المحاولة الأولى ({first['total']} صفًّا)"
+    if second is None:
+        return False, (f"{first['susp']} مشتبهًا بلا محاولةٍ ثانية — لا حكمَ من قراءةٍ واحدة")
+    common = sorted(set(first["ids"]) & set(second["ids"]))
+    if common:
+        more = " …" if len(common) > 5 else ""
+        return False, (f"شكوكٌ **تتكرّر** بمعرّفها ⇒ عطبٌ حتميّ لا ضجيج: "
+                       f"{common[:5]}{more} ({len(common)} صفًّا)")
+    if not _is_clean(second):
+        return False, (f"لا قراءةَ نظيفة: الأولى {first['susp']} والثانية {second['susp']} "
+                       f"(تقاطعٌ فارغٌ لا يُثبت براءة)")
+    return True, (f"قراءةٌ غيرُ حتميّة مُعلَنة: {first['susp']} مشتبهًا في الأولى لم يتكرّر "
+                  f"({first['ids'][:3]})، والثانيةُ نظيفةٌ ({second['total']} صفًّا) "
+                  f"⇒ تُقرأ القيمُ من القراءة النظيفة")
+
+
+def g_end_to_end() -> str:
+    pdf = PROJ / "data/local_sample/sample_10p.pdf"
+    assert pdf.exists(), f"missing {pdf}"
+    first = _e2e_measure(pdf)
+    run, declared = first, ""
+    if not _is_clean(first):
+        second = _e2e_measure(pdf)
+        ok, why = decide_two_runs(first, second)
+        assert ok, f"الفحصُ الشامل: {why}"
+        declared = f" · [flaky_read] {why}"
+        if _is_clean(second):
+            run = second
+    summary, data, idx = run["summary"], run["data"], run["idx"]
+    total = run["total"]
+    assert total >= MIN_ROWS, (
+        f"only {total} rows — العتبة {MIN_ROWS}: صفحات أقل غزارة من المتوقع، "
+        f"راجع خطوات المعايرة في docs/ONBOARDING_NEW_FILE.md §3")
 
     def val(r, col):
         return r[idx[col]]
@@ -252,7 +307,7 @@ def g_end_to_end() -> str:
         f"أنواعُ المبالغ المتكرّرة: {_found} — المتوقَّع {_want}"
 
     return (f"{summary} | p1/p2 starts + p9→p10 continuity "
-            f"+ أنواعُ المبلغِ المتكرّر مقفلة + footer {f_ok}/{f_possible} OK")
+            f"+ أنواعُ المبلغِ المتكرّر مقفلة + footer {f_ok}/{f_possible} OK{declared}")
 
 
 def main() -> None:

@@ -60,6 +60,7 @@ tests/test_static_gate.py
 tests/test_amount_guard.py
 tests/test_answer_names_witness.py
 tests/test_gate_goldens.py
+tests/test_gate_flake_policy.py
 ```
 
 **ومعرّفُ كلّ خطوةٍ مُسجَّلٌ هنا — تُقابَل بالـworkflow في الاتّجاهين (لا خطوةَ بلا معرّفٍ مُسجَّل، ولا معرّفَ شبح):**
