@@ -10,7 +10,12 @@
   وهذا هو الموضعُ الذي تأخّر فيه دمجُ #119 بلا مالكٍ ظاهر (P-6 صريحاً).
   **وصيغتُه واحدة، وموضعاه مُعلَنان (R57-2 · قاسه المدقّق في مراجعة ٥٧):** الصيغةُ `status: AWAITING_FOUNDER`
   — كما توثّقها `handoff/STATE.md:60` وتكليفُ المدقّق `docs/claude-auditor-directive.md:43` — وتُقرأ من
-  **آخر تقرير** ومن **الملفّ المشترك `handoff/STATE.md`** (قفلُ المالك) معاً. وما ليس إعلاناً: اقتباسُها
+  **ترويسة آخر تقرير** ومن **ترويسة الملفّ المشترك `handoff/STATE.md`** معاً.
+  **وحدُّ الترويسة (أمرُ المالك: «الأكثر حرصاً ووضوحاً» · SP-3):** كلُّ سطرٍ **قبل أوّل عنوان `## `** وأيضاً
+  **ضمن أوّل ٣٠ سطراً** (أيّهما أسبق) — **وما بعده متنٌ: يُوثّق ولا يُزيح الدورَ**. والعلّةُ المقيسة: مطابقةُ
+  العلامة في أيّ موضعٍ تجعل تقريراً **يشرح القاعدة** يُوقف الطرفين بلا سبب، وهي أخطرُ من أن يُهمَل إعلانٌ
+  حقيقيٌّ (لم يقع مرّةً في الشجرة: قِيس **صفرُ** نصٍّ يُعلن من المتن). ولذلك ما يُهمَل **يُعرَض** ولا يُخفى.
+  وما ليس إعلاناً: اقتباسُها
   في **كتلة شِفرة مُقفَلة** (وليس في سياجٍ يتيم — S-4/ST-6)، و«بيدك» في قائمةِ نهاية التقرير (كلُّ تقريرٍ
   للمنفّذ ينتهي بها ⇒ صارت ضجيجاً يُزيح الدورَ زوراً)، وصيغةٌ حرّةٌ بلا حقل `status:`.
   **ولا يُجرَّد اقتباسٌ داخليّ** (S-4): كان `` `[^`]*` `` يُحذَف قبل المطابقة، وقِيس في مقعد ٥٧ أنّ إسقاطَه
@@ -58,6 +63,10 @@ DECLARATION_RE = re.compile(r"^\s*(?:[-*+]\s*)?status:\s*(AWAITING[ _]FOUNDER)\b
 #: سياجُ كتلةِ شِفرة (``` أو ~~~) — ويُقابَل **زوجاً** لا قلْباً لحالة: سياجٌ يتيمٌ يُبطِل التسييجَ كلَّه،
 #: فلا يُكتم إعلانٌ حقيقيٌّ بسطرِ تنسيقٍ ناقص (ST-6: كان القلْبُ يجعل كلَّ ما بعد سياجٍ يتيمٍ مُهمَلاً).
 FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
+#: **حدُّ الترويسة** (أمرُ المالك: «الأكثر حرصاً ووضوحاً» — SP-3): الإعلانُ يُقرأ من أوّل الملفّ **قبل أوّل
+#: عنوان `## `** و**ضمن أوّل ٣٠ سطراً** (أيّهما أسبق). والاثنان معاً مقصودان: `## ` يفصل ترويسةَ الرسالة
+#: (الحقولُ الستّة) عن متنها في تقارير هذا المستودع، و`٣٠` سقفٌ لملفٍّ بلا عنوانٍ أصلًا فلا يُقرأ نصُّه كلُّه.
+HEADER_LINES = 30
 
 
 def stamp_of(name: str) -> str | None:
@@ -94,16 +103,19 @@ def _reports(side: str) -> list[tuple[str, str, Path]]:
     return out
 
 
-def declarations(text: str) -> list[str]:
-    """إعلاناتُ التوقّف **الحقيقيّة** في نصّ — قاعدتُها مقيسةٌ في ستّ حالات (R57-2 · S-4/ST-6):
+def header_cut(text: str) -> int:
+    """عددُ أسطر **الترويسة**: قبل أوّل عنوان `## ` وضمن أوّل `HEADER_LINES` (أيّهما أسبق)."""
+    lines = text.splitlines()
+    first_heading = next((i for i, ln in enumerate(lines) if ln.startswith("## ")), len(lines))
+    return min(first_heading, HEADER_LINES)
 
-    (١) الصيغةُ حقلُ `status:` يحمل العلامة — **مُرساةً في أوّل السطر** (بعد مسافةٍ أو علامةِ قائمة).
-    (٢) ولا يُقرأ داخل **كتلة شِفرة مُقفَلة**: الأسوارُ تُقابَل **زوجاً**؛ وسياجٌ يتيمٌ (عددٌ فرديّ) يُبطِل
-    التسييجَ كلَّه — فيُقرأ النصُّ كما هو: البديلُ (قلْبُ الحالة) كان يُهمِل كلَّ ما بعد سياجٍ ناقص، وإهمالُ
-    إعلانٍ حقيقيٍّ أسوأُ من قراءة اقتباس (ST-6).
-    (٣) ولا يُجرَّد اقتباسٌ داخليّ قبل المطابقة: قِيس أنّ إسقاطَ التجريد لا يُسقط ضابطاً، وأنّ الصيغةَ الخامّةَ
-    (بين علامتين خلفيّتين) **لا تُطابق** لأنّ السطرَ يبدأ بعلامةٍ خلفيّة — فالمرساةُ وحدَها تكفي (S-4).
-    (٤) وصيغةٌ حرّةٌ بلا `status:` ليست إعلاناً. ودالّةٌ خالصةٌ ⇒ تُقاس بسمٍّ في الذاكرة لا بالنيّة.
+
+def _marked_lines(text: str) -> list[tuple[int, str]]:
+    """(رقمُ السطر، العلامة) لكل سطرٍ مُعلِن — والاقتباسُ مُستثنى (كتلةُ شِفرة **مُقفَلة**، ومرساةُ السطر).
+
+    الأسوارُ تُقابَل **زوجاً**؛ وسياجٌ يتيمٌ (عددٌ فرديّ) يُبطِل التسييجَ كلَّه — فيُقرأ النصُّ كما هو:
+    البديلُ (قلْبُ الحالة) كان يُهمِل كلَّ ما بعد سياجٍ ناقص، وإهمالُ إعلانٍ حقيقيٍّ أسوأُ من قراءة اقتباس (ST-6).
+    ولا يُجرَّد اقتباسٌ داخليّ (S-4): المرساةُ وحدَها تكفي، والتجريدُ كان **يوسّع** المطابقةَ لا يضيّقها.
     """
     lines = text.splitlines()
     fences = [i for i, ln in enumerate(lines) if FENCE_RE.match(ln)]
@@ -112,14 +124,34 @@ def declarations(text: str) -> list[str]:
         for a, b in zip(fences[0::2], fences[1::2]):
             for i in range(a, b + 1):
                 inside[i] = True
-    out: list[str] = []
+    out: list[tuple[int, str]] = []
     for i, line in enumerate(lines):
         if inside[i]:
             continue
         m = DECLARATION_RE.match(line)
         if m:
-            out.append(m.group(1).upper().replace(" ", "_"))
+            out.append((i + 1, m.group(1).upper().replace(" ", "_")))
     return out
+
+
+def declarations(text: str) -> list[str]:
+    """إعلاناتُ التوقّف **المقروءة** في نصّ — أي في **ترويسته** وحدَها (الباقي متنٌ يُوثّق).
+
+    **والحدُّ مقصودٌ ومقيس:** مطابقةُ العلامة في أيّ موضعٍ جعلت تقريراً **يشرح القاعدة** يُزيح الدورَ إلى
+    المالك ويوقف الطرفين بلا سبب (قاسه مقعدُ المواصفة: SP-3)؛ وصفرُ نصوصٍ في الشجرة تُعلن من المتن ⇒ فالحدُّ
+    لا يُلغي إعلاناً واقعاً، ويمنع الصنفَ الذي قِيس. ودالّةٌ خالصةٌ ⇒ تُقاس بسمٍّ في الذاكرة لا بالنيّة.
+    """
+    cut = header_cut(text)
+    return [d for ln, d in _marked_lines(text) if ln <= cut]
+
+
+def ignored_markers(text: str) -> list[str]:
+    """أسطرٌ **تُعلن في المتن** فتُهمَل بالحدّ — تُعرَض للوضوح فلا يظنّ كاتبُها أنّه أوقف الدور.
+
+    (والمقصودُ: ما كان يُزيح الدورَ قبل الحدّ — لا الاقتباساتُ، فهي مُستثناةٌ في `_marked_lines` أصلًا.)
+    """
+    cut = header_cut(text)
+    return [f"{ln}: {d}" for ln, d in _marked_lines(text) if ln > cut]
 
 
 def derive() -> dict[str, object]:
@@ -130,13 +162,16 @@ def derive() -> dict[str, object]:
     ts, side, path = max(allreps, key=lambda t: (t[0], t[1]))
     body = path.read_text(encoding="utf-8", errors="replace")
     owner_awaiting = declarations(body)
+    ignored = [f"{path.relative_to(ROOT)}:{x}" for x in ignored_markers(body)]
     where = f"آخرُ تقريرٍ ({side} · {ts})"
     if not owner_awaiting:
-        # **قفلُ المالك** (الموضعُ الثاني المُعلَن): يُقرأ من الملفّ المشترك — وكان لا يُقرأ أصلًا ⇒ قفلٌ
-        # موثَّقٌ لا يوقف الدور (R57-2أ). والقيمةُ تُقاس لحظةَ الطلب كمثلها في سطر الدور.
+        # **قفلُ المالك** (الموضعُ الثاني المُعلَن): يُقرأ من **ترويسة** الملفّ المشترك — وكان لا يُقرأ
+        # أصلًا ⇒ قفلٌ موثّقٌ لا يوقف الدور (R57-2أ). والقيمةُ تُقاس لحظةَ الطلب كمثلها في سطر الدور.
         shared = ROOT / SHARED
         if shared.exists():
-            owner_awaiting = declarations(shared.read_text(encoding="utf-8", errors="replace"))
+            stext = shared.read_text(encoding="utf-8", errors="replace")
+            owner_awaiting = declarations(stext)
+            ignored += [f"{SHARED}:{x}" for x in ignored_markers(stext)]
             if owner_awaiting:
                 where = f"قفلُ المالك في {SHARED}"
     if owner_awaiting:
@@ -146,7 +181,9 @@ def derive() -> dict[str, object]:
         turn, why = other, f"آخرُ فاعلٍ {side} ({ts}) ⇒ الدورُ على {other}"
     return {"verdict": "MEASURED", "turn": turn, "turn_label": SIDES.get(turn, turn),
             "last_actor": side, "last_report": str(path.relative_to(ROOT)), "as_of": ts,
-            "owner_declared_in": where if owner_awaiting else None, "why": why}
+            "owner_declared_in": where if owner_awaiting else None, "why": why,
+            "header_scope": {"lines": HEADER_LINES, "applies_to": [str(path.relative_to(ROOT)), SHARED]},
+            "ignored_markers": ignored}
 
 
 #: **ولا تُحفَظ القيمة** (R55-1 الطبقةُ الثانية): لو كُتبت في الملفّ المشترك لتقادمت **بعد كلّ دفعةٍ من
@@ -166,6 +203,18 @@ def _turn_line(text: str) -> str | None:
         if ln.lower().startswith("turn:"):
             return ln.strip()
     return None
+
+
+def _ignored_note(d: dict[str, object]) -> str | None:
+    """**وضوحٌ لا عقوبة**: سطرٌ يُعلن في المتن فيُهمَل بالحدّ — يُعرَض باسمه وموضعه (وإلّا ظنّ كاتبُه أنّه
+    أوقف الدور). ولا يُغيّر الحكمَ ولا رمزَ الخروج: الحدُّ مُعلَن، وما يُهمَل يُقال.
+    """
+    items = d.get("ignored_markers")
+    if not isinstance(items, list) or not items:
+        return None
+    return ("⚠ تنبيهُ وضوح: سطرٌ يشبه الإعلان في **متن** الملفّ لم يُقرأ (الإعلانُ يُكتب في الترويسة: "
+            "قبل أوّل `## ` وضمن أوّل " + str(HEADER_LINES) + " سطراً) ⇒ إمّا يُنقل إلى الترويسة وإمّا يُقال "
+            "إنّه توثيق:\n  " + "\n  ".join(str(x) for x in items))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -211,6 +260,9 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(f"✓ {SHARED}: المُؤشِّرُ كما هو (لا قيمةَ محفوظةً ⇒ لا تقادُمَ ممكن). "
               f"والدورُ الآنيّ: {d['turn']} ({d['why']})")
+        note = _ignored_note(d)
+        if note:
+            print(note)
         return 0
 
     if a.json:
@@ -220,6 +272,9 @@ def main(argv: list[str] | None = None) -> int:
         # وإلّا فالمُؤشِّرُ يعِد بما لا تفعله الأداة (وهو ما قاسه المدقّق في مراجعة ٥٦: أمرٌ موثَّقٌ لا يُخرِج الدور).
         print(f"الدورُ الآنيّ: **{d['turn']}** — {d['why']}")
         print(f"({SHARED}: سطرُ `turn:` مُؤشِّرٌ لا قيمةَ محفوظة ⇒ لا تقادُمَ ممكن)")
+        note = _ignored_note(d)
+        if note:
+            print(note)
     return 0
 
 

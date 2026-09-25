@@ -138,18 +138,44 @@ def test_a_quoted_marker_in_a_fence_or_backticks_does_not_declare_a_stop(monkeyp
     assert '"turn": "claude"' in capsys.readouterr().out, "سطرُ التوثيق (اقتباسٌ بعلامتين) أزاح الدورَ"
 
 
-def test_the_declaration_field_is_read_anywhere_in_the_body(monkeypatch, tmp_path, capsys):
-    """الموضعُ داخلَ التقرير **ليس** جزءاً من القاعدة — الحقلُ هو القاعدة (وليس «أوّل سطر» كما كان يوثّق).
+def test_the_declaration_is_read_in_the_header_only(monkeypatch, tmp_path, capsys):
+    """**حدُّ الترويسة (أمرُ المالك: «الأكثر حرصاً ووضوحاً» · SP-3 — قاسه مقعدُ المواصفة)**: الإعلانُ يُقرأ
+    من أوّل الملفّ **قبل أوّل عنوان `## `** (وضمن أوّل ٣٠ سطراً) — فترويسةُ تقريرٍ يُعلن فيها = توقّفٌ حقيقيّ،
+    و**متنُه = توثيقٌ لا يُزيح الدور**.
 
-    وحدُّ ذلك مُعلَن: يُقرأ حقلُ `status:` حيث جاء، ويُستثنى الاقتباسُ (كتلةٌ · علامتان خلفيّتان).
+    والعلّةُ المقيسة: مطابقةُ العلامة في أيّ موضعٍ جعلت تقريراً **يشرح القاعدةَ** يُوقف الطرفين بلا سبب؛
+    وصفرُ نصوصٍ في الشجرة تُعلن من المتن ⇒ فالحدُّ يمنع الصنفَ **ولا يُلغي إعلاناً واقعاً**. وما يُهمَل يُعرَض
+    بتنبيه وضوحٍ لا يُغيّر الحكم (وإلّا ظنّ كاتبُه أنّه أوقف الدورَ وهو لم يُوقف).
     """
     m = _load()
     monkeypatch.setattr(m, "ROOT", tmp_path)
-    body = "\n".join(["## ما فعلتُه", "عشرةُ أسطرٍ من الشرح", "ثم"] + ["سطرٌ عاديّ"] * 20 +
-                     ["status: AWAITING_FOUNDER — القرارُ للمالك"])
-    _tree(tmp_path, {"sulaiman": [("20260925-0130-REPORT", body)]})
+    header_decl = "status: AWAITING_FOUNDER — القرارُ للمالك\n\n## ما فعلتُه\nشرحٌ طويل\n"
+    _tree(tmp_path, {"sulaiman": [("20260925-0130-REPORT", header_decl)]})
     assert m.main(["--json"]) == 0
-    assert '"turn": "المالك"' in capsys.readouterr().out
+    assert '"turn": "المالك"' in capsys.readouterr().out, "إعلانٌ في الترويسة لم يُقرأ (تضييقٌ زائد)"
+
+    body_decl = "\n".join(["## ما فعلتُه", "عشرةُ أسطرٍ من الشرح"] + ["سطرٌ عاديّ"] * 20 +
+                          ["status: AWAITING_FOUNDER — القرارُ للمالك"])
+    _tree(tmp_path, {"sulaiman": [("20260925-0131-REPORT", body_decl)]})
+    assert m.main([]) == 0
+    out = capsys.readouterr().out
+    assert "claude" in out, "إعلانٌ في المتن أزاح الدورَ (العلّةُ باقية)"
+    assert "تنبيهُ وضوح" in out and "لم يُقرأ" in out, \
+        "سطرٌ مُهمَلٌ لم يُعرَض ⇒ كاتبُه يظنّ أنّه أوقف الدور (الصمتُ أسوأُ من التنبيه)"
+
+
+def test_a_headingless_file_longer_than_the_header_is_body(monkeypatch, tmp_path, capsys):
+    """**سقفُ `HEADER_LINES`**: ملفٌّ بلا عنوانٍ أصلًا لا يُقرأ نصُّه كلُّه — فإعلانٌ بعد السطر ٣٠ **ليس في
+    الترويسة** (وإلّا صار أيُّ نصٍّ طويلٍ بلا عناوين ترويسةً كاملة، وعاد الصنفُ الذي مُنع)."""
+    m = _load()
+    monkeypatch.setattr(m, "ROOT", tmp_path)
+    long_body = "\n".join(["سطرٌ عاديّ"] * 40 + ["status: AWAITING_FOUNDER — بعد الثلاثين"])
+    _tree(tmp_path, {"sulaiman": [("20260925-0132-REPORT", long_body)]})
+    assert m.main(["--json"]) == 0
+    out = capsys.readouterr().out
+    assert '"turn": "claude"' in out, "سقفُ الترويسة لم يُحترم (ملفٌّ بلا عنوانٍ صار كلُّه ترويسة)"
+    assert '"ignored_markers": [\n    "handoff/sulaiman/20260925-0132-REPORT' in out or \
+           '"0132-REPORT' in out, out
 
 
 def test_quoting_the_marker_in_prose_does_not_move_the_turn(monkeypatch, tmp_path, capsys):
@@ -270,12 +296,12 @@ def test_an_unpaired_fence_does_not_hide_a_real_declaration(monkeypatch, tmp_pat
     """
     m = _load()
     monkeypatch.setattr(m, "ROOT", tmp_path)
-    unpaired = "## الحكم\n```\nاقتباسٌ لم يُقفَل أصلًا\n\nstatus: AWAITING_FOUNDER — إعلانٌ حقيقيّ بعد سياجٍ يتيم\n"
+    unpaired = "```\nاقتباسٌ لم يُقفَل أصلًا\n\nstatus: AWAITING_FOUNDER — إعلانٌ حقيقيّ بعد سياجٍ يتيم\n"
     _tree(tmp_path, {"sulaiman": [("20260925-0302-REPORT", unpaired)]})
     assert m.main(["--json"]) == 0
     assert '"turn": "المالك"' in capsys.readouterr().out, "إعلانٌ حقيقيٌّ بعد سياجٍ يتيمٍ أُهمِل"
 
-    paired = "## الحكم\n```\nstatus: AWAITING_FOUNDER — اقتباسٌ مُقفَل\n```\nبلا إعلانٍ حقيقيّ\n"
+    paired = "```\nstatus: AWAITING_FOUNDER — اقتباسٌ مُقفَل\n```\nبلا إعلانٍ حقيقيّ\n"
     _tree(tmp_path, {"sulaiman": [("20260925-0303-REPORT", paired)]})
     assert m.main(["--json"]) == 0
     assert '"turn": "claude"' in capsys.readouterr().out, "كتلةُ شِفرةٍ **مُقفَلة** أزاحت الدور"
