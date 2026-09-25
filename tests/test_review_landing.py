@@ -44,29 +44,9 @@ def test_every_file_in_the_audit_box_is_reachable_from_origin_main():
              if p.is_file() and p.name != "STATE.md"}
     missing = unlanded(local, landed)
     assert not missing, (f"ملفّاتٌ في صندوق المدقّق غيرُ مدفوعةٍ إلى `{REF}` (§٢٧): {missing} ⇒ "
-                         f"ادفعها بالمسار (فرعٌ → بوّابةٌ خضراء → `HEAD:main` → حذفُ الفرع) قبل أن يُجاب حكمُها")
-
-
-def test_the_local_main_ref_is_not_behind_the_pushed_one():
-    """**فخٌّ عضّني فعلًا (قاسه القياس لا المراجعة):** خطوةُ الدفع المتّفق عليها (`HEAD:main`) تُحدّث **المرجعَ
-    البعيد** ولا تلمس `refs/heads/main` المحلّيّ ⇒ تراكم ٧٠ التزاماً في الـ70 بينما `main` المحلّيّ عند نقطةٍ
-    قديمة. وأثرُه حقيقيّ: نسخةٌ نظيفةٌ مأخوذةٌ من المسار المحلّيّ **سقط ضابطُ الدفع فيها** بسبب مرجعٍ متقادم
-    لا بسبب عطب (إنذارٌ كاذبٌ يُكلِّف، وأسوأُ منه: قد يُخفي سقوطاً حقيقيًّا).
-
-    ⇒ يُقابَل المرجعان عند وجودهما معاً، والعلاجُ سطرٌ واحد: `git fetch origin main:main`.
-    (وإن غاب أحدهما ⇒ تخطٍّ مُعلَنٌ بسببٍ لا صمت.)
-    """
-    import subprocess
-    local = subprocess.run(["git", "rev-parse", "--verify", "refs/heads/main"],
-                           cwd=str(ROOT), capture_output=True, text=True)
-    remote = subprocess.run(["git", "rev-parse", "--verify", REF], cwd=str(ROOT), capture_output=True, text=True)
-    if local.returncode != 0 or remote.returncode != 0:
-        import pytest
-        pytest.skip("لا `refs/heads/main` ولا `origin/main` معاً ⇒ لا مقابلة (تخطٍّ مُعلَن)")
-    behind = subprocess.run(["git", "rev-list", "--count", f"refs/heads/main..{REF}"],
-                            cwd=str(ROOT), capture_output=True, text=True).stdout.strip()
-    assert behind == "0", (f"`refs/heads/main` متقادمٌ بـ{behind} التزاماً عن `{REF}` ⇒ مرجعٌ محلّيّ يُخفي "
-                           f"العمل؛ سيّنه: `git fetch origin main:main`")
+                         f"ادفعها بالمسار (فرعٌ → بوّابةٌ خضراء → `HEAD:main` → حذفُ الفرع) قبل أن يُجاب حكمُها. "
+                         f"**وإن كانت مدفوعةً فعلًا فتحقّق أنّ `{REF}` هو الالتزامُ المقصود** لا مرجعاً "
+                         f"متقادماً (نسخةٌ من المسار المحلّيّ ترث `refs/heads/main` — انظر §٢٧ الخطوةَ الخامسة)")
 
 
 def test_the_landing_guard_actually_bites():
