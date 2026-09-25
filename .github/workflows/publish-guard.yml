@@ -21,8 +21,10 @@ jobs:
         with:
           fetch-depth: 0   # full history for the forensic scan
       - name: PII / real-data guard (tree + history + commit messages)
+        id: gate_pii
         run: python3 tools/publish_guard.py --tree --history --ci
       - name: Real-amount guard — a public surface without the manifest (declares what it checked)
+        id: gate_amount
         env:
           AMOUNT_GUARD_KEY: ${{ secrets.AMOUNT_GUARD_KEY }}
         run: python3 tools/amount_guard.py --ci
@@ -30,6 +32,7 @@ jobs:
       # verdict cannot drift with a version bump; a dev tool, never a runtime
       # dependency.
       - name: Static gate (names that never resolve, bindings never read)
+        id: gate_static
         run: |
           python3 -m pip install --quiet pyflakes==3.4.0
           python3 tools/static_gate.py
@@ -38,8 +41,10 @@ jobs:
       # silently (external audit, 2026-09-18). No local cache in CI — this reads
       # docs/claims.json and asserts the public documents still match it.
       - name: Public claims must match their derived snapshot
+        id: gate_claims
         run: python3 tools/render_claims.py --check
       - name: Lightweight suite (no ML deps — compile, lock, public claims, gate injection)
+        id: gate_suite
         run: |
           python3 -m pip install --quiet pytest openpyxl==3.1.5
           python3 -m pytest tests/test_compile_all.py \
@@ -54,6 +59,7 @@ jobs:
                            tests/test_static_gate.py \
                            tests/test_amount_guard.py -q
       - name: Real-data files must never be tracked
+        id: gate_data_untracked
         run: |
           bad=$(git ls-files | grep -E '^data/(local_sample|training|eval_pack)/' || true)
           if [ -n "$bad" ]; then
@@ -64,9 +70,11 @@ jobs:
           echo "no real-data files tracked under local_sample/training/eval_pack — OK"
 
       - name: Amount-guard — the key/manifest must not be tracked (no secret needed)
+        id: gate_amount_key
         run: python3 tools/amount_guard.py --tracking-audit
 
       - name: Amount-ratchet — a pushed baseline may never raise the threshold
+        id: gate_amount_ratchet
         # مراجعة ٣٩/٣: **العتبةُ لا يضعها من يدفع ثمنها.** هذا الفحصُ بلا سرٍّ وبلا أدلّة:
         # يقرأ ملفَّين مُتتبَّعين فقط ⇒ فهو السطحُ الذي لا يستطيع دافعٌ محليٌّ تجاوزه بـ`--no-verify`.
         run: |

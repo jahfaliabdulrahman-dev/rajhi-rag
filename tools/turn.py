@@ -38,8 +38,11 @@ OWNER = "المالك"
 #: زمنُ الاسم: أربعُ خانات (HHMM) أو **ستّ** (HHMMSS) — والصيغةُ الثانيةُ هي الموثَّقة في البروتوكول،
 #: وأسماءُ المدقّق كلُّها بها ⇒ نمطٌ بأربعٍ فقط كان **يُعميه عن صندوقِ الطرف الآخر كاملاً** (R55-1).
 NAME_RE = re.compile(r"^(\d{8})-(\d{4})(\d{2})?-")
-#: علاماتُ «الدورُ عند المالك»: طلبُ قرارٍ صريح لا يملكه غيرُه.
-OWNER_SIGNALS = ("بيدك", "AWAITING_FOUNDER", "AWAITING FOUNDER", "قرار المالك", "قرارُ المالك")
+#: علاماتُ «الدورُ عند المالك»: **إعلانُ توقّفٍ صريح** (البروتوكول §٣: `AWAITING_FOUNDER`).
+#: **ولماذا ليست «بيدك»:** كلُّ تقريرٍ للمنفّذ ينتهي بقائمة «ما بيد المالك» ⇒ صارت الكلمةُ **ضجيجاً** يُزيح
+#: الدورَ عن الطرف المنتظَر فعلًا (قاسه المدقّق في مراجعة ٥٦: الأداةُ قالت «المالك» والنصُّ نفسُه يقول إنّ
+#: المراجعةَ هي المنتظَرة). ⇒ **العلامةُ فعلُ توقّفٍ مُعلَن، لا ذكرُ المالك في قائمة.**
+OWNER_SIGNALS = ("AWAITING_FOUNDER", "AWAITING FOUNDER")
 
 
 def stamp_of(name: str) -> str | None:
@@ -85,7 +88,7 @@ def derive() -> dict[str, object]:
     body = path.read_text(encoding="utf-8", errors="replace")
     owner_awaiting = [s for s in OWNER_SIGNALS if s in body]
     if owner_awaiting:
-        turn, why = OWNER, f"آخرُ تقريرٍ ({side} · {ts}) يطلب قراراً من المالك («{owner_awaiting[0]}»)"
+        turn, why = OWNER, f"آخرُ تقريرٍ ({side} · {ts}) يُعلن توقّفاً على قرار المالك («{owner_awaiting[0]}»)"
     else:
         other = "claude" if side == "sulaiman" else "sulaiman"
         turn, why = other, f"آخرُ فاعلٍ {side} ({ts}) ⇒ الدورُ على {other}"
@@ -160,7 +163,10 @@ def main(argv: list[str] | None = None) -> int:
     if a.json:
         print(json.dumps(d, ensure_ascii=False, indent=2))
     else:
-        print(want)
+        # **الوعدُ في المُؤشِّر مُنفَّذٌ هنا** (R56-2): بلا وسيطٍ تُعرض **الدورُ وسببُه**، لا سطرُ الإشارة وحده —
+        # وإلّا فالمُؤشِّرُ يعِد بما لا تفعله الأداة (وهو ما قاسه المدقّق في مراجعة ٥٦: أمرٌ موثَّقٌ لا يُخرِج الدور).
+        print(f"الدورُ الآنيّ: **{d['turn']}** — {d['why']}")
+        print(f"({SHARED}: سطرُ `turn:` مُؤشِّرٌ لا قيمةَ محفوظة ⇒ لا تقادُمَ ممكن)")
     return 0
 
 

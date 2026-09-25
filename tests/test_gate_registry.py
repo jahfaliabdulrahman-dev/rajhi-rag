@@ -113,3 +113,78 @@ def test_the_registry_reports_its_own_blind_spot():
     """وسجلٌّ يدّعي الكمال يُناقض غرضه: إعلانُ الحدود إلزاميّ."""
     doc = _doc()
     assert ("حدُّ ذلك مُعلَن" in doc) or ("ما لم يُثبت" in doc), "لا إعلانَ لحدود السجلّ"
+
+# ── الاتّجاهُ الخامس (R56-4 · قاسه المدقّق في مراجعة ٥٦) ────────────────────────────────────────────
+#: **ثغرةٌ كانت مفتوحة**: الاتّجاهاتُ الأربعة تمسك خطّافاً غيرَ مسجَّل، **ولا تمسك خطوةَ CI** — أضاف المدقّق
+#: خطوةً مصطنعةً في نسخته فمرّت صامتةً (وأداةٌ تُنادى من الخطوة تُمسَك، أمّا خطوةٌ بأمرٍ حرٍّ فلا). ⇒ الحلُّ
+#: **معرّفٌ ثابتٌ لكلّ خطوة** (`id: gate_*`) ومقابلةٌ في الاتّجاهين: لا خطوةَ بلا معرّفٍ مُسجَّل، ولا معرّفَ شبح.
+STEP_START = re.compile(r"^\s*-\s+(?:name|uses):", re.M)
+RUN_RE = re.compile(r"^\s*(?:-\s+)?run:", re.M)
+STEP_ID_RE = re.compile(r"^\s*id:\s*(gate_[a-z0-9_]+)\s*$", re.M)
+STEP_NAME_RE = re.compile(r"-\s*name:\s*(.+)")
+
+
+def _steps(wf_text: str) -> list[str]:
+    """كلُّ خطوةٍ كنصٍّ مستقلّ (تُقسَم عند بداية خطوة) — **الترويسةُ تُهمَل**."""
+    return [p for p in re.split(r"(?m)(?=" + STEP_START.pattern + ")", wf_text)[1:]]
+
+
+#: موضعُ الإعلان في §٣: قائمةُ المعرّفات **وحدها** تُقابَل (لا كلُّ نصّ الوثيقة — وإلّا لَحُسِبت أسماءُ
+#: ملفّاتٍ مثل `test_gate_bites.py` معرّفاتٍ شبحاً، وهي ليست معرّفاتِ خطوات). وهذا نفسُ صنف الحدّ الذي
+#: يُقاس: **حضورُ نصّ** ≠ تساوي مجموعة.
+DECLARED_MARKER = "مُسجَّلٌ هنا"
+
+
+def _declared_step_ids() -> list[str]:
+    doc = _doc()
+    assert DECLARED_MARKER in doc, "لا إعلانَ لمعرّفات خطوات الـCI في السجلّ ⇒ لا قابليةَ للتساوي"
+    block = doc.split(DECLARED_MARKER, 1)[1]
+    block = block.split("```", 2)[1] if "```" in block else block
+    return sorted(set(re.findall(r"gate_[a-z0-9_]+", block)))
+
+
+def unregistered_ci_steps(wf_text: str, declared: str) -> list[str]:
+    """خطواتُ `run:` بلا معرّف — أو بمعرّفٍ ليس في المُعلَن. (دالّةٌ خالصةٌ ⇒ تُقاس بسمٍّ في الذاكرة.)"""
+    out: list[str] = []
+    for chunk in _steps(wf_text):
+        if not RUN_RE.search(chunk):
+            continue
+        m = STEP_ID_RE.search(chunk)
+        if m is None:
+            nm = STEP_NAME_RE.search(chunk)
+            out.append(f"بلا معرّف: {nm.group(1).strip() if nm else 'خطوةٌ بلا اسم'}")
+        elif m.group(1) not in declared:
+            out.append(f"غيرُ مسجَّلة: {m.group(1)}")
+    return out
+
+
+def phantom_registered_steps(wf_text: str, declared: str) -> list[str]:
+    """معرّفٌ في السجلّ لا وجودَ له في الـworkflow = صفٌّ شبحٌ يُوهم حَرْساً غيرَ قائم."""
+    real = set(STEP_ID_RE.findall(wf_text))
+    return sorted({i for i in re.findall(r"gate_[a-z0-9_]+", declared) if i not in real})
+
+
+def test_every_ci_run_step_is_registered_and_no_phantom_is_declared():
+    """كلُّ خطوةِ `run:` بمعرّفٍ مُسجَّلٍ في §٣ — والسجلُّ لا يذكر معرّفاً غيرَ موجود."""
+    wf, declared = WORKFLOW.read_text(encoding="utf-8"), " · ".join(_declared_step_ids())
+    assert declared, "قائمةُ معرّفات الـCI فارغةٌ في السجلّ ⇒ فشلٌ مُغلَق"
+    missing = unregistered_ci_steps(wf, declared)
+    phantom = phantom_registered_steps(wf, declared)
+    assert not missing, f"خطواتُ CI خارج السجلّ: {missing} ⇒ أضِف معرفَها واذكرْها في §٣"
+    assert not phantom, f"معرّفاتٌ في السجلّ بلا خطوةٍ في الـworkflow: {phantom}"
+
+
+def test_the_fifth_direction_actually_bites():
+    """**سمٌّ مصنوعٌ في الذاكرة** (نفسُ ما فعله المدقّق في نسخته): خطوةٌ بلا معرّف، وخطوةٌ بمعرّفٍ غريب.
+
+    وبلا هذا الضابط يصير الاتّجاهُ الخامس ادّعاءً: قاعدةٌ لا يُقاس مَن يخالفها ليست قاعدة.
+    """
+    wf = WORKFLOW.read_text(encoding="utf-8")
+    declared = " · ".join(_declared_step_ids())
+    stripped = wf.replace("        id: gate_static\n", "", 1)              # خطوةٌ صارت بلا معرّف
+    assert unregistered_ci_steps(stripped, declared) == [
+        "بلا معرّف: Static gate (names that never resolve, bindings never read)"]
+    stranger = wf.replace("id: gate_static", "id: gate_static_new_thing", 1)  # معرّفٌ لم يُسجَّل
+    assert unregistered_ci_steps(stranger, declared) == ["غيرُ مسجَّلة: gate_static_new_thing"]
+    assert phantom_registered_steps(wf, declared + " · gate_ghost") == ["gate_ghost"]
+

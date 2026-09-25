@@ -69,13 +69,43 @@ def test_the_two_name_lengths_are_ordered_on_one_scale(monkeypatch, tmp_path, ca
     assert '"last_actor": "claude"' in capsys.readouterr().out, "اختلّ الترتيبُ بين الطولين"
 
 
-def test_a_report_asking_the_owner_makes_the_turn_the_owners(monkeypatch, tmp_path, capsys):
-    """**المسارُ الذي تأخّر عنده #119**: تقريرٌ يطلب قراراً ⇒ الدورُ للمالك، لا «للطرف الآخر»."""
+def test_a_blocking_owner_request_makes_the_turn_the_owners(monkeypatch, tmp_path, capsys):
+    """**المسارُ الذي تأخّر عنده #119**: تقريرٌ **يُعلن توقّفاً** على قرار المالك ⇒ الدورُ للمالك.
+
+    والعلامةُ هي إعلانُ التوقّف المُصطلَح (`AWAITING_FOUNDER` · البروتوكول §٣) لا ذكرُ المالك في قائمة.
+    """
     m = _load()
     monkeypatch.setattr(m, "ROOT", tmp_path)
-    _tree(tmp_path, {"sulaiman": [("20260925-0130-REPORT", "اكتب «ادفع» وأنفّذ — وبيدك أيضاً تدويرُ الرمز")]})
+    _tree(tmp_path, {"sulaiman": [("20260925-0130-REPORT", "AWAITING_FOUNDER — لا أُكمل قبل قرارِ المالك")]})
     assert m.main(["--json"]) == 0
     assert '"turn": "المالك"' in capsys.readouterr().out
+
+
+def test_an_owner_queue_line_does_not_move_the_turn(monkeypatch, tmp_path, capsys):
+    """**R56-3 (قاسه المدقّق)**: قائمةُ «ما بيد المالك» في آخر كلّ تقرير **ضجيجٌ** لا طلبَ توقّف.
+
+    قبل الإصلاح: أيُّ «بيدك» في أيّ موضعٍ كانت تُزيح الدورَ إلى المالك، وتقريرُ المنفّذ ينتهي بها دائماً ⇒
+    الدورُ يقف عند المالك أبداً بينما المنتظَرُ فعلًا هو الطرفُ الآخر. ⇒ السالبُ هنا يمنع عودةَ ذلك.
+    """
+    m = _load()
+    monkeypatch.setattr(m, "ROOT", tmp_path)
+    _tree(tmp_path, {"sulaiman": [("20260925-0130-REPORT",
+                                   "بيدك: تدويرُ الرمز · نصُّ التذكرة · قرارُ الفروع الخمسة عشر")]})
+    assert m.main(["--json"]) == 0
+    assert '"turn": "claude"' in capsys.readouterr().out, "قائمةٌ عاديّةٌ أزاحت الدور إلى المالك (R56-3)"
+
+
+def test_the_default_command_prints_the_turn_and_its_reason(monkeypatch, tmp_path, capsys):
+    """**R56-2 (قاسه المدقّق)**: المُؤشِّرُ في `handoff/STATE.md` يعِد بأنّ الأمرَ **بلا وسيط** يعرض الدورَ وسببَه.
+
+    وكان يطبع سطرَ الإشارة وحده ⇒ وعدٌ في المصدر لا يفي به التنفيذ. والضابطُ يقيس الوفاءَ لا الوعد.
+    """
+    m = _load()
+    monkeypatch.setattr(m, "ROOT", tmp_path)
+    _tree(tmp_path, {"sulaiman": [("20260925-0130-REPORT", "بلا طلب")]})
+    assert m.main([]) == 0
+    out = capsys.readouterr().out
+    assert "claude" in out and "آخرُ فاعلٍ" in out, f"الأمرُ الافتراضيّ لا يعرض الدورَ وسببَه: {out!r}"
 
 
 def test_check_flags_every_stored_value_variant(monkeypatch, tmp_path, capsys):
