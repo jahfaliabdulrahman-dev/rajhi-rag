@@ -1,0 +1,50 @@
+{
+ "measured_at": "2026-09-21",
+ "symptom": "المدقّق يقيس 3 تخطّت ونحن نقيس 0 — والعددُ الكلي يختلف (309 مقابل 331)",
+ "method": "تشغيلٌ في worktree المدقّق نفسه بنفس المفسّر (.venv) ثم بإزالة السبب",
+ "reasons_measured": [
+  {
+   "test": "tests/test_page_gate.py:190",
+   "reason": "المسحة الحقيقية غير موجودة على هذا الجهاز"
+  },
+  {
+   "test": "tests/test_page_gate.py:201",
+   "reason": "المسحة الحقيقية غير موجودة على هذا الجهاز"
+  },
+  {
+   "test": "tests/test_text_reader.py:74",
+   "reason": "الكشف الرقمي محليّ لا يدخل المستودع"
+  }
+ ],
+ "root_cause": "`git worktree` لا يحمل المُتجاهَل: `data/local_sample/*` مُستثنى عمداً (بيانات كشوف حقيقية) ⇒ فحوصُ المسحة الحقيقية والكشف الرقمي لا تجد مدخلها.",
+ "ruled_out": [
+  "المفسّر: نفس `.venv` في الحالتين (numpy وpyflakes موجودان) — ولم تتغيّر مجموعةُ التخطّي",
+  "فرقُ العدد 312 مقابل 333: **التزامٌ أقدم** — والقياسُ نُسب إلى worktree والتزامٍ بعينهما (انظر measured_where) لا إلى «بيئة المدقّق» عموماً."
+ ],
+ "proved_by_removal": {
+  "before": {
+   "passed": 20,
+   "skipped": 3,
+   "command": "pytest tests/test_page_gate.py tests/test_text_reader.py"
+  },
+  "after": {
+   "passed": 20,
+   "skipped": 0,
+   "action": "وصلُ slice_629p وdigital برابطٍ رمزي إلى data/local_sample في الـworktree"
+  }
+ },
+ "structural_consequence": "**تغطية المراجعة دالّةٌ على البيئة لا على العدد**: من يراجع من worktree يُسقط — بلا أن يدري — الفحوصَ التي تحرس الكوربوس الحقيقي والمسار الرقمي. ولهذا يُقرأ الرقمُ المعلن مقروناً ببيئته.",
+ "remedy": "tools/link_local_data.sh <worktree> — عادةٌ تُعاد، والنتيجة المتوقّعة 0 تخطّى.",
+ "cost_usd": 0,
+ "measured_where": {
+  "worktree": ".claude/worktrees/third-eye-review-95794d",
+  "commit": "4eb5798",
+  "result": "309 نجحت · 3 تخطّت  (=312، وهو ما يطابق claims.json عند b98703c/37b4a5d)",
+  "note": "مُلاحَظةُ المدقّق: هُناك **أكثرُ من worktree واحد** للمدقّق، والذي قاس 314→330 العَدّ ليس هو الذي قاس 312 ⇒ الملفُ يسمّي ما قاس لا «بيئةَ المدقّق» عموماً. والسببُ الجذريّ **صحيحٌ في كل worktree** — إذ لا worktree يحمل المُتجاهَل.",
+  "verified_again": {
+   "worktree": ".claude/worktrees/vibrant-williams-9e84e9",
+   "before": "3 تُخطّى",
+   "after_linking": "0 تُخطّى"
+  }
+ }
+}

@@ -1,0 +1,45 @@
+{
+ "pg": 4,
+ "page_no": 4,
+ "ms_read": 12.5,
+ "ms_footer": 3.25,
+ "footer": {
+  "debits": "6.00",
+  "credits": "7.00",
+  "balance": "18.00",
+  "raw": {
+   "debits": "6.00",
+   "credits": "7.00",
+   "balance": "18.00"
+  }
+ },
+ "raw_rows": [
+  {
+   "row_no": 1,
+   "date": "2026/01/07",
+   "date_source": "cell",
+   "col": null,
+   "printed_col": null,
+   "movement": "6.00",
+   "balance": "25.00",
+   "desc": "قيدٌ تجريبيّ ٥",
+   "raw_movement": "6.00",
+   "raw_balance": "25.00"
+  },
+  {
+   "row_no": 2,
+   "date": "2026/01/08",
+   "date_source": "cell",
+   "col": null,
+   "printed_col": null,
+   "movement": "7.00",
+   "balance": "18.00",
+   "desc": "قيدٌ تجريبيّ ٦",
+   "raw_movement": "7.00",
+   "raw_balance": "18.00"
+  }
+ ],
+ "usage": {},
+ "date_backfill": {},
+ "first_balance": "19.00"
+}

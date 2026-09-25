@@ -97,7 +97,7 @@ def _parse_amount(tok: str | None) -> Decimal | None:
 
     DELEGATES to the proven legacy parser (629-page case) — it owns the full
     separator zoo: '٣٠٠,٠٠' -> 300.00 (comma is the decimal point on old
-    prints), '.,..' -> 0.00 (printed zero), '9001.00' -> 9001.00 (lost
+    prints), '.,..' -> 0.00 (printed zero), '٦١,١٦٥١٢' -> 61165.12 (lost
     dot), '١١٩.٠٠-' -> -119.00 (trailing minus). A local re-implementation
     once regressed all four of these at once — never re-implement; inherit.
     """

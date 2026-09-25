@@ -195,6 +195,10 @@ def test_every_tracked_text_file_is_clean():
     for rel in tracked:
         if Path(rel).suffix.lower() in (pg.BINARY_EXTS | pg.OPAQUE_EXTS):
             continue
+        if not (root / rel).exists():
+            # ملفٌّ محذوفٌ ولم يُلتزم بعد: الفهرسُ يسبق الشجرة، والحارسُ لا ينهار
+            # على حذفٍ معلَّق — الفشلُ هنا كان `FileNotFoundError` لا حكماً.
+            continue
         here: list[tuple] = []
         pg._scan_text(rel, (root / rel).read_text(encoding="utf-8"),
                       "worktree", here, pg.load_allowlist())
@@ -214,3 +218,73 @@ def test_commit_messages_are_wired_into_the_scan():
     assert "def scan_messages" in src
     assert "git-msg/" in src
     assert "scan_messages(findings, entries)" in src
+
+
+# ── البصمةُ المقتطعة ليست حساباً (عطلٌ في الحارس نفسه، أُغلق بقياس) ──────────
+# ملفُّ دليلٍ يحمل بصماتِ صفحاتٍ **مقتطعة** (16 محرفاً) حُجب ثلاثاً: الدليلُ يُحجب
+# **لأنه دليل**. والفاصل الحقيقي هو الحرف اللاتيني الصغير (a–f) لا الطول وحده —
+# فالحسابُ والبطاقة أرقامٌ بلا حروف، والـIBAN بحروفٍ كبيرة.
+
+def _scan_one(text: str) -> list[tuple[str, str]]:
+    findings: list[tuple[str, str]] = []
+    pg._scan_text("docs/evidence/probe.json", text, "tree", findings, [])
+    return [(f[0], f[1]) for f in findings]
+
+
+def test_a_truncated_digest_with_letters_is_evidence_not_an_account():
+    line = f' "sha256": "{_run("4", 6)}ab{_run("9", 8)}c{-0 if False else ""}"'
+    assert not [r for r in _scan_one(line) if r[1] == "long_digits"], \
+        "بصمةٌ مقتطعة (حروف a–f) يجب ألا تُحجب"
+
+
+def test_an_all_digit_run_is_still_blocked_however_long():
+    line = f' "account": "{FAKE_ACCOUNT}"'
+    assert [r for r in _scan_one(line) if r[1] == "long_digits"], \
+        "رقمٌ كلُّه أرقام يبقى محجوباً"
+
+
+def test_an_upper_case_iban_is_still_blocked():
+    line = ' "iban": "SA' + _run("8", 20) + '6129"'
+    assert [r for r in _scan_one(line) if r[1] == "long_digits"], \
+        "IBAN بحروفٍ كبيرة يبقى محجوباً"
+
+
+def test_a_page_number_list_is_exempted_by_a_written_allowlist_entry():
+    """قائمةُ أرقام صفحاتٍ مفصولةٍ بفراغ **تُحجب بقصد** — لأن الحسابَ نفسه يُكتب
+    بثلاثاتٍ بفراغ، فالقاعدة لا تستطيع التمييز ⇒ **الثمنُ مقبول**: تُحجب القائمة
+    ويُستثنى **ملفٌّ بعينه** بسببٍ مكتوب في `.publish-allowlist`.
+
+    وهذا هو الفرقُ الذي فرضه المدقّق: كان استثنائي **توسيعاً للقاعدة** فمرّت أرقامُ
+    حسابٍ حقيقية؛ فصار استثناءً **لملفٍ** — أضيقَ أثراً وأصدقَ في التوثيق.
+    """
+    list_line = "مذكورة: " + " ".join(str(n * 7) for n in range(3, 20))
+    assert [r for r in _scan_one(list_line) if r[1] == "long_digits"], \
+        "القاعدة تحجب القائمة (ثمنُ عدم فتح الثغرة)"
+    allow = (Path(pg.ROOT) / ".publish-allowlist").read_text(encoding="utf-8")
+    entry = next((ln for ln in allow.splitlines()
+                  if ln.startswith("long_digits :: handoff/claude/")), None)
+    assert entry, "لا بد أن يكون الاستثناءُ لملفٍ بعينه لا للشجرة"
+    assert len(entry.split("::")) == 3 and entry.split("::")[2].strip(), \
+        "كل استثناءٍ بسببٍ مكتوب"
+
+
+def test_a_three_wide_hyphenated_cheque_is_still_blocked():
+    line = ' "cheque": "' + "-".join(_run(str(n), 3) for n in range(1, 6)) + '"'
+    assert [r for r in _scan_one(line) if r[1] == "long_digits"], \
+        "صكٌّ بثلاثاتٍ موصولةٍ بشُرَط يبقى محجوباً"
+
+
+def test_a_four_wide_card_still_blocked_even_with_spaces():
+    line = ' "card": "' + " ".join(_run(str(n), 4) for n in (4, 8, 2, 6)) + '"'
+    assert [r for r in _scan_one(line) if r[1] == "long_digits"], \
+        "بطاقةٌ برُباعياتٍ مفصولةٍ بفراغ تبقى محجوبة"
+
+
+def test_a_three_wide_space_grouped_account_is_blocked():
+    """**الثغرة التي فتحها توسيعي ثم أُغلق.** مدقّقٌ خارجي قاس أن حساباً من 15 أو
+    18 رقماً مكتوباً بثلاثاتٍ مفصولةٍ بفراغ كان **يمرّ**، لأنني وسّعتُ القاعدة
+    ليُقبل ملفٌّ واحد. والاختبارات الثلاثة السابقة كانت تغطّي الحالات **الآمنة**
+    وحدها — فلا يسمّم أحدٌ الحالةَ التي يفتحها استثناؤه. هذا هو السمّ الغائب."""
+    line = ' "account": "' + " ".join(_run(str(n), 3) for n in range(1, 6)) + '"'
+    findings = [r for r in _scan_one(line) if r[1] == "long_digits"]
+    assert findings, "حسابٌ بثلاثاتٍ مفصولةٍ بفراغ يجب أن يُحجب (ثغرةٌ كانت مفتوحة)"

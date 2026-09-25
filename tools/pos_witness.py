@@ -22,7 +22,9 @@ import numpy as np
 from PIL import Image
 
 PROJ = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJ))
 sys.path.insert(0, str(PROJ / "src"))
+from tools.spend import at_or_over  # noqa: E402 — **السقفُ بالسنتات** (مراجعة ٥٢ · R52-4 · F7)
 
 from statement_qa.pos_witness import (INK_MIN, INK_THRESHOLD, PROMPT,  # noqa: E402
                                       assign_column, compare_with_chain,
@@ -99,7 +101,7 @@ def main() -> int:
         for clash in res["clashes"]:
             print(f"     خلاف صف{clash['row']}: السلسلة {clash['chain']} · "
                   f"الهندسة {clash['geometry']} · {clash['amount']}", flush=True)
-        if total >= args.max_cost:
+        if at_or_over(total, args.max_cost):
             print(f"توقّف: بلغ السقف ${args.max_cost}", flush=True)
             break
     Path(args.out).write_text(json.dumps(out, ensure_ascii=False, indent=1),

@@ -373,6 +373,15 @@ def main() -> int:
             continue
         check(f"الملخص يذكر «{needle}»", needle in joined)
     check("الملخص يعلن حكم الهوية", "مطابق ✓" in joined)
+    # **دور التذييل: التقرير يُقابَل بالعقد** — وإلا فتصديرٌ بعقدٍ لتصميمٍ آخر
+    # يمرّ (وقع: قلبُ `footer_role` في تقرير مسحٍ فقُبل بعقد التطبيق).
+    contract_role = ((profile.get("statement") or {}).get("footer") or {}).get("role") \
+        or "غير مُعلن في العقد"
+    report_role = report.get("footer_role") or "غير مُعلن في التقرير"
+    check("دور التذييل في التقرير يوافق العقد",
+          contract_role == report_role,
+          f"العقد «{contract_role}» · التقرير «{report_role}»")
+
     # ── FM-1: الكوربوس يُعلن بمن قُرئ ────────────────────────────────────────
     # كان الرقم يُنشر بلا نسب: كوربوسٌ بنى نصفه قارئٌ ونصفه آخر يجمع رقمين تحت
     # اسمٍ واحد، ولا شيء في الملف يقول ذلك (D=5: لا رصد). فصار الإعلان فحصاً:
@@ -424,6 +433,19 @@ def main() -> int:
     check("عدد الصفحات بلا ختم يطابق الكاش",
           declared_count == measured["unstamped"],
           f"الورقة {unstamped_pages} · الكاش {measured['unstamped']}")
+    # **الحدود تُقاس**: ورقة «كيف تُقرأ هذه الأوراق» هي ما يقرؤه إنسان، وكانت
+    # نسخةَ المسح حرفاً حتى في التصدير الرقمي (لا صور ولا ورق فيه) — فتقول
+    # لقارئها حدّاً لا يخصّه وتسكت عن حدّه. والعقد يسمّي ما يجب أن تحمله.
+    guide = wb["كيف تُقرأ هذه الأوراق"] if "كيف تُقرأ هذه الأوراق" in wb.sheetnames else None
+    guide_text = (" ".join(str(v) for row in guide.iter_rows(values_only=True)
+                           for v in row if v is not None)) if guide else ""
+    required = (profile.get("artifacts") or {}).get("disclosure_must_contain") or []
+    missing_disclosure = [s for s in required if s not in guide_text]
+    check("ورقة الحدود تُعلن حقيقة هذا التصميم",
+          bool(required) and not missing_disclosure,
+          f"ناقص: {missing_disclosure}" if missing_disclosure
+          else f"{len(required)} حدّاً مذكورة")
+
     unproven = wb["ما لم يُثبت"]
     check("ورقة «ما لم يُثبت» قائمة وفيها سطور",
           unproven.max_row >= 2, f"{unproven.max_row - 1} بنداً")

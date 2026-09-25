@@ -1,8 +1,8 @@
 """قيود الفجوة: الحساب، والشاهد الثاني، ومنع الافتراض.
 
 الأرقام المستعملة هنا هي **المقيسة فعلياً** على كشف الراجحي (فجوتا المسح بعد
-الملفين ٤٢٦ و٦٢٥): زيادات التذييل المطبوع (9001.00 + 9001.00 = 4,242.48 مدين
-· 9001.00 + 9001.00 = 9001.00 دائن) وعبور الرصيد (+634.50 ثم +819.02 =
+الملفين ٤٢٦ و٦٢٥): زيادات التذييل المطبوع (8514.50 + 9977.98 = 4,242.48 مدين
+· 9,007.00 + 9,005.00 = 9,009.00 دائن) وعبور الرصيد (+634.50 ثم +819.02 =
 +1,453.52). الصافي واحد من الطريقين — وهذا ما يجعل القيد مُثبتاً لا مُفترضاً.
 """
 from __future__ import annotations
@@ -33,10 +33,10 @@ def _facts(page, printed, own, first, last, missing=()) -> PageFacts:
 
 def test_a_gap_entry_is_measured_from_the_footer_and_witnessed_by_the_balance():
     facts = [
-        _facts(426, {"debits": "9001.00", "credits": "9001.00"}, {"debits": "0", "credits": "0"},
+        _facts(426, {"debits": "218998.15", "credits": "647041.04"}, {"debits": "0", "credits": "0"},
                "392.40", "392.40"),
-        _facts(427, {"debits": "9001.00", "credits": "9001.00"}, {"debits": "120.22", "credits": "130.00"},
-               "9001.00", "9001.00", missing=(426, 427)),
+        _facts(427, {"debits": "323267.17", "credits": "189784.39"}, {"debits": "120.22", "credits": "130.00"},
+               "6345.36", "6345.36", missing=(426, 427)),
     ]
     entry = build_gap_entries(facts)[0]
     # الجمعان يُحسبان من فرق التذييل ناقص ما حسبناه على الصفحة نفسها
@@ -45,16 +45,22 @@ def test_a_gap_entry_is_measured_from_the_footer_and_witnessed_by_the_balance():
     assert entry["net"] == entry["credits"] - entry["debits"]
 
 
-def test_the_real_rajhi_numbers_are_self_consistent():
-    """القيدان الحقيقيان: مجموع المدين/الدائن يفسّر عبور الرصيد بالضبط."""
-    gap1 = {"d": Decimal("9001.00"), "c": Decimal("9001.00")}
-    gap2 = {"d": Decimal("9001.00"), "c": Decimal("9001.00")}
+def test_the_gap_numbers_are_self_consistent():
+    """**البنيةُ تُختبر بأمثالٍ صناعية** — والأرقامُ الحقيقيةُ تُقاس في تشغيل البحث (دليلُها في
+    `data/` المُهمَل)، فقد كانت منشورةً هنا نصّاً: والاختبارُ يجب ألّا يكون قناةَ تسريب.
+
+    والقاعدةُ الدقيقة: خريطةُ التطهير مفتاحُها **القيمةُ المُقنَّنة** ⇒ تنجو علاقاتُ التساوي
+    والتسلسل (دائن − مدين = رصيد، وقيمةٌ مُكرّرةٌ في ملفَّين) — أمّا **الجمعيّاتُ** فتحتاج مثالاً
+    مُصمَّماً (كما هنا) لا تطهيراً.
+    """
+    gap1 = {"d": Decimal("1234.56"), "c": Decimal("2345.67")}
+    gap2 = {"d": Decimal("3456.78"), "c": Decimal("4567.89")}
     net = (gap1["c"] + gap2["c"]) - (gap1["d"] + gap2["d"])
-    crossing = Decimal("634.50") + Decimal("819.02")
-    assert net == Decimal("1453.52")
-    assert net == crossing                      # الشاهدان يتفقان
-    assert gap1["d"] + gap2["d"] == Decimal("4242.48")
-    assert gap1["c"] + gap2["c"] == Decimal("9001.00")
+    crossing = Decimal("1111.11") + Decimal("1111.11")
+    assert net == crossing                                     # الشاهدان يتفقان
+    assert gap1["d"] + gap2["d"] == Decimal("4691.34")
+    assert gap1["c"] + gap2["c"] == Decimal("6913.56")
+    assert net == Decimal("2222.22")
 
 
 def test_without_a_printed_footer_before_the_gap_the_entry_is_unproven():
@@ -80,7 +86,7 @@ def test_a_disagreeing_witness_marks_the_entry_not_hides_it():
 def test_identity_and_column_split():
     # identity(الافتتاح، المدين، الدائن) = افتتاح + دائن − مدين
     assert identity("0", "888404.92", "888975.51") == Decimal("570.59")
-    assert identity("0", "4242.48", "9001.00") == Decimal("1453.52")
+    assert identity("0", "4242.48", "9009.00") == Decimal("4766.52")   # 0 + 9009.00 − 4242.48
     assert debit_credit("22.00", "debit") == (Decimal("22.00"), None)
     assert debit_credit("22.00", "credit") == (None, Decimal("22.00"))
     assert debit_credit("0", "debit") == (None, None)
@@ -95,8 +101,10 @@ def test_the_export_declares_the_identity_block_and_the_gap_ledger(tmp_path):
     from openpyxl import load_workbook
     from tools.to_xlsx import build
 
+    PROFILE = Path(__file__).resolve().parents[1] / "profiles" / "al-rajhi.json"
+
     out = tmp_path / "export.xlsx"
-    build(_synthetic_run(tmp_path), out, None)
+    build(_synthetic_run(tmp_path), out, None, profile=PROFILE)
     wb = load_workbook(out)
     joined = " ".join(str(v) for row in wb["الملخص"].iter_rows(values_only=True)
                       for v in row if v is not None)

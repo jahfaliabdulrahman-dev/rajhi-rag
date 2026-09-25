@@ -12,14 +12,22 @@
 
 from __future__ import annotations
 
+
 import argparse
 import json
 import statistics
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tools.pack_io import data_root as _data_root, pack_facts as _pack_facts, pack_path as _pack_path  # noqa: E402
+from tools.pack_io import repo_root as _repo_root  # noqa: E402 — **الكتابةُ في الشجرة الجاريّة** (S-1)
+from tools.spend import at_or_over  # noqa: E402 — **السقفُ بالسنتات** (مراجعة ٥٢ · R52-4 · F7)
 
 PROJ = Path(__file__).resolve().parents[1]
 for _p in (str(PROJ), str(PROJ / "src"), str(PROJ / "tools")):
@@ -57,10 +65,14 @@ def measure_page(run: Path, pg: int, prompt: str) -> dict:
     certified = _page_rows(run, pg)
     stamp = {"page": pg, "rows_certified": len(certified)}
     t0 = time.time()
+    stats: dict = {}
     try:
-        rows = read_rows_vlm(str(img), prompt=prompt)
+        rows = read_rows_vlm(str(img), prompt=prompt, stats=stats)
     except Exception as exc:                # noqa: BLE001
-        return stamp | {"error": f"{type(exc).__name__}: {exc}"[:160]}
+        return stamp | {"cost_usd": float(stats.get("cost") or 0.0),
+                        "error": f"{type(exc).__name__}: {exc}"[:160]}
+    # **الكلفة المقيسة من الاستعمال لا من عدّادٍ في رأسنا** (درس «تكلفة فعلية لا عدّاد»)
+    stamp["cost_usd"] = float(stats.get("cost") or 0.0)
     stamp["rows_read"] = len(rows)
     stamp["seconds"] = round(time.time() - t0, 1)
     prev = _prev_balance(run, pg)
@@ -79,27 +91,110 @@ def measure_page(run: Path, pg: int, prompt: str) -> dict:
     return stamp
 
 
+def excluding_pack(pool: list[int], pack_pages: set[int]) -> list[int]:
+    """يُسقط صفحاتِ الحزمة المجمّدة من مجموعة السحب — **قرارٌ نقيٌّ يمسّه اختبارٌ مباشرةً**.
+
+    (R45-3): هذه الأداةُ هي التي سحبت عيّنةَ FM-2 فأنفقت ١٣٣ صفحةً من الحزمة قبل ختمها،
+    ولم تكن تعرف بوجود الحزمة أصلاً. والقرارُ هنا لا داخل `main()` كي لا يمرّ حذفُه بصمت.
+    """
+    return [p for p in pool if p not in pack_pages]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True, type=Path)
     ap.add_argument("--count", type=int, default=24)
     ap.add_argument("--holdout-mod", type=int, default=3)
-    ap.add_argument("--out", type=Path, default=PROJ / "docs/evidence")
+    ap.add_argument("--workers", type=int, default=6,
+                    help="نداءاتٌ متوازية — والكلفة تُجمَع من الاستعمال المقيس")
+    ap.add_argument("--prompts", default="v1,v2",
+                    help=("أذرعُ المقابلة. وذراعٌ واحد = مقابلةٌ مع **المرجع المُثبت** "
+                          "(صفوف الكوربوس نفسها) ⇒ نصفُ الكلفة ونفسُ بيانات القرار، "
+                          "بشرط إعلان أن الذراع الثاني مقروءٌ سابقاً لا الآن."))
+    ap.add_argument("--budget", type=float, default=11.0,
+                    help="سقفُ الميزانية بالدولار: يُتوقّف عند بلوغه **ويُعلن التغطية**")
+    ap.add_argument("--set", choices=("holdout", "training"), default="holdout",
+                    help=("من أين تُسحَب الصفحات: `holdout` لقياسٍ لا يُنفق مجموعة "
+                          "التدريب · و`training` للمقارنة الكاملة **بلا إنفاق الحجز** "
+                          "(قرارٌ يُتّخذ على الحجز يُنفقه — فالحجز للنموذج)."))
+    ap.add_argument("--out", type=Path, default=_repo_root() / "docs" / "evidence")
+    ap.add_argument("--out-name", default="20260921-fm2-prompt-comparison.json",
+                    help="اسمُ ملف النتيجة — فيُكتب كلُّ ذراعٍ في ملفّه ولا يُبطل ما قبله")
     args = ap.parse_args()
 
-    run = args.run if args.run.is_absolute() else PROJ / args.run
+    run = args.run if args.run.is_absolute() else _data_root() / args.run
     pages = sorted(int(p.stem.split("-")[1]) for p in (run / "results").glob("pg-*.json"))
-    holdout = [p for p in pages if p % args.holdout_mod == 0]
-    step = max(1, len(holdout) // args.count)
-    picked = holdout[::step][:args.count]
+    divisible = [p for p in pages if p % args.holdout_mod == 0]
+    pool = divisible if args.set == "holdout" else [p for p in pages if p not in divisible]
+    # **الحزمةُ المجمّدة لا تُنفَق في أيّ ضبط** (مراجعة ٤٥ · R45-3): هذه الأداةُ نفسُها هي التي
+    # سحبت عيّنةَ FM-2 فسبّبت SPEC-1 — فصارت تسأل الحزمةَ أوّلًا، وتُعلن ما استثنته، وتقف إن عمِيت.
+    _facts = _pack_facts(_pack_path())
+    _before = len(pool)
+    pool = excluding_pack(pool, _facts["pages"])
+    print(f"استثناءُ الحزمة: {_before - len(pool)} صفحةً من {_before} · "
+          f"(حزمةٌ معلَنة: {_facts['file']} · {len(_facts['pages'])} صفحة)")
+    if not pool:
+        raise SystemExit("⛔ لا صفحاتَ خارج الحزمة ⇒ لا ضبطَ بلا إنفاقها (فشلٌ مُغلَق)")
+    step = max(1, len(pool) // args.count)
+    picked = pool[::step][:args.count]
+
+    arms = [a.strip() for a in args.prompts.split(",") if a.strip()]
+    bad = [a for a in arms if a not in PROMPTS]
+    if bad:
+        raise SystemExit(f"تلقينات غير معروفة: {bad} — المتاح: {sorted(PROMPTS)}")
+    tasks = [(name, pg) for name in arms for pg in picked]
+    results: dict[str, list[dict]] = {name: [] for name in arms}
+    spent = 0.0
+    stopped_by_budget = False
+    lock = threading.Lock()
+    # ⚠️ الاسم `pool` محجوزٌ لمجموعة الصفحات — فلا يُعاد استعماله للمنفِّذ
+    with ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
+        futures = {}
+        for name, pg in tasks:
+            with lock:
+                if at_or_over(spent, args.budget):
+                    stopped_by_budget = True
+                    break
+            futures[executor.submit(measure_page, run, pg, PROMPTS[name])] = (name, pg)
+        for fut in as_completed(futures):
+            name, pg = futures[fut]
+            try:
+                res = fut.result()
+            except Exception as exc:        # noqa: BLE001
+                res = {"page": pg, "error": f"{type(exc).__name__}: {exc}"[:160],
+                       "cost_usd": 0.0}
+            with lock:
+                spent += float(res.get("cost_usd") or 0.0)
+                results[name].append(res)
+
+    # **نسبُ المرجع يُسجَّل وقتَ القياس** (مأخذ المدقّق · الجولة ٢٢): بدونه صار
+    # المشتقُّ يقرأ تشغيلةً مُتجاهَلة، فلم يبقَ دالّةً لملفَّي الذراعين — ولا تُعاد
+    # نتيجتُه في بيئةٍ نظيفة (CI أو worktree بلا بيانات).
+    _rep = run / "slice_report.json"
+    provenance = {"reader": None, "legacy_unstamped_pages": None, "declaration": None,
+                  "source": "غير مُعلن في تقرير التشغيلة"}
+    if _rep.exists():
+        cp = (json.loads(_rep.read_text(encoding="utf-8")).get("corpus_provenance") or {})
+        provenance = {"reader": cp.get("reader") or None,
+                      "legacy_unstamped_pages": cp.get("legacy_unstamped_pages"),
+                      "declaration": cp.get("declaration"),
+                      "source": "slice_report.json → corpus_provenance (وقت القياس)"}
 
     report = {"measured_at": date.today().isoformat(), "run": str(args.run),
+              "corpus_provenance": provenance,
               "sample": {"requested": args.count, "picked": len(picked),
-                         "from": "holdout (page % {} == 0)".format(args.holdout_mod),
-                         "pages": picked},
+                         "from": (f"{args.set} (page % {args.holdout_mod} "
+                                  f"{'==' if args.set == 'holdout' else '!='} 0)"),
+                         "pool": len(pool), "pages": picked},
+              "spend_usd": round(spent, 4), "budget_usd": args.budget,
+              "stopped_by_budget": stopped_by_budget,
+              "workers": args.workers,
               "prompts": {}}
-    for name in ("v1", "v2"):
-        per = [measure_page(run, pg, PROMPTS[name]) for pg in picked]
+    if len(arms) == 1:
+        report["baseline"] = ("صفوف الكوربوس نفسها (قراءة سابقة) — يُعلن أنه مرجعٌ "
+                              "مسجَّل لا قراءةٌ جديدة، فلا يكشف انزياحاً زمنياً للنموذج")
+    for name in arms:
+        per = sorted(results[name], key=lambda r: r["page"])
         ok = [p for p in per if "error" not in p]
         report["prompts"][name] = {
             "pages_measured": len(ok), "errors": len(per) - len(ok),
@@ -109,18 +204,33 @@ def main() -> None:
             "pairs_matching_certified": sum(p.get("pairs_matching_certified", 0) for p in ok),
             "pages_with_last_balance_equal": sum(
                 1 for p in ok if p.get("last_balance_equals_certified")),
+            "pages_exact_against_certified": sum(
+                1 for p in ok
+                if p.get("pairs_matching_certified") == p.get("pairs_certified")
+                and p.get("last_balance_equals_certified")),
+            "cost_usd": round(sum(float(p.get("cost_usd") or 0.0) for p in per), 4),
             "median_seconds": round(statistics.median(
                 [p["seconds"] for p in ok if p.get("seconds")]), 1) if ok else None,
+            "p95_seconds": (sorted(p["seconds"] for p in ok if p.get("seconds"))
+                            [int(0.95 * (len(ok) - 1))] if ok else None),
             "per_page": per,
         }
     args.out.mkdir(parents=True, exist_ok=True)
-    out = args.out / "20260921-fm2-prompt-comparison.json"
+    out = (args.out / args.out_name).resolve()
     out.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     for name, d in report["prompts"].items():
-        print(f"{name}: قرأ {d['rows_read']} من {d['rows_certified']} مُثبت · "
-              f"سلسلة {d['rows_chain_verified']} · مطابقة {d['pairs_matching_certified']} · "
-              f"آخر رصيد مطابق في {d['pages_with_last_balance_equal']}/{d['pages_measured']} صفحة")
-    print(f"\nالملف: {out.relative_to(PROJ)}")
+        print(f"{name}: {d['pages_measured']} صفحة · قرأ {d['rows_read']}/{d['rows_certified']} · "
+              f"مطابقة {d['pairs_matching_certified']} · صفحاتٌ مُقفلة {d['pages_with_last_balance_equal']} · "
+              f"مطابقةٌ تامة {d['pages_exact_against_certified']} · ${d['cost_usd']}")
+    print(f"\nالمصروف: ${report['spend_usd']} من سقف ${args.budget} · "
+          f"توقّف بالسقف: {stopped_by_budget} · العيّنة: {len(picked)} من {len(pool)}")
+    # ⚠️ الطبعُ لا يُسقط تشغيلةً مدفوعة: كان `relative_to` على مسارٍ **نسبيّ**
+    # ⇒ `ValueError` **بعد** أن كُتب الملف، فيُقرأ الخروجُ فشلاً والقياسُ تامّ.
+    try:
+        shown = out.relative_to(PROJ)
+    except ValueError:
+        shown = out
+    print(f"الملف: {shown}")
 
 
 if __name__ == "__main__":

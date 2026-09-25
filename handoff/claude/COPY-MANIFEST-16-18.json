@@ -1,0 +1,34 @@
+{
+ "copied_by": "sulaiman",
+ "note": "نسخٌ بالبايت من worktree المدقّق إلى صندوق البريد — بما فيها 19 و20 و21 (فجوةُ التسليم التي نبّه عليها المدقّق: أربعةُ أحكامٍ لم تصل إلا بيد)",
+ "at": "2026-09-21",
+ "files": [
+  {
+   "file": "20260921-014333-third-eye-review-16.md",
+   "sha256_src": "3528cb044df2f79d679d042af52e73ad355fbc8b9850f712900127452e27d9a6",
+   "sha256_dst": "3528cb044df2f79d679d042af52e73ad355fbc8b9850f712900127452e27d9a6",
+   "identical": true
+  },
+  {
+   "file": "20260921-060727-third-eye-review-18.md",
+   "sha256_src": "5a3ec12a9e556a423db5c2c78b0d4655df4aa9b8c2db79125298b5e22ecc51cc",
+   "sha256_dst": "5a3ec12a9e556a423db5c2c78b0d4655df4aa9b8c2db79125298b5e22ecc51cc",
+   "identical": true
+  },
+  {
+   "file": "20260921-062321-third-eye-review-19.md",
+   "sha256": "81dc6ebd6bcc5606d59fd627a40e7832147887dadc93af4e20d0f8abb2dedbbe",
+   "identical": true
+  },
+  {
+   "file": "20260921-064807-third-eye-review-20.md",
+   "sha256": "f52f6f51e7c635a562d649152c7f530160efbd1c0d1195c767eb4b9671551039",
+   "identical": true
+  },
+  {
+   "file": "20260921-072811-third-eye-review-21.md",
+   "sha256": "27ddde1031a31b8f0e498d32256a0ae2aa54f34203d3b4d32b0c572d76402e31",
+   "identical": true
+  }
+ ]
+}

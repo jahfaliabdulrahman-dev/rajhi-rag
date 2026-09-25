@@ -7,8 +7,8 @@ runs on the RAW tokens returned by the VLM reader (raw_movement/raw_balance —
 what was ON the paper before normalization) and classifies, per page:
 
   old       — comma as decimal point («٣٠٠,٠٠») or thousand-group style
-  new       — dot halalas («9001.00»), thousands separator allowed
-  lost_dot  — the missing-decimal-dot family («9001.00»)
+  new       — dot halalas («3856.65»), thousands separator allowed
+  lost_dot  — the missing-decimal-dot family («٦١,١٦٥١٢»)
   zero_style— the printed zero («.,..»)
   plain     — digits only
 

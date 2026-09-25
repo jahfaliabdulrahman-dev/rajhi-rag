@@ -10,13 +10,13 @@ Rules baked in (each one was discovered by a live failure):
 - Dot/comma-only strings like '.,..' = a PRINTED ZERO balance (old pages
   print zero as dots). Return 0.0 — never None — or the balance chain breaks.
 - Separators: ٫ (U+066B) and '.' = decimal; ٬ (U+066C) and ، (U+060C) = comma.
-- Trailing or leading '-' = negative (old rows print '9001.00-').
+- Trailing or leading '-' = negative (old rows print '5,375.80-').
 - NO dot present → look at the LAST comma:
     * exactly 2 digits after it  → comma IS the decimal point
       (OLD pages print '300,00' = 300.00; '٥٠,٠٠' = 50.00)
     * exactly 3 digits after it  → thousands separator ('2,900' = 2900)
     * more than 3 after it       → the decimal dot was LOST
-      ('9001.00' = 9001.00 — owner's golden rule)
+      ('61,16512' = 61,165.12 — owner's golden rule)
 - Fraction length 1 or 3 after an explicit dot → return None (ambiguous,
   never guess; the balance chain will supply the value).
 """
@@ -77,10 +77,10 @@ def gdate(s):
 if __name__ == "__main__":
     cases = {
         "۳۰۰,۰۰": 300.00, "۱۰۰,۰۰": 100.00, "٥٠,٠٠": 50.00,       # قديمة: فاصلة عشرية
-        "9001.00": 9001.00, "9001.00": 9001.00,                   # جديدة: نقطة
-        "9001.00": 9001.00, "9001.00": 9001.00,              # نقطة ضائعة
-        ".,..": 0.0, "٠.٠٠": 0.0, "9001.00-": 9001.00,           # صفر وناقص
-        "٢٤٥.٠٠": 245.00, "9001.00": 9001.00,                     # قيم عادية
+        "3856.65": 9006.00, "3671.56": 9004.00,                   # جديدة: نقطة
+        "٦١,١٦٥,١٢": 61165.12, "61,16512": 61165.12,              # نقطة ضائعة
+        ".,..": 0.0, "٠.٠٠": 0.0, "٥,٣٧٥٫٨٠-": -5375.80,           # صفر وناقص
+        "٢٤٥.٠٠": 245.00, "٩,٠١٠.٠٠": 9010.00,                     # قيم عادية
     }
     bad = 0
     for s, want in cases.items():

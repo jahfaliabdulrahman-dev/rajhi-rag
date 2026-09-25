@@ -1,0 +1,102 @@
+{
+ "derived_by": "tools/fm2_verdict.py — كلُّ رقمٍ هنا محسوبٌ من ملفَّي الذراعين",
+ "arms": {
+  "a": "20260921-fm2-v1-arm.json",
+  "b": "20260921-fm2-v2-arm.json"
+ },
+ "criteria": {
+  "exact": "كل الأزواج مطابقة **و** آخر رصيد مطابق (الأشدّ)",
+  "closed": "آخر رصيد مطابق = إقفال السلسلة",
+  "overread": "rows_read − rows_chain_verified (صفوفٌ لا تُصدّقها السلسلة)"
+ },
+ "reference_provenance": {
+  "reader": null,
+  "source": "slice_report.json → corpus_provenance",
+  "legacy_unstamped_pages": 629,
+  "declaration": "غير مختم — قُرئ قبل تسجيل الهوية"
+ },
+ "reference_bias": "⚠️ **نسبُ المرجع مجهول**: `corpus_provenance.reader = None` و629 صفحةً بلا ختم ⇒ لا يُقال «منحازٌ إلى b» ولا «محايد» — **الاتجاهُ غير محدَّد**. وما يصمد مستقلّاً عن النسب: الذراعان طابقا المرجع في **نفس** عدد الأزواج، وهذا لا يتوقّف على من كتبه.",
+ "pages": {
+  "paired": 420,
+  "clean_in_both": 413,
+  "errors_a": 4,
+  "errors_b": 3
+ },
+ "a": {
+  "rows_read": 3801,
+  "rows_certified": 3801,
+  "rows_chain_verified": 3766,
+  "pairs_matching": 3721,
+  "overread": 35,
+  "closed": 405,
+  "exact": 383,
+  "median_s": 17.8,
+  "p95_s": 55.1,
+  "errors": 4
+ },
+ "b": {
+  "rows_read": 3783,
+  "rows_certified": 3801,
+  "rows_chain_verified": 3765,
+  "pairs_matching": 3721,
+  "overread": 18,
+  "closed": 409,
+  "exact": 390,
+  "median_s": 18.1,
+  "p95_s": 53.9,
+  "errors": 3
+ },
+ "paired_difference_pairs": {
+  "mean": 0,
+  "median": 0,
+  "pages_b_ahead": 21,
+  "pages_a_ahead": 13,
+  "pages_tied": 379
+ },
+ "page_level_wins": {
+  "a": 13,
+  "b": 21,
+  "tie": 379
+ },
+ "pages_where_a_lost": [
+  38,
+  49,
+  67,
+  119,
+  134,
+  139,
+  173,
+  184,
+  197,
+  206,
+  235,
+  245,
+  260,
+  344,
+  368,
+  469,
+  479,
+  503,
+  541,
+  553,
+  595
+ ],
+ "pages_where_b_lost": [
+  1,
+  20,
+  107,
+  146,
+  188,
+  193,
+  248,
+  281,
+  388,
+  410,
+  506,
+  547,
+  629
+ ],
+ "spend_usd": 9.6433,
+ "spend_on_pages_outside_the_count_usd": 0.1963,
+ "budget_usd_charged": 13.0
+}

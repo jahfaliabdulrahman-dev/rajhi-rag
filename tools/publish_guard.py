@@ -105,10 +105,16 @@ OPAQUE_EXTS = {".zip", ".xlsx", ".xlsm", ".xls", ".docx", ".doc", ".pptx",
                ".ppt", ".sqlite", ".db", ".tar", ".gz", ".tgz", ".7z", ".rar",
                ".pickle", ".pkl", ".bin", ".ttf", ".otf", ".woff", ".woff2"}
 
+# **ثلاثةُ مستودعاتٍ للبيانات الحقيقيّة، لا واحد** (مراجعة ٣٨): `.gitignore` يعلن
+# `data/local_sample/` و`data/training/` و`data/eval_pack/` بياناتٍ حقيقيّة — وكان هذا الحارس
+# يمنع الأوّلَ وحدَه ⇒ `git add -f` يمرّ على الاثنين الآخرين، وفيهما خريطةُ التطهير التي تربط
+# كلَّ قيمةٍ مُقنَّعةٍ بأصلها الحقيقيّ.
+REAL_DATA_DIRS = ("data/local_sample", "data/training", "data/eval_pack")
+
 PATH_RULES = [
     ("local_data", "BLOCK",
-     lambda p: p == "data/local_sample" or p.startswith("data/local_sample/"),
-     "ملف بيانات حقيقية — ممنوع رفعه نهائياً"),
+     lambda p: any(p == d or p.startswith(d + "/") for d in REAL_DATA_DIRS),
+     "ملف بيانات حقيقية (لقطات/تدريب/تقييم/خريطة تطهير) — ممنوع رفعه نهائياً"),
     ("env_file", "BLOCK", lambda p: Path(p).name == ".env", "ملف اسرار"),
     ("media_file", "BLOCK",
      lambda p: Path(p).suffix.lower() in MEDIA_EXTS
@@ -265,11 +271,15 @@ def _weld_adjacent_literals(line: str) -> str:
     return line
 
 
-HEX_CHARS = "0123456789abcdefABCDEF"
-HEX_LETTERS = "abcdefABCDEF"
+# **حروفٌ صغيرة فقط** — والقياس هو الذي فرضها: بصمةُ sha256 تُكتب صغيرةً،
+# والمعرّفاتُ التي نطاردها (IBAN · بطاقة · مرجع مُبطَّن) تُكتب **كبيرة** أو أرقاماً
+# لا غير. فلو قبل العُرف الحروفَ الكبيرة لمرّ IBAN كامل تحت اسم «بصمة» — وهو ما
+# أمسكه اختبارُ `test_an_upper_case_iban_is_still_blocked` بعد أن كان يمرّ.
+HEX_CHARS = "0123456789abcdef"
+HEX_LETTERS = "abcdef"
 
 
-def _in_hex_token(src: str, match, min_len: int = 24) -> bool:
+def _in_hex_token(src: str, match, min_len: int = 16) -> bool:
     """A ten-digit run inside a long hexadecimal token is a hash, not an account.
 
     Both auditors hit this: a commit sha blocked the message that documented it,
@@ -283,6 +293,11 @@ def _in_hex_token(src: str, match, min_len: int = 24) -> bool:
     number, a card, an IBAN's digits and a padded reference never do. Requiring
     a letter keeps the sha exemption and closes the hole, and it fails SAFE: an
     all-digit token is scanned, not waived.
+
+    و`min_len` نزل من 24 إلى **16**: القياس أراه — ملفُّ دليلٍ يحمل بصماتِ صفحاتٍ
+    **مقتطعة** (16 محرفاً) حُجب ثلاث مرات، فصار الدليل يُحجب **لأنه دليل**. وشرطُ
+    الحرف اللاتيني (a–f صغيرة) هو الفاصل الحقيقي: الحسابُ والبطاقة أرقامٌ بلا حروف،
+    والـIBAN بحروفٍ **كبيرة** — فالبصمةُ الصغيرة تمرّ والمعرّفُ لا.
     """
     a = match.start()
     while a > 0 and src[a - 1] in HEX_CHARS:
@@ -320,6 +335,11 @@ def _digit_variants(line: str) -> list[str]:
             continue
         if len({len(g) for g in groups}) != 1:
             continue
+        # ⚠️ **تراجعٌ مقصود (حكم المدقّق · الجولة ١٩):** كان هنا استثناءٌ يُسقط
+        # «ثلاثاتٍ مفصولةً بفراغ» فتمرّ **أرقامُ حسابٍ من 15 و18 رقماً** مكتوبةً
+        # بثلاثات — أي أنّ **قاعدةً أمنيةً وُسِّعت ليُرضى ملفٌّ واحد**. والعلاجُ
+        # الصحيح: `.publish-allowlist` — سطرٌ لملفٍ بعينه **بسببٍ مكتوب**، فلا
+        # تُوسَّع القاعدةُ على الشجرة كلها. وسمُّ الحالة في الاختبارات يمنع رجوعها.
         joined = line[:m.start()] + "".join(groups) + line[m.end():]
         if joined not in out:
             out.append(joined)
@@ -551,7 +571,8 @@ def scan_pre_push(findings, entries, seen) -> int:
         if set(local_sha) <= {"0"}:
             continue  # branch deletion
         if set(remote_sha) <= {"0"}:
-            revs.update(_git("rev-list", local_sha).split())
+            # مدى الدفع لكامل القائمة الحالية: نطبعها لكل مرجع على حدة.
+            revs.update(_git("rev-list", local_sha, "--not", "--remotes").split())
         else:
             revs.update(_git("rev-list", f"{remote_sha}..{local_sha}").split())
     # No sampling: a commit that carried PII and was later rewritten is

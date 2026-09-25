@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -33,16 +34,46 @@ RESULTS = PROJ / "data" / "local_sample" / "slice_629p" / "results"
 # and calls the fresh document the drift (this happened with the test count).
 SNAPSHOT = PROJ / "docs" / "claims.json"
 
+# **كائنُ القرار يُستورد في أعلى الملفّ — بلا `try/except` يُخفي** (مقعدُ البنية · مراجعة ٦١): كان
+# يُستورد داخل دالّةٍ عبر `sys.path.insert` **ويبتلع الخطأ** فيُعيد `None` ⇒ تُصاغ الوثيقةُ بـ`{None}`
+# ويُكتب في اللقطة `null` بصمت. والآن الوحدةُ المجرّدةُ (`tools/gate3.py` — لا تبعيّةَ خارج المكتبة
+# القياسية، فلا خدمةَ ولا نموذج) تُستورد بنفس النمط المُعلَن المُستعمل لـ`scale_slice` أدناه.
+sys.path.insert(0, str(PROJ / "tools"))
+from gate3 import GATE3_DECISION                                    # noqa: E402
+
 
 def _test_count() -> int | None:
+    """عدُّ الاختبارات — ببيئةٍ نظيفة.
+
+    عطلٌ مُعلن كان يُعطي أرقاماً خاطئة (227 · 232 · 233) حين يُستدعى من عمليةٍ
+    أخرى: المتغيّرات الموروثة (`PYTHONPATH` خصوصاً) تُغيّر ما يُجمَع. **الوثائق
+    ليست البيئة** — فالقياس يُنزع من بيئة الاستدعاء قبل أن يُشغَّل.
+    """
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("PYTHONPATH", "PYTHONHOME", "PYTEST_ADDOPTS")}
     out = subprocess.run([sys.executable, "-m", "pytest", "tests/",
                           "--collect-only", "-q"],
-                         cwd=PROJ, capture_output=True, text=True)
+                         cwd=PROJ, capture_output=True, text=True, env=env)
     for line in reversed(out.stdout.splitlines()):
         parts = line.split()
         if len(parts) >= 2 and parts[0].isdigit() and "test" in parts[1]:
             return int(parts[0])
     return None
+
+
+def _gate3_price_cap() -> int | None:
+    """**سقفُ ثمن الإفراج يُشتقّ من كائنه لا من النثر** (review-60 · R60-1).
+
+    الرقمُ ١٣٣ كان يُكتب بيدٍ في الوثائق — وقد سُحب مرّةً إلى «١٠٠» لأن البوابةَ كانت تقيس مجتمعًا
+    ناقصًا. فالآن يُشتقّ من `GATE3_DECISION` (مصدرٌ واحد: **`tools/gate3.py`**) ويُقابَل في موضعين
+    معلَنين، فمن غيّر السقفَ في الشيفرة يجد الوثائقَ تحمرّ.
+
+    **وحدُّ الاستيراد (مقعدُ البنية · مراجعة ٦١):** كان يقع في `try/except` يبتلع كلَّ خطأ ويُعيد
+    `None`، فيُصاغ الطلبُ ويُكتب في اللقطة `{None} صفحة` **بصمت**. والآن يُستورد **الوحدةَ المجرّدة**
+    (`tools/gate3.py`: لا تبعيّةَ خارج المكتبة القياسية) في **أعلى الملفّ** — فإن اختفى كائنُ القرار
+    سقطت الأداةُ بالاسم (`ModuleNotFoundError`) لا أن تكتب `null` في وثيقةٍ معلَنة.
+    """
+    return int(GATE3_DECISION["price_cap_pages"])
 
 
 def derive() -> dict | None:
@@ -74,6 +105,8 @@ def derive() -> dict | None:
         "arbitrations": len(facts.get("arbitrations", [])),
         "median_page_s": facts.get("median_page_s"),
         "tests": _test_count(),
+        # **ومصدرٌ ثالثٌ مُعلَن**: كائنُ قرار البوابة (٣) — يُشتقّ منه سقفُ الثمن ويُقابَل في الوثائق.
+        "gate3_price_cap_pages": _gate3_price_cap(),
     }
 
 
@@ -92,6 +125,13 @@ def claims(d: dict) -> list[tuple[str, str, str]]:
         # accounted for every page: the number a stranger reads first had no
         # guard at all (external audit).
         ("app.py", f"{d['ok']} صفحة", "الصفحات المطابقة بإطارها (شاشة ABOUT)"),
+        # **وسقفُ ثمن الإفراج يُقابَل في موضعين** (review-60 · R60-1): الرقمُ ١٣٣ كان يُكتب بيدٍ،
+        # فسُحب مرّةً إلى «١٠٠» لمّا قاست البوابةُ مجتمعًا ناقصًا. والصيغةُ تحمل الرقمَ **معناه**
+        # (سقفُ ثمنِ الإفراج) فلا يُنسَخ رقمٌ آخر في مكانه؛ والمصدرُ كائنُ القرار لا نصّ.
+        ("docs/EVAL_PACK.md", f"سقفُ ثمنِ الإفراج {d.get('gate3_price_cap_pages')} صفحة",
+         "سقفُ ثمن الإفراج (البوابة ٣)"),
+        ("docs/GATES.md", f"سقفُ ثمنِ الإفراج {d.get('gate3_price_cap_pages')} صفحة",
+         "سقفُ ثمن الإفراج (سجلّ البوابات)"),
     ]
 
 
@@ -106,6 +146,22 @@ def check(d: dict) -> list[tuple[str, str, str]]:
     return drifts
 
 
+def snapshot_drift(d: dict) -> list[tuple[str, object, object]]:
+    """-> [(key, في اللقطة, في الاشتقاق)] — **البوّابةُ التي كانت عمياء**.
+
+    كان `check()` يقابل الوثائقَ بالاشتقاق الحيّ **فقط**، ولا يقرأ اللقطةَ الملتزمة التي يقرأها CI ⇒
+    لقطةٌ متقادمة (٥٩٠ مقابل ٦٠٢) تمرّ محليًّا وتسقط في نسخةٍ نظيفة. اللقطةُ الآن **شاهدٌ يُقابَل** لا حجرٌ
+    يُوثق به.
+    """
+    if not SNAPSHOT.exists():
+        return [("<لقطة>", "غائبة", "مطلوبة")]
+    try:
+        old = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
+    except Exception as e:                                    # noqa: BLE001
+        return [("<لقطة>", f"غيرُ مقروءة: {type(e).__name__}", "مطلوبة")]
+    return [(k, old.get(k), v) for k, v in d.items() if old.get(k) != v]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--check", action="store_true",
@@ -115,8 +171,20 @@ def main() -> None:
     args = ap.parse_args()
     d = derive()
     if d is None:
-        print(f"لا يوجد تقرير مقيس هنا ({REPORT}) — لا شيء لاشتقاقه. "
-              f"على CI هذا طبيعي: الكاش محلي.")
+        # **بلا تقريرٍ لا يُصمت** (مراجعة ٥٠ · مقعدا Standards وSpec): كان الخروجُ هنا يسبق كلّ مقابلة ⇒
+        # خطوةُ CI المسمّاة «اللقطة» كانت تقابل **لا شيء** (rc=0 ولقطةٌ مسمومة). الآن تُقابَل **اللقطةُ
+        # الملتزمةُ بالوثائق** — وهو ما يفعله `tests/test_public_claims.py` في غياب الكاش — فيحمرّ على CI.
+        if not SNAPSHOT.exists():
+            print(f"لا تقرير مقيس هنا ({REPORT}) ولا لقطةٌ ملتزمة — لا شيء يُحرس.")
+            sys.exit(0)
+        snapdoc = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
+        sdrifts = check(snapdoc)
+        if sdrifts:
+            print("⚠ الوثائقُ تخالف لقطتها الملتزمة:")
+            for rel, needle, label in sdrifts:
+                print(f"  {rel}: تفتقد {needle!r}  ({label})")
+            sys.exit(1)
+        print("الحكم: الوثائقُ توافق لقطتها الملتزمة (لا تقريرٌ حيّ هنا).")
         sys.exit(0)
     print("[claims] الأرقام المشتقّة من تقرير التشغيل:")
     for k, v in d.items():
@@ -126,6 +194,15 @@ def main() -> None:
                             encoding="utf-8")
         print(f"\nكُتبت اللقطة: {SNAPSHOT.relative_to(PROJ)} "
               f"(مشتقّة من التقرير، لا مكتوبة بيد).")
+    # **اللقطةُ شاهدٌ يُقابَل** (مراجعة ٥٠ · CI): كانت `check` تقابل الوثائقَ بالاشتقاق الحيّ وحده،
+    # فلا ترى لقطةً متقادمة يقرأها CI ⇒ البوّابةُ تمرّ محليًّا وتسقط هناك.
+    snap = snapshot_drift(d)
+    if snap:
+        print("\n⚠ اللقطةُ الملتزمة متقادمة (CI يقرأ اللقطةَ لا الاشتقاقَ الحيّ):")
+        for k, o, n in snap:
+            print(f"  docs/claims.json: {k}: اللقطة {o!r} ≠ الاشتقاق {n!r} ⇒ `--write`")
+        if args.check:
+            sys.exit(1)
     drifts = check(d)
     if not drifts:
         print("\nالحكم: كل رقم معلن يطابق مصدره.")

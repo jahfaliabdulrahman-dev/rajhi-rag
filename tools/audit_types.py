@@ -5,7 +5,7 @@ Reads the real 10-page sample through the SAME pipeline the app uses
 final row shaping identical to app.process_pdf), then reports:
 
   1. every distinct description + its count        (classifier vocabulary)
-  2. every row with movement == 9001.00            (owner's four-row question)
+  2. every row with movement == 4331.11            (owner's four-row question)
   3. direction audit: delta sign vs stored side, mismatches listed
   4. chain status summary + the page-10 tail near the owner's صف 94
 
@@ -90,16 +90,16 @@ def main() -> None:
                            for r in rows).most_common():
         print(f"{n:3d} × {desc[:110]}")
 
-    print("\n=== [2] ROWS WITH AMOUNT == 9001.00 ===")
+    print("\n=== [2] ROWS WITH AMOUNT == 4331.11 ===")
     hit = 0
     for r in rows:
         mv = r.get("movement")
-        if isinstance(mv, Decimal) and mv == Decimal("9001.00"):
+        if isinstance(mv, Decimal) and mv == Decimal("4331.11"):
             hit += 1
             print(f"row {r['row_no']:3d} | صفحة {r['page']:2d} | "
                   f"side={r['side'] or '—':6s} | balance={r['balance']} | "
                   f"desc={str(r.get('desc'))[:95]}")
-    print(f"-> {hit} row(s) with 9001.00")
+    print(f"-> {hit} row(s) with 4331.11")
 
     print("\n=== [3] DIRECTION AUDIT (balance-delta sign vs stored side) ===")
     print("side distribution:", dict(Counter(r["side"] or "undecided"

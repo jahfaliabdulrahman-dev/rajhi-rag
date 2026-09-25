@@ -2,19 +2,56 @@
 # pre-push hook — the last line of defense (what-if G3).
 # Install once per clone:  git config core.hooksPath .githooks
 #
-# 1) static gate  — names that never resolve / bindings never read. This is the
-#    class that killed a PAID run: pytest cannot see a branch no test executes,
-#    a linter reads the code and sees it for free.
-# 2) publish guard — scans exactly what this push would publish (refs arrive on
-#    stdin, so the guard runs last and its stdin stays untouched).
-cd "$(dirname "$0")/.." || exit 1
+# 1) publish guard — scans exactly what this push would publish.
+# 2) amount guard  — the same range, against the fingerprint manifest and the
+#    per-file baseline (a ratchet: declared debt passes, any INCREASE fails).
+# 3) static gate   — a dev-tool gate, run LAST and never a blocker on its own:
+#    blocking a push because pyflakes is missing creates the very incentive to
+#    use --no-verify, which would skip the two security guards above. (review 39/4)
+#
+# **stdin is read ONCE.** refs arrive on stdin and the first child to read them
+# consumes the stream (measured: publish_guard ate it). Captured then piped.
+#
+# The interpreter is looked up in this worktree, then in the MAIN checkout via
+# `git rev-parse --git-common-dir` — a linked worktree has no .venv of its own.
+cd "$(git rev-parse --show-toplevel)" || exit 1
+COMMON=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
 
-# The gate needs an interpreter with pyflakes; prefer the project venv. If none
-# has it the gate refuses loudly (exit 2) — a gate that cannot run never passes.
-PY=python3
-if [ -x ".venv/bin/python" ] && .venv/bin/python -c "import pyflakes" 2>/dev/null; then
-  PY=.venv/bin/python
+PY=""
+for cand in ".venv/bin/python" "$COMMON/.venv/bin/python" "python3"; do
+  case "$cand" in /*) [ -x "$cand" ] && { PY="$cand"; break; };;   # مسارٌ مطلقٌ من النسخة الرئيسيّة
+    *) command -v "$cand" >/dev/null 2>&1 && { PY="$cand"; break; };; esac
+done
+[ -n "$PY" ] || PY=python3
+
+REFS=$(cat)
+printf '%s\n' "$REFS" | "$PY" tools/publish_guard.py --pre-push || exit 1
+# `$1` = وجهةُ الدفع (اسمُ ريموت أو رابط): يمرّرها الحارسُ ليَقيس «ما يُنشر» مقابلها لا مقابل كلّ الريموتات.
+# **ويُمرَّر فقط إن أعلنته الأداة:** خطّافُ نسخةٍ يشير إليها worktree آخر قد يُشغّل أداةً أقدمَ لا
+# تعرف `--remote` ⇒ argparse يرفض ⇒ يُمنَع دفعٌ مشروع (وقع فعلاً للمدقّق). والبديلُ يُعلَن لا يُخفى.
+# و`grep -- '--remote'` على `--help` **لا يفصل**: يطابق `--not --remotes` في نصّ المساعدة ⇒ يمرّ
+# كذباً على أداةٍ قديمة، فيرفض argparse الدفعَ (وهو ما وقع فعلاً للمدقّق). فيُقرأ العَلَمُ من المصدر.
+if grep -q -- 'add_argument("--remote"' tools/amount_guard.py 2>/dev/null; then
+  printf '%s\n' "$REFS" | "$PY" tools/amount_guard.py --pre-push --remote "$1" || exit 1
+else
+  echo "⚠ الأداةُ لا تعرف --remote ⇒ المدى تقريباً من كلّ الريموتات (يُعلن ولا يُخفى)"
+  printf '%s\n' "$REFS" | "$PY" tools/amount_guard.py --pre-push || exit 1
 fi
-"$PY" tools/static_gate.py || exit 1
 
-exec python3 tools/publish_guard.py --pre-push
+if "$PY" -c "import pyflakes" 2>/dev/null; then
+  "$PY" tools/static_gate.py || exit 1
+else
+  echo "⚠ static_gate تخطّى: لا pyflakes في $PY — أداةُ تطويرٍ غائبةٌ لا تُسقِط حرّاسَ الأمن."
+fi
+
+# 4) تذكيرُ تقرير الدفع (R61-1 «ملحقُ الدفع»): الـCI يعمل **بعد** الدفع ⇒ لا حُكمَ هنا، بل يُطبع
+#    الأمرُ الذي يُقاس به **كلُّ مرجعٍ** دُفع — لأنّ تقريرَ دفعٍ قال «أخضر» وقِيس مرجعٌ واحدٌ من خمسة،
+#    وفرعان مدفوعان كانا أحمرَين.
+#    **وقراءةُ المراجع في الأداة لا هنا:** `awk '{print $1}'` مبنيٌّ على «الحقلُ الأول مرجع» — وقد
+#    قِيس كذبُه (git يُرسل `(delete) …` و`HEAD …` و`refs/tags/…`) ⇒ مُحلِّلٌ مختبَرٌ في الأداة
+#    (`--pre-push`) يقرأ **وجهةَ الدفع**، ويُعلن ما لا يُقاس.
+#    **ولا يُسقط دفعاً:** خروجُ الخطّاف صفرٌ صريحاً بعده، وخطّافٌ يمنع دفعاً مشروعاً (وسمٌ · حذفُ
+#    فرع · رأسٌ مفصول) يُصنع به الحافزُ على `--no-verify` الذي يُسقط حارسَي الأمن أعلاه (وسابقةُ
+#    R39-4 في السطر ٩ — والعلّةُ نفسُها، مقيسةً في `tools/amount_guard.py` لِـstdin الفارغ).
+printf '%s\n' "$REFS" | "$PY" tools/ci_report.py --pre-push || true
+exit 0

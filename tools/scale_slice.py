@@ -33,7 +33,9 @@ from decimal import Decimal
 from pathlib import Path
 
 PROJ = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJ))
 sys.path.insert(0, str(PROJ / "src"))
+from tools.spend import at_or_over  # noqa: E402 — **السقفُ بالسنتات** (مراجعة ٥٢ · R52-4 · F7)
 
 from statement_qa.era import fingerprint_pages, summarize_ar as era_ar  # noqa: E402
 from statement_qa.footer_oracle import (  # noqa: E402
@@ -53,6 +55,18 @@ from statement_qa.vlm_reader import (  # noqa: E402
 )
 
 DEFAULT_SOURCE = None  # resolved at startup: --source, else a LOCAL pointer file
+
+
+def _contract_footer_role() -> str:
+    """دور التذييل من عقد البنك — يُقرأ ولا يُفترض."""
+    try:
+        import json as _json
+        prof = PROJ / "profiles" / "al-rajhi.json"
+        data = _json.loads(prof.read_text(encoding="utf-8"))
+        return ((data.get("statement") or {}).get("footer") or {}).get("role") \
+            or "غير مُعلن في العقد"
+    except Exception:                       # noqa: BLE001
+        return "غير مُعلن في العقد"
 
 
 def _resolve_source(arg: str | None) -> str:
@@ -632,7 +646,7 @@ def main() -> None:
                 stop_reason = (f"نسبة الشكوك في آخر {args.stop_window} صفحات "
                                f"{ratio:.0%} > {args.stop_suspect_ratio:.0%}")
                 break
-        if usage_total.get("cost", 0.0) >= args.max_cost:
+        if at_or_over(usage_total.get("cost", 0.0), args.max_cost):
             stop_reason = f"تجاوز سقف الميزانية ${args.max_cost}"
             break
 
@@ -685,6 +699,9 @@ def main() -> None:
         "usage": usage_total,
         "usage_ledger": ledger,
         "reader_stamp": read_stamp,
+        # **دور التذييل من العقد** (لا من العادة): التقارير القديمة لم تحمله،
+        # فصار يُكتب — والبوابة تقابله بالعقد فلا يمرّ تقريرٌ صامت.
+        "footer_role": _contract_footer_role(),
         "corpus_provenance": {
             "reader": read_stamp,
             "legacy_unstamped_pages": legacy_unstamped,

@@ -1,0 +1,136 @@
+{
+ "gate": "الخطوة ١ — البوابتان (١) و(٢): ختمُ هوية الكوربوس وإعادةُ الالتقاط من الكاش",
+ "date": "2026-09-22",
+ "cost_usd": 0,
+ "why_this_file": "الملفاتُ المقيسة (الكاش والمصدَّر ومجلد الالتقاط) خارج git بحكم الخصوصية، فالقابلُ للنشر والمقابلة هو هذا التصريحُ مع الأمر الذي أنتجه.",
+ "gate_1_corpus_identity": {
+  "command": ".venv/bin/python tools/backfill_reader_stamp.py --run data/local_sample/slice_629p",
+  "doc_id": "3e2d360a665c88aa",
+  "doc_file": "slice_629p.pdf",
+  "method": "sha256(file)[:16] — العُرفُ نفسه في tools/capture_training.py وsrc/statement_qa/text_reader.py",
+  "written_where": "data/local_sample/slice_629p/slice_report.json → corpus_provenance (مفاتيحٌ مضافة فقط",
+  "keys_added": [
+   "doc_id",
+   "doc_file",
+   "doc_id_method",
+   "doc_id_note",
+   "doc_id_backfilled_at"
+  ],
+  "note": "إعلانُ استدراكٍ لا إعادةُ قراءة: الصفحاتُ قُرئت قبل تسجيل الهوية (legacy_unstamped_pages: 629)، والوسمُ من الملف نفسه. والملفُّ المفقود يُعلن مجهولاً ولا يُخمَّن له وسم."
+ },
+ "gate_2_recapture_from_cache": {
+  "command": ".venv/bin/python tools/capture_training.py --run data/local_sample/slice_629p --export data/local_sample/export-629p.xlsx --out data/training --adopt-legacy",
+  "seconds": 9.5,
+  "result": {
+   "total_in_export": 626,
+   "visited": 626,
+   "captured": 416,
+   "holdout_reserved": 209,
+   "skipped": [
+    {
+     "page": 629,
+     "why": "no_chain_proven_rows"
+    }
+   ],
+   "rows": 3841,
+   "dropped_rows": 5,
+   "balances_joined": 3820,
+   "balances_not_joined": 21
+  },
+  "matches_the_lost_capture": "416 صفحة · 209 حجزًا — مطابقٌ لما سُجّل عن الالتقاط المفقود (ف٢) دون نداء نموذج",
+  "list": "data/training/3e2d360a665c88aa/pg-NNN/ (416 مجلداً) + data/training/index.json",
+  "defect_fixed_named": "العلّة البنيوية: بيانٌ واحدٌ في أعلى مجلد الالتقاط ⇒ تشغيلةُ مستندٍ ثانٍ تمحو بيانَ الأول. العلاج: بيانٌ في مجلد كل مستند + فهرسٌ جامع، وبيانٌ بصيغةٍ قديمة يوقف الكتابة بالاسم (--adopt-legacy يرحّله ونسخةُ الأصل تبقى باسم manifest.json.adopted)."
+ },
+ "intersection_gate": {
+  "key": "(doc_id, page)",
+  "state_before": "مجهول — لا قائمةَ التقاطٍ موجودة لتُقابَل",
+  "state_after": "مُثبت — قائمةٌ حقيقية (416 صفحة) تُقابَل بالمفتاحين",
+  "measured": {
+   "pages_in_the_capture": 416,
+   "capture_subset_of_page_mod_3_nonzero": true,
+   "holdout_pages_in_1_to_629": 209,
+   "capture_intersect_holdout": 0
+  },
+  "poison": "صفحةٌ ملتقطة (مثال ص١) داخل قائمة الحزمة ⇒ التقاطع ≠ ∅ ⇒ يجب أن يُفشل البناء بالاسم",
+  "negative_control": "صفحةٌ برقمٍ موجودٍ في مستندٍ آخر (093e1b733689193f) لا تُسقط البوابة — تصادمُ رقمٍ ليس تلوّثاً"
+ },
+ "conventions_printed_beside_their_numbers": {
+  "movement": "صفٌّ يحمل مبلغاً — لا صفٌّ حكمُه ليس «قيد» (كان هذا سببَ فرق 1,642/1,641)",
+  "movement_count_range_1_171": 1641,
+  "delta_order": "deltas = (frame_delta − Σ) ⇒ الإشارةُ صناعةُ عُرف، فالعُرفُ يُطبع بجانب الرقم وإلا قرأ اثنان إشارتين",
+  "file_counts": "بأدب `ls -A`: tools 42 = 41 + .DS_Store · docs 21 = 20 + .DS_Store · tests 37 = 36 + .DS_Store (و`git ls-files` عرفٌ آخر: 42 · 31 · 34)"
+ },
+ "not_proven": [
+  "أن قائمةَ الالتقاط هذه هي بعينها ما كان في الالتقاط المفقود — المقيسُ أن الأعداد تطابق (416/209)، والمحتوى أُعيد توليده من الكاش والمصدَّر لا من نسخةٍ محفوظة",
+  "أن بوابةَ المحتوى (الزمن/المبلغ/الاتجاه) تصمد عند تقاطع نافذتين — ما زالت «مُهيّأة» لا «مُختبَرة»",
+  "أن عدّادَ الحركات بهذا التعريف هو ما ستعتمده اللجنة — التعريفُ مطبوعٌ والقرارُ ليس لي"
+ ],
+ "condition_fix_demotion_closed": {
+  "found_by": "المدقّق (حكم الخطوة ١: PASS بشرط) — عطبٌ لم يذكره المنفّذ",
+  "reproduced_then": "أمرُ المدقّق حرفيًّا: نسخةٌ مختومة بلا PDF بجانبها ⇒ exit=0 و doc_id: 3e2d360a665c88aa → None",
+  "root_cause": "جذران لا جذر: (١) الحارسُ (تكرارُ العمل) كان يشترط reader_stamp — وهو None بحكم التصميم على هذا الكوربوس (القارئُ مجهول وهو سببُ وجود الأداة) ⇒ حارسٌ لا يمكن أن يَحرُس؛ (٢) والأداةُ **تستبدل** قاموس corpus_provenance كلَّه بدل أن تدمجه ⇒ فالتصريحُ السابق يُمحى قبل أن يُنظر إليه.",
+  "fix_layers": [
+   "دمجٌ لا استبدال: corpus_provenance تُدمج فيها الحقول، وحقولٌ سابقة تبقى (اختبار: custom_declaration)",
+   "لا تدهور: دالّة resolve_doc_id لا تستبدل هويةً مُثبتة بـnull ولا بوسمٍ مخالف؛ وتُعيد ماذا فعلت (stamped/unchanged/kept/unknown)",
+   "الوقوفُ بالاسم: مستندٌ مخالف ⇒ exit=1 برسالة تسمّي الوسمين؛ وملفٌّ مطلوبٌ صريحًا وغائب ⇒ exit=1",
+   "الحارسُ يضيق: يتخطّى فقط حيث **لا ملفَّ يُتحقّق منه** — فوجودُ الملفّ يفتح التحقّق لا التخطّي (وإلا مرّ مستندٌ مخالف بلا كشف)"
+  ],
+  "verified_after_fix": {
+   "established_identity_missing_file": "doc_id محفوظة · التصريحُ السابق باقٍ · exit=0 برسالةٍ معلنة",
+   "live_corpus_with_file": "unchanged — الهويةُ تطابق الملفّ، فلا تغيير",
+   "conflicting_document": "exit=1 · الهويةُ سليمة · والرسالةُ تسمّي الوسمين (3e2d360a665c88aa مقابل 453162bbc7406504)"
+  },
+  "lessons_recorded": [
+   "الاختبارُ الذي يُثبت «فارغ → null» **لا يرى الانتقالَ من حالةٍ ممتلئة**: الحالةُ السابقة جزءٌ من المُدخَل لا خارجٌ عنه",
+   "الحارسُ الذي يشترط حقلًا غير موجود بحكم التصميم = حارسٌ لا يمكن أن يَحرُس",
+   "الاصطلاحُ المستقرّ للعدّ هو git ls-tree -r <commit> لا ls -A: فالثاني دالّةٌ في الزمن (__pycache__ يولد بعد أول تشغيل)"
+  ],
+  "next_gate_contract": "في مُنشئ الحزمة: doc_id = null **يوقف البناء بالاسم** ولا يُمرَّر إلى unknown — وإلا سقطت بوابةُ التقاطع إلى الحالة التي بُنيت البوابة (٢) للخروج منها."
+ },
+ "explicit_replacement_records_itself": {
+  "defect_reproduced_with_the_reviewers_command": {
+   "command": "tools/backfill_reader_stamp.py --run <stamped run> --replace-doc-id  (doc file differs)",
+   "before": {
+    "exit": 0,
+    "doc_id": "d57019f0a654f9b9",
+    "doc_id_previous": "ABSENT",
+    "doc_id_note": "ختمُ استدراك: الصفحاتُ قُرئت قبل تسجيل الهوية…  (نصُّ الختم الأول)",
+    "doc_id_history": "ABSENT",
+    "tests_mentioning_replace": 0
+   },
+   "why_it_matters": "doc_id هو مفتاحُ بوابة التقاطع: حزمةٌ استُبدلت هويتُها تحتها تمرّ البوابة لأن الطرفين تحرّكا معاً — «الشاهدُ يتحرّك مع المشهود له»، أخطرُ من المحو لأن المحوَ يُرى."
+  },
+  "fix": [
+   "doc_id_previous = الوسمُ السابق",
+   "doc_id_replaced_at = تاريخ الاستبدال",
+   "doc_id_history[] سجلٌّ تراكميّ (previous · replaced_by · at · reason) — لا حقلُ آخر استبدال",
+   "doc_id_note تُعلن الاستبدال بالطرفين وتاريخه بدل نصّ الختم الأول",
+   "return 'replaced' متميّزٌ عن 'stamped' في المخرَج"
+  ],
+  "after_measured": {
+   "exit": 0,
+   "doc_id": "d57019f0a654f9b9",
+   "doc_id_previous": "3e2d360a665c88aa",
+   "doc_id_note": "ختمٌ صريحٌ باستبدال: من 3e2d360a665c88aa إلى d57019f0a654f9b9 في 2026-09-22 — الملفُّ المعطى مخالفٌ للوسم السابق، والاستبدالُ بطلبٍ صريح.",
+   "doc_id_history": [
+    {
+     "previous": "3e2d360a665c88aa",
+     "replaced_by": "d57019f0a654f9b9",
+     "at": "2026-09-22",
+     "reason": "استبدالٌ صريح بـ--replace-doc-id (إعلانُ إرادةٍ لا صمت)"
+    }
+   ],
+   "expected_new": "d57019f0a654f9b9"
+  },
+  "protocol_rule": "docs/handoff-protocol.md §٦/٥ — لا تدهورَ لحقيقةٍ مُثبتة، **والبابُ المعلن يُسجّل من عبَر**: كلُّ مسارٍ يغيّر حقيقةً مُثبتة يُقيَّد معه ما كان.",
+  "tests": {
+   "file": "tests/test_corpus_doc_id.py",
+   "count": 11,
+   "new": [
+    "test_an_unknown_identity_is_upgraded_when_the_document_appears",
+    "test_an_explicit_replacement_records_what_it_replaced",
+    "test_a_second_replacement_keeps_the_whole_history"
+   ]
+  }
+ }
+}
