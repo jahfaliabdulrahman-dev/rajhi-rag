@@ -224,6 +224,14 @@ CASES = [
      '    lines_all, files_all, _, _ = _tatweel_form_counts(files, excluded_prefix="")\n'
      '    assert _pair_at(proto, r"(\\d+)·(\\d+)\\s*بلا حسّاس") == (lines_all, files_all), "R59-1: مقارنةٌ حيّةٌ تشمل الصناديق"',
      "tools/landing_probe.py --from-worktree"),
+
+    # **م٢٣ · ثقبُ مقام التغطية عطبُ نظافة (R60-2 · قاسه المدقّق في مراجعة ٦٠):** كان يُقرأ «نظيفًا» عند
+    # السياسة ⇒ لا إعادةَ قراءةٍ ولا وسم، ثمّ تسقط البوّابةُ على تأكيدٍ صلب ⇒ «٤/٥» ثمّ إعادةُ البوّابة
+    # كلِّها **باليد**. فسمُّه يُلغي شرطَ المقام من دالّة النظافة، ويجب أن يُسقط ضابطَ الثقب.
+    ("م٢٣ · ثقبُ مقام التغطية عطبُ نظافة لا سقوطٌ صامت (R60-2)", QG,
+     '            and bool(cov) and f_possible == cov[1])',
+     '            and True)',
+     "tests/test_gate_flake_policy.py::test_a_footer_denominator_hole_is_a_dirty_read_not_a_silent_gate_failure"),
 ]
 
 

@@ -9,6 +9,11 @@ Run BEFORE every delivery claim ("تم", "يعمل", "جاهز"):
 
 Exit 0 = all gates pass; any FAIL blocks delivery.
 
+**والدليلُ يُكتب بالأداة لا بيدك (R60-2 · مراجعة ٦٠):** كلُّ تشغيلٍ `--full` يكتب ملفَّ دليله في
+`handoff/sulaiman/<زمن>-gate-evidence-full-run.txt` — ناجحًا **أو ساقطًا** — ويطبع مسارَه. فالكتابةُ
+لم تبقَ `... | tee …` بيد المنفّذ: مرّةً واحدة لم يُحفَظ فيها دليلُ تشغيلٍ ساقطٍ (٤/٥) فضاع رصدُ
+اللاحتميّة من نافذة السجلّ (`handoff/FLAKY_READS.md`).
+
 The --full gate locks VALUES that were verified by eye against the document
 renders (page 1: opening dots=0.00 → transfer +300.00 → 300.00 → 200.00 →
 100.00; page 2: 0.00 → +50.00). Do NOT edit those constants without
@@ -38,6 +43,65 @@ MIN_FOOTER_COMPARABLE = 9     # pages whose printed totals could be compared
 #: السجلّ (`tests/test_flake_ledger.py`) ⇒ إعادةُ تسميته تُعمي السجلَّ **صامتاً** (صفرُ تشغيلٍ مُلوَّث =
 #: أخضرُ كاذب). فيُبنى السطرُ بهذا الثابت، ويستورده الحارسُ من هنا.
 FLAKY_MARK = "[flaky_read]"
+#: **موضعُ دليل التشغيل — يُبنى هنا ويُقرأ من هنا (R60-2 · إغلاقُ حركة ٢ من مراجعة ٦٠):** كان حفظُ
+#: الدليل **بيد المنفّذ** (`... | tee handoff/sulaiman/<تاريخ>-gate-evidence-full-run.txt`)، وقد وُجد
+#: مرّةً واحدة لم تُحفَظ فيها أدلّةُ تشغيلٍ ساقطٍ (٤/٥) ⇒ فضاع رصدُ اللاحتميّة، وبقيت «النافذة» تقرأ
+#: أقلَّ ممّا جرى. فالبوّابةُ الآن **تكتب دليلَها بنفسها في كلّ تشغيلٍ `--full`، ناجحًا أو ساقطًا**،
+#: والمسارُ يُطبع في المخرَج. والحارسُ (`tests/test_flake_ledger.py`) يقرأ النمطَ نفسَه من هنا.
+EVIDENCE_DIR = PROJ / "handoff" / "sulaiman"
+EVIDENCE_SUFFIX = "gate-evidence-full-run.txt"
+
+
+def _table(results: list[tuple[str, bool, str]]) -> list[str]:
+    """سطورُ جدول البوّابات — **موضعٌ واحد** يُطبع على الشاشة ويُكتب في الدليل (لا نسختان تفترقان)."""
+    width = max((len(n) for n, _, _ in results), default=0)
+    ok_n = sum(1 for _, p, _ in results if p)
+    return [f"[{'PASS' if p else 'FAIL'}] {n:<{width}}  {d}" for n, p, d in results] + \
+           ["", f"GATES: {ok_n}/{len(results)} passed"]
+
+
+def evidence_path(now=None, directory: Path = EVIDENCE_DIR) -> Path:
+    """مسارُ دليل التشغيل بزمن اللحظة — **دالّةٌ خالصةٌ** (تُقاس بمُدخَلٍ مصنوع بلا انتظار ساعة)."""
+    from datetime import datetime
+
+    stamp = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
+    return directory / f"{stamp}-{EVIDENCE_SUFFIX}"
+
+
+def _interpreter_label() -> str:
+    """وصفُ المفسّر **بلا مسار منزل** (R60-2 · قاسه مسبارُ الهبوط قبل الدفع):
+
+    الترويسةُ كانت تكتب `sys.executable` مطلقًا — والمسارُ المطلق يحمل اسمَ المستخدم ⇒ فدليلُ تشغيلٍ
+    مُودَعٌ تحت `handoff/` يجعل `publish_guard --tree` يعطي **BLOCK `home_path`** في الشجرة المدفوعة
+    (وهو ما أسقط «هبوطَ المراجعة» في المسبار: `rc=1` من خطوة الحارس). والمعلومةُ (أيُّ مفسّر) باقية:
+    **نسبيٌّ إلى جذر المستودع** إن كان داخله، وإلّا الاسمُ وحدَه.
+    """
+    exe = Path(sys.executable)
+    try:
+        return str(exe.relative_to(PROJ))
+    except ValueError:
+        return exe.name
+
+
+def evidence_body(ok: bool, results: list[tuple[str, bool, str]], full: bool,
+                  when=None) -> str:
+    """نصُّ الدليل: الترويسةُ (الزمنُ · الحكمُ · الوضعُ) ثمّ جدولُ البوّابات — **المخرَجُ كاملًا**.
+
+    ولا يُقتطع: الحارسُ يستنتج «غيابَ الوسم» من ملفٍّ يحمل المخرجَ كاملًا (ووسمُ `[flaky_read]` يقع
+    داخل سطر النتيجة نفسِه) ⇒ فملفٌّ مقتطعٌ يجعل الغيابَ صمتًا لا دليلًا (حدٌّ مُعلَن في السجلّ).
+    """
+    from datetime import datetime
+
+    ts = (when or datetime.now()).isoformat(timespec="seconds")
+    ok_n = sum(1 for _, p, _ in results if p)
+    lines = [
+        f"# qa_gate {'--full' if full else '--quick'} — {ts}",
+        f"# rc={0 if ok else 1} · GATES: {ok_n}/{len(results)} passed · المفسّر={_interpreter_label()}",
+        "# كُتب هذا الملفُّ **بالأداة** لا بيد الكاتب (R60-2) ⇒ تشغيلٌ بلا دليلٍ = تشغيلٌ خارج النافذة.",
+        "",
+        *_table(results),
+    ]
+    return "\n".join(lines) + "\n"
 sys.path.insert(0, str(PROJ / "src"))
 
 RESULTS: list[tuple[str, bool, str]] = []
@@ -182,10 +246,21 @@ def _is_clean(run: dict) -> bool:
 
     الشرطُ الأخيرُ لم يكن فيها أوّلًا، وأدخله قياسُ مقعد المواصفة: بدونه **تُغسَل مخالفةُ أوراكل
     الفوتر** (أقوى حارسٍ خارجيّ) بإعادةِ قراءةٍ نظيفةٍ ثانية، فتُمرَّر بلا إعلان.
+
+    **والثقبُ الرابع (R60-2 · قاسه المدقّق في مراجعة ٦٠):** شرطُ **إغلاق مقام التغطية**
+    (`f_possible == cov[1]` — «صفحاتٌ خرجت من الأوراكل بلا حكم») كان يُفحص **لاحقًا** تأكيدًا صلبًا في
+    `g_end_to_end` وحدَه، وليس داخل «النظافة» ⇒ فقراءةٌ فيها ثقبُ مقامٍ تُقرأ **نظيفةً عند السياسة**:
+    لا إعادةَ قراءةٍ ولا وسمَ `[flaky_read]`، ثمّ تسقط البوّابةُ على التأكيد ⇒ «٤/٥» ثمّ إعادةُ
+    البوّابة كلِّها **باليد** — وهو بعينه صنفُ «أعِدْ حتى تخضرّ» الذي بُني السجلُّ والميزانيّةُ لمنعه.
+    والآن الثقبُ **عطبُ نظافة**: تُطلَب قراءةٌ ثانيةٌ، وإن أبرّأت فالإبراءُ **مُعلَنٌ بوسمٍ يُقيَّد**
+    في `handoff/FLAKY_READS.md` — لا إعادةٌ سرّيّة. (وقراءةٌ بلا مقامِ تغطيةٍ مقروء ⇒ ليست نظيفة:
+    فشلٌ مُغلَق.)
     """
     f_ok, f_possible = run["footer_pair"]
+    cov = run["coverage_pair"]
     return (run["susp"] == 0 and run["clean"] == run["total"]
-            and not run["footer_flag"] and f_ok == f_possible)
+            and not run["footer_flag"] and f_ok == f_possible
+            and bool(cov) and f_possible == cov[1])
 
 
 #: **سياسةُ اللاحتميّة — مُعلَنةٌ لا مُخمَّنة.** كانت البوّابةُ تحكم من قراءةٍ واحدة فتبدّل لونَها بلا
@@ -388,13 +463,18 @@ def main() -> None:
     if args.full:
         gate("end-to-end sample (values locked)", g_end_to_end)
 
-    width = max(len(n) for n, _, _ in RESULTS)
-    ok = sum(1 for _, p, _ in RESULTS if p)
+    ok = sum(1 for _, p, _ in RESULTS if p) == len(RESULTS)
     print()
-    for n, p, d in RESULTS:
-        print(f"[{'PASS' if p else 'FAIL'}] {n:<{width}}  {d}")
-    print(f"\nGATES: {ok}/{len(RESULTS)} passed")
-    sys.exit(0 if ok == len(RESULTS) else 1)
+    print("\n".join(_table(RESULTS)))
+    # **والدليلُ يُكتب بالأداة في كلّ تشغيلٍ شامل — ناجحًا أو ساقطًا (R60-2):** كان `tee` بيد الكاتب،
+    # ومرّةً واحدة لم يُحفَظ فيها دليلُ تشغيلٍ ساقطٍ (٤/٥) ⇒ ضاع رصدُ اللاحتميّة. والكتابةُ **قبل**
+    # الخروجَين حتى لا يضيع دليلُ السقوط — وهو الدليلُ الذي يُهمّ أكثر.
+    if args.full:
+        path = evidence_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(evidence_body(ok, RESULTS, full=True), encoding="utf-8")
+        print(f"\n[evidence] دليلُ التشغيل مكتوبٌ بالأداة: {path.relative_to(PROJ)}")
+    sys.exit(0 if ok else 1)
 
 
 if __name__ == "__main__":

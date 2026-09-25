@@ -24,8 +24,10 @@
 2. عددُ المُخاطَبين بالقاعدة يُقاس ويُقابَل بالثابت (`SUBJECTS_LANDED`) ⇒ لا قاعدةَ صامتةٌ على فراغ
    (وحين يهبط أوّلُ جوابٍ يصرخ الضابطُ فيُقرَن الشاهدُ ويُحدَّث الثابتُ في الالتزام نفسه — وهو صنفُ
    «سقفِ معدّلِ المعرّفات الغريبة» القائم في المستودع).
-3. يُقابَل **وجودُ المسار** و**مقامُه** (تحت `handoff/claude/`: الحُكمُ يُصدره المدقّق)، لا صحّةُ كونِه
-   المراجعةَ **المقصودة بعينها** (غيرُ قابلٍ للقياس آليّاً — يُعلَن).
+3. يُقابَل **وجودُ المسار** و**مقامُه** (تحت `handoff/claude/`: الحُكمُ يُصدره المدقّق) **وأنّه حُكمٌ
+   فعلًا بربطٍ مقيس (R59-2 · قاسه المدقّق في مراجعة ٥٩)**: الحُكمُ **يحمل زمنَه في اسمه** (فمراجعة)،
+   **وهو أحدثُ حُكمٍ زمنُه قبل زمن الجواب** — فلا يمرّ ملفٌّ ساكنٌ في الصندوق (`STATE.md` ·
+   `gate-injection-harness.py` قِيس أنّهما كانا يمرّان) ولا حُكمٌ قديمٌ تجاوزه أحدثُ منه.
 4. والقياسُ على **الشجرة المُودَعة (`HEAD`)** لا على قرص الكاتب: ما لم يُودَع لا يُقاس. وهذا حدُّ الاتّجاهين
    معاً — لا «تذكيرٌ محلّيّ» يُتجاهَل، ولا موتٌ دائريٌّ للفروع.
 5. صندوقُ المدقّق (`handoff/claude/`) خارج هذا الاتّجاه: المراجعةُ **تُصدر** حُكماً ولا تُجيب عنه.
@@ -170,6 +172,17 @@ def _witness_path(raw: str) -> str:
     return parts[0] if parts else ""
 
 
+def newest_verdict_before(tree: set[str], answer_stamp: str) -> str | None:
+    """**أحدثُ حُكمٍ** زمنُه لا يتجاوز زمنَ الجواب — أو `None` إن لم يسبقه حُكم.
+
+    (R59-2 · والحدُّ ٢ المُعلَن: «حُكمٌ قديمٌ يمرّ» — فصار **مربوطًا**: الشاهدُ هو أحدثُ مراجعةٍ سبقت
+    الجواب. والحدُّ مُعلَن: هذا **ربطٌ لا إثباتُ نيّة** — أيُّهما كان المقصودَ فعلًا لا يُقاس آليًّا.)
+    """
+    cands = sorted((s, p) for p in tree
+                   if p.startswith(WITNESS_ROOT) and p.endswith(".md") and (s := stamp_of(p)) and s <= answer_stamp)
+    return cands[-1][1] if cands else None
+
+
 def ungated_answers(answers: dict[str, str], tree: set[str], since: str = WITNESS_FROM) -> list[str]:
     """كلُّ جوابٍ هبط بعد القاعدة **ولا يُسمّي حُكماً موجوداً في الشجرة** — (دالّةٌ خالصةٌ ⇒ تُقاس بسمّ).
 
@@ -211,10 +224,52 @@ def ungated_answers(answers: dict[str, str], tree: set[str], since: str = WITNES
                        f"(الحُكمُ يُصدِره المدقّق؛ والقرارُ والتوجيهُ ليسا حُكماً)")
             continue
         w_stamp = stamp_of(witness)
-        if w_stamp and w_stamp > stamp:
+        if not w_stamp:
+            # **R59-2:** «الشاهدُ حُكم» كان يُقارَب بـ«الشاهدُ في صندوق المدقّق» ⇒ فملفٌّ ساكنٌ هناك
+            # (بلا زمنٍ في اسمه) يمرّ شاهداً وهو ليس حُكماً. والحُكمُ مراجعةٌ تحمل زمنَها.
+            out.append(f"{path} · الشاهدُ «{witness}» **بلا زمنٍ في اسمه** ⇒ ليس حُكماً (R59-2: "
+                       f"الحُكمُ مراجعةٌ تحمل زمنَها، لا ملفٌّ ساكنٌ في صندوق المدقّق)")
+            continue
+        if w_stamp > stamp:
             out.append(f"{path} · الشاهدُ «{witness}» أُودِع **بعد** الجواب ({w_stamp} > {stamp}) — "
                        f"§٢٧: الشاهدُ يُدفَع قبل أن يُجاب")
+            continue
+        newest = newest_verdict_before(tree, stamp)
+        if newest and witness != newest:
+            out.append(f"{path} · الشاهدُ «{witness}» ليس أحدثَ حُكمٍ قبل الجواب — والأحدثُ «{newest}» "
+                       f"(الحدُّ ٢ كان مُعلَنًا: «حُكمٌ قديمٌ يمرّ» ⇒ فصار مربوطًا · R59-2)")
     return sorted(out)
+
+
+def test_a_witness_without_a_time_is_not_a_verdict():
+    """**R59-2 (P3 · قاسه المدقّق في مراجعة ٥٩):** شرطُ «الشاهدُ حُكم» كان يُقارَب بـ«الشاهدُ تحت
+    `handoff/claude/`» ⇒ فملفٌّ **ساكنٌ** هناك بلا زمنٍ في اسمه يمرّ شاهداً وهو ليس حُكماً. وقِيس أنّ
+    `handoff/claude/STATE.md` و`handoff/claude/gate-injection-harness.py` **يمرّان** قبل الإصلاح.
+    والآن: الحُكمُ **يحمل زمنَه** (فمراجعة)، **وهو أحدثُ حُكمٍ قبل الجواب** (ربطُ الحدّ ٢ المُعلَن).
+    """
+    old = "handoff/claude/20260925-021953-third-eye-review-55-x.md"
+    new = "handoff/claude/20260925-0900-third-eye-review-56-y.md"
+    tree = {old, new, "handoff/claude/STATE.md", "handoff/claude/gate-injection-harness.py",
+            "handoff/sulaiman/20260925-1000-REPORT-to-claude-z.md"}
+    answer = "handoff/sulaiman/20260925-1000-REPORT-to-claude-z.md"
+
+    def only_one(target: str) -> str:
+        got = ungated_answers({answer: f"in-reply-to: {target}\n"}, tree)
+        assert len(got) == 1, (target, got)
+        return got[0]
+
+    # (١) **ملفٌّ ساكنٌ في الصندوق ليس حُكماً** — وهما الملفّان اللذان كانا يمرّان (برهانُ المدقّق)
+    assert "بلا زمن" in only_one("handoff/claude/STATE.md")
+    assert "بلا زمن" in only_one("handoff/claude/gate-injection-harness.py")
+    # (٢) **حُكمٌ قديمٌ تجاوزه أحدثُ منه** ⇒ يسقط («الحدُّ ٢» كان مُعلَنًا غيرَ مقيس)
+    assert "ليس أحدث" in only_one(old)
+    # (٣) وأحدثُ حُكمٍ قبل الجواب ⇒ يمرّ (فلا موتَ دائريًّا للفروع)
+    assert ungated_answers({answer: f"in-reply-to: {new}\n"}, tree) == []
+    # (٤) والربطُ يُقاس مباشرةً: أحدثُ ما قبل الجواب هو الجديد، وأحدثُ ما قبل حُكمٍ أقدمَ هو القديم
+    assert newest_verdict_before(tree, "20260925-100000") == new
+    assert newest_verdict_before(tree, "20260925-050000") == old
+    # (٥) وجوابٌ لا حُكمَ قبلَه ⇒ لا ربطَ (فالربطُ على مقامٍ، وما لا مقامَ له لا يُلزَم باسمٍ)
+    assert newest_verdict_before(tree, "20260925-010000") is None
 
 
 def test_the_witness_must_be_a_verdict_not_any_path_in_the_tree():

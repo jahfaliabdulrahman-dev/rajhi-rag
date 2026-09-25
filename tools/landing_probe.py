@@ -40,7 +40,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 PROJ = Path(__file__).resolve().parent.parent
-WORKFLOW = PROJ / ".github" / "workflows" / "publish-guard.yml"
+#: مسارُ الـworkflow **نسبةً إلى جذر الشجرة** — فيُقرأ من الشجرة التي تُقاس لا من شجرة المنفّذ دائمًا.
+WORKFLOW_REL = Path(".github") / "workflows" / "publish-guard.yml"
+WORKFLOW = PROJ / WORKFLOW_REL
 DESCRIPTION = "مسبارُ الهبوط (P-11): هل تهبط مراجعةٌ تحت قائمة الـCI؟"
 #: صندوقُ المدقّق — المراجعةُ الاصطناعيّةُ تسكنه (وهو موضعُ المراجعات الحقيقيّة).
 BOX = "handoff/claude"
@@ -52,7 +54,12 @@ CI_FILE_RE = re.compile(r"tests/[A-Za-z0-9_/]+\.py")
 
 
 def ci_files(workflow: Path = WORKFLOW) -> list[str]:
-    """ملفّاتُ ضوابط الـCI بترتيب ورودها في الـworkflow — **مصدرٌ واحد** لا قائمةُ نسخ.
+    """ملفّاتُ ضوابط الـCI بترتيب ورودها في الـworkflow — **مصدرٌ واحد، ومن الشجرة المقيسة نفسِها**.
+
+    القارئُ يمرّر `dst / WORKFLOW_REL` (جذرُ النسخة) فيُقرأ الـworkflow من الشجرة التي تُقاس. ولماذا:
+    كانت القائمةُ تُقرأ من شجرة المنفّذ دائمًا، فأوّلُ تشغيلٍ بعد إضافة ضابطٍ جديد (وغيرِ مُودَعٍ بعد)
+    قاس **نسخةً مُودَعة** بقائمةٍ محلّيّةٍ تحمل الملفَّ الغائب ⇒ «تعذّر قياس» كاذب، وقع في سمّ م٢١
+    (`tests/test_landing_probe.py` يقيس الأثر: القائمةُ تتبع الشجرةَ التي تُشار إليها).
 
     (وفشلٌ مُغلَق: workflow غائبٌ أو بلا ملفّات ⇒ `[]`، والقارئُ يوقف القياسَ بالاسم لا يعلن نظافة.)
     """
@@ -155,7 +162,7 @@ def _synthetic_review(stamp: str, ref: str, branch: str, poison: str | None) -> 
         "والغرضُ أنّ قائمةَ الـCI تبقى خضراءَ بعد أن يُودَع — وإن احمرّت، فالثابتُ («هل تهبط مراجعة؟») مكسور.",
         "",
         f"- **R99-1** الصيغةُ في نثر المدقّق: «{form} {foreign}» — السطرُ نفسه في أربع مراجعات.",
-        f"  وقِيس أنّ الشجرةَ كلَّها تعطي **27 سطراً في 16 ملفّاً** بهذه الصيغة (رقمٌ يُقرأ بتاريخه).",
+        "  وقِيس أنّ الشجرةَ كلَّها تعطي **27 سطراً في 16 ملفّاً** بهذه الصيغة (رقمٌ يُقرأ بتاريخه).",
         f"  ومعرّفٌ غريبٌ ثانٍ للنصّ: `commit {foreign}` — المرجعُ غريبٌ عن رسم هذا المستودع.",
         "",
         "status: مسبارٌ اصطناعيٌّ — لا يُقرأ حكمًا على أحد",
@@ -240,6 +247,12 @@ def measure(ref: str, from_worktree: bool, poison: str | None, keep: bool,
             if rc != 0:
                 print(f"⛔ تعذّر القياس: فشلُ نسخ شجرة العمل:\n{out.strip()[:600]}")
                 return 2
+        # **والقائمةُ تُقرأ من الشجرة المقيسة** (لا من شجرة المنفّذ): فقياسُ نسخةٍ مُودَعةٍ بقائمةٍ محلّيّة
+        # تحمل ضابطًا لم يُودَع بعد = «تعذّر قياس» كاذب — أمسكه سمُّ م٢١ في أوّل تشغيلٍ بعد إضافة ضابط.
+        files = ci_files(dst / WORKFLOW_REL)
+        if not files:
+            print(f"⛔ تعذّر القياس: النسخةُ لا تحمل قائمةَ ضوابط في {WORKFLOW_REL} ⇒ فشلٌ مُغلَق.")
+            return 2
         box = dst / BOX
         box.mkdir(parents=True, exist_ok=True)
         name = _name(stamp, poison)
@@ -304,6 +317,8 @@ def main(argv=None) -> int:
         for label, argv in steps:
             print(f"  - {label}   ({' '.join(argv)})")
         print("السموم المُتاحة: " + " · ".join(f"`{k}` ({v})" for k, v in POISONS.items()))
+        print(f"صندوقُ الشاهد: {BOX}/ · الاسمُ بصيغة {_name('YYYYMMDD-HHMMSS', None)}"
+              " · ويُشغَّل على شجرةٍ مُودَعة، والقياسُ بلا شبكة")
         return 0
     return measure(args.ref, args.from_worktree, args.poison, args.keep, quiet=args.quiet)
 
