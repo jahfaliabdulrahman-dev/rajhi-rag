@@ -122,6 +122,23 @@ def test_parse_amount_lost_dot():
     assert _parse_amount("٦١,١٦٥١٢") == Decimal("61165.12")
 
 
+def test_the_gate_goldens_agree_with_this_locked_test():
+    """**الجدولُ الذهبيُّ نسخةٌ واحدة** — البوّابةُ (`tools/qa_gate.py`) تقرأ `PARSER_GOLDENS`، وهنا يُقاس
+    كلُّ زوجٍ منها على المُحلّل. فمَن بدّل قيمةً ليطمس الأحمرَ يفشل هنا في الـCI قبل أن يُدفَع.
+
+    **العلّةُ المقيسة (R13):** القيمةُ في جدول البوّابة كانت `35832.43` للمفتاح `٦١,١٦٥١٢`، وهو **رقمٌ لا ينتجه
+    الرمز** (ينتج `61165.12` — وهو ما توثّقه `arabic_digit_parser.py:19` ويثبّته `test_parse_amount_lost_dot`
+    أعلاه) ⇒ بقيت البوّابةُ `[FAIL]` ستّةَ أيام حتى صار الأحمرُ عاديًّا. والعلاجُ **نسخةٌ واحدة** لا تعديلُ قيمة.
+    """
+    from tools.qa_gate import PARSER_GOLDENS
+
+    assert PARSER_GOLDENS["٦١,١٦٥١٢"] == "61165.12", \
+        "القيمةُ الذهبية عادت لمخالفة الوثيقة والضابط"
+    for tok, want in PARSER_GOLDENS.items():
+        assert _parse_amount(tok) == Decimal(want), f"{tok!r}: الجدولُ يقول {want} والمُحلّل يقول {_parse_amount(tok)}"
+    assert PARSER_GOLDENS[".,.."] == "0", "الصفرُ المطبوعُ نقاطًا يُرجع صفرًا لا None (وإلّا انكسرت السلسلة)"
+
+
 def test_parse_amount_trailing_minus():
     # Negative balances print the minus at the END — sign must survive.
     assert _parse_amount("١١٩.٠٠-") == Decimal("-119.00")

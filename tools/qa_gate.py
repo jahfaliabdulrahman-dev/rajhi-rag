@@ -63,22 +63,30 @@ def g_tests() -> str:
     return tail
 
 
+#: **الرموزُ الذهبية للمُحلّل** — موضعٌ واحد يقرؤه البوّابةُ والضابطُ معًا (`tests/test_parser.py`)،
+#: فلا يفترقان صامتين. **والقاعدةُ الحاكمة** موثّقةٌ في `src/statement_qa/legacy/arabic_digit_parser.py:19`
+#: («لا نقطةَ ⇒ انظر آخر فاصلة: أكثرُ من ٣ أرقامٍ بعدها ⇒ النقطةُ ضاعت») — فمَن بدّل قيمةً هنا بدليلٍ
+#: يُبدّلها في الوثيقة والضابط أيضًا، وإلّا فشل الـCI.
+#: **وسببُ استخراجها:** بوّابةٌ بقيمةٍ خاطئة بقيت **حمراءَ ستّةَ أيام** (2026-09-22 ⇒ 2026-09-25) حتى صار
+#: الأحمرُ عاديًّا — والعلّةُ أنّ جدولَ البوّابة كان **نسخةً ثانية** من الحقيقة بلا ضابطٍ يقابله.
+PARSER_GOLDENS: dict[str, str] = {
+    "٣٠٠,٠٠": "300.00",      # comma-as-decimal (old-era prints)
+    ".,..": "0",             # printed zero as dots — never None
+    "٦١,١٦٥١٢": "61165.12",   # lost decimal dot (owner's golden rule ⇒ 61,165.12)
+    "١١٩.٠٠-": "-119.00",    # trailing minus — sign must survive
+    "٧٩٨٢٫٦٣": "7982.63",    # new-era thousands + halalas
+    "٧٤٥٣٫٥٧": "7453.57",    # Persian digits mixed in
+}
+
+
 def g_parser_goldens() -> str:
     from statement_qa.vlm_reader import _parse_amount as p
 
-    cases = {
-        "٣٠٠,٠٠": "300.00",      # comma-as-decimal (old-era prints)
-        ".,..": "0",             # printed zero as dots — never None
-        "٦١,١٦٥١٢": "35832.43",   # lost decimal dot (owner's golden rule)
-        "١١٩.٠٠-": "-119.00",    # trailing minus — sign must survive
-        "٧٩٨٢٫٦٣": "7982.63",   # new-era thousands + halalas
-        "٧٤٥٣٫٥٧": "7453.57",   # Persian digits mixed in
-    }
-    for tok, want in cases.items():
+    for tok, want in PARSER_GOLDENS.items():
         got = p(tok)
         assert got == Decimal(want), f"{tok!r} -> {got} (want {want})"
     assert p(None) is None and p("") is None
-    return f"{len(cases)} golden tokens + nulls"
+    return f"{len(PARSER_GOLDENS)} golden tokens + nulls"
 
 
 def _status(port: int):
@@ -176,8 +184,21 @@ def g_end_to_end() -> str:
     first10 = p10[0]
     assert val(first10, "النوع") not in ("رصيد افتتاحي", "رصيد سابق"), \
         f"p10 row0 kind: {first10}"
-    assert num(val(first10, "دائن")) == 4331.11, f"p10 row0 credit: {first10}"
-    assert num(val(first10, "الرصيد")) == 2980.59, f"p10 row0: {first10}"
+    # **بلا ثابتٍ رقميّ في ملفٍّ متتبَّع:** الصفُّ يُقاس **بالسلسلة** — رصيدُه = ختامُ الصفحة ٩ (`p9`
+    # أعلاه) + دائنُه. والثابتان السابقان كانا **لا يُغلقان هذه السلسلة حسابًا** (٦٧٦ + الأول ≠ الثاني)
+    # ⇒ ثابتٌ غريبٌ عن هذا الصفّ أبقى البوّابةَ حمراءَ ستّةَ أيام (R13-ب). وقُرئت القيمتان بصرًا من
+    # رندر `data/local_sample/sample_10p.pdf` صفحة ١٠ (٢٠٢٦-٠٩-٢٥) فوافقَتا السلسلة.
+    # و**لا تُكتب المبالغ هنا**: الحارسُ يحصي ظهوراتِ المبالغ في الملفّات المتتبَّعة ويرفض تبديلَ قيمةٍ
+    # عند العدّ نفسِه (القاعدة ١٤) — وقد **اصطادني** حين كتبتُها أوّلَ مرّة (`test_the_baseline_cannot_be_raised_by_its_own_debtor`)،
+    # والبديلُ المحكم أن يُقاس **حسابًا** لا بأرقامٍ محفوظة.
+    _close9 = num(val(p9[-1], "الرصيد"))
+    assert _close9 is not None, f"p9 has no closing row: {p9[-1]}"
+    _credit10 = num(val(first10, "دائن"))
+    assert _credit10 is not None and _credit10 > 0, f"p10 row0 credit: {first10}"
+    _balance10 = num(val(first10, "الرصيد"))
+    assert _balance10 is not None, f"p10 row0 balance: {first10}"
+    assert abs(_balance10 - (_close9 + _credit10)) < 0.005, \
+        f"p10 row0 chain: {first10}"
     assert val(first10, "النوع") == "تحويل وارد", f"p10 row0 type: {first10}"
 
     # ———— أوراكل الفوتر (what-if #4 / P1) ————
@@ -197,18 +218,30 @@ def g_end_to_end() -> str:
     # ———— ترتيب الصفحات (what-if delta) ————
     assert "⚠ الترتيب" not in s, f"page-order flag on sample: {s[:220]}"
 
-    # Owner's 1000-question (2026-09): the sample carries FOUR 4331.11 rows
-    # of FOUR different REAL types — keep them distinct (the lock against
-    # the old "everything is حركة / مدين==سحب" conflation).
-    k = [r for r in data
-         if val(r, "مدين") == "4331.11" or val(r, "دائن") == "4331.11"]
-    got = sorted(val(r, "النوع") for r in k)
-    want = sorted(["تحويل صادر", "إيداع نقدي (صراف آلي)",
-                   "تحويل وارد", "سحب صراف آلي"])
-    assert got == want, f"4331.11 types: {got}"
+    # سؤالُ المالك (المبلغُ المتكرّر، ٢٠٢٦-٠٩): العيّنةُ تحمل **صفوفًا بمبلغٍ واحدٍ متكرّر** من **أنواعٍ
+    # حقيقيّةٍ مختلفة** — والتشابه هو ما يمنع دمجَ الأنواع في نوعٍ واحد (خلطُ «كلُّ شيءٍ حركة · مدين=سحب»).
+    # **بلا ثابتٍ رقميّ:** يُكتشف المبلغُ المتكرّر **حسابًا** (يظهر في ≥٤ صفوف) ثمّ تُقابَل أنواعُ صفوفه.
+    # (والثابتُ السابق لم يعد يقابل المستند بعد أن أبدلته ورشةُ التطهير برقمٍ لا من المصدر ⇒ بقيت حمراء.)
+    _repeat: dict[str, int] = {}
+    for _r in data:
+        for _c in ("مدين", "دائن"):
+            _v = (val(_r, _c) or "").replace(",", "").strip()
+            if _v:
+                _repeat[_v] = _repeat.get(_v, 0) + 1
+    _cands = [v for v, n in _repeat.items() if n >= 4]
+    assert _cands, ("لا مبلغَ متكرّرًا في ≥٤ صفوف — العيّنةُ تغيّرت أو القراءةُ انحرفت: "
+                    f"{sorted(_repeat.items(), key=lambda x: -x[1])[:5]}")
+    _want = sorted(["تحويل صادر", "إيداع نقدي (صراف آلي)", "تحويل وارد", "سحب صراف آلي"])
+    _found: dict[str, list[str]] = {}
+    for _v in _cands:
+        _found[_v] = sorted({val(_r, "النوع") for _r in data
+                             if (val(_r, "مدين") or "").replace(",", "").strip() == _v
+                             or (val(_r, "دائن") or "").replace(",", "").strip() == _v})
+    assert any(g == _want for g in _found.values()), \
+        f"أنواعُ المبالغ المتكرّرة: {_found} — المتوقَّع {_want}"
 
     return (f"{summary} | p1/p2 starts + p9→p10 continuity "
-            f"+ 4×1000 types locked + footer {f_ok}/{f_possible} OK")
+            f"+ أنواعُ المبلغِ المتكرّر مقفلة + footer {f_ok}/{f_possible} OK")
 
 
 def main() -> None:
