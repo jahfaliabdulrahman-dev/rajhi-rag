@@ -697,3 +697,24 @@ def test_the_history_audit_scans_the_mirror_it_is_given(tmp_path):
     assert forms >= 1, f"مرآةٌ تحمل رقماً حقيقيّاً يجب أن تُسقط ⇒ بلغ {forms} في {n} blobاً"
     assert ag.history_forms(deny, repo=_mirror("fake", FAKE))[1] == 0, "وهميّةٌ لا تُسقط (لا إنذارَ كاذب)"
     assert ag.history_forms(deny)[1] == 0, "والمستودعُ الحاليُّ نظيفٌ بها"
+
+
+# ---------------------------------------------------------------- وسَمٌ لا يعدو دليله (مراجعة ٦٣ · R63-P3)
+
+def test_the_block_banner_does_not_claim_amounts_on_unreadable_input():
+    """«مدخلٌ غيرُ مقروء» سببٌ واحد، وكان يُقرأ حكمًا على المبالغ: «الدفعُ يحمل مبالغَ حقيقيّة».
+
+    والقاعدة (١٤: الوسمُ لا يعدو دليله): ما دام الدليلُ «عتبةٌ/خطُّ أساسٍ لم يُقرأ» فليس في اليد
+    ظهورُ مبلغٍ واحد ⇒ اللافتةُ تنطق بذلك، ويُعرض السببُ منسوبًا إلى موضعه.
+    """
+    unreadable = ag.ratchet_violations(None, {}, "خطُّ الأساس المنشورُ في abcdef12")
+    assert unreadable and "غيرُ مقروء" in unreadable[0]
+
+    head, shown, remedy = ag.block_claim(unreadable)
+    assert "لمبالغَ حقيقيّة" not in head, "لا ادّعاءَ على مبالغَ بلا ظهورٍ مقيس"
+    assert "غيرُ مقروء" in head and remedy is False and shown == unreadable
+
+    real = ["⛔ زادت الظهوراتُ: docs/x.md 1 → 2 — الشجرةُ العاملة"]
+    head2, shown2, remedy2 = ag.block_claim(real + unreadable)
+    assert "لمبالغَ حقيقيّة" in head2 and remedy2 is True
+    assert shown2[:1] == real and "غيرُ مقروء" in " ".join(shown2), "يُعرض الاثنان، والسببُ مسمّى لا مخلوط"
