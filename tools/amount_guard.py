@@ -554,6 +554,25 @@ def write_baseline(deny: set[str], accept_increase: bool = False) -> int:
     return 0
 
 
+def block_claim(bad: list[str], subject: str = "الدفعُ يحمل") -> tuple[str, list[str], bool]:
+    """**وسمٌ لا يعدو دليله:** تُصنَّف بنودُ الإسقاط قبل أن تُصاغ اللافتة.
+
+    «مدخلٌ غيرُ مقروء في السقاطة» (عتبةٌ أو خطُّ أساسٍ مفقودٌ في الفرع) **ليس** ظهورًا لمبلغ؛ وكانت
+    اللافتةُ تحكم «مبالغَ حقيقيّة» على هذا السبب وحده فتعدو دليلَها. الآن:
+    - بنودٌ حقيقيّة موجودة ⇒ اللافتةُ نفسُها (ومعها عددُ غير المقروء صريحًا).
+    - ولا بنودَ حقيقيّة ⇒ لافتةٌ تقول «لا أُثبت نظافةً ولا ظهورًا» — **بلا** ادّعاءٍ على المبالغ.
+    """
+    unreadable = [b for b in bad if "غيرُ مقروء" in b]
+    real = [b for b in bad if b not in unreadable]
+    if real:
+        extra = f" — ومعه {len(unreadable)} مدخلٌ غيرُ مقروء" if unreadable else ""
+        return (f"⛔ BLOCK — {subject} ظهوراتٍ لمبالغَ حقيقيّة (نصوصٌ لا تُطبع){extra}:",
+                real + unreadable, True)
+    return (f"⛔ BLOCK — {subject} لا يُثبت نظافةً ولا ظهورًا: مدخلُ السقاطة غيرُ مقروء "
+            f"({len(unreadable)}) ⇒ «غيرُ المقروء ليس نظيفاً» (القاعدة ١٢) — ولا ادّعاءَ على المبالغ هنا:",
+            unreadable, False)
+
+
 def ratchet_violations(counts: dict[str, dict] | None, base: dict[str, dict] | None,
                        where: str) -> list[str]:
     """**السقاطة:** تسقط عند زيادةِ عددٍ · ملفٍّ جديد · **أو تبديلِ قيمةٍ بأخرى عند العدّ نفسِه**
@@ -1170,10 +1189,12 @@ def main(argv=None) -> int:
             pushed_base = baseline_at(head)
             bad += ratchet_violations(pushed_base, base, f"خطُّ الأساس المنشورُ في {head[:8]}")
         if bad:
-            print("⛔ BLOCK — الدفعُ يحمل ظهوراتٍ لمبالغَ حقيقيّة (نصوصٌ لا تُطبع):")
-            for b in bad[:25]:
+            head, shown, remedy = block_claim(bad)
+            print(head)
+            for b in shown[:25]:
                 print("   " + b)
-            print("   ⇒ صحّح القيمةَ أو خفّض خطَّ الأساس بعد إعادة الكتابة (القاعدة ١٢: لا يُعفى موضع)")
+            if remedy:
+                print("   ⇒ صحّح القيمةَ أو خفّض خطَّ الأساس بعد إعادة الكتابة (القاعدة ١٢: لا يُعفى موضع)")
             return 1
         print(f"PASS — مدى الدفع ({len(revs)} التزاماً) لا يزيد ظهوراً واحداً على خطّ الأساس، "
               f"ولا بصمةَ مجموعةٍ تبدّلت")
@@ -1182,8 +1203,9 @@ def main(argv=None) -> int:
         counts = counts_with_commitment(deny)
         bad = ratchet_violations(counts, read_baseline(), "الشجرةُ العاملة")
         if bad:
-            print("⛔ BLOCK — الشجرةُ تحمل ظهوراتٍ لمبالغَ حقيقيّة:")
-            for b in bad[:25]:
+            head, shown, _ = block_claim(bad, subject="الشجرةُ تحمل")
+            print(head)
+            for b in shown[:25]:
                 print("   " + b)
             return 1
         print(f"PASS — لا ملفَّ تجاوز خطَّ الأساس ({sum(v['count'] for v in counts.values())} ظهوراً مُعلَنٌ في "
