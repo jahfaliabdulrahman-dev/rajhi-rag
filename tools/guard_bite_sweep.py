@@ -66,6 +66,10 @@ EP = ROOT / "tools/eval_pack.py"
 # (م١٩ · م٢٠ · م٢٤) تُحقن هناك. وإلّا بقيت السمومُ تُعدّل نصًّا غيرَ موجود فتُصنَّف «تعذّر تشغيل» —
 # أي بوّاباتٌ تسقط من القياس بصمتٍ وهي تظنّ نفسها مُطبَّقة.
 G3 = ROOT / "tools/gate3.py"
+CIR = ROOT / "tools" / "ci_report.py"
+# **ومُدقِّقُ الدفع مالكُ حُكمٍ في موضعين** (أداةٍ + تذكيرٍ في الخطّاف · R61-1 «ملحقُ الدفع») ⇒
+# فسمّاه في الموضعين: `tools/ci_report.py` و`.githooks/pre-push` — لأنّ الصفّ ١٧ يحمل الاثنين.
+PUSH_HOOK = ROOT / ".githooks" / "pre-push"
 _LP_CMD = ["tools/landing_probe.py"]
 _LP_CMD_FROM_WT = ["tools/landing_probe.py", "--from-worktree"]
 TSEC = ROOT / "tests/test_secret_scan.py"
@@ -248,6 +252,29 @@ CASES = [
      '    return isinstance(x, int) and not isinstance(x, bool)',
      '    return isinstance(x, int)',
      "tests/test_eval_pack.py::test_a_boolean_field_is_not_a_measured_price"),
+
+    # **م٢٥ · «أخضر» بلا مرساة (R62-F4 · قاسه المقاعد الثلاثة):** كان `if head and not _same_commit(…)`
+    # يُسقط المقابلةَ إن **غاب** `headSha` من خَرْج `gh` ⇒ تُوسَم الأداةُ «أخضر» ولا تقيس شيئًا — وهو
+    # عينُ صنفِ R61-1 (حُكمٌ بلا موضعِ قياس) طبقةً أعمق. فسمُّه يُعيد الشرطَ المتساهل، ويجب أن يُسقط
+    # ضابطَ الفشل المُغلَق. (وشرطُ `and` هو الفرقُ بين «لا أدري» و«نظيف».)
+    ("م٢٥ · تشغيلٌ بلا `headSha` لا يُقال له أخضر (فشلٌ مُغلَق · R62)", CIR,
+     '    if not head:\n'
+     '        return {"ref": ref, "state": "غيرُ مقروء",\n'
+     '                "why": f"تشغيلٌ بلا `headSha` ⇒ لا مرساةَ تقيسها (والمدفوعُ {want[:7]})"}\n'
+     '    if not _same_commit(want, head):',
+     '    if head and not _same_commit(want, head):',
+     "tests/test_ci_report.py::test_a_run_without_a_headsha_cannot_be_called_green"),
+
+    # **م٢٦ · الخطّافُ يُسقط دفعاً مشروعاً (R62-F1 · حاجبُ الجولة ٦٢ · صاده المقاعدُ الثلاثة):** كان
+    # سطرُ التذكير آخرَ سطرٍ ويستخرج المراجعَ بـ`awk` على **الحقل الأول** ⇒ وسمٌ/حذفُ فرع/دفعٌ بلا جديد
+    # يُفرِغ `BRANCHES` فيخرج الخطّاف **1 بلا سبب** ⇒ دفعٌ مشروعٌ يُرفض صامتاً، ويُصنع الحافزُ على
+    # `--no-verify` الذي يُسقط حارسَي الأمن. فسمُّه يُعيد الأسطرَ التي كانت، ويجب أن يُسقط ضابطَ
+    # «الخطّافُ لا يُسقط دفعاً مشروعاً» — بعد أن كان يُقاس بمقعدِ مدقّقٍ لا بضابط.
+    ("م٢٦ · خطّافُ الدفع لا يُسقط دفعاً مشروعاً (R62-F1)", PUSH_HOOK,
+     "printf '%s\\n' \"$REFS\" | \"$PY\" tools/ci_report.py --pre-push || true\nexit 0",
+     "BRANCHES=$(printf '%s\\n' \"$REFS\" | awk '{print $1}' | sed -n 's#^refs/heads/##p' | sort -u)\n"
+     "[ -n \"$BRANCHES\" ] && \"$PY\" tools/ci_report.py --remind $BRANCHES",
+     "tests/test_hook_gates.py::test_the_pre_push_hook_never_blocks_a_legitimate_push"),
 ]
 
 

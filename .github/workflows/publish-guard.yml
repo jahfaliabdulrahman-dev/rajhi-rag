@@ -58,6 +58,7 @@ jobs:
                            tests/test_hook_gates.py \
                            tests/test_static_gate.py \
                            tests/test_amount_guard.py \
+                           tests/test_ci_report.py \
                            tests/test_answer_names_witness.py \
                            tests/test_gate_goldens.py \
                            tests/test_gate_flake_policy.py \
