@@ -5,11 +5,14 @@
 المقاعدُ الثلاثة في نسختها الأولى: السجلُّ أعلن «أربعة ملفّات» وفي الالتزام نفسه صارت ثمانية، وقال
 «٦٨٥ ضابطاً» والمقيس ٦٩٥، ونسب إلى ضابطٍ سمَّ بوّابةً لا يمسّها.
 
-**الاتّجاهاتُ الأربعة (كلُّها مقروءةٌ من الملفّات، ولا واحدٌ منها «حضورُ نصّ» وحده):**
+**الاتّجاهاتُ (كلُّها مقروءةٌ من الملفّات، ولا واحدٌ منها «حضورُ نصّ» وحده؛ ولا عددَ مكتوبٌ بيد — يُقرأ
+من هنا لا من نثر):**
 1. كلُّ ملفٍّ في `.githooks/` وكلُّ `tools/*.py` يُنادى من خطّافٍ أو من الـworkflow مذكورٌ في السجلّ.
 2. **قائمةُ الـCI المُعلَنة = مجموعةُ ملفّات `pytest` في الـworkflow** (تساوياً لا احتواءً).
 3. **كلُّ أداةٍ في صفوف السجلّ لها ملفُّ ضابطٍ يذكرها** ⇒ لا ثقةَ غيرَ مكتسَبة في عمود «سمُّها».
 4. **أيّ عبارةٍ عدديّة عن الـCI تطابق العددَ المقيس** (الأرقامُ والكلماتُ العدديّة كلتاهما).
+5. **كلُّ خطوةِ `run:` في الـworkflow لها معرّفٌ مُسجَّلٌ في §٣** (ومقابلةٌ في الاتجاهين · بمحلّل YAML).
+6. **كلُّ عَلَمٍ `` `--x` `` يُذكر في صفّ سجلٍّ موجودٌ في مصدر أداتِه** (قاسه القياس لا المراجعة).
 """
 from __future__ import annotations
 
@@ -157,15 +160,24 @@ def test_the_registry_reports_its_own_blind_spot():
 #: **ثغرةٌ كانت مفتوحة**: الاتّجاهاتُ الأربعة تمسك خطّافاً غيرَ مسجَّل، **ولا تمسك خطوةَ CI** — أضاف المدقّق
 #: خطوةً مصطنعةً في نسخته فمرّت صامتةً (وأداةٌ تُنادى من الخطوة تُمسَك، أمّا خطوةٌ بأمرٍ حرٍّ فلا). ⇒ الحلُّ
 #: **معرّفٌ ثابتٌ لكلّ خطوة** (`id: gate_*`) ومقابلةٌ في الاتّجاهين: لا خطوةَ بلا معرّفٍ مُسجَّل، ولا معرّفَ شبح.
-STEP_START = re.compile(r"^\s*-\s+(?:name|uses):", re.M)
-RUN_RE = re.compile(r"^\s*(?:-\s+)?run:", re.M)
-STEP_ID_RE = re.compile(r"^\s*id:\s*(gate_[a-z0-9_]+)\s*$", re.M)
-STEP_NAME_RE = re.compile(r"-\s*name:\s*(.+)")
+#: **ولماذا محلّلُ YAML لا مُقسِّمٌ بنمط** (نقدُ مقعدَي Standards وStructure، بمسمًّى في الذاكرة): نسخةٌ
+#: أولى قسّمت النصَّ عند `- name:`/`- uses:` ⇒ خطوةُ `- run:` **بلا اسم** تُبتلع في المقطع السابق فيُقرأ
+#: معرّفُ غيرِها، فصار العالمُ «كلُّ خطوةٍ **مُسمّاة**» لا «كلُّ خطوة». وكذلك كانت «المجموعةُ» تُقابَل
+#: **نصّاً مُلحَماً** ⇒ `id: gate_p` يمرّ لأنّه بادئةُ `gate_pii` المُعلَن. والمحلّلُ يقرأ `jobs[*].steps`
+#: صريحاً، والمقابلةُ بـ`set` لا بنصّ ⇒ يسقط الصنفان معاً. (`PyYAML` مُثبَّتةٌ في `requirements.lock`
+#: وتُثبَّت في الـCI — والفشلُ **مُغلَق**: غيابُ المحلّل يسقط بدل أن يُقرأ نظافة.)
+def _yaml():
+    try:
+        import yaml
+    except ModuleNotFoundError as exc:                       # فشلٌ مُغلَق (قاعدة ٢٦)
+        raise AssertionError("PyYAML لازمٌ لقراءة خطوات الـworkflow — ولا فحصَ بلا محلّل") from exc
+    return yaml
 
 
-def _steps(wf_text: str) -> list[str]:
-    """كلُّ خطوةٍ كنصٍّ مستقلّ (تُقسَم عند بداية خطوة) — **الترويسةُ تُهمَل**."""
-    return [p for p in re.split(r"(?m)(?=" + STEP_START.pattern + ")", wf_text)[1:]]
+def ci_steps(wf_text: str) -> list[dict]:
+    """كلُّ خطوات الـworkflow كقواميس — **بلا استثناء خطوةٍ بلا اسم**."""
+    doc = _yaml().safe_load(wf_text) or {}
+    return [step for job in (doc.get("jobs") or {}).values() for step in (job.get("steps") or [])]
 
 
 #: موضعُ الإعلان في §٣: قائمةُ المعرّفات **وحدها** تُقابَل (لا كلُّ نصّ الوثيقة — وإلّا لَحُسِبت أسماءُ
@@ -182,30 +194,32 @@ def _declared_step_ids() -> list[str]:
     return sorted(set(re.findall(r"gate_[a-z0-9_]+", block)))
 
 
-def unregistered_ci_steps(wf_text: str, declared: str) -> list[str]:
-    """خطواتُ `run:` بلا معرّف — أو بمعرّفٍ ليس في المُعلَن. (دالّةٌ خالصةٌ ⇒ تُقاس بسمٍّ في الذاكرة.)"""
+def unregistered_ci_steps(wf_text: str, declared: set[str]) -> list[str]:
+    """خطواتُ `run:` بلا معرّف — أو بمعرّفٍ ليس في المُعلَن. (دالّةٌ خالصةٌ ⇒ تُقاس بسمٍّ في الذاكرة.)
+
+    و«مُعلَن» **مجموعةٌ** لا نصّ: الاحتواءُ النصّيُّ يقبل البادئةَ (`gate_p` أمام `gate_pii`) فيُبطل الاتّجاه.
+    """
     out: list[str] = []
-    for chunk in _steps(wf_text):
-        if not RUN_RE.search(chunk):
+    for st in ci_steps(wf_text):
+        if "run" not in st:
             continue
-        m = STEP_ID_RE.search(chunk)
-        if m is None:
-            nm = STEP_NAME_RE.search(chunk)
-            out.append(f"بلا معرّف: {nm.group(1).strip() if nm else 'خطوةٌ بلا اسم'}")
-        elif m.group(1) not in declared:
-            out.append(f"غيرُ مسجَّلة: {m.group(1)}")
+        sid = st.get("id")
+        if not sid:
+            out.append(f"بلا معرّف: {st.get('name') or 'خطوةٌ بلا اسم'}")
+        elif sid not in declared:
+            out.append(f"غيرُ مسجَّلة: {sid}")
     return out
 
 
-def phantom_registered_steps(wf_text: str, declared: str) -> list[str]:
+def phantom_registered_steps(wf_text: str, declared: set[str]) -> list[str]:
     """معرّفٌ في السجلّ لا وجودَ له في الـworkflow = صفٌّ شبحٌ يُوهم حَرْساً غيرَ قائم."""
-    real = set(STEP_ID_RE.findall(wf_text))
-    return sorted({i for i in re.findall(r"gate_[a-z0-9_]+", declared) if i not in real})
+    real = {st.get("id") for st in ci_steps(wf_text) if st.get("id")}
+    return sorted(d for d in declared if d not in real)
 
 
 def test_every_ci_run_step_is_registered_and_no_phantom_is_declared():
     """كلُّ خطوةِ `run:` بمعرّفٍ مُسجَّلٍ في §٣ — والسجلُّ لا يذكر معرّفاً غيرَ موجود."""
-    wf, declared = WORKFLOW.read_text(encoding="utf-8"), " · ".join(_declared_step_ids())
+    wf, declared = WORKFLOW.read_text(encoding="utf-8"), set(_declared_step_ids())
     assert declared, "قائمةُ معرّفات الـCI فارغةٌ في السجلّ ⇒ فشلٌ مُغلَق"
     missing = unregistered_ci_steps(wf, declared)
     phantom = phantom_registered_steps(wf, declared)
@@ -217,13 +231,31 @@ def test_the_fifth_direction_actually_bites():
     """**سمٌّ مصنوعٌ في الذاكرة** (نفسُ ما فعله المدقّق في نسخته): خطوةٌ بلا معرّف، وخطوةٌ بمعرّفٍ غريب.
 
     وبلا هذا الضابط يصير الاتّجاهُ الخامس ادّعاءً: قاعدةٌ لا يُقاس مَن يخالفها ليست قاعدة.
+    **والأربعةُ الأخيرةُ من نقد المقعدين** (خطوةٌ خامّة · بادئةٌ تُقبَل خطأً · `id` داخل جسم `run` · اسمٌ لا معرّف).
     """
     wf = WORKFLOW.read_text(encoding="utf-8")
-    declared = " · ".join(_declared_step_ids())
+    declared = set(_declared_step_ids())
     stripped = wf.replace("        id: gate_static\n", "", 1)              # خطوةٌ صارت بلا معرّف
     assert unregistered_ci_steps(stripped, declared) == [
         "بلا معرّف: Static gate (names that never resolve, bindings never read)"]
     stranger = wf.replace("id: gate_static", "id: gate_static_new_thing", 1)  # معرّفٌ لم يُسجَّل
     assert unregistered_ci_steps(stranger, declared) == ["غيرُ مسجَّلة: gate_static_new_thing"]
-    assert phantom_registered_steps(wf, declared + " · gate_ghost") == ["gate_ghost"]
+    assert phantom_registered_steps(wf, declared | {"gate_ghost"}) == ["gate_ghost"]
+
+    # (أ) خطوةُ `run:` **خامّةٌ بلا اسمٍ ولا معرّف** (صيغةٌ مشروعةٌ في Actions) — كانت تمرّ صامتة
+    nameless = "jobs:\n  guard:\n    steps:\n      - run: echo hi\n      - id: gate_ok\n        run: echo ok\n"
+    assert unregistered_ci_steps(nameless, {"gate_ok"}) == ["بلا معرّف: خطوةٌ بلا اسم"]
+
+    # (ب) البادئةُ ليست المجموعة: `gate_pii` مُعلَنٌ و`gate_p` ليس معرّفاً له ⇒ لا يُقبَل
+    prefix = "jobs:\n  guard:\n    steps:\n      - id: gate_pii\n        run: echo x\n"
+    assert unregistered_ci_steps(prefix, {"gate_pii"}) == []
+    assert unregistered_ci_steps(prefix, {"gate_p"}) == ["غيرُ مسجَّلة: gate_pii"]
+
+    # (ج) `id:` **داخل جسم run** ليس معرّفَ خطوة (كان يُقرأ معرّفاً فيقرأ الخطوةَ مُسجَّلة)
+    in_body = "jobs:\n  guard:\n    steps:\n      - run: |\n          id: gate_ok\n          echo hi\n"
+    assert unregistered_ci_steps(in_body, {"gate_ok"}) == ["بلا معرّف: خطوةٌ بلا اسم"]
+
+    # (د) خطوةٌ **باسمٍ** بلا معرّف ⇒ تُسمّى باسمها (لا تُجهَل)
+    named = "jobs:\n  guard:\n    steps:\n      - name: المارقة\n        run: echo hi\n"
+    assert unregistered_ci_steps(named, set()) == ["بلا معرّف: المارقة"]
 

@@ -81,6 +81,24 @@ def test_a_blocking_owner_request_makes_the_turn_the_owners(monkeypatch, tmp_pat
     assert '"turn": "المالك"' in capsys.readouterr().out
 
 
+def test_quoting_the_marker_in_prose_does_not_move_the_turn(monkeypatch, tmp_path, capsys):
+    """**نقدُ مقعد Spec**: مطابقةُ العلامة في **أيّ موضع** تعني أنّ تقريراً **يقتبسها** — كما تقتبسها الوثيقةُ
+    نفسُها في §٢٦ — يُزيح الدورَ إلى المالك ويوقف الطرفين بلا سبب.
+
+    ⇒ الموضعُ جزءٌ من القاعدة: الإعلانُ سطرٌ **يبدأ** بالعلامة؛ والاقتباسُ في نثرٍ لا يبدأ بها.
+    """
+    m = _load()
+    monkeypatch.setattr(m, "ROOT", tmp_path)
+    _tree(tmp_path, {"sulaiman": [("20260925-0300-REPORT",
+                                    "البروتوكول §٣: الرمزُ `AWAITING_FOUNDER` يعني أنّ الدورَ للمالك …")]})
+    assert m.main(["--json"]) == 0
+    assert '"turn": "claude"' in capsys.readouterr().out, "اقتباسٌ في نثرٍ أزاح الدورَ (العلّةُ باقية)"
+
+    _tree(tmp_path, {"sulaiman": [("20260925-0301-REPORT", "AWAITING_FOUNDER — نعم، إعلانٌ فعليّ")]})
+    assert m.main(["--json"]) == 0
+    assert '"turn": "المالك"' in capsys.readouterr().out, "إعلانٌ صريحٌ لم يُزِح الدور"
+
+
 def test_an_owner_queue_line_does_not_move_the_turn(monkeypatch, tmp_path, capsys):
     """**R56-3 (قاسه المدقّق)**: قائمةُ «ما بيد المالك» في آخر كلّ تقرير **ضجيجٌ** لا طلبَ توقّف.
 
