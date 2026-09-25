@@ -116,6 +116,8 @@ NON_ANSWER_FILES_SINCE_RULE = {
         "نصُّ المقاعد الثلاثة بالحرف (نقلٌ للمُدخَل) — لا يُجيب حُكماً",
     "handoff/sulaiman/20260926-0045-REPORT-round62-closure-of-the-three-seat-blocker-and-final-quality.md":
         "تقريرٌ للمالك (تقريرُ الجولة) — لا يُجيب حُكماً",
+    "handoff/sulaiman/20260926-0205-MEASUREment-q4-local-reader-five-pages.md":
+        "وثيقةُ قياسٍ مُودَعة (نتيجةُ قياس ٤) — لا تُجيب حُكماً ولا تُودِع شاهداً، ورقمُها مقيسٌ في متنها",
 }
 #: وأصنافُها مذكورةٌ **في القاموس نفسِه** (`NON_ANSWER_FILES_SINCE_RULE` — البند ٦) لا في تعليقٍ ثانٍ.
 #: **ومُخاطَبٌ واحدٌ هبط بالقاعدة، وهو صنفٌ مُعلَنٌ بالاسم:** `20260925-0723-REPORT-to-claude-r13-…`
