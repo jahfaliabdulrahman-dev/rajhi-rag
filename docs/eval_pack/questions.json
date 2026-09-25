@@ -1,0 +1,582 @@
+{
+ "schema": "eval-questions/1",
+ "note": "أسئلةُ تقييم البند ٤ (٥٠ سؤالاً). **القاعدة ١٣:** لا مبلغَ ولا اسمَ شخصٍ ولا نصَّ كشفٍ في هذا الملفّ — الأنماطُ المستعملةُ مصطلحاتٌ مصرفيّةٌ عامّة (شيك · رسوم)، والصفحاتُ أرقامٌ. والحقيقةُ الأرضيةُ **تُشتقّ ولا تُكتب**: `python3 tools/eval_questions.py --truth` على الشاشة وحدها، و`--safe` هو ما يُلصق في تقرير.",
+ "metrics": {
+  "number": "دقّة الرقم — يُقابَل المبلغُ بنفس مصدر الحزمة (تذييل الصفحة/آخر صفّ)",
+  "citation": "صدق الاستشهاد من الأثر — يجب أن يُسمّى الصفُّ/الصفحةُ المُثبتة، ويُقاس وجودُها",
+  "abstain": "صحّة الامتناع — الجوابُ «لا يوجد/لا أعلم/غيرُ مطبوع» بدل رقمٍ مُخترع"
+ },
+ "questions": [
+  {
+   "id": "num-01",
+   "cat": "رقمي",
+   "metric": "number",
+   "expect": "number",
+   "q": "ما الرقمُ المطبوعُ في خانة «مدين» بتذييل الصفحة ٢؟",
+   "derive": {
+    "kind": "footer",
+    "field": "debits",
+    "page": 2
+   }
+  },
+  {
+   "id": "num-02",
+   "cat": "رقمي",
+   "metric": "number",
+   "expect": "number",
+   "q": "ما مجموعُ مبالغ الحركات المطبوعة داخل الصفحة ٢ (مديناً ودائناً معاً)؟",
+   "derive": {
+    "kind": "page_sum_all",
+    "page": 2
+   }
+  },
+  {
+   "id": "num-03",
+   "cat": "رقمي",
+   "metric": "number",
+   "expect": "number",
+   "q": "ما الرقمُ المطبوعُ في خانة «مدين» بتذييل الصفحة ٥٢؟",
+   "derive": {
+    "kind": "footer",
+    "field": "debits",
+    "page": 52
+   }
+  },
+  {
+   "id": "num-04",
+   "cat": "رقمي",
+   "metric": "number",
+   "expect": "number",
+   "q": "ما مجموعُ مبالغ الحركات المطبوعة داخل الصفحة ٥٢ (مديناً ودائناً معاً)؟",
+   "derive": {
+    "kind": "page_sum_all",
+    "page": 52
+   }
+  },
+  {
+   "id": "num-05",
+   "cat": "رقمي",
+   "metric": "number",
+   "expect": "number",
+   "q": "ما الرقمُ المطبوعُ في خانة «مدين» بتذييل الصفحة ٢٤٢؟",
+   "derive": {
+    "kind": "footer",
+    "field": "debits",
+    "page": 242
+   }
+  },
+  {
+   "id": "num-06",
+   "cat": "رقمي",
+   "metric": "number",
+   "expect": "number",
+   "q": "ما مجموعُ مبالغ الحركات المطبوعة داخل الصفحة ٢٤٢ (مديناً ودائناً معاً)؟",
+   "derive": {
+    "kind": "page_sum_all",
+    "page": 242
+   }
+  },
+  {
+   "id": "num-07",
+   "cat": "رقمي",
+   "metric": "number",
+   "expect": "number",
+   "q": "ما الرقمُ المطبوعُ في خانة «مدين» بتذييل الصفحة ٤٨٦؟",
+   "derive": {
+    "kind": "footer",
+    "field": "debits",
+    "page": 486
+   }
+  },
+  {
+   "id": "num-08",
+   "cat": "رقمي",
+   "metric": "number",
+   "expect": "number",
+   "q": "ما مجموعُ مبالغ الحركات المطبوعة داخل الصفحة ٤٨٦ (مديناً ودائناً معاً)؟",
+   "derive": {
+    "kind": "page_sum_all",
+    "page": 486
+   }
+  },
+  {
+   "id": "num-09",
+   "cat": "رقمي",
+   "metric": "number",
+   "expect": "number",
+   "q": "ما الرقمُ المطبوعُ في خانة «دائن» بتذييل الصفحة ٢٧؟",
+   "derive": {
+    "kind": "footer",
+    "field": "credits",
+    "page": 27
+   }
+  },
+  {
+   "id": "num-10",
+   "cat": "رقمي",
+   "metric": "number",
+   "expect": "number",
+   "q": "ما الرقمُ المطبوعُ في خانة «دائن» بتذييل الصفحة ١٠٠؟",
+   "derive": {
+    "kind": "footer",
+    "field": "credits",
+    "page": 100
+   }
+  },
+  {
+   "id": "num-11",
+   "cat": "رقمي",
+   "metric": "number",
+   "expect": "number",
+   "q": "ما الرقمُ المطبوعُ في خانة «دائن» بتذييل الصفحة ٢٩٠؟",
+   "derive": {
+    "kind": "footer",
+    "field": "credits",
+    "page": 290
+   }
+  },
+  {
+   "id": "num-12",
+   "cat": "رقمي",
+   "metric": "number",
+   "expect": "number",
+   "q": "ما الرقمُ المطبوعُ في خانة «دائن» بتذييل الصفحة ٥٣٥؟",
+   "derive": {
+    "kind": "footer",
+    "field": "credits",
+    "page": 535
+   }
+  },
+  {
+   "id": "cnt-01",
+   "cat": "عددي",
+   "metric": "number",
+   "expect": "count",
+   "q": "كم صفًّا مطبوعًا في الصفحة ٢؟",
+   "derive": {
+    "kind": "count_rows",
+    "page": 2
+   }
+  },
+  {
+   "id": "cnt-02",
+   "cat": "عددي",
+   "metric": "number",
+   "expect": "count",
+   "q": "كم صفًّا مطبوعًا في الصفحة ٢٥؟",
+   "derive": {
+    "kind": "count_rows",
+    "page": 25
+   }
+  },
+  {
+   "id": "cnt-03",
+   "cat": "عددي",
+   "metric": "number",
+   "expect": "count",
+   "q": "كم صفًّا مطبوعًا في الصفحة ٥١؟",
+   "derive": {
+    "kind": "count_rows",
+    "page": 51
+   }
+  },
+  {
+   "id": "cnt-04",
+   "cat": "عددي",
+   "metric": "number",
+   "expect": "count",
+   "q": "كم صفًّا مطبوعًا في الصفحة ٥٢؟",
+   "derive": {
+    "kind": "count_rows",
+    "page": 52
+   }
+  },
+  {
+   "id": "cnt-05",
+   "cat": "عددي",
+   "metric": "number",
+   "expect": "count",
+   "q": "كم صفًّا مطبوعًا في الصفحة ٢٤٢؟",
+   "derive": {
+    "kind": "count_rows",
+    "page": 242
+   }
+  },
+  {
+   "id": "cnt-06",
+   "cat": "عددي",
+   "metric": "number",
+   "expect": "count",
+   "q": "كم صفًّا مطبوعًا في الصفحة ٤٨٦؟",
+   "derive": {
+    "kind": "count_rows",
+    "page": 486
+   }
+  },
+  {
+   "id": "cnt-07",
+   "cat": "عددي",
+   "metric": "number",
+   "expect": "count",
+   "q": "كم صفًّا مطبوعًا في الصفحة ٥٠٠؟",
+   "derive": {
+    "kind": "count_rows",
+    "page": 500
+   }
+  },
+  {
+   "id": "cnt-08",
+   "cat": "عددي",
+   "metric": "number",
+   "expect": "count",
+   "q": "كم صفًّا مطبوعًا في الصفحة ٥٣٥؟",
+   "derive": {
+    "kind": "count_rows",
+    "page": 535
+   }
+  },
+  {
+   "id": "bal-01",
+   "cat": "رصيد",
+   "metric": "number",
+   "expect": "number",
+   "q": "ما رصيدُ آخر صفٍّ مطبوعٍ في الصفحة ٢؟",
+   "derive": {
+    "kind": "last_row_balance",
+    "page": 2
+   }
+  },
+  {
+   "id": "bal-02",
+   "cat": "رصيد",
+   "metric": "number",
+   "expect": "number",
+   "q": "ما رصيدُ آخر صفٍّ مطبوعٍ في الصفحة ٥٢؟",
+   "derive": {
+    "kind": "last_row_balance",
+    "page": 52
+   }
+  },
+  {
+   "id": "bal-03",
+   "cat": "رصيد",
+   "metric": "number",
+   "expect": "number",
+   "q": "ما رصيدُ آخر صفٍّ مطبوعٍ في الصفحة ٢٤٢؟",
+   "derive": {
+    "kind": "last_row_balance",
+    "page": 242
+   }
+  },
+  {
+   "id": "bal-04",
+   "cat": "رصيد",
+   "metric": "number",
+   "expect": "number",
+   "q": "ما رصيدُ آخر صفٍّ مطبوعٍ في الصفحة ٤٨٦؟",
+   "derive": {
+    "kind": "last_row_balance",
+    "page": 486
+   }
+  },
+  {
+   "id": "chn-01",
+   "cat": "سلسلة",
+   "metric": "number",
+   "expect": "chain",
+   "q": "هل يساوي رصيدُ آخر صفٍّ مطبوعٍ في الصفحة ٥٢ رصيدَ أوّل صفٍّ مطبوعٍ في الصفحة ٥٣؟ وما الفرقُ بينهما بالمبلغ؟",
+   "derive": {
+    "kind": "row_chain",
+    "a": 52,
+    "b": 53
+   }
+  },
+  {
+   "id": "chn-02",
+   "cat": "سلسلة",
+   "metric": "number",
+   "expect": "chain",
+   "q": "هل يساوي رصيدُ آخر صفٍّ مطبوعٍ في الصفحة ٢٤٢ رصيدَ أوّل صفٍّ مطبوعٍ في الصفحة ٢٤٣؟ وما الفرقُ بينهما بالمبلغ؟",
+   "derive": {
+    "kind": "row_chain",
+    "a": 242,
+    "b": 243
+   }
+  },
+  {
+   "id": "chn-03",
+   "cat": "سلسلة",
+   "metric": "number",
+   "expect": "chain",
+   "q": "هل يساوي رصيدُ آخر صفٍّ مطبوعٍ في الصفحة ٤٨٦ رصيدَ أوّل صفٍّ مطبوعٍ في الصفحة ٤٨٧؟ وما الفرقُ بينهما بالمبلغ؟",
+   "derive": {
+    "kind": "row_chain",
+    "a": 486,
+    "b": 487
+   }
+  },
+  {
+   "id": "chn-04",
+   "cat": "سلسلة",
+   "metric": "number",
+   "expect": "chain",
+   "q": "هل يساوي رصيدُ آخر صفٍّ مطبوعٍ في الصفحة ٢ رصيدَ أوّل صفٍّ مطبوعٍ في الصفحة ٣؟ وما الفرقُ بينهما بالمبلغ؟",
+   "derive": {
+    "kind": "row_chain",
+    "a": 2,
+    "b": 3
+   }
+  },
+  {
+   "id": "cit-01",
+   "cat": "استشهاد",
+   "metric": "citation",
+   "expect": "rows",
+   "q": "في أيّ صفحةٍ من الكشف يظهر وصفٌ يتضمّن كلمة «شيك»؟",
+   "derive": {
+    "kind": "rows_matching",
+    "pattern": "شيك"
+   }
+  },
+  {
+   "id": "cit-02",
+   "cat": "استشهاد",
+   "metric": "citation",
+   "expect": "rows",
+   "q": "كم صفًّا في الكشف يتضمّن وصفُه كلمة «رسوم»، وعلى كم صفحةً تتوزّع؟",
+   "derive": {
+    "kind": "rows_matching",
+    "pattern": "رسوم"
+   }
+  },
+  {
+   "id": "cit-03",
+   "cat": "استشهاد",
+   "metric": "citation",
+   "expect": "row_index",
+   "q": "ما رقمُ الصفّ الذي يحمل أكبر مبلغ حركة في الصفحة ٥٢؟",
+   "derive": {
+    "kind": "argmax_row",
+    "page": 52
+   }
+  },
+  {
+   "id": "cit-04",
+   "cat": "استشهاد",
+   "metric": "citation",
+   "expect": "row_index",
+   "q": "ما رقمُ الصفّ الذي يحمل أكبر مبلغ حركة في الصفحة ٦٠؟",
+   "derive": {
+    "kind": "argmax_row",
+    "page": 60
+   }
+  },
+  {
+   "id": "cit-05",
+   "cat": "استشهاد",
+   "metric": "citation",
+   "expect": "row_index",
+   "q": "ما رقمُ الصفّ الذي يحمل أكبر مبلغ حركة في الصفحة ١٠٠؟",
+   "derive": {
+    "kind": "argmax_row",
+    "page": 100
+   }
+  },
+  {
+   "id": "cit-06",
+   "cat": "استشهاد",
+   "metric": "citation",
+   "expect": "row_index",
+   "q": "ما رقمُ الصفّ الذي يحمل أكبر مبلغ حركة في الصفحة ٢٤٢؟",
+   "derive": {
+    "kind": "argmax_row",
+    "page": 242
+   }
+  },
+  {
+   "id": "cit-07",
+   "cat": "استشهاد",
+   "metric": "citation",
+   "expect": "row_index",
+   "q": "ما رقمُ الصفّ الذي يحمل أكبر مبلغ حركة في الصفحة ٤٨٦؟",
+   "derive": {
+    "kind": "argmax_row",
+    "page": 486
+   }
+  },
+  {
+   "id": "cit-08",
+   "cat": "استشهاد",
+   "metric": "citation",
+   "expect": "row_index",
+   "q": "ما رقمُ الصفّ الذي يحمل أكبر مبلغ حركة في الصفحة ٥٣٥؟",
+   "derive": {
+    "kind": "argmax_row",
+    "page": 535
+   }
+  },
+  {
+   "id": "cit-09",
+   "cat": "استشهاد",
+   "metric": "citation",
+   "expect": "row_index",
+   "q": "ما رقمُ الصفّ الذي يحمل أكبر مبلغ حركة في الصفحة ٢٥؟",
+   "derive": {
+    "kind": "argmax_row",
+    "page": 25
+   }
+  },
+  {
+   "id": "cit-10",
+   "cat": "استشهاد",
+   "metric": "citation",
+   "expect": "row_index",
+   "q": "ما رقمُ الصفّ الذي يحمل أكبر مبلغ حركة في الصفحة ٥٠٠؟",
+   "derive": {
+    "kind": "argmax_row",
+    "page": 500
+   }
+  },
+  {
+   "id": "abs-01",
+   "cat": "امتناع",
+   "metric": "abstain",
+   "expect": "abstain",
+   "q": "ما مجموعُ المبالغ المدينة في تذييل الصفحة ٧٠٠؟",
+   "derive": {
+    "kind": "absent",
+    "reason": "page_outside_pack",
+    "page": 700
+   }
+  },
+  {
+   "id": "abs-02",
+   "cat": "رقمي",
+   "metric": "number",
+   "expect": "number",
+   "q": "كم صفًّا مطبوعًا في الصفحة ٦٢٩؟",
+   "derive": {
+    "kind": "count_rows",
+    "page": 629
+   }
+  },
+  {
+   "id": "abs-03",
+   "cat": "امتناع",
+   "metric": "abstain",
+   "expect": "abstain",
+   "q": "ما مجموعُ حركات سنة ١٩٩٩ في الكشف؟",
+   "derive": {
+    "kind": "absent",
+    "reason": "year_absent",
+    "year": 1999
+   }
+  },
+  {
+   "id": "abs-04",
+   "cat": "امتناع",
+   "metric": "abstain",
+   "expect": "abstain",
+   "q": "ما مجموعُ حركات سنة ٢٠٢٦ في هذه الحزمة؟",
+   "derive": {
+    "kind": "absent",
+    "reason": "year_absent",
+    "year": 2026
+   }
+  },
+  {
+   "id": "abs-05",
+   "cat": "امتناع",
+   "metric": "abstain",
+   "expect": "abstain",
+   "q": "ما رقمُ هويّة المستفيد في حوالةٍ داخل الصفحة ٢٤٣؟",
+   "derive": {
+    "kind": "absent",
+    "reason": "field_not_printed",
+    "field": "beneficiary_id"
+   }
+  },
+  {
+   "id": "abs-06",
+   "cat": "امتناع",
+   "metric": "abstain",
+   "expect": "abstain",
+   "q": "ما عنوانُ الفرع الذي نُفِّذت فيه حركة الصفحة ٢٤٤؟",
+   "derive": {
+    "kind": "absent",
+    "reason": "field_not_printed",
+    "field": "branch_address"
+   }
+  },
+  {
+   "id": "abs-07",
+   "cat": "امتناع",
+   "metric": "abstain",
+   "expect": "abstain",
+   "q": "هل يتّصل رصيدُ الصفحة ٧٠٠ بما بعدها؟",
+   "derive": {
+    "kind": "absent",
+    "reason": "page_outside_pack",
+    "page": 700
+   }
+  },
+  {
+   "id": "abs-08",
+   "cat": "امتناع",
+   "metric": "abstain",
+   "expect": "ambiguous",
+   "q": "ما أكبرُ مبلغ حركة في الصفحة ٢؟",
+   "derive": {
+    "kind": "argmax_row",
+    "page": 2
+   }
+  },
+  {
+   "id": "abs-09",
+   "cat": "امتناع",
+   "metric": "abstain",
+   "expect": "absent",
+   "q": "كم صفًّا مطبوعًا في الصفحة ٨٠٠؟",
+   "derive": {
+    "kind": "absent",
+    "reason": "page_outside_pack",
+    "page": 800
+   }
+  },
+  {
+   "id": "abs-10",
+   "cat": "امتناع",
+   "metric": "abstain",
+   "expect": "absent",
+   "q": "ما أكبرُ مبلغ حركة في الصفحة ٩٠٠؟",
+   "derive": {
+    "kind": "absent",
+    "reason": "page_outside_pack",
+    "page": 900
+   }
+  },
+  {
+   "id": "str-03",
+   "cat": "بنيوي",
+   "metric": "number",
+   "expect": "count",
+   "q": "كم صفًّا في الكشف كُتب تاريخُه بأرقامٍ عربيّةٍ-هندية؟",
+   "derive": {
+    "kind": "date_encoding",
+    "encoding": "arabic_ind"
+   }
+  },
+  {
+   "id": "abs-11",
+   "cat": "امتناع",
+   "metric": "abstain",
+   "expect": "absent",
+   "q": "ما الرصيدُ الأخير في الصفحة ١٠٠٠؟",
+   "derive": {
+    "kind": "absent",
+    "reason": "page_outside_pack",
+    "page": 1000
+   }
+  }
+ ]
+}

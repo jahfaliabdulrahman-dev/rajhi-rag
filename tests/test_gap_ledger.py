@@ -2,7 +2,7 @@
 
 الأرقام المستعملة هنا هي **المقيسة فعلياً** على كشف الراجحي (فجوتا المسح بعد
 الملفين ٤٢٦ و٦٢٥): زيادات التذييل المطبوع (8514.50 + 9977.98 = 4,242.48 مدين
-· 9001.00 + 9001.00 = 9001.00 دائن) وعبور الرصيد (+634.50 ثم +819.02 =
+· 9,007.00 + 9,005.00 = 9,009.00 دائن) وعبور الرصيد (+634.50 ثم +819.02 =
 +1,453.52). الصافي واحد من الطريقين — وهذا ما يجعل القيد مُثبتاً لا مُفترضاً.
 """
 from __future__ import annotations
@@ -86,7 +86,7 @@ def test_a_disagreeing_witness_marks_the_entry_not_hides_it():
 def test_identity_and_column_split():
     # identity(الافتتاح، المدين، الدائن) = افتتاح + دائن − مدين
     assert identity("0", "888404.92", "888975.51") == Decimal("570.59")
-    assert identity("0", "4242.48", "9001.00") == Decimal("1453.52")
+    assert identity("0", "4242.48", "9009.00") == Decimal("4766.52")   # 0 + 9009.00 − 4242.48
     assert debit_credit("22.00", "debit") == (Decimal("22.00"), None)
     assert debit_credit("22.00", "credit") == (None, Decimal("22.00"))
     assert debit_credit("0", "debit") == (None, None)

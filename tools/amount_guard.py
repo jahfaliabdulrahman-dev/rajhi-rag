@@ -222,10 +222,11 @@ def declared_set(path: Path) -> set[str]:
 
 # ═══════════════════════ الاشتقاقُ من المصدر ═══════════════════════
 
-NON_SOURCE = {
-    "data/eval_pack/amount_redaction_map.json",   # خريطةُ التطهير: عمودُها الأيمنُ حقيقيٌّ بالبناء
-    "data/.amount-guard-key",
-}
+NON_SOURCE = {"data/.amount-guard-key", "data/eval_pack/amount_redaction_map.json",
+              "data/eval_pack/amount-manifest.json"}
+# **مخرجاتُنا ليست مصدراً** — المانيفستُ وحدَه يُستثنى (قراءةُ ناتجِنا تُدخل رقمَنا في مصدرنا:
+# قِيس أنّ ذلك أزاغ `source_shape_ok` بـ+5 وجعل المشيَ يتوقّف على جذر التشغيل). أمّا `pack.json`
+# فهو أثرُ قراءةٍ يحمل مبالغَ حقيقيّة ⇒ **يجب** أن يبقى في المدى.
 
 
 def _walk_amounts(obj, out: set[str]) -> None:
@@ -246,11 +247,17 @@ def _walk_amounts(obj, out: set[str]) -> None:
 
 
 def _artifacts(globs: tuple[str, ...] = ("data/**/*",)):
+    """**المصدرُ يُقرأ من `DATA_ROOT` لا من `ROOT` (ثغرةُ مراجعة ٣٩ رقم ١).**
+
+    كان يمشي على `ROOT` ⇒ بناءٌ من worktree مرتبط لا يجد الكوربوسَ ⇒ يكتب **مانيفستاً فارغاً
+    إلى النسخة الرئيسيّة** ويُعلن نجاحاً (`rc=0`) ⇒ كلُّ دفعٍ بعده يمرّ. وهذا بعينه نمطُ
+    العطب الأصليّ: *مصدرٌ أعمى يُنتج صفراً يُقرأ كنجاح*. والقاعدةُ هنا: **صفرُ مدخلٍ ليس نتيجةً**.
+    """
     for pat in globs:
-        for f in sorted(ROOT.glob(pat)):
+        for f in sorted(DATA_ROOT.glob(pat)):
             if not f.is_file() or f.suffix.lower() not in {".json", ".jsonl"}:
                 continue
-            rel = str(f.relative_to(ROOT))
+            rel = str(f.relative_to(DATA_ROOT))
             if rel in NON_SOURCE:
                 continue
             yield f, rel
@@ -314,6 +321,13 @@ def build(_extra: list[str]) -> int:
     if total != len(entered) + ex_trivial + ex_synth:
         raise SystemExit(f"⛔ فجوةٌ غيرُ مُعلَنة: {total} ≠ {len(entered)}+{ex_trivial}+{ex_synth}"
                          " ⇒ البناءُ يسقط (لا يُنشر مانيفستٌ ناقص)")
+    if files == 0:
+        raise SystemExit(
+            f"⛔ صفرُ ملفَّ مصدرٍ في {_shown(DATA_ROOT)} ⇒ البناءُ يسقط ولا يُكتب مانيفست.\n"
+            "   (صفرٌ يُقرأ كانجاحٍ كان يُفرغ الحارسَ صامتاً — القاعدة: صفرُ مدخلٍ ليس نتيجة.)")
+    if not entered:
+        raise SystemExit(
+            f"⛔ صفرُ قيمةٍ داخلةٍ في المدى من {files} ملفّاً ⇒ البناءُ يسقط (لا مانيفستَ فارغ).")
     fps = sorted({fingerprint(a) for a in entered})
     # **بصمةُ المجموعة:** تُكشف تبديلَ قيمةٍ بأخرى (وهو ما لا يراه عدّادٌ يقارن الأعداد وحدها).
     digest = hmac.new(load_key(), "\n".join(fps).encode(), hashlib.sha256).hexdigest()
@@ -350,7 +364,9 @@ def load_deny() -> set[str] | None:
     """**None = سطحٌ عامٌّ بلا أدلّة** ⇒ يُعلن **ويسقط مُغلَقاً**، إلّا بعلَمٍ صريح `--ci`."""
     if not MANIFEST.exists():
         return None
-    return set(json.loads(MANIFEST.read_text(encoding="utf-8"))["fingerprints"])
+    fps = set(json.loads(MANIFEST.read_text(encoding="utf-8"))["fingerprints"])
+    # **مانيفستٌ فارغٌ ليس أدلّة** (أمسكه مقعدُ المعايير): كان set() ⇒ كلُّ عدّادٍ صفر ⇒ PASS بلا فحص.
+    return fps or None
 
 
 def _manifest_blind() -> str:
@@ -408,6 +424,24 @@ def counts_by_file(deny: set[str], files: list[str] | None = None) -> dict[str, 
     return counts
 
 
+def pre_push_checks() -> int:
+    """فحصا **كلّ** مسار دفع — التعفّنُ والثنائياتُ غيرُ المُعلَنة (T-5 · مراجعة ٤٥ S-3).
+
+    كانا بعد `return` فرعَي `--pre-push` و`--ratchet` ⇒ **لا يبلغهما الخطّاف أبداً**. وبعد النقل
+    صارا في موضعٍ واحدٍ يُستدعى من كلّ مسار — **ولهما سمٌّ**: مانيفستٌ متعفّن ⇒ يُخرج ١ بالاسم.
+    """
+    if undeclared_binaries():
+        print("⛔ BLOCK — ثنائيٌّ مدفوعٌ تحت data/ أو digital/ بلا إعلان:")
+        for f in undeclared_binaries()[:10]:
+            print(f"   {f}")
+        return 1
+    stale = staleness()
+    if stale:
+        print(stale)
+        return 1
+    return 0
+
+
 def undeclared_binaries() -> list[str]:
     declared = declared_set(DECLARED_BINARIES)
     out = subprocess.run(["git", "ls-files"], cwd=str(ROOT), capture_output=True, text=True).stdout
@@ -417,35 +451,137 @@ def undeclared_binaries() -> list[str]:
 
 # ═══════════════════════ السقاطة (الخطّاف الذي يخضرّ) ═══════════════════════
 
-def read_baseline() -> dict[str, int]:
+def _baseline_norm(obj: dict | None) -> dict[str, dict]:
+    """**القارئُ يطبّع الصيغتين:** العدّادُ المجرّد (ما نُشر سابقاً) و(عدّادٌ + بصمةُ مجموعة)."""
+    out: dict[str, dict] = {}
+    for rel, v in ((obj or {}).get("counts") or {}).items():
+        out[rel] = {"count": int(v)} if isinstance(v, int) else {
+            "count": int(v["count"]), "commitment": v.get("commitment")}
+    return out
+
+
+def baseline_at(rev: str) -> dict[str, dict] | None:
+    """**العتبةُ من التزامٍ بعينه، لا من الشجرة العاملة (ثغرةُ ٣٩ رقم ٣أ/٣ب).**
+
+    كان `--pre-push` يقرأها من الشجرة ⇒ الدافعُ يرفع عتبتَه فيمرّ. الآن العتبةُ =
+    **المنشورُ على `origin/main`**، وما سينشره الدفعُ يُقارَن به ولا يرفعه.
+    """
+    r = _git("show", f"{rev}:{REL_BASELINE}")
+    if r.returncode != 0:
+        return None                       # غيرُ موجود ⇒ غيرُ مقروء (يُسقط)
+    try:
+        return _baseline_norm(json.loads(r.stdout))   # **فارغٌ شرعاً ≠ غيرُ مقروء**: {} = صفرُ دَين
+    except (json.JSONDecodeError, TypeError, KeyError):
+        return None
+
+
+def baseline_audit(ref: str) -> int:
+    """**مقارنةُ عتبةٍ بمفتاحٍ صفر:** خطُّ الأساس في هذه الشجرة مقابل خطٍّ منشورٍ في `ref`.
+
+    لا مانيفستَ ولا مفتاحَ ولا دفعَ — **ملفّان مُتتبَّعان يُقارَنان**، ولذلك موضعُها في `main()`
+    **قبل** أيّ فرعٍ يعتمد على الأدلّة. وكانت بعدها ⇒ في CI (بلا مانيفست) يخرج البرنامجُ من
+    فرع «السطح العامّ» قبل أن يبلغها، فتُطبع «PASS (بما أُمكن فحصُه)» على عتبةٍ مرفوعة
+    (مراجعة ٤٠، البند ١ — مقيسٌ في السجلّ وفي نسخةٍ نظيفة).
+    """
+    base = baseline_at(ref)
+    if base is None:
+        # عتبةٌ غيرُ مقروءة ⇒ لا أستبدلها بخطّ الشجرة العاملة، ولا أمرّ صامتاً.
+        print(f"⛔ BLOCK — لا أساسَ مقروءاً من {ref} ⇒ لا أُثبت شيئاً "
+              "(بوّابةٌ لا تستطيع العمل لا تمرّ)")
+        return 2
+    here = read_baseline()
+    bad_rows = ratchet_violations(here, base, f"خطُّ الأساس المدفوع مقابل {ref}")
+    if bad_rows:
+        print(f"⛔ BLOCK — خطُّ الأساس في هذه الشجرة يرفع العتبةَ عن {ref}:")
+        for b in bad_rows[:25]:
+            print("   " + b)
+        return 1
+    print(f"PASS — خطُّ الأساس لا يرفع عتبةً عن {ref} "
+          f"({sum(v['count'] for v in here.values())} ظهوراً مُعلَناً، بلا مفتاحٍ ولا أدلّة)")
+    return 0
+
+
+def read_baseline() -> dict[str, dict]:
     if not BASELINE.exists():
         return {}
-    return dict(json.loads(BASELINE.read_text(encoding="utf-8"))["counts"])
+    try:
+        return _baseline_norm(json.loads(BASELINE.read_text(encoding="utf-8")))
+    except (json.JSONDecodeError, TypeError, KeyError):
+        return {}
 
 
-def write_baseline(deny: set[str]) -> int:
-    counts = counts_by_file(deny)
+def _commitment(fps: set[str]) -> str:
+    """**بصمةُ المجموعة** (مُفتَّحةٌ بالمفتاح): تكشف تبديلَ قيمةٍ بأخرى عند العدّاد نفسِه،
+    ولا تُجرَد بلا مفتاح ⇒ يجوز نشرُها في خطّ الأساس العامّ."""
+    return hmac.new(load_key(), "\n".join(sorted(fps)).encode(), hashlib.sha256).hexdigest()[:16]
+
+
+def counts_with_commitment(deny: set[str], files: list[str] | None = None) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for rel in (files if files is not None else tracked_text_files()):
+        txt = _text_of_rel(rel)
+        if txt is None:
+            continue
+        hits = find_in_text(txt, deny)
+        if hits:
+            out[rel] = {"count": len(hits),
+                        "commitment": _commitment({fingerprint(t) for t, _ in hits})}
+    return out
+
+
+def write_baseline(deny: set[str], accept_increase: bool = False) -> int:
+    """**ولا يُرفع أبداً (ثغرةُ ٣٩ رقم ٣):** كتابةٌ تزيد عدداً أو تبدّل بصمةً عند العدّ نفسِه
+    تُرفَض؛ وما عدا ذلك يجوز (التخفيضُ بالتصحيح لا بالمسح)."""
+    counts = counts_with_commitment(deny)
+    cur = read_baseline()
+    raised = ratchet_violations(counts, cur, "كتابةُ خطّ الأساس")
+    if raised and not accept_increase:
+        print("⛔ BLOCK — خطُّ الأساس لا يُرفع (القاعدة ١٢: لا يُعفى موضع، تُغيَّر القيمة):")
+        for b in raised[:25]:
+            print("   " + b)
+        print("   ⇒ وإن كان الرفعُ مقصوداً: --accept-increase \"السبب\" (والخطّافُ يمنع دفعه)")
+        return 1
     BASELINE.parent.mkdir(parents=True, exist_ok=True)
     BASELINE.write_text(json.dumps({
         "what": "خطُّ أساسِ الظهورات — **أعدادٌ فقط**: لا قيمةَ ولا بصمةَ مبلغٍ (فلا يُنشر ما يُجرَد)",
         "how": "python3 tools/amount_guard.py --baseline-write   # يُخفَّض بالتصحيح لا بالمسح",
         "rule": ("لا يُعفى موضع (القاعدة ١٢) — الخطُّ مؤقّتٌ يُخفَّض بإعادة كتابة القيم، "
                  "ولا يُرفع أبداً: أداةُ --build لا تلمسه"),
-        "counts": dict(sorted(counts.items())),
-        "total": sum(counts.values()),
+        "counts": {k: v for k, v in sorted(counts.items())},
+        "total": sum(v["count"] for v in counts.values()),
     }, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    print(f"خطُّ الأساس: {sum(counts.values())} ظهوراً في {len(counts)} ملفّاً ⇒ {_shown(BASELINE)}")
+    print(f"خطُّ الأساس: {sum(v['count'] for v in counts.values())} ظهوراً في {len(counts)} ملفّاً ⇒ {_shown(BASELINE)}")
     return 0
 
 
-def ratchet_violations(counts: dict[str, int], base: dict[str, int], where: str) -> list[str]:
-    """**السقاطة:** تسقط عند زيادةٍ أو ملفٍّ جديد، وتخضرّ فيما عداه ⇒ ينتهي حافزُ التجاوز."""
+def ratchet_violations(counts: dict[str, dict] | None, base: dict[str, dict] | None,
+                       where: str) -> list[str]:
+    """**السقاطة:** تسقط عند زيادةِ عددٍ · ملفٍّ جديد · **أو تبديلِ قيمةٍ بأخرى عند العدّ نفسِه**
+    (ببصمة المجموعة — وهو ما لا يراه عدّادٌ يقارن الأعدادَ وحدها)، وتخضرّ فيما عدا ذلك.
+
+    **وغيابُ العتبة أو العدّاد يُسقط باسمه ولا يُنهي البرنامج** (عطبٌ صنفيّ · الجولة ٦١):
+    `baseline_at()` تُعيد `None` شرعاً حين لا يكون خطُّ الأساس موجوداً في ذلك الالتزام (فرعٌ
+    أساسُه أقدمُ من الخطّ) — وكان `None` يُمرَّر إلى `.items()` فيسقط الخطّافُ بـ`AttributeError`
+    **قبل** أن يحكم، فكان يُقرأ **انهيارٌ** مكان **حُكمٍ**، ويمنع دفعاً مشروعاً بلا اسمِ سبب.
+    والقاعدةُ المعلنة: «غيرُ المقروء ليس نظيفاً» ⇒ **BLOCK بالاسم**.
+    """
+    if counts is None or base is None:
+        # **ولا يُخمَّن الدورُ من موضعِ الوسيط** (تصحيحٌ بعد قياس): في `--pre-push` يُنادى
+        # بهذه الدالّة مرّتان بترتيبين مختلفَي المعنى — فالأولُ هناك **خطُّ الأساس المنشورُ في
+        # الالتزام** لا «العدّاد»؛ فكان وسمُ «العدّاد» يُشير إلى غير موضعه. الوسمُ الآن دورٌ
+        # محايد، والموضعُ المُصلَح يُسمّيه `where` بنفسه.
+        return [f"⛔ مدخلٌ غيرُ مقروء في السقاطة (عتبةٌ أو عدّاد) ⇒ لا أُثبت نظافةَ الظهورات — "
+                f"«غيرُ المقروء ليس نظيفاً» (القاعدة ١٢) — {where}"]
     bad: list[str] = []
-    for rel, n in sorted(counts.items(), key=lambda x: -x[1]):
-        if rel not in base:
+    for rel, cur in sorted(counts.items(), key=lambda x: -x[1]["count"]):
+        b = base.get(rel)
+        n, n0 = cur["count"], (b or {}).get("count")
+        if b is None:
             bad.append(f"⛔ ملفٌّ جديدٌ يحمل ظهوراتٍ حقيقيّة: {rel} ({n}) — {where}")
-        elif n > base[rel]:
-            bad.append(f"⛔ زادت الظهوراتُ: {rel} {base[rel]} → {n} — {where}")
+        elif n > n0:
+            bad.append(f"⛔ زادت الظهوراتُ: {rel} {n0} → {n} — {where}")
+        elif n == n0 and b.get("commitment") and cur.get("commitment") != b["commitment"]:
+            bad.append(f"⛔ تبديلُ قيمةٍ بأخرى عند العدد نفسِه: {rel} ({n}) — {where}")
     return bad
 
 
@@ -455,34 +591,158 @@ def _git(*args: str, text: bool = True):
     return subprocess.run(["git", *args], cwd=str(ROOT), capture_output=True, text=text)
 
 
-def pushed_revs(refs: str) -> list[str]:
-    """**مراجعُ الدفع من `stdin`** — والنمطُ هو نمطُ `publish_guard` نفسُه حتى لا يرى حارسان مجموعتين.
+def _git_here(*args: str):
+    """git في **المستودع الذي أُنفِّذ فيه الأمر** (لا في جذر الأداة).
+
+    (لماذا: مسحُ التاريخ يقيس المستودعَ المقصود؛ ولو مشى على `ROOT` لكان مسحُ مستودعٍ آخر
+    يمرّ كأنّه مسحُ هذا ⇒ **فشلٌ مفتوحٌ صامت**.)
+    """
+    return subprocess.run(["git", *args], capture_output=True, text=True)
+
+
+class UnresolvedRange(RuntimeError):
+    """**ثغرةُ مراجعة ٣٩ رقم ٢:** رأسٌ بعيدٌ غيرُ مجلوب ⇒ `rev-list` يفشل ⇒ كان الخطأُ مُهمَلاً
+    فيمرّ الدفعُ `rc=0` بلا فحص. **مدىً لم أُثبته ليس مدىً نظيفاً.**"""
+
+
+REL_BASELINE = "docs/security/amount-baseline.json"
+
+
+# ── طبقةٌ واحدةٌ لسؤالٍ واحد: **ما يُنشَر؟** (مُحلِّلٌ واحد · وجهةٌ واحدة · قرارٌ واحد) ──
+HEX = set("0123456789abcdef")
+
+
+def _is_sha(s: str) -> bool:
+    """sha1 (٤٠ خانة) **وsha256 (٦٤)** — مقيسٌ أنّ git 2.54 على مستودعٍ `--object-format=sha256`
+    يرسل ٦٤ خانة، فاشتراطُ ٤٠ وحدَها يُسقط كلَّ دفعٍ `rc=2` (مقعدُ المعايير، مراجعة ٤١/٢)."""
+    return len(s) in (40, 64) and set(s.lower()) <= HEX
+
+
+def _remote_names() -> list[str]:
+    return _git("remote").stdout.split()
+
+
+def _zero(s: str) -> bool:
+    return set(s) <= {"0"}
+
+
+def parse_refs(stream: str) -> tuple[list[tuple[str, str]], int]:
+    """`stdin` مرّةً واحدة ⇒ (مراجعُ (محلي, بعيد), عددُ الأسطر التي **لم أقرأها**).
+
+    **«لم أقرأ» ≠ «لا شيءَ يُدفع»:** شكلُ سطر `pre-push` أربعةُ حقولٍ بالضبط، فكلُّ سطرٍ آخر
+    (مقصوصٌ أو مبتور) **يُعَدّ** فاسداً لا مُهمَلاً — ومجرى مقصوص (القاعدة ١٩) يُسقَط مُغلَقاً
+    لا أن يمرّ بمدىً فارغٍ يُقرأ «لا شيءَ يُنشر». ومُحلِّلٌ واحدٌ يعني أنّ `pushed_revs` و
+    `_local_heads` لا يمكن أن يفترقا على الحالة نفسها. (مقعدا المواصفة والبنية، مراجعة ٤١.)
+    """
+    pairs: list[tuple[str, str]] = []
+    bad = 0
+    for line in stream.splitlines():
+        if not line.strip():
+            continue
+        p = line.split()
+        # **الحقلُ الأول ليس مرجعاً دائماً** — مقيسٌ من git نفسِه (لا من ظنٍّ):
+        #   `git push origin HEAD:refs/heads/x` ⇒ `HEAD <sha> refs/heads/x <zeros>`
+        #   `git push origin <sha>:refs/heads/y` ⇒ `<sha> <sha> refs/heads/y <zeros>`
+        #   `git push origin --delete x`        ⇒ `(delete) <zeros> refs/heads/x <sha>`
+        # واشتراطُ `refs/` في الحقل الأول **رفض ثلاثَ صيغٍ مشروعة** بـ`rc=2` (وفيها الحذفُ الذي
+        # ادّعيتُ أنّه يمرّ — فسقط الادّعاء بالقياس). فيُفحَص **الشكل**: حقلان sha صحيحان، ومقصدٌ مرجع.
+        if len(p) != 4 or not p[2].startswith("refs/") or not _is_sha(p[1]) or not _is_sha(p[3]):
+            bad += 1
+            continue
+        pairs.append((p[1], p[3]))
+    return pairs, bad
+
+
+def _rev_list(args: list[str], what: str) -> list[str]:
+    r = _git("rev-list", *args)
+    if r.returncode != 0:
+        last = (r.stderr.strip().splitlines() or ["rev-list فشل"])[-1][:120]
+        raise UnresolvedRange(f"{what} :: {' '.join(args)} :: {last}")
+    return r.stdout.split()
+
+
+def _unpublished(local_sha: str, remote_sha: str, remote: str | None) -> list[str]:
+    """ما يُنشَر من مرجعٍ واحد: **مقيساً مقابل وجهة الدفع** لا مقابل كلّ الريموتات.
+
+    (هذا إغلاقُ فتحٍ أدخلته هذه الجولة: `--not --remotes` **تطرح مراجعَ كلِّ ريموت**، فالتزامٌ
+    يعرفه ريموتٌ ثانٍ — نسخةٌ احتياطيّة — يُقرأ «منشوراً» ⇒ `PASS` بينما الدفعُ إلى `origin`
+    ينشره. الفراغُ يجب أن يُقاس مقابل **الوجهة** وحدَها. مقعدُ البنية، مراجعة ٤١.)
+
+    وكلُّ اشتقاقٍ متدهورٍ يُعلَن بجملة — لا صمتٌ: العدّادُ في سطر النجاح لا يجوز أن يوصف
+    بأنّه «ما فُحص» إن كان مدىً مُستبدَلاً. (مقعدُ المعايير، ٤١.)
+    """
+    if _zero(local_sha):
+        return []                                    # حذفُ فرع: لا شيءَ يُنشَر
+    if not _zero(remote_sha):
+        r = _git("rev-list", f"{remote_sha}..{local_sha}")
+        if r.returncode == 0:
+            return r.stdout.split()                  # الوجهةُ تعرف الأساس ⇒ المدى مضبوطٌ بالتعريف
+    if remote and remote in _remote_names():
+        # **بدون نجمة:** `rev-list <sha> --not refs/remotes/R/*` **لا يوسّع النجمةَ كمرجع**
+        # (تُقرأ `pathspec` ⇒ مدىً فارغٌ كاذب — مقيسٌ في sandbox) ⇒ تُعدَّد مراجعُ الوجهة صراحةً.
+        tracked = _git("for-each-ref", "--format=%(objectname)", f"refs/remotes/{remote}/").stdout.split()
+        if tracked:
+            return _rev_list([local_sha, "--not", *tracked], f"ما لم تعرفه وجهةُ الدفع `{remote}`")
+        # اسمُ ريموتٍ **معروف** ولم تُجلَب مراجعُه ⇒ لا أُثبت المدى، والوصفةُ موجودة (fetch).
+        raise UnresolvedRange(f"وجهةُ الدفع `{remote}` معروفةٌ ولم تُجلَب مراجعُها ({local_sha[:8]})")
+    if remote:
+        # **وجهةٌ مُسمّاةٌ لا أعرفها محليّاً** (رابطٌ أو مسارٌ في `$1`): لا مراجعَ لها نستثنيها،
+        # **ولا `--not --remotes`** — فهي تطرح مراجعَ ريموتٍ آخر (نسخةٍ احتياطيّة) فتُفرغ المدى
+        # ⇒ `PASS` كاذب (قِيس: ١ ← ٠ التزام). فيُفحَص **كلُّ ما يمكن أن يُنشَر**، ويُعلَن مع الوصفة.
+        print(f"⚠ الوجهة `{remote}` ليست اسمَ ريموتٍ معروفاً محليّاً ⇒ المدى = كلُّ ما يمكن أن يُنشَر "
+              f"({local_sha[:8]}) بلا استثناء — وللدقّة: أضِفها ريموتاً باسم (`git remote add`) "
+              f"وادفع بالاسم. يُعلن ولا يُخفى.")
+        return _rev_list([local_sha], "المدى الكامل لوجهةٍ مُسمّاةٍ لا أعرفها محليّاً")
+    # **ولا وجهةَ مُعلَنة** (خطّافٌ قديمٌ لا يمرّرها): التقريبُ بطرح مراجع الريموتات المعروفة —
+    # **ويُعلَن** لأنّه قد يُخفي ما تعرفه وجهةٌ أخرى (وهو الحدُّ المقيس في هذه الطبقة).
+    print("⚠ لا وجهةَ دفعٍ مُعلَنة ⇒ المدى تقريباً بطرح مراجع الريموتات المعروفة (قد يُخفي ما "
+          "تعرفه وجهةٌ أخرى) — للدقّة: مرّر وجهةَ الدفع. يُعلن ولا يُخفى.")
+    return _rev_list([local_sha, "--not", "--remotes"], "احتياطُ --not --remotes (بلا وجهةٍ مُعلَنة)")
+
+
+def pushed_revs(refs: str, remote: str | None = None) -> list[str]:
+    """**مراجعُ الدفع من `stdin`** — طبقةٌ واحدةٌ **هنا**: `parse_refs` ثم `_unpublished` لكلّ مرجع.
+
+    **وحدُّها المُعلَن (دَينٌ بمالك):** `publish_guard` ما زال يحمل مُحلِّلاً ثانياً ومدىً لا يعرف وجهةَ
+    الدفع ⇒ الحارسان **قد يريان مجموعتين** (مقعدُ البنية، مراجعة ٤١/٣: قِيس ٠ التزامات مقابل ١ على
+    التزامٍ تعرفه نسخةٌ احتياطيّة). توحيدُهما في وحدةٍ مشتركة دفعةٌ قائمةٌ بذاتها.
+    (وكانت هنا دعوى «حتى لا يرى حارسان مجموعتين» — **أسقطها القياسُ فصُحّحت**.
 
     (وهنا كان العطبُ: `--pre-push` في الإصدار الثاني **لا يقرأ `stdin` إطلاقاً** ⇒ لا يرى التزاماً
-    وسيطًا مثل `e819e65` الذي حمل المبلغ.)
+    وسيطًا مثل `e819e65` الذي حمل المبلغ. وكان سؤالُ «ما لم يعرفه الريموت» **ثلاثَ نسخٍ جزئيّة**
+    بعباراتٍ مختلفة ⇒ أُعيد إلى طبقةٍ واحدة: `parse_refs` ثم `_unpublished` لكلّ مرجع.)
     """
+    pairs, _bad = parse_refs(refs)
     revs: set[str] = set()
-    for line in refs.splitlines():
-        parts = line.split()
-        if len(parts) < 4:
-            continue
-        local_sha, remote_sha = parts[1], parts[3]
-        if set(local_sha) <= {"0"}:
-            continue                                  # حذفُ فرع
-        if set(remote_sha) <= {"0"}:
-            # **فرعٌ جديد: المدى = ما لا يعرفه الريموت، لا كلُّ التاريخ.**
-            # `rev-list <sha>` وحدَه يعيد ١٤٠٧ التزاماتٍ هنا ⇒ يُفحَص تاريخٌ **منشورٌ سلفاً**
-            # ⇒ يتحوّل الدَّينُ المُعلَن في التزاماتٍ قديمةٍ إلى **منعٍ دائم**. و`--not --remotes`
-            # هو التعريفُ الصحيح لِـ«ما يُنشَر جديداً» (وما يعرفه الريموت منشورٌ بالفعل).
-            rng = [local_sha, "--not", "--remotes"]
-        else:
-            rng = [f"{remote_sha}..{local_sha}"]
-        r = _git("rev-list", *rng)
-        revs.update(r.stdout.split())
+    for local_sha, remote_sha in pairs:
+        revs.update(_unpublished(local_sha, remote_sha, remote))
     return sorted(revs)
 
 
-def pushed_counts(deny: set[str], revs: list[str]) -> dict[str, int]:
+def _local_heads(refs: str) -> list[str]:
+    return [local for local, _ in parse_refs(refs)[0] if not _zero(local)]
+
+
+def _range_from_heads(heads: list[str], remote: str | None = None) -> list[str] | None:
+    """**المدى من المراجع المدفوعة أنفسِها — لا من `HEAD`** (مراجعة ٤٠، البند ٢).
+
+    كان الاحتياطُ يشترط `rev-list HEAD --not --remotes`: فرعٌ متسرّبٌ يُدفع و`HEAD` يحمل
+    التزاماً نظيفاً ⇒ **فحصَ فرعاً آخر** ومرّ التسرّبُ `rc=0` (مقيسٌ في sandbox). و`HEAD` ليس
+    ما يُدفع؛ والمراجعُ على `stdin` هي المصدرُ الوحيدُ لِما يُدفع ⇒ غيابُها عطبُ سباكةٍ
+    **يُسقَط مُغلَقاً**، لا يُخمَّن له بديل. والمدى هنا يُقاس **مقابل وجهة الدفع** كذلك.
+    """
+    if not heads:
+        return None
+    revs: set[str] = set()
+    for sha in heads:
+        try:
+            revs.update(_unpublished(sha, "0" * 40, remote))
+        except UnresolvedRange:
+            return None
+    return sorted(revs)
+
+
+def pushed_counts(deny: set[str], revs: list[str]) -> dict[str, dict]:
     """**كلُّ blob يُدفع** (لا الشجرةُ العاملة): أحدثَ ظهورٍ لكلّ مسار داخل المدى.
 
     والقارئُ **لا يفترض أنّ المدفوعَ نصّ**: أيُّ blobٍ لا يُفكّ بـ`utf-8` يُتخطّى بصمتٍ مقصود
@@ -490,7 +750,7 @@ def pushed_counts(deny: set[str], revs: list[str]) -> dict[str, int]:
     أسقط هذا الحارسَ بـ`UnicodeDecodeError`** لأنّ `text=True` يفترض نصًّا — والخطّافُ منعه
     (fail-closed) فأمسك العطبَ قبل أن يخرج.
     """
-    counts: dict[str, int] = {}
+    counts: dict[str, dict] = {}
     for rev in revs:
         names = _git("diff-tree", "-r", "--no-commit-id", "--name-only", "--root", rev).stdout.split()
         for rel in names:
@@ -503,9 +763,12 @@ def pushed_counts(deny: set[str], revs: list[str]) -> dict[str, int]:
                 txt = r.stdout.decode("utf-8")
             except UnicodeDecodeError:
                 continue
-            n = len(find_in_text(txt, deny))
-            if n:
-                counts[rel] = max(counts.get(rel, 0), n)
+            hits = find_in_text(txt, deny)
+            if hits:
+                cur = {"count": len(hits),
+                       "commitment": _commitment({fingerprint(t) for t, _ in hits})}
+                if rel not in counts or cur["count"] > counts[rel]["count"]:
+                    counts[rel] = cur          # أحدثُ ظهورٍ للمسار داخل المدى
     return counts
 
 
@@ -687,6 +950,72 @@ def proof_inject() -> int:
 
 # ═══════════════════════ الواجهة ═══════════════════════
 
+def history_forms(deny: set[str] | None = None, repo: Path | None = None) -> tuple[int, int]:
+    """**مسحُ كلّ تاريخ المستودع** (`--all --objects`) عن صيغِ مبالغَ حقيقيّة.
+
+    (لماذا: تطهيرُ الملفّات لا يكفي — المفتاحُ وبصماتُه ونسخُ الفيكسترات في *التزاماتٍ سابقة*
+    تبقى قابلةً للاسترجاع ما لم تُكشف الشجرةُ كلُّها. والفرقُ عن `--pre-push` أنّ هذا لا يسأل عن
+    مدى دفعٍ بل عن التاريخ نفسِه ⇒ هو الفحصُ الصالحُ بعد **إعادة كتابة** لا مدى لها.)
+
+    يُعيد (عددُ الـblobs، عددُ الصيغ) — **أعداداً لا نصوصاً**.
+    """
+    deny = load_deny() if deny is None else deny
+    # **سطحُ المسح يُقاس لا يُفترض (مراجعةُ ٤٣):** كان `--history-audit` يقرأ المستودعَ الحاليّ أبداً
+    # وإن مُرِّر `--mirror` ⇒ «PASS» عن سطحٍ لم يُطلَب فحصُه. أُثبت بزرعٍ حقيقيّ: rc=0 والعددُ نفسُه.
+    prefix = ["-C", str(repo)] if repo is not None else []
+    if repo is not None:
+        probe = subprocess.run(["git", "-C", str(repo), "rev-parse", "--git-dir"],
+                               capture_output=True, text=True)
+        if probe.returncode != 0:
+            raise UnresolvedRange(f"سطحُ المسح المُعلَن ليس مستودعاً ({_shown(Path(repo))}) ⇒ لا أمرّ")
+    # **سطحٌ واحدٌ للقراءة والكتابة:** بلا وجهةٍ يُقرأ المستودعُ الذي أُنفِّذ فيه الأمر (سلوكُ
+    # `_git_here` نفسُه)، وبوجهةٍ `-C <المسار>`. (وأوّلُ صياغةٍ لي استعملت `_git(*)` أي `cwd=ROOT`
+    # ⇒ أشارت القراءةُ إلى مستودعٍ آخر، فسقط اختبارُ «كلّ التاريخ يُفحَص» — قِيسَ لا تُخُمّ.)
+    listing = subprocess.run(["git", *prefix, "rev-list", "--all", "--objects"],
+                             capture_output=True, text=True)
+    if listing.returncode != 0:
+        raise UnresolvedRange("rev-list --all --objects فشل ⇒ لا تاريخَ أُثبته")
+    shas = sorted({line.split()[0] for line in listing.stdout.splitlines() if line.split()})
+    batch = subprocess.run(["git", *prefix, "cat-file", "--batch"], input="\n".join(shas).encode(),
+                           capture_output=True)
+    if batch.returncode != 0:
+        raise UnresolvedRange(f"cat-file --batch فشل (rc={batch.returncode}) ⇒ مسحٌ لم يقع ⇒ لا أمرّ")
+    data, i, seen, nblobs, forms = batch.stdout, 0, 0, 0, set()
+    while i < len(data):
+        nl = data.find(b"\n", i)
+        if nl < 0:
+            break
+        head = data[i:nl].decode("utf-8", "replace").split()
+        if len(head) < 3:
+            break
+        try:
+            size = int(head[2])
+        except ValueError:
+            break
+        body = data[nl + 1:nl + 1 + size]
+        if len(body) != size:
+            break
+        i = nl + 1 + size + 1
+        seen += 1
+        if head[1] != "blob":
+            continue
+        nblobs += 1
+        try:
+            text = body.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        if deny:
+            for tok, _ in find_in_text(text, deny):
+                forms.add(tok)
+    # **قيدٌ واحدٌ يُغني عن ثلاثةِ شروطٍ دفاعيّة:** قُرئ كلُّ كائنٍ؟ وإلّا فالمسحُ ناقصٌ (كائنٌ مفقود،
+    # تدفّقٌ مقصوص، أو ترويسةٌ غيرُ متوقَّعة) ⇒ يُسقط. و«الصفرُ علامةُ قياسٍ ميّت»: صفرُ blobٍ ليس نظافة.
+    if seen != len(shas):
+        raise UnresolvedRange(f"قُرئ {seen} كائناً من {len(shas)} ⇒ مسحٌ ناقصٌ أو كائنٌ مفقود ⇒ لا أمرّ")
+    if nblobs == 0 and len(shas):
+        raise UnresolvedRange("صفرُ blobٍ مقروء ⇒ قياسٌ ميّتٌ لا نظافةٌ ⇒ لا أمرّ")
+    return nblobs, len(forms)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="حارسُ المبالغ: لا مبلغَ حقيقيّ في مستودعٍ عامّ")
     ap.add_argument("--build", action="store_true")
@@ -695,11 +1024,24 @@ def main(argv=None) -> int:
     ap.add_argument("--ratchet", action="store_true", help="السقاطةُ على الشجرة (ملفّاً ملفّاً)")
     ap.add_argument("--baseline-write", action="store_true", help="كتابةُ خطّ الأساس (أعدادٌ فقط)")
     ap.add_argument("--tracking-audit", action="store_true", help="فحصُ الإهمال واقعاً (بلا سرّ)")
+    ap.add_argument("--accept-increase", metavar="REASON", default="",
+                    help="رفعُ خطّ الأساس عمداً (يُعلَن؛ والخطّاف يُسقط دفعه)")
+    ap.add_argument("--baseline-audit", metavar="BASE_REF", default="",
+                    help="سطحٌ عامّ بلا أدلّة: خطُّ الأساس المدفوع لا يتجاوز الأساس (بلا مفتاح)")
+    ap.add_argument("--history-audit", action="store_true",
+                    help="مسحُ **كلّ تاريخ المستودع** عن صيغِ مبالغَ حقيقيّة (لا يسأل عن مدى)")
+    ap.add_argument("--history-rewrite", metavar="OLD_SHA", default="",
+                    help="إعادةُ كتابةٍ مُعلَنة: تُثبت الأصلَ في النسخة الاحتياطيّة ثم تمسح التاريخ كلَّه")
+    ap.add_argument("--mirror", metavar="PATH", default="",
+                    help="نسخةٌ مرآتيّةٌ احتياطيّةٌ يُثبَت منها أصلُ إعادة الكتابة")
     ap.add_argument("--probe", metavar="REL", default="", help="فحصُ ملفٍّ واحد بمكانه النسبيّ")
     ap.add_argument("--ci", action="store_true", help="سطحٌ عامٌّ بلا أدلّة **بالبناء** (يُعلن ولا يُخفي)")
     ap.add_argument("--extra", default="")
     ap.add_argument("--inject", action="store_true", help="برهانُ السقوط (سمٌّ من المصدر · سطحان)")
     ap.add_argument("--json", action="store_true", help="المخرَجُ الآليُّ الكامل (لا يُقصّ)")
+    ap.add_argument("--remote", default=None,
+                    help="اسمُ وجهة الدفع كما يمرّرها الخطّاف من `$1` — المدى يُقاس مقابلها لا "
+                         "مقابل كلّ الريموتات؛ وغيابُها يُعلَن تقريباً لا يُخفى.")
     args = ap.parse_args(argv)
 
     if args.tracking_audit:
@@ -715,6 +1057,12 @@ def main(argv=None) -> int:
         return build([x for x in args.extra.split(",") if x.strip()])
     if args.inject:
         return proof_inject()
+    if args.baseline_audit:
+        # **قبل كلّ ما يعتمد على الأدلّة** (مراجعة ٤٠، البند ١): كانت الكتلةُ **بعد** فرعِ
+        # «السطح العامّ»، وذلك الفرعُ **يُرجِع** في CI (لا مانيفستَ بالتصميم) ⇒ تُطبَع
+        # «PASS (بما أُمكن فحصُه)» بلا أن تُقرأ عتبةٌ أصلاً. وهي لا تحتاج مفتاحاً: **ملفّان
+        # مُتتبَّعان يُقارَنان** ⇒ لا عُذرَ لوقوعها خلف بوابةٍ تعتمد على سرّ.
+        return baseline_audit(args.baseline_audit)
 
     deny = load_deny()
     if deny is None and not args.ci:
@@ -734,57 +1082,128 @@ def main(argv=None) -> int:
     if args.probe:
         return probe(args.probe, deny)
     if args.baseline_write:
-        return write_baseline(deny)
+        return write_baseline(deny, accept_increase=bool(args.accept_increase))
+    if args.history_audit or args.history_rewrite:
+        if args.history_rewrite:
+            if not args.mirror:
+                print("⛔ BLOCK — إعادةُ كتابةٍ مُعلَنةٌ بلا نسخةٍ احتياطيّةٍ أُثبت منها الأصل ⇒ لا أمرّ")
+                return 2
+            proof = _git("-C", args.mirror, "cat-file", "-e", f"{args.history_rewrite}^{{commit}}")
+            if proof.returncode != 0:
+                print(f"⛔ BLOCK — الأصلُ المُعلَن {args.history_rewrite[:12]} غيرُ موجودٍ في النسخة "
+                      f"الاحتياطيّة ⇒ إعادةُ كتابةٍ لا تُثبت أصلَها")
+                return 2
+            print(f"✓ أصلُ إعادة الكتابة مُثبَتٌ في النسخة الاحتياطيّة: {args.history_rewrite[:12]}")
+        if deny is None:
+            if args.ci:
+                print("⚠ سطحٌ عامٌّ بلا أدلّة: مسحُ التاريخ لا يُقاس بلا مفتاح ⇒ **يُعلن ولا يُخفى**")
+                return 0
+            print("⛔ BLOCK — لا أدلّةَ (مفتاح/مانيفست) ⇒ لا أستطيع مسحَ التاريخ ⇒ لا أُثبت شيئاً")
+            return 2
+        scan_repo = Path(args.mirror) if args.mirror else None
+        print(f"· سطحُ المسح: {_shown(scan_repo) if scan_repo else 'المستودع الحالي'}")
+        nblobs, forms = history_forms(deny, repo=scan_repo)
+        if forms:
+            print(f"⛔ BLOCK — التاريخُ يحمل {forms} صيغةً لمبالغَ حقيقيّة داخل {nblobs} blobاً "
+                  f"(النصوصُ لا تُطبع؛ استعمل `--json` للأعداد فقط)")
+            return 5
+        print(f"PASS — مسحُ كلّ التاريخ: {nblobs} blobاً · ولا صيغةَ مبلغٍ حقيقيّ واحدة")
+        return 0
+    # **الفحصانِ فوق كلّ تفريع (مراجعة ٤٤):** كانا بعد `return` فرعَي `--pre-push` و`--ratchet`
+    # ⇒ الخطّافُ لا يبلغهما أبداً، ومانيفستٌ متعفّن يمرّ من بوابة الدفع بلا سقوط.
+    if pre_push_checks():
+        return 1
     if args.pre_push:
         refs = sys.stdin.read()
-        revs = pushed_revs(refs)
+        if not refs.strip():
+            # **فارغٌ شرعاً:** git يُنفّذ `pre-push` و`stdin` فارغٌ حين لا مرجعَ يُحدَّث (دفعٌ
+            # لفرعٍ متزامن — مقيسٌ: bytes=0). فلا شيءَ يُنشر ⇒ لا شيءَ أُثبته، **ويُعلَن**.
+            # (كان يسقط `rc=2` ⇒ حافزُ `--no-verify` لعملٍ روتينيّ — وهو الصنفُ الذي حذّرت منه
+            # المراجعةُ في البند ٣. المقعدُ يمنع سقوطاً كاذباً، والمقعدُ الآخر يمنع مروراً كاذباً
+            # ⇒ والفصلُ بين الحالتين هو الجواب: **الفرقُ بين «لا شيءَ» و«لم أقرأ»**.)
+            print("PASS — لا مراجعَ على stdin ⇒ دفعٌ لا يُحدّث مرجعاً ⇒ لا شيءَ يُنشر (يُعلن)")
+            return 0
+        _pairs, _bad = parse_refs(refs)
+        if _bad or not _pairs:
+            print(f"⛔ BLOCK — stdin غيرُ فارغٍ ولم أُقرأ منه مرجعاً ({_bad} سطراً خارج شكل"
+                  f" `pre-push` رباعيّ الحقول) ⇒ «لم أقرأ» ليست «لا شيءَ يُنشر»"
+                  f" (القاعدة ١٩: المجرى المقصوص يُسقَط مُغلَقاً)")
+            print("   ⇒ الخطّافُ يمرّر أربعةَ حقولٍ في السطر (مقيسٌ في دفعٍ حقيقيّ):"
+                  " أعد الدفع، أو `--ratchet` للفحص بلا دفع.")
+            return 2
+        try:
+            revs = pushed_revs(refs, args.remote)
+        except UnresolvedRange as e:
+            declared = os.environ.get("AMOUNT_GUARD_HISTORY_REWRITE", "").strip()
+            if declared:
+                print("⚠ إعادةُ كتابةِ التاريخ **مُعلَنة**: لا مدى لها ⇒ يُفحَص التاريخُ كلُّه بدلاً منه"
+                      " (بإعلانٍ لا بصمت)")
+                return main(["--history-rewrite", declared,
+                             "--mirror", os.environ.get("AMOUNT_GUARD_MIRROR", "")])
+            salvaged = _range_from_heads(_local_heads(refs), args.remote)  # المراجعُ نفسُها، لا `HEAD`
+            if salvaged:
+                print(f"⚠ المراجعُ غيرُ محلولة ({e}) ⇒ اشتُقّ المدى من المراجع المدفوعة نفسِها "
+                      f"({len(salvaged)} التزاماً لم تعرفها وجهةُ الدفع) — يُعلن ولا يُخفى")
+                revs = salvaged
+            else:
+                print(f"⛔ BLOCK — لم أُثبت نظافةَ المدى ⇒ لا أمرّ (ثغرةُ ٣٩ رقم ٢): {e}")
+                print("   ⇒ `git fetch <وجهة الدفع>` (وإن كانت رابطاً: أضِفها ريموتاً باسمٍ "
+                      "`git remote add <اسم> <رابط>` ثم `git fetch <اسم>`) وأعِد الدفع:"
+                      " مدىً غيرُ محلولٍ ليس مدىً نظيفاً.")
+                return 2
         if not revs:
-            print("⚠ لا مراجعَ مدفوعة على stdin ⇒ لا شيءَ يُفحص (ولا يُقال PASS على لا شيء)")
+            # **الفارغُ شرعاً ≠ غيرُ المقروء** (مراجعة ٤٠/٣): مدىً **حُلّ** فارغاً قياسٌ يقول
+            # «لا التزامَ جديداً يُنشر» — فرعٌ جديدٌ عند التزامٍ منشورٍ أصلاً، أو **حذفُ فرع** —
+            # فيُمرّ بإعلانٍ لا بسقوط؛ والسقوطُ يبقى لحالةٍ واحدة: **فشلُ حلّ المدى** (أعلاه).
+            print("PASS — المدى فارغٌ **بالقياس مقابل وجهة الدفع**: لا التزامَ جديداً يُنشر "
+                  "(فرعٌ تعرف الوجهةُ أساسَه، أو حذفُ فرع) ⇒ لا شيءَ يُنشر فلا شيءَ أُثبته")
             return 0
         counts = pushed_counts(deny, revs)
-        bad = ratchet_violations(counts, read_baseline(), f"دفعُ {len(revs)} التزاماً")
+        base = baseline_at("origin/main")
+        if base is None:
+            # **البابُ ٣أ/٣ب (أمسكه مقعدان):** كان يسقط إلى خطّ الشجرة العاملة ⇒ الدافعُ يضع عتبتَه.
+            print("⛔ BLOCK — عتبةُ origin/main غيرُ مقروءة ⇒ لا أستبدلها بخطّ الشجرة العاملة "
+                  "(العتبةُ ممن نُشر لا ممّا في يد الدافع) ⇒ `git fetch origin` ثم أعِد الدفع")
+            return 2
+        bad = ratchet_violations(counts, base, f"دفعُ {len(revs)} التزاماً مقابل origin/main")
+        for head in _local_heads(refs):
+            pushed_base = baseline_at(head)
+            bad += ratchet_violations(pushed_base, base, f"خطُّ الأساس المنشورُ في {head[:8]}")
         if bad:
             print("⛔ BLOCK — الدفعُ يحمل ظهوراتٍ لمبالغَ حقيقيّة (نصوصٌ لا تُطبع):")
             for b in bad[:25]:
                 print("   " + b)
             print("   ⇒ صحّح القيمةَ أو خفّض خطَّ الأساس بعد إعادة الكتابة (القاعدة ١٢: لا يُعفى موضع)")
             return 1
-        print(f"PASS — مدى الدفع ({len(revs)} التزاماً) لا يزيد ظهوراً واحداً على خطّ الأساس")
+        print(f"PASS — مدى الدفع ({len(revs)} التزاماً) لا يزيد ظهوراً واحداً على خطّ الأساس، "
+              f"ولا بصمةَ مجموعةٍ تبدّلت")
         return 0
     if args.ratchet:
-        counts = counts_by_file(deny)
+        counts = counts_with_commitment(deny)
         bad = ratchet_violations(counts, read_baseline(), "الشجرةُ العاملة")
         if bad:
             print("⛔ BLOCK — الشجرةُ تحمل ظهوراتٍ لمبالغَ حقيقيّة:")
             for b in bad[:25]:
                 print("   " + b)
             return 1
-        print(f"PASS — لا ملفَّ تجاوز خطَّ الأساس ({sum(counts.values())} ظهوراً مُعلَنٌ في "
+        print(f"PASS — لا ملفَّ تجاوز خطَّ الأساس ({sum(v['count'] for v in counts.values())} ظهوراً مُعلَنٌ في "
               f"{len(counts)} ملفّاً كما هو)")
         return 0
 
-    if undeclared_binaries():
-        print("⛔ BLOCK — ثنائيٌّ مدفوعٌ تحت data/ أو digital/ بلا إعلان:")
-        for f in undeclared_binaries()[:10]:
-            print(f"   {f}")
-        return 1
-    stale = staleness()
-    if stale:
-        print(stale)
-        return 1
-    hits = counts_by_file(deny)
+    hits = counts_with_commitment(deny)
     if args.json:
-        # **القاعدة ١٣:** المخرَجُ الآليُّ لا يُقصّ أبداً. **والقيمةُ لا تُطبع**: الوحدةُ ملفٌّ+عددها.
-        print(json.dumps({"pass": not hits, "count": len(hits), "total": sum(hits.values()),
-                          "files": dict(sorted(hits.items()))},
+        # **القاعدة ١٥:** المخرَجُ الآليُّ لا يُقصّ أبداً. **والقيمةُ لا تُطبع**: الوحدةُ ملفٌّ+عددها.
+        print(json.dumps({"pass": not hits, "count": len(hits),
+                          "total": sum(v["count"] for v in hits.values()),
+                          "files": {k: v["count"] for k, v in sorted(hits.items())}},
                          ensure_ascii=False, indent=1))
         return 1 if hits else 0
     if hits:
         bad = ratchet_violations(hits, read_baseline(), "الشجرةُ العاملة")
         print("⛔ BLOCK — مبالغُ حقيقيّةٌ في ملفّاتٍ مُتتبَّعة (تُعرض الأعدادُ لا القيم):")
-        for rel, n in sorted(hits.items(), key=lambda x: -x[1])[:25]:
-            print(f"   {rel}  ←  {n} ظهوراً")
-        print(f"المجموع: {sum(hits.values())}")
+        for rel, v in sorted(hits.items(), key=lambda x: -x[1]["count"])[:25]:
+            print(f"   {rel}  ←  {v['count']} ظهوراً")
+        print(f"المجموع: {sum(v['count'] for v in hits.values())}")
         if bad:
             print("   ⇒ وفيها ما تجاوز خطَّ الأساس ⇒ امنع الدفع حتى التصحيح")
         return 1

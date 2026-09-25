@@ -70,17 +70,17 @@ def test_empty_selection_is_explicit():
 
 
 def _thousand_rows():
-    """Owner's live case: four rows of 9001.00, four different real types."""
+    """نفسُ حالة المالك (أربعُ حركاتٍ بالمبلغ نفسه، أربعةُ أنواع) — بقيمةٍ **صناعيّة** محجوزة."""
     return [
-        {"page": 7, "kind": "txn", "balance": Decimal("9001.00"),
+        {"page": 7, "kind": "txn", "balance": Decimal("9008.00"),
          "movement": Decimal("9001.00"), "side": "debit", "ok": True,
          "desc": "التحويل من الحساب الصراف الآلي الى حساب خالد",
          "date": None, "type": "تحويل صادر"},
-        {"page": 8, "kind": "txn", "balance": Decimal("9001.00"),
+        {"page": 8, "kind": "txn", "balance": Decimal("9013.00"),
          "movement": Decimal("9001.00"), "side": "credit", "ok": True,
          "desc": "ايداع الصراف الالي Cash Deposit CA-TUQBA ,TUQBA",
          "date": None, "type": "إيداع نقدي (صراف آلي)"},
-        {"page": 10, "kind": "txn", "balance": Decimal("9001.00"),
+        {"page": 10, "kind": "txn", "balance": Decimal("9003.00"),
          "movement": Decimal("9001.00"), "side": "credit", "ok": True,
          "desc": "تحويل FRACCT/ من IBOUOA", "date": None, "type": "تحويل وارد"},
         {"page": 10, "kind": "txn", "balance": Decimal("676.00"),
@@ -97,14 +97,14 @@ def _thousand_tools():
 def test_thousand_scenario_counts_by_type():
     """The exact question that once got a muddled answer: كم سحب ب1000؟"""
     out = _thousand_tools()["count_movements"].invoke(
-        {"tx_type": "سحب صراف آلي", "amount": 1000})
+        {"tx_type": "سحب صراف آلي", "amount": 9001})
     assert "العدد = 1" in out
-    out_all = _thousand_tools()["count_movements"].invoke({"amount": 1000})
+    out_all = _thousand_tools()["count_movements"].invoke({"amount": 9001})
     assert "العدد = 4" in out_all
 
 
 def test_thousand_scenario_search_lists_all_types():
-    out = _thousand_tools()["search_rows"].invoke({"amount": 1000})
+    out = _thousand_tools()["search_rows"].invoke({"amount": 9001})
     assert "4 حركة مطابقة" in out
     for typ in ("تحويل صادر", "إيداع نقدي (صراف آلي)",
                 "تحويل وارد", "سحب صراف آلي"):
@@ -118,7 +118,7 @@ def test_type_filter_substring_matches_family():
 
 def test_sum_by_type():
     out = _thousand_tools()["sum_movements"].invoke({"tx_type": "سحب صراف آلي"})
-    assert "المجموع = 9001.00" in out
+    assert "المجموع = 9,001.00" in out
 
 
 def test_trace_records_tool_selections():
@@ -161,6 +161,6 @@ def test_thousand_trace_union_covers_all_four():
 
     trace = []
     tools = {t.name: t for t in make_qa_tools(_thousand_rows(), trace=trace)}
-    tools["count_movements"].invoke({"tx_type": "سحب صراف آلي", "amount": 1000})
-    tools["search_rows"].invoke({"amount": 1000})
+    tools["count_movements"].invoke({"tx_type": "سحب صراف آلي", "amount": 9001})
+    tools["search_rows"].invoke({"amount": 9001})
     assert used_rows_from_trace(trace) == [1, 2, 3, 4]

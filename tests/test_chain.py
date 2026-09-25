@@ -36,8 +36,8 @@ def test_fresh_start_missing_opening_row_keeps_movement():
 
 def test_boundary_transaction_keeps_movement():
     # The owner's page-10 case: previous closing 676, transfer +1000 -> 1676.
-    rows = chain_derive([_r("تحويل FRACCT", "9001.00", "9001.00")],
-                        prev_balance=Decimal("676.00"))
+    rows = chain_derive([_r("تحويل FRACCT", "9001.00", "9677.00")],
+                        prev_balance=Decimal("676.00"))   # 676.00 + 9001.00
     assert rows[0]["opening"] is False
     assert rows[0]["derived_movement"] == Decimal("9001.00")
     assert rows[0]["side"] == "credit"
@@ -54,7 +54,7 @@ def test_boundary_carry_row_is_opening():
 def test_boundary_unverifiable_amount_is_anchor():
     # delta != printed amount → cannot verify the boundary (non-consecutive
     # page or misread): anchor as opening, never fabricate a movement.
-    rows = chain_derive([_r("سحب الصراف الآلي", "500.00", "9001.00")],
+    rows = chain_derive([_r("سحب الصراف الآلي", "500.00", "9003.00")],
                         prev_balance=Decimal("676.00"))
     assert rows[0]["opening"] is True
     assert rows[0]["derived_movement"] == Decimal("0")
@@ -62,7 +62,7 @@ def test_boundary_unverifiable_amount_is_anchor():
 
 def test_boundary_then_chain_continues():
     rows = chain_derive([
-        _r("تحويل FRACCT", "9001.00", "9001.00"),
+        _r("تحويل FRACCT", "9001.00", "9677.00"),
         _r("سحب الصراف الآلي DAMMAM", "9001.00", "676.00"),
         _r("سحب الصراف الآلي", "200.00", "476.00"),
     ], prev_balance=Decimal("676.00"))

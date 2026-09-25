@@ -21,8 +21,10 @@ jobs:
         with:
           fetch-depth: 0   # full history for the forensic scan
       - name: PII / real-data guard (tree + history + commit messages)
+        id: gate_pii
         run: python3 tools/publish_guard.py --tree --history --ci
       - name: Real-amount guard — a public surface without the manifest (declares what it checked)
+        id: gate_amount
         env:
           AMOUNT_GUARD_KEY: ${{ secrets.AMOUNT_GUARD_KEY }}
         run: python3 tools/amount_guard.py --ci
@@ -30,6 +32,7 @@ jobs:
       # verdict cannot drift with a version bump; a dev tool, never a runtime
       # dependency.
       - name: Static gate (names that never resolve, bindings never read)
+        id: gate_static
         run: |
           python3 -m pip install --quiet pyflakes==3.4.0
           python3 tools/static_gate.py
@@ -38,15 +41,40 @@ jobs:
       # silently (external audit, 2026-09-18). No local cache in CI — this reads
       # docs/claims.json and asserts the public documents still match it.
       - name: Public claims must match their derived snapshot
+        id: gate_claims
         run: python3 tools/render_claims.py --check
       - name: Lightweight suite (no ML deps — compile, lock, public claims, gate injection)
+        id: gate_suite
         run: |
-          python3 -m pip install --quiet pytest openpyxl==3.1.5
+          python3 -m pip install --quiet pytest openpyxl==3.1.5 PyYAML==6.0.3
           python3 -m pytest tests/test_compile_all.py \
                            tests/test_requirements_lock.py \
                            tests/test_public_claims.py \
-                           tests/test_gate_bites.py -q
+                           tests/test_gate_bites.py \
+                           tests/test_gate_registry.py \
+                           tests/test_secret_scan.py \
+                           tests/test_report_names.py \
+                           tests/test_turn_derivation.py \
+                           tests/test_hook_gates.py \
+                           tests/test_static_gate.py \
+                           tests/test_amount_guard.py \
+                           tests/test_ci_report.py \
+                           tests/test_answer_names_witness.py \
+                           tests/test_gate_goldens.py \
+                           tests/test_gate_flake_policy.py \
+                           tests/test_flake_ledger.py \
+                           tests/test_landing_probe.py \
+                           tests/test_eval_pack.py \
+      # P-11 (مراجعة ٥٩ · بقرار المالك): **قِس الثابتَ لا العدّادات.** ثلاثةُ إصلاحاتٍ للصنف نفسه
+      # (R57-1 حارسُ المكان · R58-1 عدّادُ الكشيدة · R59-1 ضابطُ مواضع النثر) سقط كلٌّ منها في
+      # جولة، لأن **نصَّ المدقّق صار مُدخَلاً إلى راتشتٍ يملكه المنفّذ** ⇒ فمجردُ هبوط مراجعةٍ يُحمرّ
+      # الـCI. هذا المسبارُ يبني نسخةً، يُودِع فيها مراجعةً اصطناعيّةً تحمل كلَّ ما تصطاده العدّادات،
+      # ثم يُشغّل قائمةَ الضوابط هناك — والقائمةُ تُقرأ من هذا الملفّ نفسِه (مصدرٌ واحد).
+      - name: Landing probe — a landing review must leave the guards green
+        id: gate_landing
+        run: python3 tools/landing_probe.py --quiet
       - name: Real-data files must never be tracked
+        id: gate_data_untracked
         run: |
           bad=$(git ls-files | grep -E '^data/(local_sample|training|eval_pack)/' || true)
           if [ -n "$bad" ]; then
@@ -57,4 +85,13 @@ jobs:
           echo "no real-data files tracked under local_sample/training/eval_pack — OK"
 
       - name: Amount-guard — the key/manifest must not be tracked (no secret needed)
+        id: gate_amount_key
         run: python3 tools/amount_guard.py --tracking-audit
+
+      - name: Amount-ratchet — a pushed baseline may never raise the threshold
+        id: gate_amount_ratchet
+        # مراجعة ٣٩/٣: **العتبةُ لا يضعها من يدفع ثمنها.** هذا الفحصُ بلا سرٍّ وبلا أدلّة:
+        # يقرأ ملفَّين مُتتبَّعين فقط ⇒ فهو السطحُ الذي لا يستطيع دافعٌ محليٌّ تجاوزه بـ`--no-verify`.
+        run: |
+          git fetch --quiet origin main || true
+          python3 tools/amount_guard.py --baseline-audit origin/main

@@ -1,0 +1,70 @@
+#!/bin/sh
+# pre-commit — **أوّلُ خطِّ دفاع، وقبل وجود الكائن** (وُلد من حادثة الانكشاف، ٢٠٢٦-٠٩-٢٤).
+# Install once per clone:  git config core.hooksPath .githooks
+#
+# لماذا أوّلُ الدفاع؟ لأنّ ما دخل **التزامًا** في مستودعٍ عام يبقى قابلًا للسحب عبر `refs/pull/*`
+# وهي **غيرُ قابلةٍ للفكّ من جهة العميل** — قِيس بعد تنقيةٍ ثلاثيّة: **١١٣ مرجعاً · ٦٥٤ التزاماً ·
+# ١٢٣ شكلاً من مبالغَ حقيقيّة داخل ١٥٦٤ blobاً** لا تزال مرئيّة، وحذفُ الفرع نفسِه لا يُغلقها
+# (لا فرعَ ريموتيّ يحمل الالتزامات ما قبل التنقية — قِيس بـ`git branch -r --contains`).
+# ⇒ المنعُ **بعد** الدفع متأخّرٌ بطبيعته؛ فالمنعُ هنا، و`pre-push` يبقى الطبقةَ الثانية.
+#
+# وثلاثةُ أصنافٍ هي التي دخلت فعلًا في الحادثة، وهي ما يُقاس هنا:
+#   ١) ملفّاتُ الأدلّة/السرّ بالاسم (`data/` · المانيفست · خريطة التطهير · القائمة المنشورة).
+#   ٢) أشكالُ أسرارٍ معروفة في **نصّ ما يُلتزم** (مفتاحٌ خاصّ · رموز مزوّدين).
+#   ٣) أشكالُ مبالغَ حقيقيّة في الملفّات المُدرَجة (بحارس المبالغ نفسِه، مصدرُ حكمٍ واحد).
+#
+# **حدُّه المُعلَن:** يقرأ محتوى ملفّات **شجرة العمل** لكلّ مسارٍ مُدرَج (لا يُميّز hunk مُدرَجًا
+# جزئيًّا بـ`git add -p`)، ولا يستبدل `pre-push` الذي يمسح المدى كاملًا بالمانيفست.
+cd "$(git rev-parse --show-toplevel)" || exit 1
+COMMON=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+
+PY=""
+for cand in ".venv/bin/python" "$COMMON/.venv/bin/python" "python3"; do
+  case "$cand" in /*) [ -x "$cand" ] && { PY="$cand"; break; };;   # مسارٌ مطلقٌ من النسخة الرئيسيّة
+    *) command -v "$cand" >/dev/null 2>&1 && { PY="$cand"; break; };; esac
+done
+[ -n "$PY" ] || PY=python3
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -n "$STAGED" ] || exit 0
+
+# —— ١) ملفّاتُ الأدلّة/السرّ: يُمنع **بالاسم** لا بالنوايا ——
+BAD=$(printf '%s\n' "$STAGED" | grep -E '(^|/)data/(\.amount-guard-key|eval_pack/amount-manifest\.json|eval_pack/amount_redaction_map\.json)$|(^|/)amount-denylist\.json$')
+if [ -n "$BAD" ]; then
+  echo "⛔ pre-commit: ملفّاتُ أدلّة/سرٍّ مُدرَجةٌ في الفهرس (إهمالُها مقصود: `data/`):"
+  printf '   %s\n' $BAD
+  echo "   ⇒ أزلْها: git restore --staged <path>  (وهذا الصنفُ بعينه هو الذي كلّف ثلاثَ تنقيات)"
+  exit 1
+fi
+
+# —— ٢) الأسرارُ في الأسطر المُضافة: أداةٌ بنمطٍ **لكلّ صنف** ——
+#     (لماذا انتقلت من `grep` هنا: قِيس ٢٠٢٦-٠٩-٢٥ أنّ النمطَ الواحد كان يمرّر `sk-or-v1-…` و`sk-ant-…`
+#      — صنفُ الرمز الذي تسرّب فعلًا — و`sk-proj-…` و`github_pat_…` لأنّه توقّف عند أوّل شَرطة.)
+IFS_SAVE=$IFS; IFS=$(printf ' \t\n')
+SEC_OUT=$("$PY" tools/secret_scan.py --staged 2>&1); SEC_RC=$?
+IFS=$IFS_SAVE
+if [ "$SEC_RC" -ne 0 ]; then
+  if [ "$SEC_RC" -eq 2 ]; then
+    echo "⛔ pre-commit: تعذّر فحصُ الأسرار ⇒ **فشلٌ مُغلَق** (لا أُعلن نظافةً لم أرها)"
+  fi
+  printf '%s\n' "$SEC_OUT" | sed 's/^/   /'
+  exit 1
+fi
+
+# —— ٣) حارسُ المبالغ على كلّ ملفٍّ مُدرَج (نفسُ مصدر الحكم الذي يستعمله الدفع) ——
+AGFAIL=""
+for f in $STAGED; do
+  if ! "$PY" tools/amount_guard.py --probe "$f" >/dev/null 2>&1; then
+    AGFAIL="$AGFAIL $f"
+  fi
+done
+if [ -n "$AGFAIL" ]; then
+  echo "⛔ pre-commit: حارسُ المبالغ رفض ملفّاتٍ مُدرَجة:"
+  for f in $AGFAIL; do
+    echo "   ↓ $f"
+    "$PY" tools/amount_guard.py --probe "$f" 2>&1 | sed 's/^/     /'
+  done
+  exit 1
+fi
+
+exit 0

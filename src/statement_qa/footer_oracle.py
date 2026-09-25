@@ -11,7 +11,7 @@ Why this exists (what-if workshop H1, promoted to P1):
     * debits/credits are CUMULATIVE from the statement opening through the
       end of THIS page — p1 650.00/750.00; p2 6363.98/5072.62 (= p1 + p2's
       own 464.00/600.00); p5 5947.63/85575.74 (…+p4 790.00/800.00 + p5
-      800.00/9001.00). They stop matching the moment ONE page's sums are
+      800.00/9012.00). They stop matching the moment ONE page's sums are
       missed — which is exactly how they exposed a wrong-context read on p5.
     * `balance` is the page's own closing balance.
   Compare:

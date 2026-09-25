@@ -22,3 +22,13 @@ data/.amount-guard-key
 data/eval_pack/amount-manifest.json
 data/eval_pack/amount_redaction_map.json
 docs/security/amount-denylist.json
+
+# أثرُ تنقيحٍ لخطّاف الدفع: لا يُتتبَّع أبداً (ولا يُكتب في الشجرة أصلاً)
+.hook-stdin.txt
+
+# نُسَخُ الحلّ الآليّ لملفّ الحالة (`tools/render_state.py --write`) — تُقرأ عند الشكّ ولا تُتتبَّع
+handoff/*.bak
+
+# مراجعُ الانكشاف المُوسَمة (معرّفاتُ التزاماتِ ما قبل التنقية) — لا تُنشر:
+# كانت في `tools/refs_exposure_probe.py` (مُتتبَّع) ⇒ صارت رابطاً موسوماً إلى ما لم يُطهَّر (مراجعة ٥٣).
+data/security/

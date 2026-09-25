@@ -33,10 +33,16 @@ for _p in (str(PROJ), str(PROJ / "src")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-CORPUS_PDF = PROJ / "data/local_sample/slice_629p/slice_629p.pdf"
-RUN = PROJ / "data/local_sample/slice_629p"
-CAPTURE = PROJ / "data/training/3e2d360a665c88aa"
-PACK = PROJ / "data/eval_pack/pack.json"
+# **الأدلّةُ من الجذر المشترك لا من موضع الأداة** (بوّابةُ التسليم · المقعد الثاني): كانت مساراتُ
+# الشاهد مثبَّتةً على `PROJ` ⇒ في شجرةِ عملٍ منفصلة تشير إلى شجرةٍ بلا `data/` **فتختفي الحزمةُ
+# صامتةً** ويُشهد بلا استثناء — وهي بعينها علّةُ R45-2 (والقارئُ نفسُه `pack_io`، والقاعدةُ واحدة).
+from tools.pack_io import data_root as _data_root  # noqa: E402
+
+_DATA = _data_root()
+CORPUS_PDF = _DATA / "data/local_sample/slice_629p/slice_629p.pdf"
+RUN = _DATA / "data/local_sample/slice_629p"
+CAPTURE = _DATA / "data/training/3e2d360a665c88aa"
+PACK = _DATA / "data/eval_pack/pack.json"
 # **الشهادةُ تحتوي تذييلاتٍ مطبوعةً لصفحات كشفٍ مصرفيّ** ⇒ لا يجوز أن تُدفَع إلى مستودعٍ عامّ.
 # فالمخرَجُ الافتراضي داخل `data/eval_pack/` المُهمَل في `.gitignore`، ويُرفض غيره.
 DEFAULT_OUT_DIR = PROJ / "data/eval_pack"
@@ -145,6 +151,15 @@ def rule_of_three(n: int) -> float:
     return 3.0 / n if n else float("nan")
 
 
+def _pack_pages(p) -> set[int]:
+    """صفحاتُ الحزمة بالقارئ الواحد (فشلٌ مُغلَق) — تُستعمل في حماية الصرف."""
+    import sys as _s
+    from pathlib import Path as _P
+    _s.path.insert(0, str(_P(__file__).resolve().parents[1]))
+    from tools.pack_io import pack_pages
+    return pack_pages(p)
+
+
 def cmd_summary(evidence_path: Path) -> int:
     ev = json.loads(evidence_path.read_text(encoding="utf-8"))
     graded = [r for r in ev["pages"] if r.get("compared") is not None]
@@ -189,6 +204,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-usd", type=float, default=0.0, help="سقفُ صرفٍ صريح — إلزاميّ للصرف")
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--dry-run", action="store_true", help="يُجهّز الصورَ والصفحاتِ بلا نداءِ نموذج")
+    ap.add_argument("--allow-pack-pages", action="store_true",
+                    help="يسمح بالصرف على صفحاتِ حزمة التقييم المجمّدة — لا يُستعمل إلا بقرارٍ معلَن")
     ap.add_argument("--summary", type=Path, default=None,
                     help="يقرأ شهادةً مكتوبةً ويطبع المجالاتِ الإحصائية (بلا نداءِ نموذج)")
     args = ap.parse_args(argv)
@@ -205,6 +222,16 @@ def main(argv: list[str] | None = None) -> int:
     else:
         pages = ([int(x) for x in args.pages.split(",") if x.strip()] if args.pages.strip()
                  else census[:args.sample] if args.sample else census)
+    # **الشاهدُ المدفوع لا يُنفق الحزمةَ افتراضاً** (مراجعة ٤٥ · F2): الإحصاءُ هو المصدرُ الافتراضيّ
+    # لصفحاته، وكان ذلك يجعل الشاهدَ ساحبًا ثالثًا يُنفق الحزمةَ بلا علَم. صار يقف مُعلَنًا.
+    _pk = _pack_pages(args.pack)
+    _about_to = sorted(set(pages) & _pk)
+    if _about_to and not args.allow_pack_pages:
+        raise SystemExit(f"⛔ {len(_about_to)} صفحةً من حزمة التقييم المجمّدة في هذه التشغيلة "
+                         f"(مثال: {_about_to[:5]}) ⇒ يتوقّف الصرف. مرّر `--pages` خارج الحزمة، "
+                         f"أو أعلِن `--allow-pack-pages`.")
+    print(f"حمايةُ الحزمة: {len(_about_to)} صفحةً منها في هذه التشغيلة"
+          f"{' (مسموحٌ بعَلَمٍ صريح)' if _about_to else ' — خارجها ✓'}")
     doc = pack["identity"]
     out_path = args.out or (DEFAULT_OUT_DIR / f"{ORACLE_OUT_NAME}-{doc}.json")
     assert_not_published(out_path)
