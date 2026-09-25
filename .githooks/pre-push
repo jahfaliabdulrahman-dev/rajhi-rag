@@ -43,3 +43,10 @@ if "$PY" -c "import pyflakes" 2>/dev/null; then
 else
   echo "⚠ static_gate تخطّى: لا pyflakes في $PY — أداةُ تطويرٍ غائبةٌ لا تُسقِط حرّاسَ الأمن."
 fi
+
+# 4) تذكيرُ تقرير الدفع (R61-1): الـCI يعمل **بعد** الدفع ⇒ لا حُكمَ هنا، بل يطبع الأمرَ الذي
+#    يُقاس به **كلُّ مرجعٍ** دُفع — لأنّ تقريرَ دفعٍ قال «أخضر» وقِيس مرجعٌ واحدٌ من خمسة،
+#    وفرعان مدفوعان كانا أحمرَين. النداءُ لا يمسّ الشبكةَ ولا يُسقط دفعاً.
+BRANCHES=$(printf '%s\n' "$REFS" | awk '{print $1}' | sed -n 's#^refs/heads/##p' | sort -u)
+# shellcheck disable=SC2086
+[ -n "$BRANCHES" ] && "$PY" tools/ci_report.py --remind $BRANCHES
