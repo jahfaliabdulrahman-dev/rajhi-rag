@@ -247,3 +247,35 @@ def test_the_live_state_file_stores_no_value():
     """**البوّابةُ الحيّة**: `handoff/STATE.md` المُتتبَّع لا يحفظ قيمةَ دورٍ ⇒ لا تقادُمَ بعده أبداً."""
     m = _load()
     assert m.main(["--check"]) == 0, "سطرُ الدور يحفظ قيمةً ⇒ ستتقادم؛ أصلِحْه بـ`tools/turn.py --write`"
+
+
+def test_a_field_carrying_a_leading_backtick_is_not_a_declaration(monkeypatch, tmp_path, capsys):
+    """**S-4 (مقعد ٥٧): التجريدُ كان يخالف وصْفَه** — كان `` `[^`]*` `` يُحذَف قبل المطابقة، وقِيس أنّ إسقاطَه
+    (أ) لا يُسقط أيَّ ضابط، (ب) وأنّ التجريد **يوسّع** المطابقة: سطرٌ يبدأ باقتباسٍ ثمّ يحمل الحقلَ يُقرأ
+    إعلاناً **معه**، ولا يُقرأ **بدونه**. والقاعدةُ الموثَّقة «لا يُقرأ بين علامتين خلفيّتين» ⇒ فالمرساةُ
+    وحدَها تكفي، والسطرُ الذي لا **يبدأ** بالحقل ليس إعلاناً (والدالّةُ خالصة ⇒ تُقاس في الذاكرة).
+    """
+    m = _load()
+    monkeypatch.setattr(m, "ROOT", tmp_path)
+    assert m.declarations("`x` status: AWAITING_FOUNDER — اقتباسٌ ثمّ حقلٌ في سطرٍ لا يبدأ به\n") == [], \
+        "التجريدُ يُوسّع المطابقة: سطرٌ يبدأ باقتباسٍ صار إعلاناً"
+    assert m.declarations("status: AWAITING_FOUNDER — إعلانٌ حقيقيّ\n") == ["AWAITING_FOUNDER"], \
+        "الإعلانُ الحقيقيُّ لم يُقرأ (تضييقٌ زائد)"
+
+
+def test_an_unpaired_fence_does_not_hide_a_real_declaration(monkeypatch, tmp_path, capsys):
+    """**ST-6 (مقعد ٥٧): السياجُ كان قلْبَ حالةٍ لا مُقابَلةً** — سطرُ سياجٍ واحدٍ بلا قِرْن يقلب معنى كلّ ما
+    بعده ⇒ إعلانٌ حقيقيٌّ بعد سياجٍ غيرِ مُغلق **يُهمَل** ولا ينتقل الدورُ إلى المالك (وهو إهمالُ إعلان،
+    وأسوأُ من قراءة اقتباس). والآن تُقابَل الأسوارُ **زوجاً**: عددٌ فرديٌّ يُبطِل التسييجَ كلَّه فيُقرأ النصّ.
+    """
+    m = _load()
+    monkeypatch.setattr(m, "ROOT", tmp_path)
+    unpaired = "## الحكم\n```\nاقتباسٌ لم يُقفَل أصلًا\n\nstatus: AWAITING_FOUNDER — إعلانٌ حقيقيّ بعد سياجٍ يتيم\n"
+    _tree(tmp_path, {"sulaiman": [("20260925-0302-REPORT", unpaired)]})
+    assert m.main(["--json"]) == 0
+    assert '"turn": "المالك"' in capsys.readouterr().out, "إعلانٌ حقيقيٌّ بعد سياجٍ يتيمٍ أُهمِل"
+
+    paired = "## الحكم\n```\nstatus: AWAITING_FOUNDER — اقتباسٌ مُقفَل\n```\nبلا إعلانٍ حقيقيّ\n"
+    _tree(tmp_path, {"sulaiman": [("20260925-0303-REPORT", paired)]})
+    assert m.main(["--json"]) == 0
+    assert '"turn": "claude"' in capsys.readouterr().out, "كتلةُ شِفرةٍ **مُقفَلة** أزاحت الدور"

@@ -9,7 +9,9 @@
 - **العطب** = الضابطُ يبقى يمرّ ⇒ دعوى حمايةٍ كاذبة (وهذا ما نُريد أن نكتشفه، لا أن نُخفيه).
 - **التخطّي (R57-5)** = الضابطُ **لم يُقَس**: يُتخطّى لغياب بياناته المحلّيّة (`data/local_sample`) فيخرج
   بـ`rc=0` ⇒ كان يُقرأ «البوّابةُ تمرّ — دعوى كاذبة»، وهي دعوى كاذبةٌ تُطبع في الاتجاه المعاكس: التخطّي
-  ليس مروراً ولا سقوطاً، بل **غيابُ قياس**. والحصيلةُ تُطبع بثلاث خانات (عَضّ · دعاوى · لم يُقَس) وببيئتها.
+  ليس مروراً ولا سقوطاً، بل **غيابُ قياس**. والحصيلةُ تُطبع بـ**أربع خانات** (عَضّ · دعاوى · لم يُقَس ·
+  تعذّر تشغيل) وبيئتها، **والتحذيرُ على الدعاوى وحدَها** (S-1/ST-1 · مقعدان قاسا الطرحَ المزدوج للعدد).
+  ورموزُ pytest غيرُ 0/1 **تعذّرُ تشغيلٍ قبل أيّ قراءةٍ للنصّ** (ST-2: عطبُ الجمع كان يُقرأ «عَضّاً»).
 
 والتغطيةُ هنا هي **حصيلةُ جولة مراجعة ٥٢ وإصلاحِ إسقاطاتها** (١٢ بوابة): R52-1 · R52-2 (ثلاثة أوجه) ·
 R52-3 · R52-4 · R52-5 (وجهان) · F6 · ومعيارُ الحالة · وسلوكُ سطر الأوامر.
@@ -129,21 +131,32 @@ CASES = [
 
 
 def _verdict(rc: int, out: str) -> str:
-    """«سقط» · «لم يسقط» · **«تعذّر التشغيل»** · **«لم يُقَس» (تخطٍّ)** — والحكمُ من **علامة pytest نفسها**.
+    """«سقط» · «لم يسقط» · **«تعذّر التشغيل»** · **«لم يُقَس» (تخطٍّ)** — **ورمزُ الخروج يُحكم أوّلًا** (ST-2).
 
     (لأنّ `python3 -m pytest` بلا pytest مُثبَّتٍ يخرج **1** أيضاً — فيلتبس «تعذّر» بـ«عَضّ»؛
     وهذا ما جعل المدقّق في مراجعة ٥٣ يجعل `.venv/bin/python` رابطاً ليعرف الفرق.)
+
+    **ولماذا الرمزُ أوّلًا (ST-2 · قاسه مقعد البنية):** كان الحكمُ يُقرأ من **نصّ المخرَج** وحدَه، ومخرَجُ
+    عطبِ **الجمع** (`rc=2`) يحمل «1 error in 0.04s» ⇒ كان يُصنَّف **«عَضّ»**، أي شهادةٌ لبوّابةٍ لم تُجمَع
+    أصلًا — أخطرُ الأصناف في هذا المستودع. والآن: `rc ∉ {0,1}` تعذّرٌ قبل أيّ قراءةٍ للنصّ.
 
     **والحالةُ الرابعة (R57-5 · قاسها المدقّق في مراجعة ٥٧):** ضابطٌ **يُتخطّى** لغياب بياناته المحلّيّة
     (`data/local_sample`) يخرج بـ`rc=0` ⇒ كانت الأداةُ تطبع له **«✗ البوابةُ تمرّ — دعوى كاذبة»**، وهي
     تُطبع دعوى كاذبةً بنفسها: التخطّي **ليس** «مرّت البوّابة» — بل **لم يُقَس شيء** (وهو صنفُ «التخطّي
     يُقرأ نجاحاً» الذي يُطارده المستودع). والتخطّي يُقرأ من مخرَج pytest لا من رمز الخروج.
     """
-    if re.search(r"\bFAILED\b", out) or re.search(r"\b\d+ (failed|error)", out):
-        return "bite"
-    if rc == 0:
-        return "skipped" if re.search(r"\bskipped\b", out) else "no_bite"
-    return "unrunnable"
+    if rc not in (0, 1):
+        return "unrunnable"                        # 2 عطبُ جمع/مقاطعة · 3 عطبٌ داخليّ · 4 خطأُ استعمال
+    if rc == 1:
+        # «عَضّ» يقتضي **فشلاً مُسمّى** في المخرَج؛ ورمزُ 1 بلا علامةٍ مُسمّاةٍ ليس شهادة.
+        return "bite" if _FAILURE_RE.search(out) else "unrunnable"
+    return "skipped" if re.search(r"\bskipped\b", out) else "no_bite"
+
+
+#: علاماتُ فشل pytest في المخرَج — تُقرأ **فقط** حين يكون رمزُ الخروج 1 (ST-2).
+_FAILURE_RE = re.compile(r"\bFAILED\b|\b\d+ (failed|error)")
+#: مراتبُ الحكم الأربع — تُحصى في موضعٍ واحد.
+KINDS = ("bite", "no_bite", "skipped", "unrunnable")
 
 
 #: نصُّ كلّ حالةٍ **في موضعٍ واحد** (كان النصُّ مبثوثاً في فرعين ⇒ ضابطُ الصيغة لم يكن ممكناً).
@@ -170,9 +183,50 @@ def _run(test: str) -> tuple[int, str]:
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
-def _report(name: str, kind: str, bad: int) -> int:
-    print(f"{name:52s} | {'مُطبَّق':6s} | {kind:7s} | {_verdict_label(kind)}")
-    return bad + (0 if kind == "bite" else 1)
+def _emit(name: str, rc: int, out: str, counts: dict[str, int], unmeasured: list[str]) -> None:
+    """يطبع سطرَ ضابطٍ واحد ويُحصيه — **والحكمُ من `_verdict` وحدَها** (رمزُ الخروج أوّلًا).
+
+    (كانت ثلاثةُ مساراتٍ في `main` تحكم بـ`rc != 0` وحدَه ⇒ أيُّ فشلٍ — ومنه غيابُ pytest — «عَضّ»؛ ST-2.)
+    """
+    kind = _verdict(rc, out)
+    counts[kind] += 1
+    if kind == "skipped":
+        unmeasured.append(name)
+    tail = out.strip().splitlines()[-1][:90] if out.strip() else ""
+    extra = f" (rc={rc}) — {tail}" if kind == "unrunnable" else ""
+    print(f"{name:52s} | {'مُطبَّق':6s} | {kind:7s} | {_verdict_label(kind)}{extra}")
+
+
+def _summary(counts: dict[str, int], total: int, equipped: bool) -> str:
+    """سطرُ الحصيلة: كلُّ حالةٍ بخانتها، **والتحذيرُ على الدعاوى وحدَها** (S-1/ST-1 · مقعدان قاساه).
+
+    **العلّةُ المقيسة:** `bites = total - bad - len(unmeasured)` و`bad` كان يُزاد لكلّ حالةٍ ليست عَضّاً
+    ⇒ التخطّي يُطرح **مرّتين**: العددُ المطبوع أقلُّ من صفوفِ «✓ البوابةُ تَعَضّ» في المخرَج نفسِه
+    (١٢ مقابل ١٣)، و«⛔ دعاوى بلا حماية!» تُطبع على **تخطٍّ** لا يدّعي شيئاً — أي وصفٌ يخالف مصدره في
+    الأداة التي وُلدت لإنهاء هذا النوع من الوصف.
+    """
+    line = f"الحصيلة: {counts['bite']}/{total} بوّاباتٍ تعضّ"
+    if counts["no_bite"]:
+        line += f" · {counts['no_bite']} دعوى بلا حماية"
+    if counts["skipped"]:
+        line += f" · {counts['skipped']} لم يُقَس (تخطٍّ مُعلَن)"
+    if counts["unrunnable"]:
+        line += f" · {counts['unrunnable']} تعذّر تشغيل"
+    if counts["no_bite"]:
+        line += "  ⛔ دعاوى بلا حماية!"
+    if counts["unrunnable"] or (counts["skipped"] and equipped):
+        line += "  ⛔ عطبُ قياس — لا شهادةَ ولا دعوى"
+    return line
+
+
+def _exit_code(counts: dict[str, int], equipped: bool) -> int:
+    """`1` إن ادّعت بوّابةٌ حمايةً لا تملكها، أو تعذّر تشغيلُها، أو لم تُقَس في بيئةٍ **مُهيّأة**.
+
+    و«لم يُقَس» في بيئةٍ **ناقصة** (لا `data/local_sample`) ليس فشلاً: هو إعلانُ حدِّ البيئة ويُطبع باسمه
+    وبيئته — وإلّا لصارت النسخةُ النقيّةُ لا تُخضِرّ أبداً، وهو صنفُ الإنذار الكاذب نفسُه (S-1).
+    """
+    faulty = counts["no_bite"] + counts["unrunnable"] + (counts["skipped"] if equipped else 0)
+    return 1 if faulty else 0
 
 
 def _environment() -> str:
@@ -187,9 +241,10 @@ def main() -> int:
     print(f"المفسّرُ المستعمل: {PY}")
     print(f"{'البوابة':52s} | {'السمّ':6s} | {'الضابط':6s} | النتيجة")
     print("-" * 92)
-    bad = 0
-    total = 0
+    counts = {k: 0 for k in KINDS}
     unmeasured: list[str] = []
+    total = 0
+    equipped = (ROOT / "data" / "local_sample").exists()
 
     for name, path, old, new, test in CASES:
         bak = path.with_suffix(path.suffix + ".bak_bite")
@@ -203,59 +258,45 @@ def main() -> int:
             shutil.copy2(bak, path)
             bak.unlink()
         total += 1
-        kind = _verdict(rc, out)
-        if kind == "unrunnable":
-            print(f"{name:52s} | {'مُطبَّق':6s} | {'?':6s} | {_verdict_label(kind)} (rc={rc}) — "
-                  f"{out.strip().splitlines()[-1][:90] if out.strip() else ''}")
-            bad += 1
-            continue
-        if kind == "skipped":
-            unmeasured.append(name)
-        bad = _report(name, kind, bad)
+        _emit(name, rc, out, counts, unmeasured)
 
     # م١٢أ: ملفُّ منفّذٍ **غيرِ مُعلَن** في صندوق المدقّق
     INTRUDER.write_text("# س\n", encoding="utf-8")
     try:
-        rc = _run("tests/test_mailbox_ownership.py::test_no_implementer_report_lives_in_the_auditors_box_unless_declared")
+        rc, out = _run("tests/test_mailbox_ownership.py::test_no_implementer_report_lives_in_the_auditors_box_unless_declared")
     finally:
         INTRUDER.unlink()
     total += 1
-    kind = "bite" if rc != 0 else "no_bite"
-    bad = _report("م١٢أ · صندوقُ المدقّق بلا تقرير منفّذ (R52-5)", kind, bad)
+    _emit("م١٢أ · صندوقُ المدقّق بلا تقرير منفّذ (R52-5)", rc, out, counts, unmeasured)
 
     # م١٢ب: نقلٌ غيرُ مُعلَن (بإخفاء سجلّ الإعلان — والحركةُ قائمةٌ في المسرَح فعلًا)
     hidden = RENAMES.with_suffix(".md.hidden")
     RENAMES.rename(hidden)
     try:
-        rc = _run("tests/test_mailbox_ownership.py::test_every_move_or_delete_under_handoff_is_declared")
+        rc, out = _run("tests/test_mailbox_ownership.py::test_every_move_or_delete_under_handoff_is_declared")
     finally:
         hidden.rename(RENAMES)
     total += 1
-    kind = "bite" if rc != 0 else "no_bite"
-    bad = _report("م١٢ب · النقلُ غيرُ المُعلَن يُرفض (R52-5)", kind, bad)
+    _emit("م١٢ب · النقلُ غيرُ المُعلَن يُرفض (R52-5)", rc, out, counts, unmeasured)
 
     # م١٢ج: استثناءٌ متقادم يبقى في القائمة بعد زوال سببِه ⇒ يُكشَف
     intruder2 = ROOT / "handoff/claude/20260924-9999-REPORT-poison-undeclared.md"
     intruder2.write_text("# س\n", encoding="utf-8")
     try:
-        rc = _run("tests/test_mailbox_ownership.py::test_no_implementer_report_lives_in_the_auditors_box_unless_declared")
+        rc, out = _run("tests/test_mailbox_ownership.py::test_no_implementer_report_lives_in_the_auditors_box_unless_declared")
     finally:
         intruder2.unlink()
     total += 1
-    kind = "bite" if rc != 0 else "no_bite"
-    bad = _report("م١٢ج · الدخيلُ غيرُ المُعلَن يُكشَف — لا قائمةَ صمّاء", kind, bad)
+    _emit("م١٢ج · الدخيلُ غيرُ المُعلَن يُكشَف — لا قائمةَ صمّاء", rc, out, counts, unmeasured)
 
     print("-" * 92)
-    # **العددُ يُطبع ببيئته، و«لم يُقَس» يُسمّى بأسمائه** (R57-5): `total - bad` كانت تخلط التخطّيَ بالعَضّ
-    # حين يكون `rc=0`، فيُقرأ العددُ وكأنّ البوّابةَ عَضّت وهي لم تُقَس. والحصيلةُ الآن ثلاثُ خانات.
-    bites = total - bad - len(unmeasured)
-    print(f"الحصيلة: {bites}/{total} بوّاباتٍ تعضّ" + (f" · {len(unmeasured)} لم يُقَس (تخطٍّ مُعلَن)" if unmeasured
-                                                       else " · صفرُ تخطٍّ")
-          + ("" if not bad else "  ⛔ دعاوى بلا حماية!"))
+    # **العددُ يُطبع ببيئته وبخاناتِه** (R57-5 · وصحّحه S-1/ST-1): كلُّ حالةٍ خانةٌ مستقلّة، والتحذيرُ على
+    # **الدعاوى** وحدَها، و«لم يُقَس» يُسمّى بأسمائه. ⇒ لا عددَ يخالف صفوفَه ولا إنذارَ كاذب على تخطٍّ.
+    print(_summary(counts, total, equipped))
     if unmeasured:
         print("   لم يُقَس: " + " · ".join(unmeasured))
     print(f"   البيئة: {_environment()}")
-    return 1 if bad else 0
+    return _exit_code(counts, equipped)
 
 
 if __name__ == "__main__":

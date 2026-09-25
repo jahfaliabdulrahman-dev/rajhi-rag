@@ -110,6 +110,11 @@ def test_a_missing_file_fails_closed(tmp_path, capsys):
 #: **والسقفُ راتشتٌ في الاتجاهين** (`==` لا `<=`): الصعودُ يقول «انكشافٌ جديد» والنزولُ يقول «كشفٌ مفقود»
 #: — وكلاهما يستحقّ توقّفاً، لا أن يُبتلع صامتاً. (تاريخُه: ٨٥ ⇒ ٦٣ ⇒ ٦٤ ⇒ ٥٠ ⇒ ٤٨ ⇒ **٤٧**.)
 FOREIGN_ID_DEBT_ON_CORPUS = 47
+#: **وصيغةُ الكشيدة (R57-3) تُقاس هي أيضاً — أسطراً وملفّات** (S-3 · قاسه مقعد المعايير): كان في §٢٦ وفي
+#: ترويسة الأداة «٢٧ سطراً في **١٦** ملفّاً» وهو **مكتوبٌ بيدٍ** وقياسُه **١١** ⇒ رقمٌ يُكذّبه مقياسُه في
+#: وثيقةٍ معياريّة. والآن يُقاس في الاتجاهين: الصعودُ = صيغةٌ/ملفٌّ جديد، والنزولُ = **كشفٌ فقدناه**.
+TATWEEL_FORM_LINES = 27
+TATWEEL_FORM_FILES = 11
 
 
 def test_the_corpus_positive_rate_is_declared_and_capped():
@@ -197,7 +202,8 @@ def test_the_four_measured_forms_of_the_pack_stamp_are_not_blocked():
 
 def test_the_arabic_tatweel_form_of_the_word_sha_is_seen():
     """**R57-3 (أ) — العمى الذي كان `\\b` يفتحه عند الكلمة لا عند المعرّف**: «الـsha <معرّف>» هي **لغةُ هذا
-    المستودع نفسِه** (٢٧ سطراً في ١٦ ملفّاً، منها البروتوكول §٥)، والكشيدةُ (`\\u0640`) والحرفُ العربيّ
+    المستودع نفسِه** (٢٧ سطراً في **١١** ملفّاً — انظر `test_the_tatweel_form_coverage_is_measured_not_described`)،
+    والكشيدةُ (`\\u0640`) والحرفُ العربيّ
     حرفا كلمةٍ عند `\\b` ⇒ كانت **لا تُكشَف** بعد إصلاح R56-1 (وكانت تُكشَف قبله). ولا يمسكها الراتشتُ
     لأنّ الكوربوس لا يحوي هذه الصيغة ⇒ فضياعُ الكشف كان يمرّ صامتاً. والضابطُ موجبٌ صريح.
     """
@@ -207,6 +213,33 @@ def test_the_arabic_tatweel_form_of_the_word_sha_is_seen():
                  f"بالـsha {foreign} مدموجٌ سابقاً",
                  f"rev {foreign} مدموج"):
         assert m.scan_foreign_ids([(4, line)], exists=lambda t: False) == [(4, "foreign_commit_id")], line
+
+
+def test_the_tatweel_form_coverage_is_measured_not_described():
+    """**S-3 (قاسه مقعد المعايير)**: «٢٧ سطراً في **١٦** ملفّاً» كان رقماً مكتوباً بيدٍ في §٢٦ وترويسة
+    الأداة، وقياسُه **١١** ملفّاً ⇒ وثيقةٌ معياريّةٌ يحمل رقمُها ما يناقض مِقياسَه (صنفُ §٢٨ P-10). وصُحِّح
+    الرقمُ **وقيس**: الأسطرُ والملفّاتُ تُقرأ من الشجرة المُتتبَّعة وتُقابَل بثابتين — راتشتٌ في الاتجاهين.
+    (ولا يُكتب الحدُّ هنا بكشيدةٍ حرفيّةٍ عن قصد: كُتُبَ هجاؤُه `\\u0640` لئلّا يزيد الضابطُ نفسُه الرقمَ الذي يقيس.)
+    """
+    m = _load()          # لا شيءَ من الفاحص يُستعمل هنا: الشاهدُ هو **الصيغةُ كما تكتبها الوثائق**.
+    needle = "\u0640sha"
+    files = subprocess.run(["git", "ls-files"], cwd=str(ROOT), capture_output=True, text=True).stdout.split()
+    assert files, "لا ملفّاتٍ مُتتبَّعة ⇒ فشلٌ مُغلَق"
+    lines = 0
+    hit_files = 0
+    for f in files:
+        try:
+            body = (ROOT / f).read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        hits = sum(1 for ln in body if needle in ln)
+        lines += hits
+        hit_files += 1 if hits else 0
+    assert (lines, hit_files) == (TATWEEL_FORM_LINES, TATWEEL_FORM_FILES), (
+        f"صيغةُ الكشيدة: {lines} سطراً في {hit_files} ملفّاً ≠ المُعلَن "
+        f"({TATWEEL_FORM_LINES} سطراً · {TATWEEL_FORM_FILES} ملفّاً) ⇒ إن ارتفع: صيغةٌ أو ملفٌّ جديد "
+        f"(حدِّث الثابتَ والوثيقةَ معاً)؛ وإن نزل: **كشفٌ فقدناه**")
+    assert m  # الفاحصُ مُحمَّلٌ (لا يُقاس الرقمُ على أداةٍ لم تُقرأ)
 
 
 def test_the_verb_rev_parse_is_not_a_commit_reference():
