@@ -56,6 +56,8 @@ STAMP = ROOT / "tools/eval_stamp.py"
 RS = ROOT / "tools/render_state.py"
 RENAMES = ROOT / "handoff/RENAMES.md"
 TFL = ROOT / "tests/test_flake_ledger.py"
+WIT = ROOT / "tests/test_answer_names_witness.py"
+TURN = ROOT / "tools/turn.py"
 INTRUDER = ROOT / "handoff/claude/20260924-9999-REPORT-to-claude-poison.md"
 PROOF_T = "tests/test_eval_proof_rows.py"
 QG = ROOT / "tools/qa_gate.py"
@@ -162,6 +164,20 @@ CASES = [
      '    if len(dirty) <= budget:\n        return []\n    return dirty',
      '    return []',
      "tests/test_flake_ledger.py::test_the_budget_actually_bites_on_a_synthetic_window"),
+
+    # **م١٧ · الشاهدُ الذاتيّ (F4 · مقعدُ المواصفة):** كان الفحصُ يقبل الملفَّ نفسَه شاهداً ⇒ فسمُّه
+    # يُلغي شرطَ الذاتيّة، ويجب أن يُسقط الضابطَ الذي يقيسها.
+    ("م١٧ · الشاهدُ الذاتيّ لا يُعدّ دليلاً (F4 · مراجعة ٥٩)", WIT,
+     '        if witness == path:\n            out.append(',
+     '        if False:\n            out.append(',
+     "tests/test_answer_names_witness.py::test_the_witness_must_be_a_verdict_not_any_path_in_the_tree"),
+
+    # **م١٨ · هويّةُ الترويسة (نقلةُ مقعد البنية · مراجعة ٥٩):** صار الشرطُ «معرّفُ الكتلة == زمنُ الاسم»
+    # ⇒ فسمُّه يُلغي الهويّة فيقرأ ترويسةَ تقريرٍ آخر تُقتبَس في أعلى ملفّ ترويسةً له، ويجب أن يُسقط ضابطَه.
+    ("م١٨ · الترويسةُ تُقاس بالهويّة لا بالشكل (نقلةُ مراجعة ٥٩)", TURN,
+     '            return stamp_of(m.group(1)) == own',
+     '            return True',
+     "tests/test_turn_derivation.py::test_the_fenced_header_is_read_not_ignored"),
 ]
 
 

@@ -56,10 +56,18 @@ WITNESS_RE = re.compile(r"^in-reply-to:\s*(.+?)\s*$", re.M | re.I)
 #: الشجرة — **قرارَ المنفّذ نفسِه** · `README.md` · وحتى **الجوابَ نفسَه** ⇒ فقاعدةُ §٢٧ («يُسمّي الحُكمَ
 #: الذي يُجيبه») لم تكن مقيسةً أصلًا. والشاهدُ الآن **تحت صندوق الأحكام** حصرًا.
 WITNESS_ROOT = "handoff/claude/"
-#: **وصنفٌ مُعلَنٌ بديل (بلا بابٍ خلفيّ):** تقريرٌ إلى المدقّق **لا يُجيب حُكمًا** يُعلن ذلك في متنه (كما فعل
-#: `0520`) ⇒ لا يُطالَب بشاهدِ حُكم، **لكنّه يُعَدّ** بعدّادٍ يُقابَل — والإعلانُ صنفٌ مُعلَنٌ لا إعفاءٌ صامت.
-CLASS_DECL_RE = re.compile(r"لا جوابٌ على حُكم|لا يُجيب حُكمًا", re.I)
-DECLARED_NON_VERDICT_ANSWERS = 1
+#: **وصنفٌ مُعلَنٌ بديل — بالهويّة لا بالعدد (S-3 · P2-5 · مقعدا المعايير والبنية):** تقريرٌ إلى المدقّق
+#: **لا يُجيب حُكمًا** يُعلن ذلك **بحقلٍ في ترويسته** (`class:`)، ويُقابَل **باسمِ الملفّ** لا بعدّادٍ ⇒
+#: فلا يُنقل الإعلانُ إلى جوابٍ آخر، ولا تُغطّي عبارةٌ في متنٍ إعفاءً (كان `CLASS_DECL_RE` يطابق نصًّا حيث
+#: ورد — ونقلُ العبارة مع ثبات العدّاد كان يمرّ صامتاً).
+CLASS_DECL_RE = re.compile(r"^\s*class\s*:\s*\S+", re.M | re.I)
+#: ملفُّ الصنف المُعلَن **بالاسم** — ويُشترَط ألّا يحمل `in-reply-to` (وإلّا صار الإعلانُ غطاءً على حُكم).
+DECLARED_NON_VERDICT = (
+    "handoff/sulaiman/20260925-0723-REPORT-to-claude-r13-green-gate-three-root-causes-and-three-seat-review.md",
+)
+#: **والشاهدُ يُدفَع قبل أن يُجاب (نصُّ §٢٧ حرفيًّا · مقعدُ المعايير S-1):** كان الفحصُ يقبل أيَّ حُكمٍ
+#: موجود حتى لو أُودِع **بعد** الجواب ⇒ فيُصدّق الرابطَ الخطأ (حُكمٌ لاحقٌ لا يُجيب السؤالَ المطروح).
+#: والآن يُقاس الزمنُ: زمنُ الحُكم ≤ زمنُ الجواب (والزمنُ من اسم الملفّ بمصدرٍ واحد: `stamp_of`).
 #: لحظةُ كتابة القاعدة: ما هبط بعدها يحمل شاهدَه. وما قبلها دَينٌ تاريخيٌّ يُقاس (البند ١).
 #: **والقيمةُ مكتوبةٌ بيدٍ لا مُشتقّةٍ من زمن الالتزام** (S-2: `--rebase`/`amend` تُغيّر زمنَه فلا يستقرّ
 #: اشتقاقٌ منه) — وموضعُها مُقاسٌ بالبند ٧: دقيقتُها `20260925-0446` (والثابتُ بستّ خانات: `20260925-044600`)
@@ -70,15 +78,17 @@ WITNESS_FROM = "20260925-044600"
 #: وملفّاتُ الصندوق بعد القاعدة خارج الصنف المُعلَن (البند ٦).
 PRE_RULE_ANSWERS = 15
 SUBJECTS_LANDED = 1
-NON_ANSWER_FILES_SINCE_RULE = 4
+NON_ANSWER_FILES_SINCE_RULE = 5
 #: (١ = تقريرُ الإغلاق إلى المالك `20260925-0520-REPORT-to-owner-…` · ٢ = قرارُ التكليف
 #: `20260925-0540-DECISION-to-claude-…` · ٣ = تقريرُ البندين ①/② إلى المالك
 #: `20260925-1330-REPORT-to-owner-flake-policy-closed-and-encrypted-backup-to-drive.md`
 #: · ٤ = تقريرُ إغلاق بنود المقاعد الثلاثة `20260925-1340-REPORT-to-owner-three-seat-closures-…`
+#: · ٥ = تقريرُ الجولة ٥٩ (إغلاقُ بنود مراجعة الكود) `20260925-1520-REPORT-to-owner-round-59-…`
 #: — وكلُّها **صنفٌ مُعلَنٌ بالاسم** لا صامت.)
-#: **ومُخاطَبٌ واحدٌ هبط بالقاعدة وأعلن شاهدَه:** `20260925-0723-REPORT-to-claude-r13-…`
-#: (`in-reply-to: handoff/sulaiman/20260925-0540-DECISION-to-claude-land-on-the-pushed-branch.md`
-#: — ملفٌّ موجودٌ في الشجرة، فلا يُجاب حُكمٌ لم يهبط). فالعدّادُ المُقاس = ١ والمُعلَن = ١.
+#: **ومُخاطَبٌ واحدٌ هبط بالقاعدة، وهو صنفٌ مُعلَنٌ بالاسم:** `20260925-0723-REPORT-to-claude-r13-…`
+#: (يُعلن `class:` ولا يُجيب حُكماً — R58-2). وبعده (مراجعة ٥٩ · مقعدا المعايير والبنية) صار الشاهدُ في
+#: حقله يُسقطه: **الإعلانُ مع استشهادٍ = غطاء، لا صنف** ⇒ فلم يبقَ مُخاطَبٌ بشاهدٍ حُكم في الشجرة،
+#: والعدُّ **بالهويّة** لا بعدّاد (S-3/P2-5: نقلُ الإعلان إلى جوابٍ آخر كان يمرّ بعدّادٍ ثابت).
 #: الحارسُ الدائريُّ الذي سُحب — يُقاس غيابُه فلا يعود صامتاً من بابٍ خلفيّ (البندُ ٤ من عِلّته).
 RETIRED_GATE = "tests/test_review_landing.py"
 
@@ -150,18 +160,25 @@ def ungated_answers(answers: dict[str, str], tree: set[str], since: str = WITNES
 
     وهي **قلبُ الاتّجاه**: تسقط على الجواب الذي يشير إلى مراجعةٍ لم تهبط، وتمرّ على الفرع الذي أنزلها.
     **وحدُّ الشاهد (R58-2):** مسارٌ تحت `handoff/claude/` — فقرارُ المنفّذ و`README.md` والجوابُ نفسُه
-    تُسقطه (شاهدٌ لا يعدو دليلَه)؛ ومن أعلن صنفَه («لا يُجيب حُكمًا») لا يُطالَب بشاهدٍ، ويبقى معدوداً.
+    تُسقطه (شاهدٌ لا يعدو دليلَه). **وثلاثةُ قيودٍ من مراجعة ٥٩ (كلُّها بقياس):** ‹١› **الشاهدُ يُدفَع قبل أن
+    يُجاب** (زمنُ الحُكم ≤ زمنُ الجواب — S-1)، ‹٢› **والصنفُ المُعلَن بالهويّة**: ملفٌّ واحدٌ مُسمّى يُعلن
+    `class:` فلا يُطالَب بشاهد، و**ولا يُقبل منه استشهاد** (إعلانٌ مع شاهد = غطاء — S-3)، ‹٣› و**فحصُ
+    الشكل** (نمطُ الحقول) سقط من `tools/turn.py` لصالح فحص الهويّة، فلا معجمَ حقولٍ ثانياً يُقاس هنا.
     """
     out: list[str] = []
     for path, body in answers.items():
         stamp = stamp_of(path)
         if not stamp or stamp < since:                       # دَينٌ تاريخيٌّ قبل القاعدة (البندُ ١)
             continue
-        declared = bool(CLASS_DECL_RE.search(body))
+        declared = path in DECLARED_NON_VERDICT
         m = WITNESS_RE.search(body)
+        if declared and m:
+            out.append(f"{path} · الصنفُ المُعلَنُ يحمل شاهداً (`in-reply-to:`) — إعلانٌ مع استشهادٍ غطاءٌ "
+                       f"لا صنف (فالصنفُ معناه: لا يُجيب حُكماً)")
+            continue
         if not m:
             if declared:
-                continue                                     # صنفٌ مُعلَنٌ ومعدودٌ في ضابطه (لا إعفاءَ صامت)
+                continue                                     # صنفٌ مُعلَنٌ **بالاسم** (لا إعفاءَ بعدّاد)
             out.append(f"{path} · بلا إعلانِ شاهد (`in-reply-to:`)")
             continue
         witness = _witness_path(m.group(1))
@@ -176,7 +193,12 @@ def ungated_answers(answers: dict[str, str], tree: set[str], since: str = WITNES
             continue
         if not witness.startswith(WITNESS_ROOT):
             out.append(f"{path} · الشاهدُ «{witness}» ليس حُكماً: لا يقع تحت `{WITNESS_ROOT}` "
-                       f"(الحُكمُ يُصدره المدقّق؛ والقرارُ والتوجيهُ ليسا حُكماً)")
+                       f"(الحُكمُ يُصدِره المدقّق؛ والقرارُ والتوجيهُ ليسا حُكماً)")
+            continue
+        w_stamp = stamp_of(witness)
+        if w_stamp and w_stamp > stamp:
+            out.append(f"{path} · الشاهدُ «{witness}» أُودِع **بعد** الجواب ({w_stamp} > {stamp}) — "
+                       f"§٢٧: الشاهدُ يُدفَع قبل أن يُجاب")
     return sorted(out)
 
 
@@ -203,26 +225,40 @@ def test_the_witness_must_be_a_verdict_not_any_path_in_the_tree():
     assert "ليس حُكماً" in only_one("README.md")
     # (٤) والجوابُ نفسُه ⇒ **رسالةٌ مختلفة**: شاهدٌ ذاتيّ (لا يُشخَّص «ليس حُكماً»)
     assert "نفسُه" in only_one(self_path)
+    # (٥) **وحُكمٌ أُودِع بعد الجواب (S-1 · مراجعة ٥٩)**: الموجودُ يكفي عند الفحص القديم فيُصدّق رابطةً لا
+    #     تُجيب السؤال؛ والآن يُقاس الزمنُ (§٢٧: الشاهدُ يُدفَع **قبل** أن يُجاب).
+    late = "handoff/claude/20260925-0900-third-eye-review-56-after-the-answer.md"
+    got = ungated_answers({self_path: f"in-reply-to: {late}\n"}, tree | {late})
+    assert len(got) == 1 and "بعد" in got[0], got
 
 
-def test_the_declared_non_verdict_class_is_counted_and_is_no_loophole():
-    """**الصنفُ المُعلَن (R58-2):** تقريرٌ إلى المدقّق **لا يُجيب حُكمًا** يُعلن ذلك ⇒ لا يُطالَب بشاهد،
-    **ويُعَدّ** — وإلّا صار الإعلانُ باباً خلفيّاً يُخرِج أيَّ جوابٍ من القاعدة بصمت.
+def test_the_declared_class_is_an_identity_and_admits_no_shield():
+    """**الصنفُ المُعلَن (R58-2 · ثمّ الهويّة في مراجعة ٥٩ · S-3/P2-5):** تقريرٌ لا يُجيب حُكمًا يُعلن
+    `class:` فيُعفى من الشاهد — **باسمِه لا بعبارةٍ في متنه**، و**ولا يُقبل منه استشهاد** (وإلّا صار الإعلانُ
+    غطاءً يُجيز الإجابةَ ويُخفيها في آنٍ). وكان العدُّ بعدّادٍ ثابت: نقلُ العبارة إلى جوابٍ آخر + استشهادُ
+    المُعلِن القديم بأيّ حُكمٍ موجود كان يمرّ صامتاً.
     """
     verdict = "handoff/claude/20260925-021953-third-eye-review-55-x.md"
-    declared_path = "handoff/sulaiman/20260925-0603-REPORT-to-claude-w.md"
-    tree = {declared_path, verdict}
-    body = "\nهذا تقريرُ إغلاقٍ إلى المدقّق، **لا جوابٌ على حُكم** — ولذلك بلا `in-reply-to:`\n"
-    assert ungated_answers({declared_path: body}, tree) == [], "الإعلانُ الصريحُ لم يُقبل"
-    # **والاستشهادُ بالنفس لا يُعفى بالإعلان** (وإلّا صار الإعلانُ غطاءً)
-    got = ungated_answers({declared_path: body + f"in-reply-to: {declared_path}\n"}, tree)
-    assert got and "نفسُه" in got[0], got
-    # **والعددُ يُقابَل على الشجرة الحقيقيّة**: إعلانٌ جديد لا يمرّ صامتاً
+    declared_path = DECLARED_NON_VERDICT[0]
+    other = "handoff/sulaiman/20260925-0603-REPORT-to-claude-w.md"
+    tree = {declared_path, other, verdict}
+    body = "```\nid:      20260925-0723-sulaiman\nclass:   تقريرٌ لا يُجيب حُكماً\n```\n\nهذا تقريرُ إغلاقٍ\n"
+    assert ungated_answers({declared_path: body}, tree) == [], "الصنفُ المُعلَنُ بالاسم لم يُقبل"
+    # **والاستشهادُ مع الإعلان غطاء** (حتى لو كان الشاهدُ حُكماً حقيقياً موجوداً)
+    got = ungated_answers({declared_path: body + f"in-reply-to: {verdict}\n"}, tree)
+    assert len(got) == 1 and "غطاء" in got[0], got
+    # **ونصُّ العبارة نفسُه في ملفٍّ غير مُعلَن لا يُعفي** (كان يُعفي حين كان المقياسُ النصّ لا الهويّة)
+    got = ungated_answers({other: body}, tree)
+    assert len(got) == 1 and "بلا إعلانِ شاهد" in got[0], got
+    # **والشجرةُ الحقيقيّة تُقابَل بالهويّة**: كلُّ مُعلَنٍ بالاسم يحمل `class:` وبلا استشهاد — والعكس
     bodies = box_answers(tree_files())
-    declared = sorted(p for p, t in bodies.items() if CLASS_DECL_RE.search(t))
-    assert len(declared) == DECLARED_NON_VERDICT_ANSWERS, (
-        f"المُعلِنون صنفَهم تغيّروا: المُقاس {len(declared)} والمُعلَن {DECLARED_NON_VERDICT_ANSWERS} ⇒ "
-        f"{declared} — يُحدَّث الثابتُ في الالتزام نفسه (الإعلانُ صنفٌ مُعلَنٌ لا إعفاءٌ صامت)")
+    declared = sorted(p for p, t in bodies.items() if CLASS_DECL_RE.search(t) or p in DECLARED_NON_VERDICT)
+    assert declared == sorted(DECLARED_NON_VERDICT), (
+        f"المُعلِنون صنفَهم تغيّروا: المُقاس {declared} والمُعلَن {sorted(DECLARED_NON_VERDICT)} ⇒ "
+        f"يُحدَّث الثابتُ في الالتزام نفسه (الإعلانُ صنفٌ مُعلَنٌ بالهويّة لا إعفاءٌ صامت)")
+    for p in DECLARED_NON_VERDICT:
+        assert CLASS_DECL_RE.search(bodies.get(p, "")), f"«{p}» مُعلَنٌ في الثابت بلا حقل `class:`"
+        assert not WITNESS_RE.search(bodies.get(p, "")), f"«{p}» مُعلَنٌ صنفاً **ويستشهد** بحُكم (غطاء)"
 
 
 def _subjects(answers: dict[str, str], since: str = WITNESS_FROM) -> list[str]:

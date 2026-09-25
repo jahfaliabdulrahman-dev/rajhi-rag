@@ -164,6 +164,22 @@ def test_the_fenced_header_is_read_not_ignored(monkeypatch, tmp_path, capsys):
     _tree(tmp_path, {"sulaiman": [("20260925-1301-REPORT", quoted)]})
     assert m.main(["--json"]) == 0
     assert '"turn": "claude"' in capsys.readouterr().out, "اقتباسٌ في غير الترويسة أزاح الدورَ"
+    # **والهويّةُ لا الشكل (نقلةُ مقعد البنية في مراجعة ٥٩):** ترويسةُ تقريرٍ **آخرَ** تُقتبَس في أعلى ملفّ
+    # تحمل شكلَ ترويسةٍ كاملاً (`id` وحقولاً) — وكان شرطُ «الشكل» يقرؤها **ترويسةً لهذا الملفّ** فيُطبّق
+    # إعلانَ غيرِه عليه. والآن تُقاس **الهويّة** (زمنُ `id` == زمنُ الاسم) فتبقى اقتباساً.
+    foreign = ("```\n"
+               "id:      20260101-0000-sulaiman\n"
+               "from:    sulaiman\n"
+               "status:  AWAITING_FOUNDER — إعلانُ تقريرٍ آخر\n"
+               "commit:  deadbeef\n"
+               "```\n\n# متنٌ\n")
+    _tree(tmp_path, {"sulaiman": [("20260925-1302-REPORT", foreign)]})
+    assert m.main(["--json"]) == 0
+    out = capsys.readouterr().out                       # قراءةٌ واحدة (الثانيةُ تُفرّغ المخزن)
+    assert '"turn": "claude"' in out, \
+        "ترويسةُ تقريرٍ آخر (شكلٌ صحيح · هويّةٌ غريبة) أزاحت الدورَ"
+    assert '"ignored_markers": []' in out, \
+        "كتلةٌ مُقتبَسة في الرأس لا يجوز أن تُعرَض إعلاناً مُهمَلاً (ليست إعلاناً من الأصل)"
 
 
 def test_the_declaration_is_read_in_the_header_only(monkeypatch, tmp_path, capsys):
@@ -311,9 +327,10 @@ def test_a_field_carrying_a_leading_backtick_is_not_a_declaration(monkeypatch, t
     """
     m = _load()
     monkeypatch.setattr(m, "ROOT", tmp_path)
-    assert m.declarations("`x` status: AWAITING_FOUNDER — اقتباسٌ ثمّ حقلٌ في سطرٍ لا يبدأ به\n") == [], \
+    assert m.declarations("`x` status: AWAITING_FOUNDER — اقتباسٌ ثمّ حقلٌ في سطرٍ لا يبدأ به\n",
+                          "probe.md") == [], \
         "التجريدُ يُوسّع المطابقة: سطرٌ يبدأ باقتباسٍ صار إعلاناً"
-    assert m.declarations("status: AWAITING_FOUNDER — إعلانٌ حقيقيّ\n") == ["AWAITING_FOUNDER"], \
+    assert m.declarations("status: AWAITING_FOUNDER — إعلانٌ حقيقيّ\n", "probe.md") == ["AWAITING_FOUNDER"], \
         "الإعلانُ الحقيقيُّ لم يُقرأ (تضييقٌ زائد)"
 
 

@@ -34,6 +34,10 @@ PROJ = Path(__file__).resolve().parent.parent
 # steps for a new file are listed in docs/ONBOARDING_NEW_FILE.md §3.
 MIN_ROWS = 95                 # rows the 10-page sample must yield (≈100–104)
 MIN_FOOTER_COMPARABLE = 9     # pages whose printed totals could be compared
+#: **وسمُ اللاحتميّة — مصدرٌ واحد (نقلةُ مقعد البنية · مراجعة ٥٩):** كان الحرفُ مكتوباً هنا وفي حارس
+#: السجلّ (`tests/test_flake_ledger.py`) ⇒ إعادةُ تسميته تُعمي السجلَّ **صامتاً** (صفرُ تشغيلٍ مُلوَّث =
+#: أخضرُ كاذب). فيُبنى السطرُ بهذا الثابت، ويستورده الحارسُ من هنا.
+FLAKY_MARK = "[flaky_read]"
 sys.path.insert(0, str(PROJ / "src"))
 
 RESULTS: list[tuple[str, bool, str]] = []
@@ -66,7 +70,7 @@ def g_tests() -> str:
 #: **الرموزُ الذهبية للمُحلّل** — موضعٌ واحد يقرؤه الضابطُ والبوّابةُ معًا، فلا يفترقان صامتين.
 #: **والضابطُ في وحدةٍ خفيفةٍ مُدرَجةٍ في الـCI:** `tests/test_gate_goldens.py` — وليست داخل
 #: `tests/test_parser.py` لأنّ ذاك يستورد `statement_qa.parser` وفيه `import polars` فيسقط الـCI الخفيف
-#: (قياسٌ مؤرَّخ: تشغيلُ الـCI على `dee00196` ⇒ `ModuleNotFoundError: No module named 'polars'` · `rc=2`).
+#: (قياسٌ مؤرَّخ: تشغيلُ الـCI على `de00196` ⇒ `ModuleNotFoundError: No module named 'polars'` · `rc=2`).
 #: **والقاعدةُ الحاكمة** موثّقةٌ في `src/statement_qa/legacy/arabic_digit_parser.py:19`
 #: («لا نقطةَ ⇒ انظر آخر فاصلة: أكثرُ من ٣ أرقامٍ بعدها ⇒ النقطةُ ضاعت») — فمَن بدّل قيمةً هنا بدليلٍ
 #: يُبدّلها في الوثيقة والضابط أيضًا، وإلّا **سقط الضابطُ في الـCI** (والاتجاهان — قائمةُ الـCI وقائمةُ
@@ -238,7 +242,7 @@ def g_end_to_end() -> str:
         second = _e2e_measure(pdf)
         ok, why = decide_two_runs(first, second)
         assert ok, f"الفحصُ الشامل: {why}"
-        declared = f" · [flaky_read] {why}"
+        declared = f" · {FLAKY_MARK} {why}"
         if _is_clean(second):
             run = second
     # **حزامٌ ثانٍ (اصطاده مقعدُ المواصفة بالقياس):** أيُّ مسارٍ يُكمِل يجب أن يكون على قراءةٍ **نظيفة** —

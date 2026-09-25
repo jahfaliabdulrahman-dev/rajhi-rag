@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib.util
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +24,15 @@ def _load():
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
+
+
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+
+def _pair_at(text: str, pattern: str) -> tuple[int, int] | None:
+    """أوّلُ زوجٍ رقميّ يطابقه النمطُ في النصّ (والأرقامُ العربيةُ تُوحَّد) — أو `None` (والغيابُ يُكشَف)."""
+    m = re.search(pattern, text.translate(_AR_DIGITS))
+    return (int(m.group(1)), int(m.group(2))) if m else None
 
 
 def _fakes() -> dict[str, str]:
@@ -127,9 +137,19 @@ FOREIGN_ID_DEBT_ON_CORPUS = 47
 #:       حسّاساً و**36·18** بلا حسّاس ⇒ **لا يُعاد إنتاجه بأيّ قاعدةٍ ولا مقام** (يُقاس بالأمر لا بالرواية).
 #:   ‹٤› **والاستثناءُ ليس عَمىً:** صيغةٌ **خارج** الصندوق تُحسَب — ضابطٌ اصطناعيٌّ أدناه يقيس الاتجاهين.
 TATWEEL_FORM_EXCLUDED_PREFIX = "handoff/"
-TATWEEL_FORM_CASE_SENSITIVE = False        # قاعدةُ الماسح `(?i)` نفسُها لا قاعدةً ثانية
+#: **وقاعدةُ الحالة تُشتقّ من الماسح لا تُكتب ثانياً (P3-9 · مقعدُ البنية):** كان `False` ثابتاً معلَّلاً
+#: بأنّه «قاعدةُ الماسح `(?i)`» — وهو **قولٌ لا قراءة**؛ فصار يُقرأ من `ID_CONTEXT.flags` (مصدرٍ واحد)،
+#: ويُقاس سلوكُه على الصيغتين في ضابطٍ أدناه (فلا يكفي الاشتقاقُ بلا أثرٍ مرئيّ).
+TATWEEL_FORM_CASE_SENSITIVE = not bool(_load().ID_CONTEXT.flags & re.IGNORECASE)
 TATWEEL_FORM_LINES = 11
 TATWEEL_FORM_FILES = 4
+#: **والعدّادُ الثاني (P-4 · `scan_foreign_ids`) كان يقرأ الكوربوس نفسه بلا الاستثناء نفسِه (F1 · مراجعة
+#: ٥٩):** قياسُ المقعد: **47 إيجاباً كلُّها داخل `handoff/` · وصفرٌ خارجه** ⇒ فالبوّابةُ كانت تراتش على
+#: **صندوق المراسلة** لا على كوربوس المنفّذ (صنفُ R57-1 بعينه: مراجعةٌ تقتبس `commit:` تُحمرّ المنفّذ).
+#: والآن: المقامُ = الشجرةُ المتتبَّعة **بلا `handoff/`**، والسقفُ = المقيسُ فيه، والمُستثنى **يُطبَع**.
+FOREIGN_ID_EXCLUDED_PREFIX = "handoff/"
+FOREIGN_ID_DEBT_ON_CORPUS = 0
+FOREIGN_ID_DEBT_INSIDE_MAILBOX = 47        # دَينٌ تاريخيٌّ مُعلَن — **لا يُراتَش** (لا يُعاقَب المدقّقُ)
 
 
 def _tatweel_form_counts(files, root=ROOT, excluded_prefix=TATWEEL_FORM_EXCLUDED_PREFIX):
@@ -155,26 +175,46 @@ def _tatweel_form_counts(files, root=ROOT, excluded_prefix=TATWEEL_FORM_EXCLUDED
     return lines, hit_files, counted, excluded
 
 
+def _foreign_id_counts(files, root=ROOT, excluded_prefix=FOREIGN_ID_EXCLUDED_PREFIX):
+    """يعدُّ إيجابيّات إشارةِ الخارِج على **ملفّاتٍ معطاة** ⇒ (المقيس, المُستثنى, عددُ الملفّات المقيسة).
+
+    مُستخرَجٌ في دالّةٍ **ليقيسه ضابطٌ بمُدخَلٍ اصطناعيٍّ** (F1): المقامُ نفسُه يُقاس لا الشجرةُ وحدها.
+    """
+    m = _load()
+    counted = excluded = files_counted = 0
+    for f in files:
+        try:
+            body = (root / f).read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        hits = sum(1 for i, ln in enumerate(body, 1) if m.scan_foreign_ids([(i, ln)]))
+        if excluded_prefix and f.startswith(excluded_prefix):
+            excluded += hits
+        else:
+            files_counted += 1
+            counted += hits
+    return counted, excluded, files_counted
+
+
 def test_the_corpus_positive_rate_is_declared_and_capped():
     """**الصدقُ في المعدّل**: أداةٌ تُعلن نظافتَها على الكوربوس بينما تُنتج عشراتِ الإيجابيّات = ادّعاء.
 
     ولا تُصلَح آليّاً (تُراجَع بشرٍ): فالقياسُ هنا **سقفٌ مُعلَن** يمنع النموّ — أي أنّ أيَّ توسيعٍ للسياق
-    أو صيغةٍ جديدة تُضاعف المعدّل **يُكشَف فوراً** بدل أن يُبتلع.
+    أو صيغةٍ جديدة تُضاعف المعدّل **يُكشَف فوراً** بدل أن يُبتلع. **والمقامُ بلا `handoff/` (F1 · R58-1):**
+    صناديقُ المراسلة ليست كوربوسَ المنفّذ، والمُستثنى **يُطبَع** لا يُخفى.
     """
-    m = _load()
     files = subprocess.run(["git", "ls-files", "*.md", "*.py", "*.json", "*.txt"],
                            cwd=str(ROOT), capture_output=True, text=True).stdout.split()
     assert files, "لا ملفّاتٍ مُتتبَّعة ⇒ فشلٌ مُغلَق (لا أُعلن سقفاً بلا مقام)"
-    n = 0
-    for f in files:
-        try:
-            lines = (ROOT / f).read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            continue
-        n += sum(1 for i, ln in enumerate(lines, 1) if m.scan_foreign_ids([(i, ln)]))
+    n, excluded, counted_files = _foreign_id_counts(files)
     assert n == FOREIGN_ID_DEBT_ON_CORPUS, (
-        f"معدّلُ الإيجابيّات {n} ≠ المُعلَن {FOREIGN_ID_DEBT_ON_CORPUS} ⇒ إن ارتفع: صيغةٌ تُوسّع الانكشافَ أو "
-        f"ملفٌّ جديد؛ وإن نزل: **كشفٌ فقدناه** (أخطرُ من الأول). كِلاهما يُقرارٌ مُعلَنٌ في الالتزام نفسه")
+        f"معدّلُ الإيجابيّات **خارج صناديق المراسلة** {n} ≠ المُعلَن {FOREIGN_ID_DEBT_ON_CORPUS} ⇒ "
+        f"إن ارتفع: صيغةٌ تُوسّع الانكشافَ أو ملفٌّ جديد؛ وإن نزل: **كشفٌ فقدناه** (أخطرُ من الأول). "
+        f"(والمُستثنى داخل `{FOREIGN_ID_EXCLUDED_PREFIX}`: {excluded} سطراً — مُعلَنٌ للتاريخ، "
+        f"ولا يُراتَش: لا يُعاقَب مدقّقٌ على اقتباسِ التزام. المقيسُ: {counted_files} ملفّاً)")
+    assert excluded >= FOREIGN_ID_DEBT_INSIDE_MAILBOX, (
+        f"المُستثنى داخل الصندوق {excluded} < المُعلَن {FOREIGN_ID_DEBT_INSIDE_MAILBOX} ⇒ الكوربوسُ "
+        f"تغيّر أو المقامُ يُقرأ خطأً (النقصانُ يُعلَن ولا يُبتلع)")
 
 def test_a_foreign_commit_id_is_flagged():
     """٤٠ خانةً سِتّ عشريّة لا وجودَ لها + سياقُ إحالةٍ ⇒ إشارةٌ إلى خارجه.
@@ -375,4 +415,45 @@ def test_the_foreign_id_report_never_prints_the_id(tmp_path, capsys):
     assert rc == 1, f"معرّفٌ غريب ⇒ 1 (صار {rc})"
     assert foreign not in out, "طُبع المعرّف! (حدُّ المدقّق: السطرُ فقط)"
     assert "foreign_commit_id" in out
+
+
+def test_the_tatweel_counter_uses_the_scanner_case_rule():
+    """**P3-9 (مقعدُ البنية):** «قاعدةُ الماسح `(?i)`» كانت **قولاً** في ثابتٍ مكتوب ⇒ لا ثابتان لمعنى واحد.
+
+    فالقاعدةُ الآن مُشتقّةٌ من `ID_CONTEXT.flags`، ويُقاس **أثرُها**: الحرفان الكبيرُ والصغير يسلكان سبيلاً
+    واحداً في العدّاد، وهي سبيلُ الماسح نفسِه.
+    """
+    m = _load()
+    scanner_i = bool(m.ID_CONTEXT.flags & re.IGNORECASE)
+    rx = re.compile("\u0640sha", 0 if TATWEEL_FORM_CASE_SENSITIVE else re.IGNORECASE)
+    assert bool(rx.flags & re.IGNORECASE) == scanner_i, "قاعدةُ العدّاد تخالف قاعدةَ الماسح (ثابتان لمعنى)"
+    assert bool(rx.search("الـ\u0640SHA")) == bool(rx.search("الـ\u0640sha")) == scanner_i, (
+        "أثرُ القاعدة غيرُ مرئيّ على حالة الحروف ⇒ الاشتقاقُ ادّعاءٌ لا قياس")
+
+
+def test_the_three_prose_sites_are_compared_to_the_measurement(monkeypatch):
+    """**الرقمُ يُقاس في مواضعه الثلاثة لا في موضعٍ واحد (P2-4 · مقعدُ المواصفة):** «١١ سطراً في ٤ ملفّات»
+    مكتوبٌ في **§٥ من البروتوكول** و**ترويسة الماسح**، و«27·11 · 36·18» في §٢٦ — وكلُّها كانت نثراً بلا
+    ضابطٍ يقرؤه، فتُقابَل الآن بالقياس: المقامُ بلا `handoff/`، والشجرةُ كلُّها في القاعدتين.
+    (و«٣١ سطراً في ١٢ ملفّاً» في §٢٦ **إعادةُ إنتاجٍ مؤرَّخة** لإسقاطٍ حصل قبل الإصلاح — تُقرأ كتاريخٍ
+    لا كقياسِ اليوم، فلا تُقابَل بمقياسٍ لا يعود.)
+    """
+    files = subprocess.run(["git", "ls-files", "*.md", "*.py", "*.json", "*.txt"],
+                           cwd=str(ROOT), capture_output=True, text=True).stdout.split()
+    lines_ex, files_ex, _, _ = _tatweel_form_counts(files)
+    assert (lines_ex, files_ex) == (TATWEEL_FORM_LINES, TATWEEL_FORM_FILES), "الثابتان ≠ المقيس (المقامُ بلا handoff/)"
+    lines_all, files_all, _, _ = _tatweel_form_counts(files, excluded_prefix="")
+    pat = r"(\d+)\s*سطراً في\s*(\d+)\s*ملفّ"
+    for doc in ("docs/handoff-protocol.md", "tools/secret_scan.py"):
+        text = (ROOT / doc).read_text(encoding="utf-8")
+        assert _pair_at(text, pat) == (TATWEEL_FORM_LINES, TATWEEL_FORM_FILES), (
+            f"{doc}: «… سطراً في … ملفّات» المنطوق يخالف المقيس "
+            f"{(TATWEEL_FORM_LINES, TATWEEL_FORM_FILES)} ⇒ نصٌّ مُتقادم")
+    monkeypatch.setattr(sys.modules[__name__], "TATWEEL_FORM_CASE_SENSITIVE", True)
+    lines_sens, files_sens, _, _ = _tatweel_form_counts(files, excluded_prefix="")
+    proto = (ROOT / "docs" / "handoff-protocol.md").read_text(encoding="utf-8")
+    assert _pair_at(proto, r"(\d+)·(\d+)\s*حسّاساً") == (lines_sens, files_sens), (
+        f"§٢٦: «…حسّاساً» المنطوق يخالف المقيس {(lines_sens, files_sens)}")
+    assert _pair_at(proto, r"(\d+)·(\d+)\s*بلا حسّاس") == (lines_all, files_all), (
+        f"§٢٦: «بلا حسّاس» المنطوق يخالف المقيس {(lines_all, files_all)}")
 

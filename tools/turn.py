@@ -63,13 +63,15 @@ DECLARATION_RE = re.compile(r"^\s*(?:[-*+]\s*)?status:\s*(AWAITING[ _]FOUNDER)\b
 #: سياجُ كتلةِ شِفرة (``` أو ~~~) — ويُقابَل **زوجاً** لا قلْباً لحالة: سياجٌ يتيمٌ يُبطِل التسييجَ كلَّه،
 #: فلا يُكتم إعلانٌ حقيقيٌّ بسطرِ تنسيقٍ ناقص (ST-6: كان القلْبُ يجعل كلَّ ما بعد سياجٍ يتيمٍ مُهمَلاً).
 FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
-#: **وشكلُ ترويسة §٢ (R58-3 · قاسه المدقّق في مراجعة ٥٨):** ترويسةُ كلّ تقريرٍ في هذا المستودع **كتلةٌ
-#: مسيّجة**، وكان استثناءُ ما بين سياجين يُهمِل `status:` فيها **صامتاً** (و`ignored_markers` فارغ ⇒ لا
-#: تنبيه). فالكتلةُ المسيّجةُ **الأولى** — إن بدأ الملفُّ بها — تُقرأ، **بشرطٍ يُقاس لا يُجامَل به أحد**:
-#: أن تحمل **شكلَ الترويسة الحقيقيّ** (سطرُ `id:` + حقلان مختلفان على الأقلّ من حقول §٢). وهذا الشرطُ
-#: يفصل ترويسةَ الرسالة عن **اقتباسٍ مُقفَلٍ** يبدأ بالملفّ ⇒ فلا يُنقَض R57-2(ج).
-HEADER_FIELD_RE = re.compile(r"^\s*(id|from|to|type|step|status|commit|in-reply-to|class)\s*:", re.I)
-HEADER_MIN_FIELDS = 2
+#: **وهويّةُ الترويسة §٢ (R58-3 · ثمّ نقلةُ مقعد البنية في مراجعة ٥٩):** ترويسةُ كلّ تقريرٍ في هذا
+#: المستودع **كتلةٌ مسيّجة**، وكان استثناءُ ما بين سياجين يُهمِل `status:` فيها **صامتاً** (و`ignored_markers`
+#: فارغ ⇒ لا تنبيه) ⇒ صارت الكتلةُ المسيّجةُ **الأولى** تُقرأ. وكان شرطُ «ترويسةٍ» **شكلَ** حقولٍ (`id:` +
+#: حقلان مختلفان) ⇒ معجمُ حقولٍ **ثانٍ** لـ§٢ يفترق عنه في الاتجاهين (حقلٌ موثَّقٌ لا يُرى · وحقلٌ جديدٌ
+#: يُضاف بلا وثيقة)، وكتلةٌ **مُقتبَسة** من ترويسة تقريرٍ آخر تبدأ بالملفّ كانت تُقرأ ترويسةً. فصار الشرطُ
+#: **الهويّة**: معرّفُ الكتلة (`id`) يحمل **زمنَ اسمِ هذا الملفّ نفسِه**، ويُقاس الطرفان بـ`stamp_of` (مصدرٌ
+#: واحد) — مقيسٌ في **١٠٣ من ١٠٣** ملفّاً مُتتبَّعاً يبدأ بكتلةٍ مسيّجة (كلُّ ترويسةٍ تحمل زمنَ اسمها).
+#: **وحدُّه المُعلَن:** ملفٌّ اسمُه بلا زمن (`YYYYMMDD-HHMM`) لا تُقرأ ترويسته — مقصود: لا هويّةَ ⇒ لا ترويسة.
+HEADER_ID_RE = re.compile(r"^\s*id\s*:\s*(\S+)", re.I)
 #: **حدُّ الترويسة** (أمرُ المالك: «الأكثر حرصاً ووضوحاً» — SP-3): الإعلانُ يُقرأ من أوّل الملفّ **قبل أوّل
 #: عنوان `## `** و**ضمن أوّل ٣٠ سطراً** (أيّهما أسبق). والاثنان معاً مقصودان: `## ` يفصل ترويسةَ الرسالة
 #: (الحقولُ الستّة) عن متنها في تقارير هذا المستودع، و`٣٠` سقفٌ لملفٍّ بلا عنوانٍ أصلًا فلا يُقرأ نصُّه كلُّه.
@@ -117,40 +119,51 @@ def header_cut(text: str) -> int:
     return min(first_heading, HEADER_LINES)
 
 
-def _is_header_block(lines: list[str], a: int, b: int) -> bool:
-    """هل الكتلةُ المسيّجة `lines[a..b]` **ترويسةُ §٢**؟ — يُقاس **شكلُها** لا مكانُها (R58-3).
+def _is_own_header(lines: list[str], name: str, a: int, b: int) -> bool:
+    """**هل الكتلةُ المسيّجة `lines[a..b]` ترويسةُ هذا الملفّ؟** — **بالهويّة لا بالشكل** (مراجعة ٥٩).
 
-    الشرط: سطرُ `id:` + `HEADER_MIN_FIELDS` حقلَين مختلفَين على الأقلّ. فاقتباسٌ مُقفَلٌ يبدأ بالملفّ
-    (بلا شكل الترويسة) يبقى اقتباساً — والفرقُ صيغةٌ مُعلَنة، لا استثناءٌ لمصلحة أحد.
+    الشرط: معرّفُ الكتلة (`id`) يحمل **زمنَ `name` نفسِه**، ويُقاس الطرفان بـ`stamp_of` (مصدرٌ واحد ⇒ لا
+    نمطَ ثانٍ). فترويسةُ تقريرٍ **آخرَ** تُقتبَس في أعلى ملفّ **لا** تُقرأ ترويسةً (وكان شرطُ «الشكل» يقرؤها)،
+    وملفٌّ اسمُه بلا زمنٍ لا تُقرأ ترويسته (لا هويّةَ ⇒ لا ترويسة) — وكلاهما **يُقاس** لا يُوصَف.
     """
-    fields = {m.group(1).lower() for ln in lines[a + 1:b] if (m := HEADER_FIELD_RE.match(ln))}
-    return "id" in fields and len(fields) >= HEADER_MIN_FIELDS
+    own = stamp_of(name)
+    if not own:
+        return False
+    for ln in lines[a + 1:b]:
+        m = HEADER_ID_RE.match(ln)
+        if m:
+            return stamp_of(m.group(1)) == own
+    return False
 
 
-def _marked_lines(text: str) -> list[tuple[int, str]]:
+def _marked_lines(text: str, name: str) -> list[tuple[int, str]]:
     """(رقمُ السطر، العلامة) لكل سطرٍ مُعلِن — والاقتباسُ مُستثنى (كتلةُ شِفرة **مُقفَلة**، ومرساةُ السطر).
 
     الأسوارُ تُقابَل **زوجاً**؛ وسياجٌ يتيمٌ (عددٌ فرديّ) يُبطِل التسييجَ كلَّه — فيُقرأ النصُّ كما هو:
     البديلُ (قلْبُ الحالة) كان يُهمِل كلَّ ما بعد سياجٍ ناقص، وإهمالُ إعلانٍ حقيقيٍّ أسوأُ من قراءة اقتباس (ST-6).
     ولا يُجرَّد اقتباسٌ داخليّ (S-4): المرساةُ وحدَها تكفي، والتجريدُ كان **يوسّع** المطابقةَ لا يضيّقها.
 
-    **والكتلةُ المسيّجةُ الأولى استثناءٌ مقصود (R58-3 · قاسه المدقّق في مراجعة ٥٨):** صيغةُ §٢ تكتب الترويسةَ
-    **كتلةً مسيّجة**، فاستثناءُ كلّ ما بين سياجين كان يُهمِل `status:` في الترويسة **صامتاً**
-    (`ignored_markers` فارغ) ⇒ إعلانٌ موثَّقٌ لا يُقرأ. فإذا بدأ الملفُّ بكتلةٍ مسيّجة **وحملت شكلَ الترويسة**
-    (`_is_header_block`) فهي **تُقرأ**، وما عداها من الكتل يبقى اقتباساً مُستثنى (ف§٢٧ والحالاتُ القديمة كما كانت).
+    **والكتلةُ المسيّجةُ الأولى ترويسةٌ إن كانت ترويسةَ هذا الملفّ (R58-3 · ثمّ الهويّة في مراجعة ٥٩):** صيغةُ
+    §٢ تكتب الترويسةَ **كتلةً مسيّجة**، فاستثناءُ كلّ ما بين سياجين كان يُهمِل `status:` فيها **صامتاً**
+    (`ignored_markers` فارغ) ⇒ إعلانٌ موثَّقٌ لا يُقرأ. فإذا بدأ الملفُّ بكتلةٍ مسيّجة وكان معرّفُها زمنَ
+    **اسمِه** (`_is_own_header`) فهي **تُقرأ**، وما عداها من الكتل يبقى اقتباساً مُستثنى (ف§٢٧ والحالاتُ
+    القديمة كما كانت · وR57-2(ج) محفوظ: كتلةٌ في الرأس ليست ترويسةَ الملفّ تبقى اقتباساً).
     """
     lines = text.splitlines()
     fences = [i for i, ln in enumerate(lines) if FENCE_RE.match(ln)]
+    if len(fences) % 2:                            # سياجٌ يتيم ⇒ التسييجُ مُبطَل (ST-6)
+        fences = []
+    read_block: tuple[int, int] | None = None
+    if len(fences) >= 2:
+        a, b = fences[0], fences[1]
+        if not any(ln.strip() for ln in lines[:a]) and _is_own_header(lines, name, a, b):
+            read_block = (a, b)                    # **ترويسةُ هذا الملفّ**: تُقرأ لا تُستثنى
     inside = [False] * len(lines)
-    if len(fences) % 2 == 0:                       # زوجٌ ⇒ التسييجُ مُتحقَّق (سياجٌ يتيم ⇒ لا تسييج)
-        blocks = list(zip(fences[0::2], fences[1::2]))
-        head = blocks[0] if blocks else None
-        for a, b in blocks:
-            if (head is not None and (a, b) == head and not any(ln.strip() for ln in lines[:a])
-                    and _is_header_block(lines, a, b)):
-                continue                           # **ترويسةُ §٢ المسيّجة**: تُقرأ لا تُستثنى (R58-3)
-            for i in range(a, b + 1):
-                inside[i] = True
+    for a, b in zip(fences[0::2], fences[1::2]):
+        if read_block == (a, b):
+            continue
+        for i in range(a, b + 1):
+            inside[i] = True
     out: list[tuple[int, str]] = []
     for i, line in enumerate(lines):
         if inside[i]:
@@ -161,24 +174,27 @@ def _marked_lines(text: str) -> list[tuple[int, str]]:
     return out
 
 
-def declarations(text: str) -> list[str]:
+def declarations(text: str, name: str) -> list[str]:
     """إعلاناتُ التوقّف **المقروءة** في نصّ — أي في **ترويسته** وحدَها (الباقي متنٌ يُوثّق).
 
     **والحدُّ مقصودٌ ومقيس:** مطابقةُ العلامة في أيّ موضعٍ جعلت تقريراً **يشرح القاعدة** يُزيح الدورَ إلى
     المالك ويوقف الطرفين بلا سبب (قاسه مقعدُ المواصفة: SP-3)؛ وصفرُ نصوصٍ في الشجرة تُعلن من المتن ⇒ فالحدُّ
     لا يُلغي إعلاناً واقعاً، ويمنع الصنفَ الذي قِيس. ودالّةٌ خالصةٌ ⇒ تُقاس بسمٍّ في الذاكرة لا بالنيّة.
+
+    **و`name` إلزاميّ**: هويّةُ الترويسة تُقاس بزمن اسم الملفّ، فلا تُقرأ ترويسةُ غيرِه (وتُمرَّر من الموضع
+    الذي يعرف الاسم — وغيابُها `TypeError` لا عمىً صامت).
     """
     cut = header_cut(text)
-    return [d for ln, d in _marked_lines(text) if ln <= cut]
+    return [d for ln, d in _marked_lines(text, name) if ln <= cut]
 
 
-def ignored_markers(text: str) -> list[str]:
+def ignored_markers(text: str, name: str) -> list[str]:
     """أسطرٌ **تُعلن في المتن** فتُهمَل بالحدّ — تُعرَض للوضوح فلا يظنّ كاتبُها أنّه أوقف الدور.
 
     (والمقصودُ: ما كان يُزيح الدورَ قبل الحدّ — لا الاقتباساتُ، فهي مُستثناةٌ في `_marked_lines` أصلًا.)
     """
     cut = header_cut(text)
-    return [f"{ln}: {d}" for ln, d in _marked_lines(text) if ln > cut]
+    return [f"{ln}: {d}" for ln, d in _marked_lines(text, name) if ln > cut]
 
 
 def derive() -> dict[str, object]:
@@ -188,8 +204,8 @@ def derive() -> dict[str, object]:
         return {"verdict": "UNMEASURED", "why": "لا تقريرَ في أيّ صندوق (لا زمنَ يُقاس)"}
     ts, side, path = max(allreps, key=lambda t: (t[0], t[1]))
     body = path.read_text(encoding="utf-8", errors="replace")
-    owner_awaiting = declarations(body)
-    ignored = [f"{path.relative_to(ROOT)}:{x}" for x in ignored_markers(body)]
+    owner_awaiting = declarations(body, path.name)
+    ignored = [f"{path.relative_to(ROOT)}:{x}" for x in ignored_markers(body, path.name)]
     where = f"آخرُ تقريرٍ ({side} · {ts})"
     if not owner_awaiting:
         # **قفلُ المالك** (الموضعُ الثاني المُعلَن): يُقرأ من **ترويسة** الملفّ المشترك — وكان لا يُقرأ
@@ -197,8 +213,8 @@ def derive() -> dict[str, object]:
         shared = ROOT / SHARED
         if shared.exists():
             stext = shared.read_text(encoding="utf-8", errors="replace")
-            owner_awaiting = declarations(stext)
-            ignored += [f"{SHARED}:{x}" for x in ignored_markers(stext)]
+            owner_awaiting = declarations(stext, shared.name)
+            ignored += [f"{SHARED}:{x}" for x in ignored_markers(stext, shared.name)]
             if owner_awaiting:
                 where = f"قفلُ المالك في {SHARED}"
     if owner_awaiting:
