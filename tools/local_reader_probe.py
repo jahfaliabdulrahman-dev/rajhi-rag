@@ -11,9 +11,11 @@
     python tools/local_reader_probe.py --pages 187
     python tools/local_reader_probe.py --design <معرّف>   # والافتراضُ يُكتشف من القرص
 
-**رموزُ الخروج (كلُّها مُعلَنة):** ٠ قياسٌ تمّ · ٢ محرّكُ Vision غائبٌ (إطفاءٌ برسالة) · ٣ لا بياناتِ
-تدريبٍ محلّيّة · ٤ صفحةٌ مطلوبةٌ غيرُ مؤهَّلة (والرسالةُ تسمّي المؤهَّلَ اليوم) · و`argparse` يخرج بـ٢
-لوسيطٍ مشوَّه.
+**رموزُ الخروج (كلُّها مُعلَنةٌ ومُختبَرة):** ٠ قياسٌ تمّ · ٢ محرّكُ Vision غائبٌ (إطفاءٌ برسالة) ·
+٣ لا بياناتِ تدريبٍ محلّيّة **أو لا مقامَ قابلًا للقياس** (لا مبلغَ مطبوعًا في الصفحات المطلوبة) ·
+٤ صفحةٌ مطلوبةٌ غيرُ مؤهَّلة (والرسالةُ تسمّي المؤهَّلَ اليوم) · ٥ وسيطٌ مشوَّه (`--pages` · أو عَلَمٌ غيرُ معروف).
+
+**الترتيبُ مهمّ:** غيابُ البيانات يُسمّى (٣) **قبل** أيّ طلبِ صفحة — وإلّا صار غيابُها «صفحةً غيرَ مؤهَّلة» (٤).
 
 **المحرّك:** macOS Vision (`VNRecognizeTextRequest`) عبر `pyobjc` في **بيئةٍ معزولة** — ليست من
 متطلّبات المشروع. غيابُه يُطفئ الأداة برسالة، ولا يكسر شيئًا (نصفُ المقارنة يعمل بلا محرّك).
@@ -47,7 +49,7 @@ PUBLISHED_PAGES = (1, 187, 320, 404, 539)
 RULES: tuple[str, ...] = ("شكل", "قيمة", "أرقام")
 RuleSets = dict[str, set]
 
-EXIT_OK, EXIT_NO_ENGINE, EXIT_NO_DATA, EXIT_NOT_ELIGIBLE = 0, 2, 3, 4
+EXIT_OK, EXIT_NO_ENGINE, EXIT_NO_DATA, EXIT_NOT_ELIGIBLE, EXIT_BAD_ARGS = 0, 2, 3, 4, 5
 
 AR_INDIC = {ord(c): ord("0") + i for i, c in enumerate("٠١٢٣٤٥٦٧٨٩")}
 AR_EXTENDED = {ord(c): ord("0") + i for i, c in enumerate("۰۱۲۳۴۵۶۷۸۹")}
@@ -59,6 +61,10 @@ TRAILING_FRACTION = re.compile(_SEPS + r"(\d{1,2})$")
 
 class IneligiblePage(Exception):
     """صفحةٌ مطلوبةٌ ليست في المُؤهَّل — رسالةٌ مسمّاة ⇒ رمزُ خروجٍ مسمّى (لا موتٌ صامتٌ برمز ١)."""
+
+
+class BadArguments(Exception):
+    """وسيطٌ مشوَّه — رمزٌ مسمّى (٥): لا موتٌ برمز ١، ولا التباسٌ برمز «المحرّك غائب» (٢)."""
 
 
 def to_ascii_digits(s: str) -> str:
@@ -235,7 +241,7 @@ def _parse_pages(raw: str | None) -> tuple[int, ...]:
     try:
         return tuple(int(x) for x in raw.replace(" ", "").split(",") if x)
     except ValueError as exc:
-        raise SystemExit(f"--pages يحتاج أرقامًا مفصولةً بفواصل: {raw}") from exc
+        raise BadArguments(f"--pages يحتاج أرقامًا مفصولةً بفواصل: {raw}") from exc
 
 
 def _no_data_message(design: str | None) -> str:
@@ -255,11 +261,19 @@ def _list_lines(design: str | None) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="قياسٌ محلّيّ لاسترجاع المبالغ والأرصدة من صور الكشوف")
+    ap = argparse.ArgumentParser(description="قياسٌ محلّيّ لاسترجاع المبالغ والأرصدة من صور الكشوف",
+                                exit_on_error=False)
     ap.add_argument("--list", action="store_true", help="اسرد التصميمَ المُكتشف والصفحاتِ المُجمَّدة والمُؤهَّل")
     ap.add_argument("--pages", help="أرقامُ صفحاتٍ بديلةٌ مفصولةٌ بفواصل")
     ap.add_argument("--design", default=None, help="معرّفُ تصميم الحزمة (والافتراض: يُكتشف من القرص)")
-    args = ap.parse_args(argv)
+    try:
+        args, extra = ap.parse_known_args(argv)
+    except argparse.ArgumentError as exc:
+        print(f"⛔ وسيطٌ مشوَّه: {exc}")
+        return EXIT_BAD_ARGS
+    if extra:      # **عَلَمٌ غيرُ معروف:** يُسمّى بالرمز ٥ — وكان `parse_args` يموت بـ٢ (رمزِ المحرّك)
+        print(f"⛔ وسيطٌ مشوَّه: {' '.join(extra)}")
+        return EXIT_BAD_ARGS
 
     if args.list:
         lines = _list_lines(args.design)
@@ -267,7 +281,17 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_NO_DATA if lines[0].startswith("لا بياناتِ") else EXIT_OK
 
     try:
-        chosen = selected(_parse_pages(args.pages), args.design)
+        pages = _parse_pages(args.pages)   # **الوسيطُ يُدقَّق قبل البيانات:** لا يُقال «لا بيانات» لوسيطٍ مشوَّه
+    except BadArguments as exc:
+        print(f"⛔ وسيطٌ مشوَّه: {exc}")
+        return EXIT_BAD_ARGS
+
+    if not eligible(args.design):
+        # **غيابُ البيانات يُسمّى (٣) قبل أيّ طلبِ صفحة** — وإلّا سُمّي «صفحةً غيرَ مؤهَّلة» (٤) كذبًا.
+        print(f"⛔ {_no_data_message(args.design)}")
+        return EXIT_NO_DATA
+    try:
+        chosen = selected(pages, args.design)
     except IneligiblePage as exc:
         print(f"⛔ {exc}")
         return EXIT_NOT_ELIGIBLE
@@ -293,6 +317,13 @@ def main(argv: list[str] | None = None) -> int:
     amt_n, amt_h = totals["مبالغ"]
     bal_n, bal_h = totals["أرصدة"]
     print("-" * 58)
+    if amt_n == 0 or bal_n == 0:
+        # **لا نسبةَ بمقامٍ صفريّ:** كان هذا ينفجر بـ`ZeroDivisionError` (تتبّعٌ خامٌ ورمز ١) لمّا تُسقَط
+        # كلُّ الصفوف بلا مبلغٍ مطبوع؛ والرفضُ يُسمّى ولا يُحسَب رقمٌ كاذب.
+        missing = "المبالغ" if amt_n == 0 else "الأرصدة"
+        print(f"⛔ لا مقامَ قابلًا للقياس: لا {missing} مطبوعةً في الصفحات المطلوبة ⇒ لا نسبةَ تُحسَب "
+              f"(المبالغ {amt_h}/{amt_n} · الأرصدة {bal_h}/{bal_n})")
+        return EXIT_NO_DATA
     print(f"قاعدةُ «قيمة» (المنشورة): المبالغ {amt_h}/{amt_n} = {100 * amt_h / amt_n:.1f}٪ · "
           f"الأرصدة {bal_h}/{bal_n} = {100 * bal_h / bal_n:.1f}٪")
     print("حدُّ القياس: استرجاعُ نصٍّ من الورق — لا إغلاقَ سلسلةٍ ولا مطابقةَ تذييل ولا شكلَ صفّ.")
