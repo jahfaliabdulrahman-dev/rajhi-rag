@@ -57,10 +57,11 @@ WITNESS_FROM = "20260925-044600"
 #: وملفّاتُ الصندوق بعد القاعدة خارج الصنف المُعلَن (البند ٦).
 PRE_RULE_ANSWERS = 15
 SUBJECTS_LANDED = 1
-NON_ANSWER_FILES_SINCE_RULE = 3
+NON_ANSWER_FILES_SINCE_RULE = 4
 #: (١ = تقريرُ الإغلاق إلى المالك `20260925-0520-REPORT-to-owner-…` · ٢ = قرارُ التكليف
 #: `20260925-0540-DECISION-to-claude-…` · ٣ = تقريرُ البندين ①/② إلى المالك
 #: `20260925-1330-REPORT-to-owner-flake-policy-closed-and-encrypted-backup-to-drive.md`
+#: · ٤ = تقريرُ إغلاق بنود المقاعد الثلاثة `20260925-1520-REPORT-to-owner-three-seat-closures-…`
 #: — وكلُّها **صنفٌ مُعلَنٌ بالاسم** لا صامت.)
 #: **ومُخاطَبٌ واحدٌ هبط بالقاعدة وأعلن شاهدَه:** `20260925-0723-REPORT-to-claude-r13-…`
 #: (`in-reply-to: handoff/sulaiman/20260925-0540-DECISION-to-claude-land-on-the-pushed-branch.md`
