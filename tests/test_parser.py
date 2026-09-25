@@ -1,21 +1,9 @@
 """Unit tests: parser + verifier (no API key, no network)."""
 
-from __future__ import annotations
-
-import sys
 from decimal import Decimal
-from pathlib import Path
 
-#: تهيئةُ مسارٍ صريحة (نمطُ `tests/test_oracle_confirm.py`): الضابطُ يستورد من `tools/` — ومتى لم يكن
-#: جذرُ المشروع على المسار (تشغيلُ الملفّ وحدَه: `.venv/bin/pytest tests/test_parser.py`) سقط بـ
-#: `ModuleNotFoundError` **لا بحكمٍ على المُحلّل** ⇒ تهيئةٌ صريحة، فالضابطُ يقيس ما وُلد لقياسه.
-PROJ = Path(__file__).resolve().parents[1]
-for _p in (str(PROJ), str(PROJ / "src")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-from statement_qa.parser import _to_decimal, normalize_digits, parse_text  # noqa: E402
-from statement_qa.verifier import verify_statement  # noqa: E402
+from statement_qa.parser import _to_decimal, normalize_digits, parse_text
+from statement_qa.verifier import verify_statement
 
 
 # ---------- digit normalization ----------
@@ -132,23 +120,6 @@ def test_parse_amount_printed_zero_as_dots():
 
 def test_parse_amount_lost_dot():
     assert _parse_amount("٦١,١٦٥١٢") == Decimal("61165.12")
-
-
-def test_the_gate_goldens_agree_with_this_locked_test():
-    """**الجدولُ الذهبيُّ نسخةٌ واحدة** — البوّابةُ (`tools/qa_gate.py`) تقرأ `PARSER_GOLDENS`، وهنا يُقاس
-    كلُّ زوجٍ منها على المُحلّل. فمَن بدّل قيمةً ليطمس الأحمرَ يفشل هنا في الـCI قبل أن يُدفَع.
-
-    **العلّةُ المقيسة (R13):** القيمةُ في جدول البوّابة كانت `35832.43` للمفتاح `٦١,١٦٥١٢`، وهو **رقمٌ لا ينتجه
-    الرمز** (ينتج `61165.12` — وهو ما توثّقه `arabic_digit_parser.py:19` ويثبّته `test_parse_amount_lost_dot`
-    أعلاه) ⇒ بقيت البوّابةُ `[FAIL]` ستّةَ أيام حتى صار الأحمرُ عاديًّا. والعلاجُ **نسخةٌ واحدة** لا تعديلُ قيمة.
-    """
-    from tools.qa_gate import PARSER_GOLDENS
-
-    assert PARSER_GOLDENS["٦١,١٦٥١٢"] == "61165.12", \
-        "القيمةُ الذهبية عادت لمخالفة الوثيقة والضابط"
-    for tok, want in PARSER_GOLDENS.items():
-        assert _parse_amount(tok) == Decimal(want), f"{tok!r}: الجدولُ يقول {want} والمُحلّل يقول {_parse_amount(tok)}"
-    assert PARSER_GOLDENS[".,.."] == "0", "الصفرُ المطبوعُ نقاطًا يُرجع صفرًا لا None (وإلّا انكسرت السلسلة)"
 
 
 def test_parse_amount_trailing_minus():

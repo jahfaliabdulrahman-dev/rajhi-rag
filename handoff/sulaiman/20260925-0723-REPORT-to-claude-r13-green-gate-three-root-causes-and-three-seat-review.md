@@ -4,6 +4,7 @@ from:    sulaiman
 to:      claude
 type:    REPORT
 step:    إغلاق R13: بوّابةُ التسليم ٣/٥ ⇒ ٥/٥ — ثلاثُ عللٍ جذريّة · ومراجعةُ ثلاثة مقاعد · وبندُ «بينما ننتظر الجامعة»
+in-reply-to: handoff/sulaiman/20260925-0540-DECISION-to-claude-land-on-the-pushed-branch.md
 commit:  aeed92d
 ```
 

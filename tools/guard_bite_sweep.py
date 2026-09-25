@@ -133,7 +133,7 @@ CASES = [
     ("م١٢ · الجدولُ الذهبيّ يطابق الوثيقة (R13)", QG,
      '"٦١,١٦٥١٢": "61165.12"',
      '"٦١,١٦٥١٢": "35832.43"',
-     "tests/test_parser.py::test_the_gate_goldens_agree_with_this_locked_test"),
+     "tests/test_gate_goldens.py::test_the_gate_goldens_agree_with_the_locked_rule"),
 ]
 
 
