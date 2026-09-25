@@ -141,6 +141,18 @@ CASES = [
      '    if _is_clean(first):\n        return True, f"قراءةٌ نظيفةٌ من المحاولة الأولى',
      '    if True:\n        return True, f"قراءةٌ نظيفةٌ من المحاولة الأولى',
      "tests/test_gate_flake_policy.py::test_the_decisive_rule_is_no_clean_read_no_acquittal"),
+
+    # **شطرا «النظافة» الأخريان** (مقعدُ البنية F-3): لكلٍّ سمُّه — فالقاعدةُ المركَّبةُ تُقاس بأجزائها لا بجملتها.
+    ("م١٤ · فقدُ صفٍّ ليس نظافة (R13)", QG,
+     '    return (run["susp"] == 0 and run["clean"] == run["total"]',
+     '    return (run["susp"] == 0 and True',
+     "tests/test_gate_flake_policy.py::test_a_lost_row_is_not_clean_even_with_zero_suspects"),
+
+    # **وثغرةُ «القراءة الأنحف»** (اصطادها مقعدا المعايير والمواصفة بالقياس): سمُّها يقلب شرطَها.
+    ("م١٥ · القراءةُ الثانيةُ الأنحفُ لا تُبرّئ (R13)", QG,
+     '    if second["n_rows"] < first["n_rows"] or second["total"] < first["total"]:',
+     '    if False:',
+     "tests/test_gate_flake_policy.py::test_a_thinner_second_read_cannot_acquit"),
 ]
 
 

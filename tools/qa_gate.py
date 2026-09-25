@@ -148,15 +148,40 @@ def _e2e_measure(pdf) -> dict:
     # الفصلَ بين «عطبٍ يتكرّر» و«ضجيجٍ لا يتكرّر» ممكنًا في سياسة اللاحتميّة أدناه.
     ids = sorted(f'{r[idx["الصفحة"]]}:{r[idx["#"]]}'
                  for r in data if str(r[idx["الحالة"]]).startswith("⚠"))
+    # لافتةٌ وهويّةٌ لا تفترقان في التطبيق (كلتاهما من `all_rows` في النداء نفسه) ⇒ تعارضُهما **عطبُ
+    # لافتةٍ/تحويلٍ لا ضجيجُ قراءة**، فلا يُعاد من أجله: **يصرخ في مكانه** (وهذا حدٌّ مُعلَن: التماثلُ
+    # مع سياسة الإعادة مدَّعىً لا مقيسًا — وما لا يُقاس لا يُدَّعى).
     assert susp == len(ids), (
         f"عدّادُ اللافتة ({susp}) لا يطابق الصفوفَ المشبوهة ({len(ids)}): {ids[:5]}")
+
+    # **وأوراكلُ الفوتر يُقاس هنا لا هناك:** يُقرأ في القياس فتصير «النظافة» واحدةً في المكانين
+    # (وإلّا غُسلت مخالفتُه بإعادة قراءة: عِلّةٌ اصطادها مقعدُ المواصفة بالقياس).
+    mf = re.search(r"تحقق الفوتر: (\d+)/(\d+)", str(summary))
+    assert mf, f"footer oracle line missing from summary: {str(summary)[:220]}"
+    seg = str(summary).split("تحقق الفوتر")[1].split("•")[0]
+    cv = re.search(r"وتغطية (\d+)/(\d+)", str(summary))
     return {"summary": str(summary), "data": data, "idx": idx, "total": total,
-            "clean": clean, "susp": susp, "ids": ids}
+            "clean": clean, "susp": susp, "ids": ids, "n_rows": len(data),
+            "footer_pair": (int(mf.group(1)), int(mf.group(2))),
+            "footer_seg": seg, "footer_flag": "⚠" in seg,
+            "coverage_pair": (int(cv.group(1)), int(cv.group(2))) if cv else None}
+
+
+#: **عقدُ القياس**: المفاتيحُ التي تُنتجها `_e2e_measure` وتستهلكها السياسة — موضعٌ واحد يُقابَل في
+#: `tests/test_gate_flake_policy.py` بالقياس (فلا يفترق العقدُ صامتًا بين منتجٍ ومستهلك).
+RUN_FIELDS = ("summary", "data", "idx", "total", "clean", "susp", "ids", "n_rows",
+              "footer_pair", "footer_seg", "footer_flag", "coverage_pair")
 
 
 def _is_clean(run: dict) -> bool:
-    """نظافةُ قراءةٍ واحدة: صفرُ شكوكٍ **و** لا صفَّ مفقودًا من العدّ (فلا صفرَ يُقرأ نجاحًا)."""
-    return run["susp"] == 0 and run["clean"] == run["total"]
+    """نظافةُ قراءةٍ واحدة: صفرُ شكوكٍ **و** لا صفَّ مفقودًا من العدّ **و** أوراكلُ الفوتر مطابق.
+
+    الشرطُ الأخيرُ لم يكن فيها أوّلًا، وأدخله قياسُ مقعد المواصفة: بدونه **تُغسَل مخالفةُ أوراكل
+    الفوتر** (أقوى حارسٍ خارجيّ) بإعادةِ قراءةٍ نظيفةٍ ثانية، فتُمرَّر بلا إعلان.
+    """
+    f_ok, f_possible = run["footer_pair"]
+    return (run["susp"] == 0 and run["clean"] == run["total"]
+            and not run["footer_flag"] and f_ok == f_possible)
 
 
 #: **سياسةُ اللاحتميّة — مُعلَنةٌ لا مُخمَّنة.** كانت البوّابةُ تحكم من قراءةٍ واحدة فتبدّل لونَها بلا
@@ -165,6 +190,14 @@ def _is_clean(run: dict) -> bool:
 #: العطبُ الحتميّ (مُحلّلٌ · سلسلةٌ · انحرافُ عدّ) **يتكرّر بمعرّفه**، وضجيجُ القراءة **لا يتكرّر**.
 #: والقاعدةُ الحاسمةُ واحدة: **لا براءةَ بلا قراءةٍ نظيفة** — والتقاطعُ **تشخيصيٌّ** لا حاسم (لأنّ
 #: أيَّ تقاطعٍ يعني أنّ الثانيةَ غيرُ نظيفةٍ حتمًا)؛ وقيمتُه أنّه **يسمّي العطبَ المتكرّرَ بمعرّفه**.
+#: **وحدودٌ مُعلَنة (اصطادتها المقاعد الثلاثة · ٢٠٢٦-٠٩-٢٥):**
+#:   ١. «العطبُ الحتميّ يتكرّر بمعرّفه» **مُدَّعى** وقياسُه المؤرَّخ يُثبت وجودَ الضجيج لا تكرارَ العطب؛
+#:      والضمانةُ الباقيةُ هي «لا قراءةَ نظيفة ⇒ أحمر» + شرطُ عدمِ فقدِ صفٍّ (أدناه).
+#:   ٢. الهويّةُ **موضعيّةٌ** (`صفحة:رقمُ الصفّ`) لا محتوائيّة: صفٌّ مُسقَطٌ يُزيح ترقيمَ ما بعده فيُفقد
+#:      اسمُ العطب — ولهذا صار **فقدُ الصفّ** سببًا مستقلًّا للرفض، لا مجرّدَ «لا تكرار».
+#:   ٣. الإعادةُ لا تُغطّي **انقطاعَ النقل**: استثناءٌ في القراءة الأولى يُسقط البوّابةَ باسمه
+#:      (فشلٌ مغلقٌ مُعلَن) ولا يُعاد — فالانقطاعُ عطبُ بيئةٍ لا لاحتميّةُ قراءة.
+#:   ٤. والإعادةُ تُضاعف الزمنَ والكلفةَ في أسوأ الحالات (قراءتان لا أكثر — لا حلقة).
 def decide_two_runs(first: dict, second: dict | None = None) -> tuple[bool, str]:
     if _is_clean(first):
         return True, f"قراءةٌ نظيفةٌ من المحاولة الأولى ({first['total']} صفًّا)"
@@ -176,11 +209,24 @@ def decide_two_runs(first: dict, second: dict | None = None) -> tuple[bool, str]
         return False, (f"شكوكٌ **تتكرّر** بمعرّفها ⇒ عطبٌ حتميّ لا ضجيج: "
                        f"{common[:5]}{more} ({len(common)} صفًّا)")
     if not _is_clean(second):
-        return False, (f"لا قراءةَ نظيفة: الأولى {first['susp']} والثانية {second['susp']} "
-                       f"(تقاطعٌ فارغٌ لا يُثبت براءة)")
-    return True, (f"قراءةٌ غيرُ حتميّة مُعلَنة: {first['susp']} مشتبهًا في الأولى لم يتكرّر "
-                  f"({first['ids'][:3]})، والثانيةُ نظيفةٌ ({second['total']} صفًّا) "
-                  f"⇒ تُقرأ القيمُ من القراءة النظيفة")
+        return False, (f"لا قراءةَ نظيفة: الأولى {first['susp']} مشتبهًا و{first['n_rows']} صفًّا "
+                       f"(فوتر {first['footer_pair'][0]}/{first['footer_pair'][1]})، والثانية "
+                       f"{second['susp']} مشتبهًا و{second['n_rows']} صفًّا "
+                       f"(فوتر {second['footer_pair'][0]}/{second['footer_pair'][1]}) "
+                       f"⇒ تقاطعٌ فارغٌ لا يُثبت براءة")
+    if second["n_rows"] < first["n_rows"] or second["total"] < first["total"]:
+        # عِلّةٌ اصطادها مقعدا المعايير والمواصفة: قراءةٌ ثانيةٌ **أنحفُ** تُقرأ نظيفةً وهي أقربُ إلى
+        # فقدِ صفٍّ (و`MIN_ROWS` وحدَه يسمح بفقدِ صفوفٍ حتّى العتبة) ⇒ تُرفض بسببها المُسمّى.
+        return False, (f"إعادةُ القراءة **أنحفُ** ({second['n_rows']} صفًّا مقابل {first['n_rows']} · "
+                       f"وعدّادُها {second['total']} مقابل {first['total']}) ⇒ فقدُ صفٍّ لا ضجيج")
+    return True, (f"قراءةٌ غيرُ حتميّة مُعلَنة: الأولى {first['susp']} مشتبهًا "
+                  f"{first['ids'][:3]} · {first['clean']}/{first['total']} · فوتر "
+                  f"{first['footer_pair'][0]}/{first['footer_pair'][1]}"
+                  f"{' بوسم ⚠' if first['footer_flag'] else ''}"
+                  f"{' · تغطية ' + '/'.join(map(str, first['coverage_pair'])) if first['coverage_pair'] else ''}"
+                  f"؛ والثانيةُ نظيفةٌ ({second['total']} صفًّا · فوتر "
+                  f"{second['footer_pair'][0]}/{second['footer_pair'][1]}) "
+                  f"⇒ تُقرأ القيمُ من الثانية، وقياساتُ الأولى مُعلَنةٌ كاملةً في هذا السطر")
 
 
 def g_end_to_end() -> str:
@@ -195,8 +241,16 @@ def g_end_to_end() -> str:
         declared = f" · [flaky_read] {why}"
         if _is_clean(second):
             run = second
+    # **حزامٌ ثانٍ (اصطاده مقعدُ المواصفة بالقياس):** أيُّ مسارٍ يُكمِل يجب أن يكون على قراءةٍ **نظيفة** —
+    # وإلّا فسياسةُ اللاحتميّة تُرخي قيدًا صامتةً إن اعتلّت. هذا السطرُ يجعل الإرخاءَ يصرخ، وسمُّه
+    # في `guard_bite_sweep` (م١٤/م١٥).
+    assert _is_clean(run), (
+        f"الفحصُ الشامل: القراءةُ المُكمِلة ليست نظيفة ({run['susp']} مشتبهًا · "
+        f"عدّاد {run['clean']}/{run['total']} · فوتر {run['footer_pair'][0]}/{run['footer_pair'][1]})")
     summary, data, idx = run["summary"], run["data"], run["idx"]
-    total = run["total"]
+    total, n_rows = run["total"], run["n_rows"]
+    assert n_rows == total, (f"جدولٌ بـ{n_rows} صفًّا مقابل عدّادٍ يقول {total} — "
+                             f"انحرافُ عدّ لا لاحتميّةُ قراءة")
     assert total >= MIN_ROWS, (
         f"only {total} rows — العتبة {MIN_ROWS}: صفحات أقل غزارة من المتوقع، "
         f"راجع خطوات المعايرة في docs/ONBOARDING_NEW_FILE.md §3")
@@ -272,14 +326,18 @@ def g_end_to_end() -> str:
     # EVERY comparable page. This is the ONLY external guard against a
     # uniform ×100 shift that stays "chain-clean" (the accuracy paradox).
     s = str(summary)
-    m = re.search(r"تحقق الفوتر: (\d+)/(\d+)", s)
-    assert m, f"footer oracle line missing from summary: {s[:220]}"
-    f_ok, f_possible = int(m.group(1)), int(m.group(2))
-    footer_seg = s.split("تحقق الفوتر")[1].split("•")[0]
+    f_ok, f_possible = run["footer_pair"]
+    footer_seg = run["footer_seg"]
     assert "⚠" not in footer_seg, f"footer mismatch on sample: {footer_seg}"
     assert f_ok == f_possible and f_possible >= MIN_FOOTER_COMPARABLE, (
         f"footer: {f_ok}/{f_possible} comparable pages matched — "
         f"العتبة {MIN_FOOTER_COMPARABLE} (راجع §3 في دليل المعايرة)")
+    # **وإغلاقُ المقام** (ثقبٌ مُعلَنٌ اصطاده مقعدُ المواصفة: «تغطية 9/10» كانت تمرّ): المقامُ المُقارَن
+    # يجب أن يساوي **عددَ الصفحات** — فلا تخرج صفحةٌ من الأوراكل بلا حكم.
+    cov = run["coverage_pair"]
+    assert cov and f_possible == cov[1], (
+        f"footer denominator hole: {f_ok}/{f_possible} مقابل تغطية {cov} "
+        f"⇒ صفحاتٌ خرجت من الأوراكل بلا حكم")
 
     # ———— ترتيب الصفحات (what-if delta) ————
     assert "⚠ الترتيب" not in s, f"page-order flag on sample: {s[:220]}"
@@ -315,7 +373,8 @@ def main() -> None:
     ap.add_argument("--quick", action="store_true",
                     help="offline gates only (the default; explicit flag kept for the documented usage)")
     ap.add_argument("--full", action="store_true",
-                    help="include the live end-to-end run (~3-4 min, uses VLM calls)")
+                    help="include the live end-to-end run (~3-4 min, uses VLM calls; "
+                         "وقد تتضاعف الزمنُ والكلفةُ مرّةً واحدة إن لم تكن القراءةُ الأولى نظيفة — إعادةٌ واحدة لا أكثر)")
     args = ap.parse_args()
 
     gate("unit suite", g_tests)

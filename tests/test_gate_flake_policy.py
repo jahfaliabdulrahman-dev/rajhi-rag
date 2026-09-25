@@ -5,18 +5,32 @@
 (ستاندرد + `tools.qa_gate`) فتُدرَج في الـCI الخفيف، ولا تعتمد على خدمةٍ حيّة.
 
 **ولا تُقرأ السياسةُ من نصٍّ عامّ:** الأساسُ الذي تُقاس عليه هو `_run` أدناه — عدّادٌ صريحٌ لكلّ قراءة.
+
+**وحدودٌ أُغلقت هنا بعد قياس المقاعد الثلاثة (٢٠٢٦-٠٩-٢٥):** قراءةٌ ثانيةٌ **أنحفُ** لا تُبرّئ ·
+مخالفةُ أوراكل الفوتر في القراءة الأولى **تُعلَن ولا تُغسَل** · والنظافةُ تشمل الفوتر · وعقدُ القياس
+(`RUN_FIELDS`) موضعٌ واحد بين المنتج والمستهلك.
 """
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from tools.qa_gate import decide_two_runs  # noqa: E402
+from tools.qa_gate import RUN_FIELDS, decide_two_runs  # noqa: E402
 
 
-def _run(total: int = 104, clean: int = 104, ids: tuple[str, ...] = ()) -> dict:
-    """قراءةٌ واحدةٌ كما تُقاس: العدّادُ الثلاثيّ + هويّةُ الصفوف المشبوهة."""
-    return {"total": total, "clean": clean, "susp": len(ids), "ids": list(ids)}
+def _run(n_rows: int = 104, total: int = 104, clean: int = 104, ids: tuple[str, ...] = (),
+         footer: tuple[int, int] = (10, 10), flag: bool = False,
+         cov: tuple[int, int] | None = (10, 10)) -> dict:
+    """قراءةٌ واحدةٌ كما تُنتجها `_e2e_measure` فعلًا: العدّاداتُ والهويّةُ وأوراكلُ الفوتر."""
+    return {"summary": "s", "data": [], "idx": {}, "total": total, "clean": clean,
+            "susp": len(ids), "ids": list(ids), "n_rows": n_rows,
+            "footer_pair": footer, "footer_seg": ("⚠ " if flag else "") + "seg",
+            "footer_flag": flag, "coverage_pair": cov}
+
+
+def test_the_run_contract_is_declared_in_one_place():
+    """**الدَّرزُ يُقاس:** ما يبنيه الضابطُ يطابق ما يُنتجه القياسُ ويستهلكه الحكم — وإلّا تباعدا صامتين."""
+    assert set(_run()) == set(RUN_FIELDS)
 
 
 def test_a_clean_first_read_passes_and_costs_one_read():
@@ -33,7 +47,7 @@ def test_a_lone_dirty_read_is_never_a_pass_by_itself():
 
 
 def test_repeating_suspect_names_a_deterministic_defect():
-    """عطبٌ حتميّ: المعرّفُ نفسُه يعود في القراءتين ⇒ أحمر **باسمه**، لا «شكوك». """
+    """عطبٌ حتميّ: المعرّفُ نفسُه يعود في القراءتين ⇒ أحمر **باسمه**، لا «شكوك»."""
     ok, why = decide_two_runs(_run(clean=103, ids=("10:41", "9:7")),
                               _run(clean=103, ids=("9:7",)))
     assert not ok, "عطبٌ متكرّرٌ مُرّر"
@@ -58,6 +72,30 @@ def test_a_flaky_read_passes_declared_when_one_read_is_clean():
 
 
 def test_a_lost_row_is_not_clean_even_with_zero_suspects():
-    """صفرُ شكوكٍ مع صفٍّ مفقودٍ من العدّ = عطبُ عدّ ∎ لا نظافة."""
+    """صفرُ شكوكٍ مع صفٍّ مفقودٍ من العدّ = عطبُ عدّ لا نظافة. (سمُّه: م١٤)"""
     ok, _ = decide_two_runs(_run(total=104, clean=103, ids=()))
     assert not ok, "صفٌّ مفقودٌ مع صفرِ شكوكٍ عُدَّ نظافة"
+
+
+def test_a_thinner_second_read_cannot_acquit():
+    """**عِلّةٌ اصطادها مقعدا المعايير والمواصفة بالقياس:** قراءةٌ ثانيةٌ أنحفُ تُقرأ نظيفةً فيُعتمد
+    نقصُها — و`MIN_ROWS` وحدَه يسمح بفقدِ صفوفٍ كثيرة. فهي تُرفض بسببها المُسمّى. (سمُّه: م١٥)"""
+    ok, why = decide_two_runs(_run(n_rows=104, total=104, clean=103, ids=("10:41",)),
+                              _run(n_rows=99, total=99, clean=99))
+    assert not ok, "قراءةٌ أنحفُ أبرّأت فقدَ صفوف"
+    assert "أنحف" in why, why
+
+
+def test_a_footer_violation_in_the_first_read_is_declared_not_washed():
+    """**عِلّةٌ اصطادها مقعدُ المواصفة:** مخالفةُ أوراكل الفوتر (أقوى حارسٍ خارجيّ) في القراءة الأولى
+    كانت تُغسَل بصمتٍ بإعادةِ قراءةٍ نظيفة. الآن تُمرَّر **وبيانُها مُعلَن**: المقامان والوسم."""
+    ok, why = decide_two_runs(_run(clean=103, ids=("10:41",), footer=(9, 10), flag=True), _run())
+    assert ok, why
+    assert "9/10" in why and "⚠" in why, f"مخالفةُ الفوتر غُسلت صامتة: {why}"
+
+
+def test_a_footer_mismatch_in_the_second_read_is_not_clean():
+    """والنظافةُ تشمل الفوتر: قراءةٌ بلا شكوكٍ وبعدّادٍ مغلقٍ ومخالفةِ فوترٍ **ليست نظيفة**."""
+    ok, why = decide_two_runs(_run(clean=103, ids=("10:41",)), _run(footer=(9, 10), flag=True))
+    assert not ok, "قراءةٌ بمخالفةِ فوترٍ عُدَّت نظيفة"
+    assert "لا قراءةَ نظيفة" in why, why
