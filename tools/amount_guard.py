@@ -554,9 +554,21 @@ def write_baseline(deny: set[str], accept_increase: bool = False) -> int:
     return 0
 
 
-def ratchet_violations(counts: dict[str, dict], base: dict[str, dict], where: str) -> list[str]:
+def ratchet_violations(counts: dict[str, dict] | None, base: dict[str, dict] | None,
+                       where: str) -> list[str]:
     """**السقاطة:** تسقط عند زيادةِ عددٍ · ملفٍّ جديد · **أو تبديلِ قيمةٍ بأخرى عند العدّ نفسِه**
-    (ببصمة المجموعة — وهو ما لا يراه عدّادٌ يقارن الأعدادَ وحدها)، وتخضرّ فيما عدا ذلك."""
+    (ببصمة المجموعة — وهو ما لا يراه عدّادٌ يقارن الأعدادَ وحدها)، وتخضرّ فيما عدا ذلك.
+
+    **وغيابُ العتبة أو العدّاد يُسقط باسمه ولا يُنهي البرنامج** (عطبٌ صنفيّ · الجولة ٦١):
+    `baseline_at()` تُعيد `None` شرعاً حين لا يكون خطُّ الأساس موجوداً في ذلك الالتزام (فرعٌ
+    أساسُه أقدمُ من الخطّ) — وكان `None` يُمرَّر إلى `.items()` فيسقط الخطّافُ بـ`AttributeError`
+    **قبل** أن يحكم، فكان يُقرأ **انهيارٌ** مكان **حُكمٍ**، ويمنع دفعاً مشروعاً بلا اسمِ سبب.
+    والقاعدةُ المعلنة: «غيرُ المقروء ليس نظيفاً» ⇒ **BLOCK بالاسم**.
+    """
+    if counts is None or base is None:
+        missing = "العدّاد" if counts is None else "خطُّ الأساس"
+        return [f"⛔ {missing} غيرُ مقروء ⇒ لا أُثبت نظافةَ الظهورات («غيرُ المقروء ليس نظيفاً» — "
+                f"القاعدة ١٢) — {where}"]
     bad: list[str] = []
     for rel, cur in sorted(counts.items(), key=lambda x: -x[1]["count"]):
         b = base.get(rel)
