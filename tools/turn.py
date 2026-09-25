@@ -6,10 +6,13 @@
 ونُفِّذت. والقاعدةُ التي تحكم (J52-1): **ما يُشتقّ لا يُكتب** — فالاشتقاقُ هنا من واقعٍ موجود:
 
 - **آخرُ فاعل**: أحدثُ تقريرٍ اسمُه يحمل زمنَه (`handoff/<طرف>/YYYYMMDD-HHMM-…md`).
-- **الدور**: للطرف الآخر… **إلّا** إذا حمل آخرُ تقريرٍ **إعلانَ توقّفٍ مُصطلَحاً** (`AWAITING_FOUNDER`
-  في **أوّل سطرٍ** من متن التقرير) ⇒ فالدورُ **للمالك** — وهذا هو الموضعُ الذي تأخّر فيه دمجُ #119
-  بلا مالكٍ ظاهر (P-6 صريحاً). **و«بيدك» ليست علامةً** (كلُّ تقريرٍ للمنفّذ ينتهي بقائمة ما بيد المالك
-  ⇒ صارت ضجيجاً يُزيح الدورَ زوراً)، **ولا يُزيح ذكرُ العلامة داخلَ نثرٍ** (اقتباسٌ لها ≠ إعلانُ توقّف).
+- **الدور**: للطرف الآخر… **إلّا** إذا وُجد **إعلانُ توقّفٍ مُصطلَح** ⇒ فالدورُ **للمالك** (البروتوكول §٣) —
+  وهذا هو الموضعُ الذي تأخّر فيه دمجُ #119 بلا مالكٍ ظاهر (P-6 صريحاً).
+  **وصيغتُه واحدة، وموضعاه مُعلَنان (R57-2 · قاسه المدقّق في مراجعة ٥٧):** الصيغةُ `status: AWAITING_FOUNDER`
+  — كما توثّقها `handoff/STATE.md:60` وتكليفُ المدقّق `docs/claude-auditor-directive.md:43` — وتُقرأ من
+  **آخر تقرير** ومن **الملفّ المشترك `handoff/STATE.md`** (قفلُ المالك) معاً. وما ليس إعلاناً: اقتباسُها
+  في **كتلة شِفرة** أو بين **علامتين خلفيّتين**، و«بيدك» في قائمةِ نهاية التقرير (كلُّ تقريرٍ للمنفّذ ينتهي
+  بها ⇒ صارت ضجيجاً يُزيح الدورَ زوراً)، وصيغةٌ حرّةٌ بلا حقل `status:`.
 
     tools/turn.py                # سطرُ الملفّ المشترك (مُؤشِّر) + الدورُ الآنيّ وسببُه
     tools/turn.py --json         # الحكمُ كاملاً (الطرف · آخرُ فاعل · زمنُه · السبب)
@@ -45,10 +48,17 @@ NAME_RE = re.compile(r"^(\d{8})-(\d{4})(\d{2})?-")
 #: الدورَ عن الطرف المنتظَر فعلًا (قاسه المدقّق في مراجعة ٥٦: الأداةُ قالت «المالك» والنصُّ نفسُه يقول إنّ
 #: المراجعةَ هي المنتظَرة). ⇒ **العلامةُ فعلُ توقّفٍ مُعلَن، لا ذكرُ المالك في قائمة.**
 OWNER_SIGNALS = ("AWAITING_FOUNDER", "AWAITING FOUNDER")
-#: **وموضعُ العلامة جزءٌ من القاعدة** (قاسه مقعدا Spec وStandards): مطابقةُ النصّ في **أيّ موضع** تجعل
-#: تقريراً **يقتبس** العلامة — كما تقتبسها الوثيقةُ نفسُها في §٢٦ — يُزيح الدورَ إلى المالك ويوقف الطرفين
-#: خطأً. ⇒ الإعلانُ **سطرٌ يبدأ بالعلامة** (بعد تجريد مسافةٍ أو علامةِ قائمة)؛ والاقتباسُ في نثرٍ لا يبدأ بها.
-DECLARATION_RE = re.compile(r"^\s*(?:[-*+]\s*)?(AWAITING[ _]FOUNDER)\b")
+#: **صيغةٌ واحدةٌ في موضعين مُعلَنين (R57-2 · قاسه المدقّق في مراجعة ٥٧ — ثلاثُ حالاتٍ مقيسة):**
+#: الصيغةُ الموثّقةُ في المستودع نفسِه هي **`status: AWAITING_FOUNDER`** (`handoff/STATE.md:60` ·
+#: `docs/claude-auditor-directive.md:43`)، وموضعاها: **آخرُ تقرير** و**الملفُّ المشترك `handoff/STATE.md`**
+#: (قفلُ المالك). والثلاثةُ التي أُغلقت: (أ) الملفُّ المشتركُ **لم يكن يُقرأ أصلًا** ⇒ قفلُ المالك الموثَّق لا
+#: يوقف الدور؛ (ب) الصيغةُ الحرّةُ (العلامةُ في أوّل سطر) أسقطت صيغةَ التكليفِ الموثّقة في `ba6c219`
+#: (**تراجع**)؛ (ج) الاقتباسُ في كتلةِ شِفرةٍ **يُزيح الدورَ زوراً**. ⇒ الإعلانُ الآن: حقلُ `status:` يحمل
+#: العلامة، في الموضعين، ولا يُقرأ داخلَ كتلةِ شِفرةٍ ولا بين علامتين خلفيّتين (اقتباسٌ ≠ إعلان).
+DECLARATION_RE = re.compile(r"^\s*(?:[-*+]\s*)?status:\s*(AWAITING[ _]FOUNDER)\b", re.I)
+#: سياجُ كتلةِ شِفرة (``` أو ~~~) · واقتباسٌ بعلامتين خلفيّتين — كلاهما **ليس إعلانَ توقّف**.
+FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
+INLINE_CODE_RE = re.compile(r"`[^`]*`")
 
 
 def stamp_of(name: str) -> str | None:
@@ -85,6 +95,27 @@ def _reports(side: str) -> list[tuple[str, str, Path]]:
     return out
 
 
+def declarations(text: str) -> list[str]:
+    """إعلاناتُ التوقّف **الحقيقيّة** في نصّ — وقاعدتُها مقيسةٌ في الحالات الثلاث (مراجعة ٥٧ · R57-2):
+
+    (١) الصيغةُ حقلُ `status:` يحمل العلامة — لا العلامةُ وحدَها في أوّل سطر (وسقوطُ صيغةِ التكليف
+    الموثّقة في `ba6c219` كان **تراجعاً**). (٢) ولا يُقرأ **داخلَ كتلة شِفرة** — الاقتباسُ ليس إعلاناً.
+    (٣) ولا بين **علامتين خلفيّتين**. ودالّةٌ خالصةٌ ⇒ تُقاس بسمٍّ في الذاكرة لا بالنيّة.
+    """
+    out: list[str] = []
+    in_fence = False
+    for line in text.splitlines():
+        if FENCE_RE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        m = DECLARATION_RE.match(INLINE_CODE_RE.sub("", line))
+        if m:
+            out.append(m.group(1).upper().replace(" ", "_"))
+    return out
+
+
 def derive() -> dict[str, object]:
     """الحكمُ المُشتقّ — بلا كتابة، وبلا افتراض: يُعلن سببَه ومن أين جاء."""
     allreps = _reports("sulaiman") + _reports("claude")
@@ -92,15 +123,24 @@ def derive() -> dict[str, object]:
         return {"verdict": "UNMEASURED", "why": "لا تقريرَ في أيّ صندوق (لا زمنَ يُقاس)"}
     ts, side, path = max(allreps, key=lambda t: (t[0], t[1]))
     body = path.read_text(encoding="utf-8", errors="replace")
-    owner_awaiting = [m.group(1) for line in body.splitlines()
-                      for m in [DECLARATION_RE.match(line)] if m]
+    owner_awaiting = declarations(body)
+    where = f"آخرُ تقريرٍ ({side} · {ts})"
+    if not owner_awaiting:
+        # **قفلُ المالك** (الموضعُ الثاني المُعلَن): يُقرأ من الملفّ المشترك — وكان لا يُقرأ أصلًا ⇒ قفلٌ
+        # موثَّقٌ لا يوقف الدور (R57-2أ). والقيمةُ تُقاس لحظةَ الطلب كمثلها في سطر الدور.
+        shared = ROOT / SHARED
+        if shared.exists():
+            owner_awaiting = declarations(shared.read_text(encoding="utf-8", errors="replace"))
+            if owner_awaiting:
+                where = f"قفلُ المالك في {SHARED}"
     if owner_awaiting:
-        turn, why = OWNER, f"آخرُ تقريرٍ ({side} · {ts}) يُعلن توقّفاً على قرار المالك («{owner_awaiting[0]}»)"
+        turn, why = OWNER, f"{where} يُعلن توقّفاً على قرار المالك («{owner_awaiting[0]}»)"
     else:
         other = "claude" if side == "sulaiman" else "sulaiman"
         turn, why = other, f"آخرُ فاعلٍ {side} ({ts}) ⇒ الدورُ على {other}"
     return {"verdict": "MEASURED", "turn": turn, "turn_label": SIDES.get(turn, turn),
-            "last_actor": side, "last_report": str(path.relative_to(ROOT)), "as_of": ts, "why": why}
+            "last_actor": side, "last_report": str(path.relative_to(ROOT)), "as_of": ts,
+            "owner_declared_in": where if owner_awaiting else None, "why": why}
 
 
 #: **ولا تُحفَظ القيمة** (R55-1 الطبقةُ الثانية): لو كُتبت في الملفّ المشترك لتقادمت **بعد كلّ دفعةٍ من

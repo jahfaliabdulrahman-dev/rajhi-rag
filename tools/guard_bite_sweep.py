@@ -7,6 +7,9 @@
 الطريقةُ: لكل ضابطٍ نُفسد **السببَ الوحيد** الذي وُجد له، ونُشغّل الضابطَ وحده.
 - **السليم** = الضابطُ المقصود **يسقط** ⇒ البوابةُ تَعَضّ (ليست زينة).
 - **العطب** = الضابطُ يبقى يمرّ ⇒ دعوى حمايةٍ كاذبة (وهذا ما نُريد أن نكتشفه، لا أن نُخفيه).
+- **التخطّي (R57-5)** = الضابطُ **لم يُقَس**: يُتخطّى لغياب بياناته المحلّيّة (`data/local_sample`) فيخرج
+  بـ`rc=0` ⇒ كان يُقرأ «البوّابةُ تمرّ — دعوى كاذبة»، وهي دعوى كاذبةٌ تُطبع في الاتجاه المعاكس: التخطّي
+  ليس مروراً ولا سقوطاً، بل **غيابُ قياس**. والحصيلةُ تُطبع بثلاث خانات (عَضّ · دعاوى · لم يُقَس) وببيئتها.
 
 والتغطيةُ هنا هي **حصيلةُ جولة مراجعة ٥٢ وإصلاحِ إسقاطاتها** (١٢ بوابة): R52-1 · R52-2 (ثلاثة أوجه) ·
 R52-3 · R52-4 · R52-5 (وجهان) · F6 · ومعيارُ الحالة · وسلوكُ سطر الأوامر.
@@ -126,16 +129,35 @@ CASES = [
 
 
 def _verdict(rc: int, out: str) -> str:
-    """«سقط» · «لم يسقط» · **«تعذّر التشغيل»** — والحكمُ من **علامة pytest نفسها** لا من رمز الخروج.
+    """«سقط» · «لم يسقط» · **«تعذّر التشغيل»** · **«لم يُقَس» (تخطٍّ)** — والحكمُ من **علامة pytest نفسها**.
 
     (لأنّ `python3 -m pytest` بلا pytest مُثبَّتٍ يخرج **1** أيضاً — فيلتبس «تعذّر» بـ«عَضّ»؛
     وهذا ما جعل المدقّق في مراجعة ٥٣ يجعل `.venv/bin/python` رابطاً ليعرف الفرق.)
+
+    **والحالةُ الرابعة (R57-5 · قاسها المدقّق في مراجعة ٥٧):** ضابطٌ **يُتخطّى** لغياب بياناته المحلّيّة
+    (`data/local_sample`) يخرج بـ`rc=0` ⇒ كانت الأداةُ تطبع له **«✗ البوابةُ تمرّ — دعوى كاذبة»**، وهي
+    تُطبع دعوى كاذبةً بنفسها: التخطّي **ليس** «مرّت البوّابة» — بل **لم يُقَس شيء** (وهو صنفُ «التخطّي
+    يُقرأ نجاحاً» الذي يُطارده المستودع). والتخطّي يُقرأ من مخرَج pytest لا من رمز الخروج.
     """
     if re.search(r"\bFAILED\b", out) or re.search(r"\b\d+ (failed|error)", out):
         return "bite"
     if rc == 0:
-        return "no_bite"
+        return "skipped" if re.search(r"\bskipped\b", out) else "no_bite"
     return "unrunnable"
+
+
+#: نصُّ كلّ حالةٍ **في موضعٍ واحد** (كان النصُّ مبثوثاً في فرعين ⇒ ضابطُ الصيغة لم يكن ممكناً).
+LABELS = {
+    "bite": "✓ البوابةُ تَعَضّ",
+    "no_bite": "✗ البوابةُ تمرّ — دعوى كاذبة",
+    "skipped": "⚪ لم يُقَس (تخطٍّ مُعلَن: لا شهادةَ ولا دعوى)",
+    "unrunnable": "🔴 تعذّر التشغيل — ليست شهادةً لبوّابة",
+}
+
+
+def _verdict_label(kind: str) -> str:
+    """الصيغةُ المطبوعةُ لكلّ حالة — دالّةٌ خالصةٌ ⇒ تُقاس بسمٍّ في الذاكرة (لا بالعين على مخرَج)."""
+    return LABELS[kind]
 
 
 def _run(test: str) -> tuple[int, str]:
@@ -148,10 +170,17 @@ def _run(test: str) -> tuple[int, str]:
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
-def _report(name: str, ok: bool, bad: int) -> int:
-    print(f"{name:52s} | {'مُطبَّق':6s} | {'سقط':6s} | "
-          f"{'✓ البوابةُ تَعَضّ' if ok else '✗ البوابةُ تمرّ — دعوى كاذبة'}")
-    return bad + (0 if ok else 1)
+def _report(name: str, kind: str, bad: int) -> int:
+    print(f"{name:52s} | {'مُطبَّق':6s} | {kind:7s} | {_verdict_label(kind)}")
+    return bad + (0 if kind == "bite" else 1)
+
+
+def _environment() -> str:
+    """بيئةُ القياس تُطبع بجانب العدد (R57-5): الضوابطُ التي تحتاج `data/` تُتخطّى هنا، والعددُ بلا
+    بيئته يُقرأ «١٣/١٤ فشلٌ» بينما هو **تخطٍّ** — فرقمٌ بلا بيئةٍ ليس رقماً."""
+    data = ROOT / "data" / "local_sample"
+    return (f"المفسّر={PY} · data/local_sample: {'موجود' if data.exists() else 'غائب'} "
+            f"⇒ الضوابطُ التي تحتاج أدلّةً محلّيّة تُتخطّى هنا وتُقاس في نسخة المالك")
 
 
 def main() -> int:
@@ -160,6 +189,7 @@ def main() -> int:
     print("-" * 92)
     bad = 0
     total = 0
+    unmeasured: list[str] = []
 
     for name, path, old, new, test in CASES:
         bak = path.with_suffix(path.suffix + ".bak_bite")
@@ -175,11 +205,13 @@ def main() -> int:
         total += 1
         kind = _verdict(rc, out)
         if kind == "unrunnable":
-            print(f"{name:52s} | {'مُطبَّق':6s} | {'?':6s} | 🔴 تعذّر التشغيل (rc={rc}) — "
-                  f"ليست شهادةً لبوّابة: {out.strip().splitlines()[-1][:90] if out.strip() else ''}")
+            print(f"{name:52s} | {'مُطبَّق':6s} | {'?':6s} | {_verdict_label(kind)} (rc={rc}) — "
+                  f"{out.strip().splitlines()[-1][:90] if out.strip() else ''}")
             bad += 1
             continue
-        bad = _report(name, kind == "bite", bad)
+        if kind == "skipped":
+            unmeasured.append(name)
+        bad = _report(name, kind, bad)
 
     # م١٢أ: ملفُّ منفّذٍ **غيرِ مُعلَن** في صندوق المدقّق
     INTRUDER.write_text("# س\n", encoding="utf-8")
@@ -188,7 +220,8 @@ def main() -> int:
     finally:
         INTRUDER.unlink()
     total += 1
-    bad = _report("م١٢أ · صندوقُ المدقّق بلا تقرير منفّذ (R52-5)", rc != 0, bad)
+    kind = "bite" if rc != 0 else "no_bite"
+    bad = _report("م١٢أ · صندوقُ المدقّق بلا تقرير منفّذ (R52-5)", kind, bad)
 
     # م١٢ب: نقلٌ غيرُ مُعلَن (بإخفاء سجلّ الإعلان — والحركةُ قائمةٌ في المسرَح فعلًا)
     hidden = RENAMES.with_suffix(".md.hidden")
@@ -198,7 +231,8 @@ def main() -> int:
     finally:
         hidden.rename(RENAMES)
     total += 1
-    bad = _report("م١٢ب · النقلُ غيرُ المُعلَن يُرفض (R52-5)", rc != 0, bad)
+    kind = "bite" if rc != 0 else "no_bite"
+    bad = _report("م١٢ب · النقلُ غيرُ المُعلَن يُرفض (R52-5)", kind, bad)
 
     # م١٢ج: استثناءٌ متقادم يبقى في القائمة بعد زوال سببِه ⇒ يُكشَف
     intruder2 = ROOT / "handoff/claude/20260924-9999-REPORT-poison-undeclared.md"
@@ -208,10 +242,19 @@ def main() -> int:
     finally:
         intruder2.unlink()
     total += 1
-    bad = _report("م١٢ج · الدخيلُ غيرُ المُعلَن يُكشَف — لا قائمةَ صمّاء", rc != 0, bad)
+    kind = "bite" if rc != 0 else "no_bite"
+    bad = _report("م١٢ج · الدخيلُ غيرُ المُعلَن يُكشَف — لا قائمةَ صمّاء", kind, bad)
 
     print("-" * 92)
-    print(f"الحصيلة: {total - bad}/{total} بوّاباتٍ تعضّ." + ("" if not bad else "  ⛔ دعاوى بلا حماية!"))
+    # **العددُ يُطبع ببيئته، و«لم يُقَس» يُسمّى بأسمائه** (R57-5): `total - bad` كانت تخلط التخطّيَ بالعَضّ
+    # حين يكون `rc=0`، فيُقرأ العددُ وكأنّ البوّابةَ عَضّت وهي لم تُقَس. والحصيلةُ الآن ثلاثُ خانات.
+    bites = total - bad - len(unmeasured)
+    print(f"الحصيلة: {bites}/{total} بوّاباتٍ تعضّ" + (f" · {len(unmeasured)} لم يُقَس (تخطٍّ مُعلَن)" if unmeasured
+                                                       else " · صفرُ تخطٍّ")
+          + ("" if not bad else "  ⛔ دعاوى بلا حماية!"))
+    if unmeasured:
+        print("   لم يُقَس: " + " · ".join(unmeasured))
+    print(f"   البيئة: {_environment()}")
     return 1 if bad else 0
 
 

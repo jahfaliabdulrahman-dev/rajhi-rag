@@ -72,11 +72,82 @@ def test_the_two_name_lengths_are_ordered_on_one_scale(monkeypatch, tmp_path, ca
 def test_a_blocking_owner_request_makes_the_turn_the_owners(monkeypatch, tmp_path, capsys):
     """**المسارُ الذي تأخّر عنده #119**: تقريرٌ **يُعلن توقّفاً** على قرار المالك ⇒ الدورُ للمالك.
 
-    والعلامةُ هي إعلانُ التوقّف المُصطلَح (`AWAITING_FOUNDER` · البروتوكول §٣) لا ذكرُ المالك في قائمة.
+    والعلامةُ هي إعلانُ التوقّف المُصطلَح — **بصيغته الواحدة الموثّقة في المستودع** (`status: AWAITING_FOUNDER`
+    · `handoff/STATE.md:60` · `docs/claude-auditor-directive.md:43`) لا ذكرُ المالك في قائمة. وهذا هو
+    الحقلُ الذي سقط في `ba6c219` (**تراجع** قاسه المدقّق في مراجعة ٥٧ · R57-2ب).
     """
     m = _load()
     monkeypatch.setattr(m, "ROOT", tmp_path)
-    _tree(tmp_path, {"sulaiman": [("20260925-0130-REPORT", "AWAITING_FOUNDER — لا أُكمل قبل قرارِ المالك")]})
+    _tree(tmp_path, {"sulaiman": [("20260925-0130-REPORT",
+                                   "status: AWAITING_FOUNDER — لا أُكمل قبل قرارِ المالك")]})
+    assert m.main(["--json"]) == 0
+    out = capsys.readouterr().out
+    assert '"turn": "المالك"' in out, out
+    assert '"owner_declared_in"' in out and "آخرُ تقريرٍ" in out, out
+
+
+def test_the_owner_lock_in_the_shared_state_file_is_read(monkeypatch, tmp_path, capsys):
+    """**R57-2 (أ) — قفلٌ موثَّقٌ لا يُقرأ.** `handoff/STATE.md:60` يقول للمالك: «اكتب `status: AWAITING_FOUNDER`
+    هنا»، والأداةُ **لم تكن تقرأ الملفّ المشترك أصلًا** ⇒ القفلُ الموثَّقُ لا يوقف الدورَ المشتقّ، والدورُ
+    يمضي إلى الطرف الآخر بينما المالكُ هو المنتظَر. والضابطُ يقيس الموضعَ الثاني المُعلَن.
+    """
+    m = _load()
+    monkeypatch.setattr(m, "ROOT", tmp_path)
+    _tree(tmp_path, {"sulaiman": [("20260925-0130-REPORT", "بلا إعلان")]})
+    shared = tmp_path / "handoff" / "STATE.md"
+    shared.write_text("status: AWAITING_FOUNDER — أوقفني المالك\n", encoding="utf-8")
+    assert m.main(["--json"]) == 0
+    out = capsys.readouterr().out
+    assert '"turn": "المالك"' in out, out
+    assert "قفلُ المالك" in out, out
+
+
+def test_only_the_documented_field_form_declares_a_stop(monkeypatch, tmp_path, capsys):
+    """**«صيغةٌ واحدةٌ في موضعٍ واحد» (R57-2)**: الصيغةُ الحرّةُ (`AWAITING_FOUNDER` في أوّل سطر) ليست إعلاناً
+    بعد التوحيد، وكذلك حقلٌ آخرُ مثل `next:` يحمل العلامة — وإلّا تعدّدت الصيغُ فصار كلُّ اقتباسٍ إعلاناً.
+
+    (والمُعلَن صريحاً في ترويسة `tools/turn.py`، فلا تُقرأ قاعدةٌ لم تُكتب.)
+    """
+    m = _load()
+    monkeypatch.setattr(m, "ROOT", tmp_path)
+    for body in ("AWAITING_FOUNDER — صيغةٌ حرّةٌ بلا حقل",
+                 "next: AWAITING_FOUNDER — لا تدعمها",
+                 "awaiting: AWAITING_FOUNDER"):
+        _tree(tmp_path, {"sulaiman": [("20260925-0130-REPORT", body)]})
+        assert m.main(["--json"]) == 0
+        assert '"turn": "claude"' in capsys.readouterr().out, f"صيغةٌ غيرُ موثّقةٍ أزاحت الدور: {body!r}"
+
+
+def test_a_quoted_marker_in_a_fence_or_backticks_does_not_declare_a_stop(monkeypatch, tmp_path, capsys):
+    """**R57-2 (ج)** — القاعدتان اللتان تمنعان الاقتباسَ من إزاحة الدور:
+
+    (١) العلامةُ في أوّل سطرٍ **داخل كتلةِ شِفرة** (كما تقتبسها التقاريرُ والوثيقة) — كانت **تُزيح الدور**
+    إلى المالك فتُوقف الطرفين بلا سبب. (٢) و**السطرُ التوثيقيّ الحقيقيّ** من `handoff/STATE.md:60` نفسه،
+    وفيه الصيغةُ بين علامتين خلفيّتين: تعليمةٌ **تُعلّم** الصيغةَ وليست إعلانَ توقّف.
+    """
+    m = _load()
+    monkeypatch.setattr(m, "ROOT", tmp_path)
+    fenced = "## الحكم\n```\nstatus: AWAITING_FOUNDER — اقتباسٌ في كتلة\n```\nبلا إعلانٍ حقيقيّ\n"
+    _tree(tmp_path, {"sulaiman": [("20260925-0300-REPORT", fenced)]})
+    assert m.main(["--json"]) == 0
+    assert '"turn": "claude"' in capsys.readouterr().out, "اقتباسٌ في كتلةِ شِفرةٍ أزاح الدورَ (العلّةُ باقية)"
+
+    documented = "- **قفل المالك:** عند رغبتك في إيقاف الحلقة، اكتب `status: AWAITING_FOUNDER` هنا — الطرفان يتوقفان.\n"
+    _tree(tmp_path, {"sulaiman": [("20260925-0301-REPORT", documented)]})
+    assert m.main(["--json"]) == 0
+    assert '"turn": "claude"' in capsys.readouterr().out, "سطرُ التوثيق (اقتباسٌ بعلامتين) أزاح الدورَ"
+
+
+def test_the_declaration_field_is_read_anywhere_in_the_body(monkeypatch, tmp_path, capsys):
+    """الموضعُ داخلَ التقرير **ليس** جزءاً من القاعدة — الحقلُ هو القاعدة (وليس «أوّل سطر» كما كان يوثّق).
+
+    وحدُّ ذلك مُعلَن: يُقرأ حقلُ `status:` حيث جاء، ويُستثنى الاقتباسُ (كتلةٌ · علامتان خلفيّتان).
+    """
+    m = _load()
+    monkeypatch.setattr(m, "ROOT", tmp_path)
+    body = "\n".join(["## ما فعلتُه", "عشرةُ أسطرٍ من الشرح", "ثم"] + ["سطرٌ عاديّ"] * 20 +
+                     ["status: AWAITING_FOUNDER — القرارُ للمالك"])
+    _tree(tmp_path, {"sulaiman": [("20260925-0130-REPORT", body)]})
     assert m.main(["--json"]) == 0
     assert '"turn": "المالك"' in capsys.readouterr().out
 
@@ -85,7 +156,7 @@ def test_quoting_the_marker_in_prose_does_not_move_the_turn(monkeypatch, tmp_pat
     """**نقدُ مقعد Spec**: مطابقةُ العلامة في **أيّ موضع** تعني أنّ تقريراً **يقتبسها** — كما تقتبسها الوثيقةُ
     نفسُها في §٢٦ — يُزيح الدورَ إلى المالك ويوقف الطرفين بلا سبب.
 
-    ⇒ الموضعُ جزءٌ من القاعدة: الإعلانُ سطرٌ **يبدأ** بالعلامة؛ والاقتباسُ في نثرٍ لا يبدأ بها.
+    ⇒ الاقتباسُ بعلامتين خلفيّتين ليس إعلاناً؛ والإعلانُ حقلُ `status:` يحمل العلامة (R57-2).
     """
     m = _load()
     monkeypatch.setattr(m, "ROOT", tmp_path)
@@ -94,7 +165,7 @@ def test_quoting_the_marker_in_prose_does_not_move_the_turn(monkeypatch, tmp_pat
     assert m.main(["--json"]) == 0
     assert '"turn": "claude"' in capsys.readouterr().out, "اقتباسٌ في نثرٍ أزاح الدورَ (العلّةُ باقية)"
 
-    _tree(tmp_path, {"sulaiman": [("20260925-0301-REPORT", "AWAITING_FOUNDER — نعم، إعلانٌ فعليّ")]})
+    _tree(tmp_path, {"sulaiman": [("20260925-0301-REPORT", "status: AWAITING_FOUNDER — نعم، إعلانٌ فعليّ")]})
     assert m.main(["--json"]) == 0
     assert '"turn": "المالك"' in capsys.readouterr().out, "إعلانٌ صريحٌ لم يُزِح الدور"
 
