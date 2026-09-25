@@ -13,8 +13,9 @@
   تعذّر تشغيل) وبيئتها، **والتحذيرُ على الدعاوى وحدَها** (S-1/ST-1 · مقعدان قاسا الطرحَ المزدوج للعدد).
   ورموزُ pytest غيرُ 0/1 **تعذّرُ تشغيلٍ قبل أيّ قراءةٍ للنصّ** (ST-2: عطبُ الجمع كان يُقرأ «عَضّاً»).
 
-والتغطيةُ هنا هي **حصيلةُ جولة مراجعة ٥٢ وإصلاحِ إسقاطاتها** (١٢ بوابة): R52-1 · R52-2 (ثلاثة أوجه) ·
-R52-3 · R52-4 · R52-5 (وجهان) · F6 · ومعيارُ الحالة · وسلوكُ سطر الأوامر.
+والتغطيةُ هنا **تراكميّةٌ**: حصيلةُ جولة مراجعة ٥٢ وإصلاحِ إسقاطاتها، ثمّ ما أضافته جولاتُ ٥٨–٥٩
+(الجدولُ الذهبيّ · سياسةُ اللاحتميّة بأجزائها · سجلُّ اللاحتميّة وميزانيّتُه) — **والعددُ يُقرأ من مخرَج
+الأداة لا من هنا** (كتابةُ العدد نصًّا في ترويسةٍ ثانيةٍ هي نموذجُ «نسختين من الحقيقة»).
 ولا يُلمس الملفُّ الأصليّ: نسخةٌ احتياطيّة تُعاد في `finally` — والنتيجةُ تُقاس بمخرَج pytest لا بالنوايا.
 """
 from __future__ import annotations
@@ -54,6 +55,7 @@ SPEND = ROOT / "tools/spend.py"
 STAMP = ROOT / "tools/eval_stamp.py"
 RS = ROOT / "tools/render_state.py"
 RENAMES = ROOT / "handoff/RENAMES.md"
+TFL = ROOT / "tests/test_flake_ledger.py"
 INTRUDER = ROOT / "handoff/claude/20260924-9999-REPORT-to-claude-poison.md"
 PROOF_T = "tests/test_eval_proof_rows.py"
 QG = ROOT / "tools/qa_gate.py"
@@ -153,6 +155,13 @@ CASES = [
      '    if second["n_rows"] < first["n_rows"] or second["total"] < first["total"]:',
      '    if False:',
      "tests/test_gate_flake_policy.py::test_a_thinner_second_read_cannot_acquit"),
+
+    # **وسجلُّ اللاحتميّة** (شرطُ مراجعة ٥٨): الحارسُ يعدّ **ويحمّر**؛ فسمُّه يُلغي العدَّ فيصير السجلُّ
+    # تزييناً (وسمٌ يُطبع ولا يُقيَّد)، وهو بعينه ما وُجد السجلُّ ليمنعه.
+    ("م١٦ · ميزانيّةُ اللاحتميّة تحمرّ عند التجاوز (شرطُ مراجعة ٥٨)", TFL,
+     '    if len(dirty) <= budget:\n        return []\n    return dirty',
+     '    return []',
+     "tests/test_flake_ledger.py::test_the_budget_actually_bites_on_a_synthetic_window"),
 ]
 
 

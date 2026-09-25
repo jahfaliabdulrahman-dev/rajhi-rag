@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import subprocess
 from pathlib import Path
 
@@ -113,8 +114,45 @@ FOREIGN_ID_DEBT_ON_CORPUS = 47
 #: **وصيغةُ الكشيدة (R57-3) تُقاس هي أيضاً — أسطراً وملفّات** (S-3 · قاسه مقعد المعايير): كان في §٢٦ وفي
 #: ترويسة الأداة «٢٧ سطراً في **١٦** ملفّاً» وهو **مكتوبٌ بيدٍ** وقياسُه **١١** ⇒ رقمٌ يُكذّبه مقياسُه في
 #: وثيقةٍ معياريّة. والآن يُقاس في الاتجاهين: الصعودُ = صيغةٌ/ملفٌّ جديد، والنزولُ = **كشفٌ فقدناه**.
-TATWEEL_FORM_LINES = 27
-TATWEEL_FORM_FILES = 11
+#:
+#: **R58-1 (مراجعة ٥٨ · الحاجب) — المقامُ كان خاطئاً والمقياسان مختلفين:**
+#:   ‹١› **المقام:** العدّادُ كان يقرأ **كتلَ المراسلة** (`handoff/`) ⇒ نصُّ المدقّق يصير مُدخَلاً إلى راتشتٍ
+#:       يملكه المنفّذ، فلا يستطيع إنزالُ مراجعةٍ تقتبس الصيغة (صنفُ R57-1 عائداً). **وأُعيد إنتاجه قبل
+#:       الإصلاح:** بمراجعة ٥٧ في المتتبَّع صار العدُّ **٣١ سطراً في ١٢ ملفّاً** ⇒ `1 failed`.
+#:       **وصناديقُ المراسلة ليست كوربوسَ المنفّذ** ⇒ تُستثنى، والمُستثنى **يُطبَع** لا يُخفى.
+#:   ‹٢› **القاعدة:** الماسحُ `(?i)` والعدّادُ كان حسّاساً للحالة ⇒ **مقياسان لمعنى واحد**. والعدّادُ الآن
+#:       على قاعدة الماسح نفسِها.
+#:   ‹٣› **قياسٌ مؤرَّخ (2026-09-25 · `HEAD` · بلا `handoff/`):** **١١ سطراً في ٤ ملفّات** في القاعدتين
+#:       (الصيغةُ مكتوبةٌ بحروفٍ صغيرة). وأما «27·16» المنسوبُ إلى الشجرة فعلاً: كلُّ الشجرة **27·11**
+#:       حسّاساً و**36·18** بلا حسّاس ⇒ **لا يُعاد إنتاجه بأيّ قاعدةٍ ولا مقام** (يُقاس بالأمر لا بالرواية).
+#:   ‹٤› **والاستثناءُ ليس عَمىً:** صيغةٌ **خارج** الصندوق تُحسَب — ضابطٌ اصطناعيٌّ أدناه يقيس الاتجاهين.
+TATWEEL_FORM_EXCLUDED_PREFIX = "handoff/"
+TATWEEL_FORM_CASE_SENSITIVE = False        # قاعدةُ الماسح `(?i)` نفسُها لا قاعدةً ثانية
+TATWEEL_FORM_LINES = 11
+TATWEEL_FORM_FILES = 4
+
+
+def _tatweel_form_counts(files, root=ROOT, excluded_prefix=TATWEEL_FORM_EXCLUDED_PREFIX):
+    """يعدُّ صيغةَ الكشيدة على **ملفّاتٍ معطاة** ويُعيد (الأسطر, الملفّات, المقيس, المُستثنى).
+
+    مُستخرَجٌ في دالّةٍ **ليقيسه ضابطٌ بمُدخَلٍ اصطناعيٍّ**: المقامُ نفسُه يُقاس، لا الشجرةُ وحدها.
+    (وبلا استثناءٍ صامت: عددُ المُستثنى يعود مع النتيجة فيُطبَع في رسالة السقوط.)
+    """
+    rx = re.compile("\u0640sha", 0 if TATWEEL_FORM_CASE_SENSITIVE else re.IGNORECASE)
+    lines = hit_files = counted = excluded = 0
+    for f in files:
+        if excluded_prefix and f.startswith(excluded_prefix):
+            excluded += 1
+            continue
+        counted += 1
+        try:
+            body = (root / f).read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        hits = sum(1 for ln in body if rx.search(ln))
+        lines += hits
+        hit_files += 1 if hits else 0
+    return lines, hit_files, counted, excluded
 
 
 def test_the_corpus_positive_rate_is_declared_and_capped():
@@ -202,7 +240,7 @@ def test_the_four_measured_forms_of_the_pack_stamp_are_not_blocked():
 
 def test_the_arabic_tatweel_form_of_the_word_sha_is_seen():
     """**R57-3 (أ) — العمى الذي كان `\\b` يفتحه عند الكلمة لا عند المعرّف**: «الـsha <معرّف>» هي **لغةُ هذا
-    المستودع نفسِه** (٢٧ سطراً في **١١** ملفّاً — انظر `test_the_tatweel_form_coverage_is_measured_not_described`)،
+    المستودع نفسِه** (**١١ سطراً في ٤ ملفّات** خارجَ صناديق المراسلة — انظر `test_the_tatweel_form_coverage_is_measured_not_described`)،
     والكشيدةُ (`\\u0640`) والحرفُ العربيّ
     حرفا كلمةٍ عند `\\b` ⇒ كانت **لا تُكشَف** بعد إصلاح R56-1 (وكانت تُكشَف قبله). ولا يمسكها الراتشتُ
     لأنّ الكوربوس لا يحوي هذه الصيغة ⇒ فضياعُ الكشف كان يمرّ صامتاً. والضابطُ موجبٌ صريح.
@@ -222,24 +260,39 @@ def test_the_tatweel_form_coverage_is_measured_not_described():
     (ولا يُكتب الحدُّ هنا بكشيدةٍ حرفيّةٍ عن قصد: كُتُبَ هجاؤُه `\\u0640` لئلّا يزيد الضابطُ نفسُه الرقمَ الذي يقيس.)
     """
     m = _load()          # لا شيءَ من الفاحص يُستعمل هنا: الشاهدُ هو **الصيغةُ كما تكتبها الوثائق**.
-    needle = "\u0640sha"
     files = subprocess.run(["git", "ls-files"], cwd=str(ROOT), capture_output=True, text=True).stdout.split()
     assert files, "لا ملفّاتٍ مُتتبَّعة ⇒ فشلٌ مُغلَق"
-    lines = 0
-    hit_files = 0
-    for f in files:
-        try:
-            body = (ROOT / f).read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            continue
-        hits = sum(1 for ln in body if needle in ln)
-        lines += hits
-        hit_files += 1 if hits else 0
+    lines, hit_files, counted, excluded = _tatweel_form_counts(files)
+    assert excluded > 0, (
+        f"الاستثناءُ بلا مقام: لا ملفَّ تحت `{TATWEEL_FORM_EXCLUDED_PREFIX}` في الشجرة المُتتبَّعة ⇒ "
+        f"الاستثناءُ صار أعمى — وهذا **فشلٌ مُغلَق** لا اجتياز")
     assert (lines, hit_files) == (TATWEEL_FORM_LINES, TATWEEL_FORM_FILES), (
         f"صيغةُ الكشيدة: {lines} سطراً في {hit_files} ملفّاً ≠ المُعلَن "
-        f"({TATWEEL_FORM_LINES} سطراً · {TATWEEL_FORM_FILES} ملفّاً) ⇒ إن ارتفع: صيغةٌ أو ملفٌّ جديد "
-        f"(حدِّث الثابتَ والوثيقةَ معاً)؛ وإن نزل: **كشفٌ فقدناه**")
+        f"({TATWEEL_FORM_LINES} سطراً · {TATWEEL_FORM_FILES} ملفّاً) · **المقام:** {counted} ملفّاً "
+        f"مُتتبَّعاً بلا `{TATWEEL_FORM_EXCLUDED_PREFIX}` (مُستثنى {excluded}) · **القاعدة:** "
+        f"{'حسّاسةٌ للحالة' if TATWEEL_FORM_CASE_SENSITIVE else 'قاعدةُ الماسح بلا حسّاس'} ⇒ إن ارتفع: "
+        f"صيغةٌ أو ملفٌّ جديد (حدِّث الثابتَ والوثيقةَ معاً)؛ وإن نزل: **كشفٌ فقدناه**")
     assert m  # الفاحصُ مُحمَّلٌ (لا يُقاس الرقمُ على أداةٍ لم تُقرأ)
+
+
+def test_the_tatweel_counter_cannot_read_the_mailbox_and_still_sees_the_product(tmp_path):
+    """**R58-1 — المقامُ يُقاس بضابطٍ اصطناعيٍّ في الاتجاهين:**
+
+    ‹١› صيغةٌ داخل صندوق المراسلة **لا تُحرّك الرقم** (نصُّ المدقّق ليس مُدخَلاً إلى راتشتٍ يملكه المنفّذ).
+    ‹٢› صيغةٌ **في نثر المنتج** تُحسَب (الاستثناءُ ليس عَمىً — لو كان، لباع الرقمُ قدرتَه بلا إعلان).
+    """
+    form = "\u0640" + "sha"          # تُبنى ولا تُكتب: لا كشيدةَ حرفيّةً في هذا الملفّ (وإلّا زاد الرقمُ نفسُه)
+    (tmp_path / "handoff").mkdir()
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "handoff" / "review.md").write_text(f"اقتباسٌ من {form} في صندوق المدقّق\n", encoding="utf-8")
+    (tmp_path / "docs" / "guide.md").write_text(f"وفي نثر المنتج {form} أيضاً\n", encoding="utf-8")
+    (tmp_path / "docs" / "clean.md").write_text("بلا صيغةٍ هنا\n", encoding="utf-8")
+    names = ["handoff/review.md", "docs/guide.md", "docs/clean.md"]
+    assert _tatweel_form_counts(names, root=tmp_path) == (1, 1, 2, 1), (
+        "أحدُ ثلاثة: المقامُ غير مُعلَن · أو الصندوقُ حرّك الرقمَ · أو نثرُ المنتج لم يُحسَب")
+    # **والفارقُ هو الاستثناءُ نفسُه** (لا صدفة): بإلغائه يصير الرقمُ اثنين ⇒ الضابطُ يقيس ما يقول.
+    assert _tatweel_form_counts(names, root=tmp_path, excluded_prefix="") == (2, 2, 3, 0), (
+        "الاستثناءُ لم يكن هو الفارق ⇒ الضابطُ لا يقيس ما يقول")
 
 
 def test_the_verb_rev_parse_is_not_a_commit_reference():

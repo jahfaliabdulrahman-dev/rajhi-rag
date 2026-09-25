@@ -138,6 +138,34 @@ def test_a_quoted_marker_in_a_fence_or_backticks_does_not_declare_a_stop(monkeyp
     assert '"turn": "claude"' in capsys.readouterr().out, "سطرُ التوثيق (اقتباسٌ بعلامتين) أزاح الدورَ"
 
 
+def test_the_fenced_header_is_read_not_ignored(monkeypatch, tmp_path, capsys):
+    """**R58-3 (قاسه المدقّق في مراجعة ٥٨)**: صيغةُ §٢ تكتب الترويسةَ **كتلةً مسيّجة** (كما في كلّ تقريرٍ في
+    هذا المستودع)، فاستثناءُ ما بين سياجين كان يُهمِل `status:` في الترويسة **صامتاً** — إعلانٌ موثَّقٌ لا
+    يُقرأ، و`ignored_markers` فارغٌ فلا تنبيهَ أيضاً. والضابطُ يقيس **شكلَ الترويسة الحقيقيّ** لا شكلاً مصغَّراً.
+    """
+    m = _load()
+    monkeypatch.setattr(m, "ROOT", tmp_path)
+    real = ("```\n"
+            "id:      20260925-1300-sulaiman\n"
+            "from:    sulaiman\n"
+            "to:      claude\n"
+            "type:    REPORT\n"
+            "status:  AWAITING_FOUNDER — القرارُ للمالك\n"
+            "commit:  deadbeef\n"
+            "```\n\n"
+            "# عنوانٌ\nمتنٌ طويلٌ بعد الترويسة\n")
+    _tree(tmp_path, {"sulaiman": [("20260925-1300-REPORT", real)]})
+    assert m.main(["--json"]) == 0
+    out = capsys.readouterr().out
+    assert '"turn": "المالك"' in out, f"ترويسةٌ مسيّجةٌ بصيغة §٢ لم تُقرأ (R58-3 باقٍ): {out}"
+    assert '"ignored_markers": []' in out, f"إعلانٌ مقروءٌ لا يجوز أن يُعرَض مُهمَلاً: {out}"
+    # **والحدُّ محفوظٌ في الاتجاه الآخر**: العلامةُ في كتلةٍ **ليست** الترويسة تبقى اقتباساً (R57-2 كما هو)
+    quoted = "## الحكم\n```\nstatus: AWAITING_FOUNDER — اقتباسٌ في المتن\n```\nبلا إعلانٍ حقيقيّ\n"
+    _tree(tmp_path, {"sulaiman": [("20260925-1301-REPORT", quoted)]})
+    assert m.main(["--json"]) == 0
+    assert '"turn": "claude"' in capsys.readouterr().out, "اقتباسٌ في غير الترويسة أزاح الدورَ"
+
+
 def test_the_declaration_is_read_in_the_header_only(monkeypatch, tmp_path, capsys):
     """**حدُّ الترويسة (أمرُ المالك: «الأكثر حرصاً ووضوحاً» · SP-3 — قاسه مقعدُ المواصفة)**: الإعلانُ يُقرأ
     من أوّل الملفّ **قبل أوّل عنوان `## `** (وضمن أوّل ٣٠ سطراً) — فترويسةُ تقريرٍ يُعلن فيها = توقّفٌ حقيقيّ،
