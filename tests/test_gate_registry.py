@@ -7,11 +7,14 @@
 
 **الاتّجاهاتُ (كلُّها مقروءةٌ من الملفّات، ولا واحدٌ منها «حضورُ نصّ» وحده؛ ولا عددَ مكتوبٌ بيد — يُقرأ
 من هنا لا من نثر):**
-1. كلُّ ملفٍّ في `.githooks/` وكلُّ `tools/*.py` يُنادى من خطّافٍ أو من الـworkflow مذكورٌ في السجلّ.
-2. **قائمةُ الـCI المُعلَنة = مجموعةُ ملفّات `pytest` في الـworkflow** (تساوياً لا احتواءً).
+1. كلُّ ملفٍّ في `.githooks/` وكلُّ `tools/*.py` يُنادى من خطّافٍ أو من **أيّ** workflow مذكورٌ في السجلّ.
+2. **قائمةُ الـCI المُعلَنة = مجموعةُ ملفّات `pytest` في الـworkflows كلِّها** (تساوياً لا احتواءً)،
+   **والمدى مُقاسٌ بالـglob لا باسم ملفّ** (R57-4 · قاسه المدقّق في مراجعة ٥٧: كان اسمَ ملفٍّ واحد ⇒
+   ملفٌّ ثانٍ **يثبّت ما نُزع** من الأول، وهي حركةٌ واحدةٌ تُبطل الاتّجاهين معاً).
 3. **كلُّ أداةٍ في صفوف السجلّ لها ملفُّ ضابطٍ يذكرها** ⇒ لا ثقةَ غيرَ مكتسَبة في عمود «سمُّها».
 4. **أيّ عبارةٍ عدديّة عن الـCI تطابق العددَ المقيس** (الأرقامُ والكلماتُ العدديّة كلتاهما).
-5. **كلُّ خطوةِ `run:` في الـworkflow لها معرّفٌ مُسجَّلٌ في §٣** (ومقابلةٌ في الاتجاهين · بمحلّل YAML).
+5. **كلُّ خطوةِ `run:` في أيّ workflow لها معرّفٌ مُسجَّلٌ في §٣** (ومقابلةٌ في الاتّجاهين · بمحلّل YAML ·
+   وعلى كلّ ملفّات الـglob).
 6. **كلُّ عَلَمٍ `` `--x` `` يُذكر في صفّ سجلٍّ موجودٌ في مصدر أداتِه** (قاسه القياس لا المراجعة).
 """
 from __future__ import annotations
@@ -22,7 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DOC = ROOT / "docs" / "GATES.md"
 HOOKS = sorted(p for p in (ROOT / ".githooks").glob("*") if p.is_file())
-WORKFLOW = ROOT / ".github" / "workflows" / "publish-guard.yml"
+WORKFLOW_DIR = ROOT / ".github" / "workflows"
 TOOL_RE = re.compile(r"tools/([A-Za-z0-9_]+\.py)")
 TEST_RE = re.compile(r"tests/(test_[A-Za-z0-9_]+\.py)")
 ROW_TOOL_RE = re.compile(r"^\|\s*\d+\s*\|.*?`tools/([A-Za-z0-9_]+\.py)", re.M)
@@ -35,8 +38,24 @@ def _doc() -> str:
     return DOC.read_text(encoding="utf-8")
 
 
-def _workflow_tests() -> list[str]:
-    return sorted(set(TEST_RE.findall(WORKFLOW.read_text(encoding="utf-8"))))
+def workflow_files(root: Path = ROOT) -> list[Path]:
+    """**كلُّ** ملفّات الـworkflow في المستودع — لا ملفٌّ واحدٌ بالاسم (R57-4).
+
+    العلّةُ المقيسة: الاتّجاهاتُ كانت تقرأ `publish-guard.yml` **بالاسم** ⇒ ملفٌّ ثانٍ (أو خطوةٌ منقولةٌ
+    إلى ملفٍّ آخر) **يثبّت ما نُزع**: تُنزع خطوةٌ من الملفّ المذكور فتُختبأ في ملفٍّ لا يُقرأ، فيبقى
+    الاتّجاهان (٢) و(٥) أخضرَيْن والحرّاسُ ناقصة. والمدى الآن يُقاس بالـglob، وأيُّ ملفٍّ جديد يدخل المدى
+    **بمجرد وجوده** (فلا يحتاج تذكيراً بأن يُذكَر).
+    """
+    return sorted(p for p in (root / ".github" / "workflows").glob("*.y*ml") if p.is_file())
+
+
+def _wf_texts(root: Path = ROOT) -> list[tuple[str, str]]:
+    """(الاسم، النصّ) لكلّ workflow — تُقرأ مرّةً في اختبارات الاتّجاهات (٢) و(٥)."""
+    return [(p.name, p.read_text(encoding="utf-8")) for p in workflow_files(root)]
+
+
+def _workflow_tests(root: Path = ROOT) -> list[str]:
+    return sorted({t for _, wf in _wf_texts(root) for t in TEST_RE.findall(wf)})
 
 
 def _declared_ci_tests() -> list[str]:
@@ -57,10 +76,10 @@ def test_every_hook_is_registered():
 
 
 def test_every_tool_called_by_a_gate_is_registered():
-    """كلُّ أداةٍ تُنادى من خطّافٍ أو من الـCI يجب أن تكون في السجلّ — وإلّا فالسجلُّ ناقص."""
+    """كلُّ أداةٍ تُنادى من خطّافٍ أو من **أيّ** workflow يجب أن تكون في السجلّ — وإلّا فالسجلُّ ناقص."""
     doc = _doc()
     called: set[str] = set()
-    for p in HOOKS + [WORKFLOW]:
+    for p in HOOKS + workflow_files():
         called |= set(TOOL_RE.findall(p.read_text(encoding="utf-8")))
     missing = sorted(t for t in called if t not in doc)
     assert not missing, f"أدواتُ بوّاباتٍ خارج السجلّ: {missing}"
@@ -218,13 +237,35 @@ def phantom_registered_steps(wf_text: str, declared: set[str]) -> list[str]:
 
 
 def test_every_ci_run_step_is_registered_and_no_phantom_is_declared():
-    """كلُّ خطوةِ `run:` بمعرّفٍ مُسجَّلٍ في §٣ — والسجلُّ لا يذكر معرّفاً غيرَ موجود."""
-    wf, declared = WORKFLOW.read_text(encoding="utf-8"), set(_declared_step_ids())
+    """كلُّ خطوةِ `run:` بمعرّفٍ مُسجَّلٍ في §٣ — **على كلّ ملفّات الـworkflows** — ولا معرّفَ شبحٌ في السجلّ."""
+    declared = set(_declared_step_ids())
     assert declared, "قائمةُ معرّفات الـCI فارغةٌ في السجلّ ⇒ فشلٌ مُغلَق"
-    missing = unregistered_ci_steps(wf, declared)
-    phantom = phantom_registered_steps(wf, declared)
+    texts = _wf_texts()
+    assert texts, "لم أقرأ أيَّ workflow ⇒ فشلٌ مُغلَق (لا أُعلن تغطيةً لم أقرأها)"
+    missing = [f"{name}: {x}" for name, wf in texts for x in unregistered_ci_steps(wf, declared)]
+    phantom = [f"{name}: {x}" for name, wf in texts for x in phantom_registered_steps(wf, declared)]
     assert not missing, f"خطواتُ CI خارج السجلّ: {missing} ⇒ أضِف معرفَها واذكرْها في §٣"
     assert not phantom, f"معرّفاتٌ في السجلّ بلا خطوةٍ في الـworkflow: {phantom}"
+
+
+def test_a_second_workflow_file_cannot_park_an_unregistered_step(tmp_path):
+    """**R57-4** — العلّةُ المقيسة: الاتّجاهاتُ كانت تقرأ ملفَّ workflow **بالاسم**، فالخطوةُ المنقولةُ إلى
+    ملفٍّ ثانٍ **يثبّت ما نُزع** (نفسُ صنف الثغرة الذي ثقبه المدقّق في مراجعة ٥٦، لكن من الباب الخلفيّ).
+
+    والسمُّ في الذاكرة: ملفّان، أحدهما مُسجَّلٌ والثاني يحمل خطوةً بلا معرّف ⇒ **يُكشَف** لأنّ المدى glob.
+    """
+    wfdir = tmp_path / ".github" / "workflows"
+    wfdir.mkdir(parents=True)
+    (wfdir / "publish-guard.yml").write_text(
+        "jobs:\n  guard:\n    steps:\n      - id: gate_suite\n        run: python3 -m pytest tests/test_ok.py\n",
+        encoding="utf-8")
+    (wfdir / "extra.yml").write_text(
+        "jobs:\n  hidden:\n    steps:\n      - run: python3 tools/secret_scan.py --tree\n", encoding="utf-8")
+    names = [p.name for p in workflow_files(tmp_path)]
+    assert names == ["extra.yml", "publish-guard.yml"], f"المدى لم يتّسع بالـglob: {names}"
+    assert _workflow_tests(tmp_path) == ["test_ok.py"], "قائمةُ الـCI لم تُقرأ من الملفّين"
+    found = [x for _, wf in _wf_texts(tmp_path) for x in unregistered_ci_steps(wf, {"gate_suite"})]
+    assert found == ["بلا معرّف: خطوةٌ بلا اسم"], f"خطوةٌ مختبَأةٌ في ملفٍّ ثانٍ مرّت صامتة: {found}"
 
 
 def test_the_fifth_direction_actually_bites():
@@ -233,7 +274,7 @@ def test_the_fifth_direction_actually_bites():
     وبلا هذا الضابط يصير الاتّجاهُ الخامس ادّعاءً: قاعدةٌ لا يُقاس مَن يخالفها ليست قاعدة.
     **والأربعةُ الأخيرةُ من نقد المقعدين** (خطوةٌ خامّة · بادئةٌ تُقبَل خطأً · `id` داخل جسم `run` · اسمٌ لا معرّف).
     """
-    wf = WORKFLOW.read_text(encoding="utf-8")
+    wf = dict(_wf_texts())["publish-guard.yml"]
     declared = set(_declared_step_ids())
     stripped = wf.replace("        id: gate_static\n", "", 1)              # خطوةٌ صارت بلا معرّف
     assert unregistered_ci_steps(stripped, declared) == [
