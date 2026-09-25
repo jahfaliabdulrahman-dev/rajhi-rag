@@ -174,7 +174,7 @@ def test_the_published_ratio_is_arithmetically_the_one_in_the_document():
 def test_page_numbers_parse_strictly():
     assert lrp._parse_pages("1,9") == (1, 9)
     assert lrp._parse_pages(None) == lrp.PUBLISHED_PAGES
-    with pytest.raises(SystemExit):
+    with pytest.raises(lrp.BadArguments):
         lrp._parse_pages("أ")
 
 
@@ -201,17 +201,50 @@ def test_list_mode_runs_without_the_engine(capsys):
         assert rc == lrp.EXIT_NO_DATA and "لا بياناتِ تدريبٍ محلّيّة" in out
 
 
-def test_an_ineligible_page_is_a_named_exit_code(capsys):
-    """صفحةٌ غيرُ مؤهَّلة ⇒ رمزٌ مسمّى (٤) ورسالةٌ تسمّي المؤهَّلَ اليوم — لا موتٌ صامتٌ برمز ١."""
+def test_no_data_is_reported_as_no_data_not_as_ineligible(capsys):
+    """**عطبٌ أدخلته أوّلُ نسخةٍ من الإصلاح (كشفه مقعدُ تحقّقٍ مستقلّ بالقياس):** غيابُ البيانات كان
+    يُبلَّغ عنه «صفحةً غيرَ مؤهَّلة» (٤) لأنّ `selected()` تُنادى قبل أيّ فحصٍ للوجود ⇒ صار الوجودُ يُفحَص أولًا (٣)."""
     rc = lrp.main(["--pages", "1", "--design", NO_DESIGN])
-    assert rc == lrp.EXIT_NOT_ELIGIBLE and "غيرُ مؤهَّلة" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert rc == lrp.EXIT_NO_DATA and "لا بياناتِ تدريبٍ محلّيّة" in out
+    assert "غيرُ مؤهَّلة" not in out
+
+
+def test_an_ineligible_page_is_a_named_exit_code(capsys):
+    """صفحةٌ غيرُ مؤهَّلة ومع البياناتُ موجودة ⇒ ٤ باسمِها؛ وعلى شجرةٍ بلا بيانات ⇒ ٣ (ولا يُخلط الاثنان)."""
+    rc = lrp.main(["--pages", "99999"])
+    out = capsys.readouterr().out
+    if lrp.design_candidates():
+        assert rc == lrp.EXIT_NOT_ELIGIBLE and "غيرُ مؤهَّلة" in out
+    else:
+        assert rc == lrp.EXIT_NO_DATA
     with pytest.raises(lrp.IneligiblePage):
         lrp.selected((1,), design=NO_DESIGN)
+
+
+def test_a_zero_denominator_refuses_instead_of_crashing(monkeypatch, capsys):
+    """**عطبٌ أدخله الإصلاح (مقيس):** مقامٌ صفريّ (كلُّ الصفوف بلا مبلغٍ مطبوع) كان ينفجر بـ
+    `ZeroDivisionError` وتتبّعٍ خامٍ ورمزِ خروج ١ — وهو الصنفُ نفسُه الذي جاء الالتزامُ ليُسمّيه ⇒ رفضٌ مسمّى (٣)."""
+    monkeypatch.setattr(lrp, "eligible",
+                        lambda *a, **k: [(ROOT / "tests", {"page": 1}, [{"balance": None}])])
+    monkeypatch.setattr(lrp, "ocr", lambda _p: "")
+    rc = lrp.main(["--pages", "1"])
+    assert rc == lrp.EXIT_NO_DATA and "لا مقامَ قابلًا للقياس" in capsys.readouterr().out
+
+
+def test_bad_arguments_get_their_own_named_code(capsys):
+    """وسيطٌ مشوَّه ⇒ ٥ باسمه: كان `--pages أ` يموت بـ١ (موتٌ غيرُ مسمّى)، و`--nope` بـ٢ (رمزِ المحرّك)."""
+    assert lrp.main(["--pages", "أ"]) == lrp.EXIT_BAD_ARGS
+    assert "وسيطٌ مشوَّه" in capsys.readouterr().out
+    assert lrp.main(["--nope"]) == lrp.EXIT_BAD_ARGS
+    assert "وسيطٌ مشوَّه" in capsys.readouterr().out
 
 
 def test_missing_engine_is_a_named_refusal_not_a_crash(monkeypatch):
     """غيابُ المحرّك يُطفئ الأداةَ برسالةٍ ورمز ٢ — لا انهيارٌ يُقرأ حكمًا."""
     monkeypatch.setattr(lrp, "ocr", lambda _p: (_ for _ in ()).throw(RuntimeError("غيرُ متاح")))
+    monkeypatch.setattr(lrp, "eligible",
+                        lambda *a, **k: [(ROOT / "tests", {"page": 1}, [{"balance": 1}])])
     monkeypatch.setattr(lrp, "selected",
                         lambda *a, **k: [(ROOT / "tests", {"page": 1}, [{"balance": 1}])])
     assert lrp.main([]) == lrp.EXIT_NO_ENGINE
