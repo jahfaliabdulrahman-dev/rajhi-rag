@@ -62,6 +62,7 @@ jobs:
                            tests/test_gate_goldens.py \
                            tests/test_gate_flake_policy.py \
                            tests/test_flake_ledger.py \
+                           tests/test_eval_pack.py \
       - name: Real-data files must never be tracked
         id: gate_data_untracked
         run: |

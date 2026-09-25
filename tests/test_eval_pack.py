@@ -323,9 +323,10 @@ def test_the_owner_decision_closes_the_intersection_only_within_its_ceiling():
     over = classify_verdict(ok=False, inter=list(range(1, ceiling + 2)), blockers=[], remedy_rows=1253,
                             decision=GATE3_DECISION)
     assert "شرطيٌّ" in over and "لا يتمدّد" in over, "فوق السقف: يعود شرطيًّا — القرارُ لا يتمدّد"
-    masked = classify_verdict(ok=False, inter=list(range(1, 11)), blockers=["بواباتُ المديات"],
-                              remedy_rows=1253, decision=GATE3_DECISION)
-    assert "عطبٌ" in masked and "PASS" not in masked, "القرارُ لا يُغطّي عطباً — ولا يُقرأ PASS"
+    # **الفخُّ الذي أغلقه ترتيبُ الفروع** (مقعدُ البنية): نداءٌ يُمرّر `ok=True` مع تقاطعٍ غيرِ
+    # مُغلقٍ كان يقول «PASS — قطعت بواباتها» ⇒ السلامةُ كانت من المُنادي لا من الدالّة.
+    assert "قطعت بواباتها" not in classify_verdict(ok=True, inter=[52], blockers=[], remedy_rows=9), \
+        "تقاطعٌ بلا قرارٍ لا يُقرأ «PASS — قطعت بواباتها» ولو قال المُنادي ok=True"
     assert gate3_closed(inter=[], blockers=[], decision=GATE3_DECISION) is False, \
         "بلا تقاطع لا يوجد ما يُغلق: الحالةُ «مُغلَقةٌ بلا تقاطع» لا «مُغلَقةٌ بقرار»"
     assert gate3_closed(inter=[1, 2], blockers=[], decision=None) is False, \
@@ -344,5 +345,37 @@ def test_the_recorded_decision_cannot_rot_on_disk():
            .get("owner_decision") or {})
     drifted = [k for k, v in GATE3_DECISION.items() if rec.get(k) != v]
     assert not drifted, f"قرارُ الحزمة قديمٌ في {drifted} ⇒ يُعاد `tools/eval_pack.py --build`"
-    assert rec.get("measured_intersection") == 0, \
-        "يومَ القرار كان التقاطعُ صفراً بالبناء — وزيادتُه قرارٌ جديدٌ لا قرارٌ قائم"
+    measured = rec.get("measured_intersection")
+    assert isinstance(measured, int) and 0 <= measured <= GATE3_DECISION["accepted_pages"], \
+        "المقيسُ يُقيَّد بسقف القرار (`--verify` يقابله بالتقاطع الحيّ — لا يُجمَّد على صفرٍ فيُكلّف إصلاحاً كاذباً)"
+
+
+def test_a_drifted_pack_fails_the_real_verify_with_a_named_reason(tmp_path, capsys):
+    """**الضابطُ ينادي الأمرَ نفسَه على حزمةٍ مُجرَّبة** — لا يُعيد بناء منطق المقابلة (وإلّا لأخفى
+    العطبَ الذي أظهره مقعدا المعايير والبنية · مراجعة ٦٠): حزمةٌ تُوسّع سقفَها بنفسها يجب أن تُسقط
+    `--verify` بـ`rc=1` وباسمٍ مطبوع — لا أن تطبع «مخالفٌ ⇒ يُعاد `--build`» ثمّ «PASS».
+
+    والأرضيّةُ فيها **الشاهدُ المضادّ** في الضابط نفسه: القرارُ الصحيح ⇒ `rc=0`؛ وإلّا فالأرضيّةُ لا
+    تُفرّق بين الفرضيّتين فلا تُثبت شيئاً.
+    """
+    run = _corpus(tmp_path)
+    cap = _capture(tmp_path)
+
+    def _verify_with(decision: dict, tag: str) -> tuple[int, str]:
+        pack = tmp_path / f"pack-{tag}.json"
+        pack.write_text(json.dumps({
+            "identity": DOC, "census": {"pages": [{"page": 1}], "size": 1, "fingerprint": _sha16("[{\"page\": 1}]")},
+            "ranges": [], "size_gate": {"value": 1, "pass": True},
+            "intersection_gate": {"pass": True, "owner_decision": decision}}), encoding="utf-8")
+        rc = main(["--verify", "--run", str(run), "--pack", str(pack), "--capture", str(cap)])
+        return rc, capsys.readouterr().out
+
+    honest = {**GATE3_DECISION, "measured_intersection": 0}
+    _, out_ok = _verify_with(honest, "honest")
+    assert "يخالف قرارَ الأداة" not in out_ok, \
+        "الشاهدُ المضادّ: الأرضيّةُ نفسُها بقرارٍ مطابقٍ لا تُنتج مخالفةً ⇒ فالضابطُ يقيس الانحرافَ لا الأرضيّة"
+    rc, out = _verify_with({**GATE3_DECISION, "accepted_pages": 9999, "measured_intersection": 0},
+                           "drifted")
+    assert rc == 1, f"حزمةٌ مُحرَّفة ⇒ `rc=1` لا `rc={rc}` (وهو ما يَعِد به صفُّ السجلّ ١٥)"
+    assert "يخالف قرارَ الأداة" in out and "الحكم: PASS" not in out, \
+        "المخالفةُ تُسمّى في `failures` ولا تُختم بـPASS"
