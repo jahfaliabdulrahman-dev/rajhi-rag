@@ -7,7 +7,8 @@
 **الأرقامُ هنا مبنيّةٌ من أجزاء لا مكتوبة** (`_D`)، فلا يُدخل اختبارٌ قيمةً من الكوربوس إلى مستودعٍ عامّ
 (القاعدةُ ١٢/١٤: لا يُعفى موضع، ولا يُنشر ظهور).
 
-**ولا يحتاج هذا الاختبارُ محرّكَ macOS Vision** — يختبر نصفَ المقارنة وحده (والنصفُ الآخر يُطفأ برسالة).
+**وما يحتاج البياناتَ أو المحرّكَ يُتخطّى معلَنًا** (الحزمةُ لا تُشحن، وVision ليست من متطلّبات المشروع)
+فيمرّ هذا الملفُّ في الـCI — حيث يُقاس نصفُ المقارنة وحده.
 """
 from __future__ import annotations
 
@@ -32,6 +33,7 @@ THOU_LAT = f"{_D * 3},{_D * 3}.{_D * 2}"     # آلافٌ لاتينيّة + ع�
 OLD_LAT = f"{_D * 3}.{_D * 3},{_D * 2}"      # عتيقةٌ: الفاصلةُ عشرِيّة
 CANON_THOU = f"{_D * 6}.{_D * 2}"
 DIGITS_THOU = _D * 8
+NO_DESIGN = "__no_such_design__"
 
 
 # ---------------------------------------------------------------- توحيدُ المحارف
@@ -53,6 +55,13 @@ def test_canonical_decides_decimal_by_position_not_by_character():
     assert lrp.canonical(SMALL) == SMALL
 
 
+def test_canonical_accepts_a_single_fraction_digit():
+    """ورقةٌ تطبع كسرًا بخانةٍ واحدة لا تُقرأ صحيحةً (عطبٌ في الاتّجاه المقابل، مقيسٌ ومُغلَق)."""
+    one_digit = f"{_D * 3}.{_D}"                 # 999.9
+    assert lrp.canonical(one_digit) == f"{_D * 3}.{_D}"
+    assert lrp.value_of(one_digit) == Decimal(f"{_D * 3}.{_D}")
+
+
 def test_canonical_keeps_integers_integral():
     assert lrp.canonical(_D * 3) == _D * 3          # بلا كسور: يبقى صحيحًا
     assert lrp.canonical(_AR * 3) == _D * 3
@@ -72,27 +81,28 @@ def test_value_matches_across_separator_styles():
 
 # ---------------------------------------------------------------- القواعدُ الثلاث تُسمّى ولا تُخلط
 
-def test_the_three_rules_are_named_and_do_diverge():
+def test_the_three_rules_are_named_in_one_place():
+    assert lrp.RULES == ("شكل", "قيمة", "أرقام")
+    assert set(lrp.numeric_sets("")) == set(lrp.RULES)
+
+
+def test_the_three_rules_do_diverge():
     """حالةٌ مقيسةٌ تُعلن الفرق: المحرّكُ قد يُسقط الفاصلةَ فيقرأ أرقامًا مجرَّدة."""
     dropped = DIGITS_THOU
     kept = THOU_LAT
     assert lrp.canonical(dropped) != lrp.canonical(kept)          # شكلًا: يفترقان
     assert lrp.value_of(dropped) != lrp.value_of(kept)            # قيمةً: يفترقان
     assert lrp.digits_of(dropped) == lrp.digits_of(kept) == DIGITS_THOU   # أرقامًا: يتّفقان
-    assert set(lrp.numeric_sets("")) == {"شكل", "قيمة", "أرقام"}
 
 
 def test_numeric_sets_collects_from_free_text():
-    got = lrp.numeric_sets(f"رصيد {THOU_AR_LINE} ثم {SMALL} بعده")
+    got = lrp.numeric_sets(f"رصيد {THOU} ثم {SMALL} بعده")
     assert Decimal(CANON_THOU) in got["قيمة"]
     assert Decimal(SMALL) in got["قيمة"]
 
 
-THOU_AR_LINE = f"{_AR * 3}٬{_AR * 3}٫{_D * 2}"
-
-
 def test_numeric_sets_keeps_the_rules_apart():
-    """الخلطُ يكذب: «أرقام» تحمل المجرَّد، و«قيمة» تحمل المكسور — فلا تُسأل واحدةٌ عن الأخرى."""
+    """الخلطُ يكذب: «أرقام» تحمل المجرَّد نصًّا، و«قيمة» تحمل `Decimal` — فلا تُسأل واحدةٌ عن الأخرى."""
     got = lrp.numeric_sets(THOU_LAT)
     assert got["قيمة"] == {Decimal(CANON_THOU)}
     assert got["شكل"] == {CANON_THOU}
@@ -100,7 +110,7 @@ def test_numeric_sets_keeps_the_rules_apart():
 
 
 def test_value_unifies_shapes_that_carry_the_same_number():
-    """**عطبٌ مقيسٌ في مراجعة الجولة ٦٣:** الأداةُ كانت تُخزّن «قيمة» نصًّا ⇒ «٩٩٩» ≠ «٩٩٩٫٠٠».
+    """**عطبٌ مقيسٌ في مراجعة الجولة ٦٣ (R63-1):** الأداةُ كانت تُخزّن «قيمة» نصًّا ⇒ «٩٩٩» ≠ «٩٩٩٫٠٠».
 
     فالرقمُ نفسُه يفترق شكلًا ويتّفق قيمةً — ومن قارن النصَّ أهدر استرجاعًا كان بيده (٣٧.١٪ ⟶ ٤٨.٦٪).
     """
@@ -109,6 +119,8 @@ def test_value_unifies_shapes_that_carry_the_same_number():
     assert lrp.numeric_sets(plain)["قيمة"] == lrp.numeric_sets(padded)["قيمة"] == {Decimal(plain)}
     assert lrp.numeric_sets(plain)["شكل"] != lrp.numeric_sets(padded)["شكل"]
 
+
+# ---------------------------------------------------------------- الحقيقةُ الأرضيّة
 
 def test_truth_form_prints_json_numbers_like_the_paper():
     """`label.json` يحمل أعدادًا لا نصوصًا: 999.9 يجب أن يصير 999.90 لا 999.9 (عطبٌ مقيس)."""
@@ -124,17 +136,51 @@ def test_truth_sets_read_the_same_three_shapes_separately():
     assert Decimal(CANON_THOU) in got["مبالغ"]["قيمة"] and CANON_THOU in got["مبالغ"]["شكل"]
     assert DIGITS_THOU in got["مبالغ"]["أرقام"]
     assert Decimal(f"999.{_D}0") in got["أرصدة"]["قيمة"]     # العطبُ المرصود أعلاه مغلق
-    assert set(got["أرصدة"]) == {"شكل", "قيمة", "أرقام"}
+    assert set(got["أرصدة"]) == set(lrp.RULES)
     assert len(got["مبالغ"]["قيمة"]) == 1                    # القيمةُ الغائبة لا تُخترع
 
 
-# ---------------------------------------------------------------- الصفحاتُ والقاعدة
+def test_truth_measures_the_printed_amount_only():
+    """القياسُ على ما على الورق: صفٌّ بلا `printed_amount` يُسقَط — لا يُقابَل بمقدارٍ مشتقٍّ من السلسلة."""
+    got = lrp.truth_sets([{"printed_amount": None, "proven_amount": THOU, "balance": None}])
+    assert got["مبالغ"]["قيمة"] == set() and got["مبالغ"]["شكل"] == set()
+
+
+def test_both_sides_drop_single_digit_forms_from_the_digits_rule():
+    """حدُّ الإدراج واحدٌ على الطرفين — فلا يبقى في المقام ما لا يمكن أن يُطابَق."""
+    assert lrp.numeric_sets("رصيد 0.65")["أرقام"] == {"65"}
+    assert lrp.numeric_sets("رصيد 5")["أرقام"] == set()        # خانةٌ واحدة ⇒ خارج القاعدة
+    got = lrp.truth_sets([{"printed_amount": None, "balance": 5}])
+    assert got["أرصدة"]["أرقام"] == set()
+
+
+# ---------------------------------------------------------------- الصفحاتُ المُجمَّدة ورموزُ الخروج
+
+def test_the_published_ratio_is_arithmetically_the_one_in_the_document():
+    """**الربطُ الذي طلبه مقعدُ المعايير:** الرقمُ المنشور (١٧/٣٥ = ٤٨.٦٪) يُقاس حسابيًّا من مستنده.
+
+    لا يُعاد قياسُ المحرّك هنا (الحزمةُ لا تُشحن وVision ليست في الـCI) — لكن ما يمكن فحصُه بلا بيانات
+    يُفحَص: نسبةُ ما نُشر تساوي قسمةَ بسطها على مقامها، والحصيلةُ مكتوبةٌ في الوثيقة. فلا ينزلق الرقمُ
+    في الوثيقة عن الأدلة التي يُعلنها بسطُها.
+    """
+    doc = ROOT / "handoff" / "sulaiman" / "20260926-0205-MEASUREment-q4-local-reader-five-pages.md"
+    text = doc.read_text(encoding="utf-8")
+    assert round(100 * 17 / 35, 1) == 48.6                    # المبالغ: «قيمة»
+    assert round(100 * 29 / 35, 1) == 82.9                    # الأرصدة: «قيمة»
+    for shown in ("١٧/٣٥", "٢٩/٣٥", "٤٨.٦٪", "٨٢.٩٪"):
+        assert shown in text, f"رقمٌ منشورٌ غاب عن الوثيقة: {shown}"
+
 
 def test_page_numbers_parse_strictly():
     assert lrp._parse_pages("1,9") == (1, 9)
-    assert lrp._parse_pages(None) == lrp.PAGES
+    assert lrp._parse_pages(None) == lrp.PUBLISHED_PAGES
     with pytest.raises(SystemExit):
         lrp._parse_pages("أ")
+
+
+def test_the_published_five_are_a_named_frozen_set():
+    """الخمسةُ ثابتٌ مُعلَنٌ لا مُشتقٌّ في كلّ وقت — والاختبارُ يقيسها **حرفًا** لا بالمقارنة بنفسها."""
+    assert lrp.PUBLISHED_PAGES == (1, 187, 320, 404, 539)
 
 
 def test_selected_pages_are_the_published_five_or_the_data_is_absent():
@@ -142,7 +188,7 @@ def test_selected_pages_are_the_published_five_or_the_data_is_absent():
     if not lrp.design_dir().exists():
         pytest.skip("لا بياناتُ تدريبٍ محلّيّة (الحزمةُ لا تُشحن)")
     pages = [int(lab["page"]) for _, lab, _ in lrp.selected()]
-    assert pages == list(lrp.PAGES)
+    assert pages == [1, 187, 320, 404, 539]
 
 
 def test_list_mode_runs_without_the_engine(capsys):
@@ -150,14 +196,22 @@ def test_list_mode_runs_without_the_engine(capsys):
     rc = lrp.main(["--list"])
     out = capsys.readouterr().out
     if lrp.design_dir().exists():
-        assert rc == 0 and "المُؤهَّل" in out
+        assert rc == lrp.EXIT_OK and "الصفحاتُ المُجمَّدةُ المنشورة" in out and "المُؤهَّلُ الآن" in out
     else:
-        assert rc == 3 and "لا بياناتِ تدريبٍ محلّيّة" in out
+        assert rc == lrp.EXIT_NO_DATA and "لا بياناتِ تدريبٍ محلّيّة" in out
+
+
+def test_an_ineligible_page_is_a_named_exit_code(capsys):
+    """صفحةٌ غيرُ مؤهَّلة ⇒ رمزٌ مسمّى (٤) ورسالةٌ تسمّي المؤهَّلَ اليوم — لا موتٌ صامتٌ برمز ١."""
+    rc = lrp.main(["--pages", "1", "--design", NO_DESIGN])
+    assert rc == lrp.EXIT_NOT_ELIGIBLE and "غيرُ مؤهَّلة" in capsys.readouterr().out
+    with pytest.raises(lrp.IneligiblePage):
+        lrp.selected((1,), design=NO_DESIGN)
 
 
 def test_missing_engine_is_a_named_refusal_not_a_crash(monkeypatch):
     """غيابُ المحرّك يُطفئ الأداةَ برسالةٍ ورمز ٢ — لا انهيارٌ يُقرأ حكمًا."""
     monkeypatch.setattr(lrp, "ocr", lambda _p: (_ for _ in ()).throw(RuntimeError("غيرُ متاح")))
-    monkeypatch.setattr(lrp, "design_dir", lambda *a, **k: ROOT / "tests")
-    monkeypatch.setattr(lrp, "selected", lambda *a, **k: [(ROOT / "tests", {"page": 1}, [{"balance": 1}])])
-    assert lrp.main([]) == 2
+    monkeypatch.setattr(lrp, "selected",
+                        lambda *a, **k: [(ROOT / "tests", {"page": 1}, [{"balance": 1}])])
+    assert lrp.main([]) == lrp.EXIT_NO_ENGINE

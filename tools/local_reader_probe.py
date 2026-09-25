@@ -1,25 +1,32 @@
 """«قياس ٤» — **أداةُ القارئ المحلّيّ**: كم يسترجع قارئٌ محلّيٌّ مجّانيّ (بلا سحابة) من ورقة كشفٍ ممسوحة؟
 
 **ما يقيسه (وحدُّه المُعلَن):** استرجاعُ **نصِّ** المبالغ والأرصدة المطبوعة، مقابل الحقيقة الأرضيّة في
-`data/training/<التصميم>/pg-<رقم>/label.json`. و**لا** يقيس إغلاقَ السلسلة ولا مطابقةَ التذييل — تلك
-بوّابةُ «ب-٤» وحدَها، وهذا مِقياسٌ واحدٌ منها.
+`data/training/<التصميم>/pg-<رقم>/label.json` (حقلُ `printed_amount` — ما على الورق — و`balance`).
+و**لا** يقيس إغلاقَ السلسلة ولا مطابقةَ التذييل — تلك بوّابةُ «ب-٤» وحدَها، وهذا مِقياسٌ واحدٌ منها.
 
 **لماذا في المستودع:** رقمٌ بلا أداته ليس دليلًا — من أراد إعادةَ القياس يُشغّل:
 
     python tools/local_reader_probe.py            # يحتاج Vision (ماك)
-    python tools/local_reader_probe.py --list     # الصفحاتُ المُختارة بلا قراءة (يعمل في أي بيئة)
+    python tools/local_reader_probe.py --list     # المجموعةُ المُجمَّدة والمُؤهَّلُ الحاليّ (بلا قراءة)
     python tools/local_reader_probe.py --pages 187
+    python tools/local_reader_probe.py --design <معرّف>   # والافتراضُ يُكتشف من القرص
+
+**رموزُ الخروج (كلُّها مُعلَنة):** ٠ قياسٌ تمّ · ٢ محرّكُ Vision غائبٌ (إطفاءٌ برسالة) · ٣ لا بياناتِ
+تدريبٍ محلّيّة · ٤ صفحةٌ مطلوبةٌ غيرُ مؤهَّلة (والرسالةُ تسمّي المؤهَّلَ اليوم) · و`argparse` يخرج بـ٢
+لوسيطٍ مشوَّه.
 
 **المحرّك:** macOS Vision (`VNRecognizeTextRequest`) عبر `pyobjc` في **بيئةٍ معزولة** — ليست من
-متطلّبات المشروع. غيابُه يُطفئ الأداة برسالةٍ ورمزِ خروج ٢، ولا يكسر شيئًا (نصفُ المقارنة يعمل بلا محرّك).
+متطلّبات المشروع. غيابُه يُطفئ الأداة برسالة، ولا يكسر شيئًا (نصفُ المقارنة يعمل بلا محرّك).
 
-**قاعدةُ الصفحات (مكتوبةٌ لتُعاد، لا لتُوصف):** من تصميمٍ واحد، تُرتَّب الصفحاتُ التي فيها `page.png` و
-`label.json` و`len(rows) >= 5` بترتيب الرقم، ثم تُؤخذ ٥ موزّعةً `[i*len//5 for i in range(5)]`.
-حصيلةُ القاعدة اليوم: `PAGES` أدناه — و`--list` يُظهرها من القرص بلا قراءةِ صورة.
+**الصفحاتُ الخمسُ ثابتٌ مُجمَّدٌ مُعلَن:** `PUBLISHED_PAGES` هي الصفحاتُ التي قِيس عليها الرقمُ المنشور.
+اشتُقّت مرّةً واحدةً بقاعدةِ توزيعٍ على المُؤهَّل (`[i*len//5 for i in range(5)]`)، ثم **جُمِّدت** — لأنّ
+المُؤهَّلَ نفسَه يتغيّر مع كلّ دفعةِ التقاطٍ جديد، فإعادةُ تطبيق القاعدة اليومَ تُعطي أرقامًا أخرى. فالخيارُ
+المُعلَنُ هو التجميدُ باسمِه، لا ادّعاءُ أنّ القاعدةَ تُنتجها في كلّ وقت. و`--list` يطبع المجموعةَ المُجمَّدة
+والمُؤهَّلَ الحاليَّ معًا فلا يختلطان.
 
-**قاعدةُ الأرقام (درسُ أ-٧):** الفواصلُ العربيّة تُوحَّد **بحكم موقعها**: آخرُ فاصلٍ يليه رقمان ⇒ عشريّ،
-وما عداه ⇒ آلاف. وتُقاس **ثلاثُ** قواعدِ مطابقةٍ لا واحدة، لأنّ الواحدة قد تكذب:
-`شكل` (الكانونيّ نصًّا) · `قيمة` (Decimal) · `أرقام` (مجرَّدةٌ من كل فاصل).
+**قاعدةُ الأرقام (درسُ أ-٧):** الفواصلُ العربيّة تُوحَّد **بحكم موقعها**: آخرُ فاصلٍ يليه كسرٌ (خانةٌ أو
+خانتان) ⇒ عشريّ، وما عداه ⇒ آلاف. وتُقاس **ثلاثُ** قواعدِ مطابقةٍ لا واحدة: `شكل` (الكانونيّ نصًّا) ·
+`قيمة` (`Decimal` — وهي التي أنتجت الرقمَ المنشور) · `أرقام` (مجرَّدةٌ من كل فاصل).
 """
 from __future__ import annotations
 
@@ -31,17 +38,27 @@ import sys
 from decimal import Decimal, InvalidOperation
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-PAGES = (1, 187, 320, 404, 539)
-DESIGN_ENV = "data/training"          # التصميمُ يُكتشف من القرص ولا يُكتب في الشيفرة (معرّفٌ في النشرة)
+DESIGN_ENV = "data/training"            # التصميمُ يُكتشف من القرص ولا يُكتب في الشيفرة (معرّفٌ في النشرة)
 MIN_ROWS = 5
-SELECT_N = 5
+MIN_DIGITS_FOR_DIGITS_RULE = 2
+PUBLISHED_PAGES = (1, 187, 320, 404, 539)
+
+# الأسماءُ الثلاثة في موضعٍ واحد — والتوقيعُ يقول نوعَ كلّ مجموعة: «شكل» و«أرقام» نصّان، و«قيمة» أعداد.
+RULES: tuple[str, ...] = ("شكل", "قيمة", "أرقام")
+RuleSets = dict[str, set]
+
+EXIT_OK, EXIT_NO_ENGINE, EXIT_NO_DATA, EXIT_NOT_ELIGIBLE = 0, 2, 3, 4
 
 AR_INDIC = {ord(c): ord("0") + i for i, c in enumerate("٠١٢٣٤٥٦٧٨٩")}
 AR_EXTENDED = {ord(c): ord("0") + i for i, c in enumerate("۰۱۲۳۴۵۶۷۸۹")}
 ALL_SEPS = ".,،٫٬"
 _SEPS = "[" + re.escape(ALL_SEPS) + "]"
 TOKEN = re.compile(r"\d[\d" + re.escape(ALL_SEPS) + r"]*\d|\d")
-TRAILING_TWO = re.compile(_SEPS + r"(\d{2})$")
+TRAILING_FRACTION = re.compile(_SEPS + r"(\d{1,2})$")
+
+
+class IneligiblePage(Exception):
+    """صفحةٌ مطلوبةٌ ليست في المُؤهَّل — رسالةٌ مسمّاة ⇒ رمزُ خروجٍ مسمّى (لا موتٌ صامتٌ برمز ١)."""
 
 
 def to_ascii_digits(s: str) -> str:
@@ -50,11 +67,15 @@ def to_ascii_digits(s: str) -> str:
 
 
 def canonical(tok: str) -> str | None:
-    """القاعدةُ الأولى: **شكلٌ** كانونيٌّ — الفاصلةُ العشريّةُ تُحدَّد بموقعها (آخر فاصلتين رقمًا)."""
+    """القاعدةُ الأولى: **شكلٌ** كانونيٌّ — الفاصلةُ العشريّةُ تُحدَّد بموقعها (آخرُ فاصلٍ ويليه كسرٌ).
+
+    والكسرُ المقبولُ خانةٌ أو خانتان: ورقةٌ تطبع «٩٩٩٫٩» لا يجوز أن تُقرأ «٩٩٩٩» (عطبٌ مقيسٌ في الاتّجاه
+    المقابل: «٩٩٩٫٠٠» ⇐ «٩٩٩٫٠»).
+    """
     t = to_ascii_digits(tok).strip()
     if not any(ch.isdigit() for ch in t):
         return None
-    m = TRAILING_TWO.search(t)
+    m = TRAILING_FRACTION.search(t)
     if m:
         head = re.sub(_SEPS, "", t[: m.start()])
         if head:
@@ -64,7 +85,11 @@ def canonical(tok: str) -> str | None:
 
 
 def value_of(tok: str) -> Decimal | None:
-    """القاعدةُ الثانية: **قيمةٌ** عدديّة — وهي القاعدةُ التي جاء منها الرقمُ المنشور."""
+    """القاعدةُ الثانية: **قيمةٌ** عدديّة (`Decimal` لا نصًّا) — وهي القاعدةُ التي جاء منها الرقمُ المنشور.
+
+    `Decimal("999") == Decimal("999.00")` بينما `"999" != "999.00"`: من قارن النصَّ أهدر استرجاعًا كان
+    بيده (قِيست الفجوة: ٣٧.١٪ ⟶ ٤٨.٦٪ على الصفحات الخمس).
+    """
     c = canonical(tok)
     if c is None:
         return None
@@ -80,13 +105,14 @@ def digits_of(tok: str) -> str | None:
     return (d.lstrip("0") or "0") if d else None
 
 
-def numeric_sets(text: str) -> dict[str, set]:
-    """يجمع ثلاثَ مجموعاتٍ من نصٍّ واحد: شكل · قيمة · أرقام.
+def _accept_digits(form) -> bool:
+    """حدُّ الإدراج لقاعدة «أرقام» — مطبَّقٌ على الطرفين (المحرّك والحقيقة) فلا يبقى في المقام ما لا يُطابَق."""
+    return form not in (None, "") and len(str(form)) >= MIN_DIGITS_FOR_DIGITS_RULE
 
-    **و«قيمة» تحمل `Decimal` لا نصًّا** — لأنّ `Decimal("436") == Decimal("436.00")` بينما
-    `"436" != "436.00"`؛ ومن قارن النصَّ أهدر استرجاعًا كان بيده (قِيست الفجوة: ٣٧.١٪ ⟶ ٤٨.٦٪).
-    """
-    out: dict[str, set] = {"شكل": set(), "قيمة": set(), "أرقام": set()}
+
+def numeric_sets(text: str) -> RuleSets:
+    """ثلاثُ مجموعاتٍ من نصٍّ واحد: `شكل` (نصّ) · `قيمة` (`Decimal`) · `أرقام` (نصّ، ≥خانتين)."""
+    out: RuleSets = {name: set() for name in RULES}
     for raw in TOKEN.findall(to_ascii_digits(text)):
         c = canonical(raw)
         if c:
@@ -95,7 +121,7 @@ def numeric_sets(text: str) -> dict[str, set]:
         if v is not None:
             out["قيمة"].add(v)
         d = digits_of(raw)
-        if d and len(d) >= 2:
+        if _accept_digits(d):
             out["أرقام"].add(d)
     return out
 
@@ -107,20 +133,20 @@ def design_candidates() -> list[pathlib.Path]:
 
 
 def design_dir(design: str | None = None) -> pathlib.Path:
-    """مجلّدُ التصميم: صريحًا، أو **الأوّلُ الذي يحمل الصفحاتِ المنشورة** فلا يُعاد قياسٌ على غيرها."""
+    """مجلّدُ التصميم: صريحًا، أو **الأوّلُ الذي يحمل الصفحاتِ المُجمَّدة** فلا يُعاد قياسٌ على غيرها."""
     if design:
         return (ROOT / DESIGN_ENV) / design
     dirs = design_candidates()
     for d in dirs:
-        # من الأرقام التي تحملها الحقيقةُ لا من اسم المجلّد (الأسماءُ قد تكون مُصفَّرة: pg-001)
+        # من الأرقام التي تحملها الحقيقةُ لا من اسم المجلّد (الأسماءُ مُصفَّرة: pg-001)
         pool = {int(lab["page"]) for _, lab, _ in eligible(d.name)}
-        if set(PAGES) <= pool:
+        if set(PUBLISHED_PAGES) <= pool:
             return d
     return dirs[0] if dirs else (ROOT / DESIGN_ENV / "-")
 
 
 def eligible(design: str | None = None) -> list[tuple[pathlib.Path, dict, list]]:
-    """الصفحاتُ المُؤهَّلة بترتيب الرقم (تُبنى من القرص — وهي مصدرُ `PAGES`)."""
+    """الصفحاتُ المُؤهَّلة بترتيب الرقم: فيها `page.png` و`label.json` و`len(rows) >= MIN_ROWS`."""
     out = []
     for d in sorted(design_dir(design).glob("pg-*"), key=lambda p: int(p.name.split("-")[1])):
         lj, png = d / "label.json", d / "page.png"
@@ -133,13 +159,14 @@ def eligible(design: str | None = None) -> list[tuple[pathlib.Path, dict, list]]
     return out
 
 
-def selected(pages: tuple[int, ...] = PAGES, design: str | None = None) -> list[tuple[pathlib.Path, dict, list]]:
-    """يختار الأرقامَ المطلوبة من المُؤهَّلة (ويُسقط برسالةٍ ما ليس مؤهَّلًا)."""
+def selected(pages: tuple[int, ...] = PUBLISHED_PAGES,
+             design: str | None = None) -> list[tuple[pathlib.Path, dict, list]]:
+    """يجد الأرقامَ المطلوبة في المُؤهَّل، ويرفع `IneligiblePage` باسمِ الصفحة والمؤهَّلِ اليوم."""
     pool = {int(lab["page"]): (d, lab, rows) for d, lab, rows in eligible(design)}
     out = []
     for p in pages:
         if p not in pool:
-            raise SystemExit(f"صفحةٌ غيرُ مؤهَّلة: {p} (المُؤهَّلُ اليوم: {sorted(pool)})")
+            raise IneligiblePage(f"صفحةٌ غيرُ مؤهَّلة: {p} (المُؤهَّلُ اليوم: {sorted(pool)})")
         out.append(pool[p])
     return out
 
@@ -152,18 +179,23 @@ def _truth_form(val) -> str:
     return str(int(d)) if d == d.to_integral_value() else f"{d:.2f}"
 
 
-def truth_sets(rows: list) -> dict[str, dict[str, set]]:
-    """الحقيقةُ الأرضيّة **مفصولةً بكل قاعدةٍ على حِدة** — خلطُ القواعد في مجموعةٍ واحدة يخلق مطابقاتٍ كاذبة."""
-    out: dict[str, dict[str, set]] = {k: {"شكل": set(), "قيمة": set(), "أرقام": set()}
-                                      for k in ("مبالغ", "أرصدة")}
+def truth_sets(rows: list) -> dict[str, RuleSets]:
+    """الحقيقةُ الأرضيّة **مفصولةً بكل قاعدةٍ على حِدة** — خلطُ القواعد في مجموعةٍ واحدة يخلق مطابقاتٍ كاذبة.
+
+    والقياسُ على **`printed_amount`** وحدَه: هو ما على الورق، وهو ما يُقابله القارئ. وصفٌّ بلا
+    `printed_amount` يُسقَط من العمود — لا يُقابَل بمقدارٍ مشتقٍّ من السلسلة لم يُطبَع.
+    """
+    out: dict[str, RuleSets] = {k: {name: set() for name in RULES} for k in ("مبالغ", "أرصدة")}
     for r in rows:
-        amt = r.get("printed_amount") or r.get("proven_amount")
-        for group, val in (("مبالغ", amt), ("أرصدة", r.get("balance"))):
+        for group, val in (("مبالغ", r.get("printed_amount")), ("أرصدة", r.get("balance"))):
             if val in (None, ""):
                 continue
             s = _truth_form(val)
             for name, form in (("شكل", canonical(s)), ("قيمة", value_of(s)), ("أرقام", digits_of(s))):
-                if form not in (None, ""):
+                if name == "أرقام":
+                    if _accept_digits(form):
+                        out[group][name].add(form)
+                elif form not in (None, ""):
                     out[group][name].add(form)
     return out
 
@@ -199,49 +231,63 @@ def ocr(path: pathlib.Path) -> str:
 
 def _parse_pages(raw: str | None) -> tuple[int, ...]:
     if not raw:
-        return PAGES
+        return PUBLISHED_PAGES
     try:
         return tuple(int(x) for x in raw.replace(" ", "").split(",") if x)
     except ValueError as exc:
         raise SystemExit(f"--pages يحتاج أرقامًا مفصولةً بفواصل: {raw}") from exc
 
 
+def _no_data_message(design: str | None) -> str:
+    return (f"لا بياناتِ تدريبٍ محلّيّة للتصميم {design or '(غيرُ مُكتشف)'} — الحزمةُ لا تُشحن، "
+            f"والقياسُ يحتاج نسخةً محلّيّة من `data/training/`")
+
+
+def _list_lines(design: str | None) -> list[str]:
+    pool = eligible(design)
+    if not pool:
+        return [_no_data_message(design)]
+    return [
+        f"التصميمُ المُكتشف: {design_dir(design).name} · المُؤهَّلُ الآن: {len(pool)} صفحة (≥{MIN_ROWS} صفوف)",
+        "الصفحاتُ المُجمَّدةُ المنشورة: " + ", ".join(f"pg-{p}" for p in PUBLISHED_PAGES),
+        "وهي ثابتٌ مُعلَنٌ لا مُشتقٌّ في كلّ وقت: مُؤهَّلُ تصميمٍ آخرَ لا يُنتجها.",
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="قياسٌ محلّيّ لاسترجاع المبالغ والأرصدة من صور الكشوف")
-    ap.add_argument("--list", action="store_true", help="اسرد الصفحات المؤهَّلة والمختارة (بلا قراءة)")
+    ap.add_argument("--list", action="store_true", help="اسرد التصميمَ المُكتشف والصفحاتِ المُجمَّدة والمُؤهَّل")
     ap.add_argument("--pages", help="أرقامُ صفحاتٍ بديلةٌ مفصولةٌ بفواصل")
     ap.add_argument("--design", default=None, help="معرّفُ تصميم الحزمة (والافتراض: يُكتشف من القرص)")
     args = ap.parse_args(argv)
 
     if args.list:
-        pool = eligible(args.design)
-        if not pool:
-            print(f"لا بياناتِ تدريبٍ محلّيّة للتصميم {args.design or '(غيرُ مُكتشف)'} — الحزمةُ لا تُشحن، "
-                  f"والقياسُ يحتاج نسخةً محلّيّة من `data/training/`")
-            return 3
-        print(f"المُؤهَّل: {len(pool)} صفحة (≥{MIN_ROWS} صفوف) · التصميم: {design_dir(args.design).name}")
-        print("المختارُ بقاعدة التوزيع: " + ", ".join(f"pg-{lab['page']}" for _, lab, _ in
-                                                       selected(PAGES, args.design)))
-        return 0
+        lines = _list_lines(args.design)
+        print("\n".join(lines))
+        return EXIT_NO_DATA if lines[0].startswith("لا بياناتِ") else EXIT_OK
 
-    pages = _parse_pages(args.pages)
-    rule_names = ("شكل", "قيمة", "أرقام")
+    try:
+        chosen = selected(_parse_pages(args.pages), args.design)
+    except IneligiblePage as exc:
+        print(f"⛔ {exc}")
+        return EXIT_NOT_ELIGIBLE
+
     totals = {k: [0, 0] for k in ("مبالغ", "أرصدة")}
-    print(f"{'صفحة':>6} {'صفوف':>5} " + " ".join(f"{n:>9}" for n in rule_names) + f" {'أرصدة':>9}")
-    for d, lab, rows in selected(pages, args.design):
+    print(f"{'صفحة':>6} {'صفوف':>5} " + " ".join(f"{n:>9}" for n in RULES) + f" {'أرصدة':>9}")
+    for d, lab, rows in chosen:
         try:
             found = numeric_sets(ocr(d / "page.png"))
         except RuntimeError as exc:
             print(f"⛔ {exc}")
-            return 2
+            return EXIT_NO_ENGINE
         truth = truth_sets(rows)
-        hits = {name: len(truth["مبالغ"][name] & found[name]) for name in rule_names}
+        hits = {name: len(truth["مبالغ"][name] & found[name]) for name in RULES}
         bh = len(truth["أرصدة"]["قيمة"] & found["قيمة"])
         totals["مبالغ"][0] += len(truth["مبالغ"]["قيمة"])
         totals["مبالغ"][1] += hits["قيمة"]
         totals["أرصدة"][0] += len(truth["أرصدة"]["قيمة"])
         totals["أرصدة"][1] += bh
-        print(f"{lab['page']:>6} {len(rows):>5} " + " ".join(f"{hits[n]:>9}" for n in rule_names)
+        print(f"{lab['page']:>6} {len(rows):>5} " + " ".join(f"{hits[n]:>9}" for n in RULES)
               + f" {bh:>9}")
 
     amt_n, amt_h = totals["مبالغ"]
@@ -250,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"قاعدةُ «قيمة» (المنشورة): المبالغ {amt_h}/{amt_n} = {100 * amt_h / amt_n:.1f}٪ · "
           f"الأرصدة {bal_h}/{bal_n} = {100 * bal_h / bal_n:.1f}٪")
     print("حدُّ القياس: استرجاعُ نصٍّ من الورق — لا إغلاقَ سلسلةٍ ولا مطابقةَ تذييل ولا شكلَ صفّ.")
-    return 0
+    return EXIT_OK
 
 
 if __name__ == "__main__":
