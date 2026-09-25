@@ -54,6 +54,25 @@ CENSUS_SIZES_FOR_SURFACE = (17, 50, 71)
 RANGE_LENGTHS_FOR_SURFACE = (20, 30, 50)
 CENSUS_CANDIDATES = (50, 71, 17)
 
+#: **قرارُ المالك 2026-09-25 — إغلاقُ حكم البوابة (٣):** التقاطعُ بين الإحصاء والمديات
+#: **قرارٌ لا عطب** ⇒ يُقبل ثمنُه المُعلَن ولا يُعاد بناءُ الحزمة. وللقرار **سقفٌ مُعلَنٌ لا يتمدّد**،
+#: و**لا يُغطّي عطباً** (المعطوباتُ تُسمّى وتُحكَم `FAIL` ولو وُجد القرار).
+#: · «١٠٠ صفحة» كان **رقماً مُسحوباً**: البوابةُ كانت تقيس المدياتِ وحدَها (١٥٠) والإحصاءُ خارجَ
+#:   مجتمعها ⇒ صُحِّح في review-32 إلى **١٣٣ صفحة · ١,٢٥٣ صفّاً · ٣٢.٦٪** من صفوف التدريب.
+#: · والقياسُ يومَ القرار: التقاطع **٠** بالبناء (`capture_mode=strict` + استثناءُ الحزمة بنيويًّا)
+#:   ⇒ فالسقفُ حدُّ أمانٍ لاحق، لا ثمنٌ يُدفع اليوم.
+GATE3_DECISION = {
+    "date": "2026-09-25",
+    "text": "حكمُ البوابة (٣): التقاطعُ بين الإحصاء والمديات قرارٌ لا عطب",
+    "scope": "المجتمعُ = الحزمةُ كاملةً (الإحصاء ٥٠ + المديات ١٥٠) ∩ صفحاتُ الالتقاط",
+    "accepted_pages": 133,
+    "basis": ("review-32 (REQUEST_CHANGES): الثمنُ ١٣٣ صفحةً · ١,٢٥٣ صفّاً · ٣٢.٦٪ — "
+              "والـ«١٠٠» كانت تقيس المديات وحدَها والإحصاءُ خارجَ مجتمعها"),
+    "measured_on_decision_day": 0,
+    "limits": ("لا يُغطّي عطباً · ولا يتمدّد فوق السقف المُعلَن · ولا يُعفى من ختم المحتوى "
+               "ولا من بوابة الحجم ولا من تغطية السموم"),
+}
+
 DEFINITIONS = (
     ("الحركة", "صفٌّ يحمل مبلغاً نصّيّاً (`movement` غير `null`) — وصفُّ «الرصيد الافتتاحى» ليس حركةً",
      "قاعدة ٨ + قياس ص١/صف١ (1,642 صفًّا و1,641 حركة)"),
@@ -685,12 +704,28 @@ def cmd_price_surface(args) -> int:
     return 0
 
 
-def classify_verdict(*, ok: bool, inter: list, blockers: list, remedy_rows: int) -> str:
+def gate3_closed(*, inter: list, blockers: list, decision: dict | None) -> bool:
+    """**هل يُغلق قرارُ المالك بندَ التقاطع؟** — دالّةٌ نقيّةٌ واحدةٌ تُغذّي النصَّ و`rc` (لا مصدران).
+
+    ثلاثةُ حدودٍ في الدالّة نفسها، فتُختبَر وتُسمَّم بلا تشغيلة:
+    ① **لا عطبَ**: وجودُ عطبٍ يُبطل القرار مهما كان (وإلا صار القرارُ ممرَّ عبورٍ يُخفي عطباً).
+    ② **سقفٌ مُعلَن**: التقاطعُ فوق `accepted_pages` يعود «شرطيًّا» — القرارُ لا يتمدّد.
+    ③ **وُجودُ قرار**: بلا قرارٍ يبقى الحكمُ شرطيًّا («القرارُ للمالك»).
+    """
+    if not inter or blockers or not decision:
+        return False
+    return len(inter) <= int(decision["accepted_pages"])
+
+
+def classify_verdict(*, ok: bool, inter: list, blockers: list, remedy_rows: int,
+                     decision: dict | None = None) -> str:
     """حكمٌ مُصنَّف — لأن «FAIL» كلمةٌ واحدة لحالتين مختلفتين، والفرقُ بينهما كلُّ المعنى.
 
     * **شرطيٌّ** (لا عطبَ، وقرارُ المالك): البوابةُ المفتوحةُ هي التقاطعُ مع الالتقاط، والمخرجُ
       منها **ثمنٌ** يُدفع بقرارٍ لا ببرمجة.
     * **عطبٌ** (عندنا، يُصلَح): أيُّ محرّكِ بواباتٍ سقط.
+    * **مُغلَقٌ بقرارٍ مؤرَّخ** (2026-09-25): قرارُ المالك حسم أنّ التقاطعَ قرارٌ لا عطب ⇒
+      يُغلق البندُ **داخلَ سقفه المُعلَن** ما لم يكن هناك عطبٌ (الحدُّ ① في `gate3_closed`).
 
     والحرسُ المهمّ: وجودُ عطبٍ **يُبطل** وصفَ «شرطيٌّ» — وإلا صار الاسمُ ممرَّ عبورٍ يُخفي عطباً
     خلف عذرٍ إداريّ (وهو صنفُ «الاستبدال الصامت» في §٦).
@@ -700,8 +735,15 @@ def classify_verdict(*, ok: bool, inter: list, blockers: list, remedy_rows: int)
     if blockers:
         return f"FAIL — عطبٌ مُسمّى أعلاه ({' · '.join(blockers)})"
     if inter:
+        if decision and gate3_closed(inter=inter, blockers=blockers, decision=decision):
+            return (f"PASS — التقاطعُ {len(inter)} صفحةً داخلَ السقفِ المقبول "
+                    f"({decision['accepted_pages']}) بقرارِ مالكٍ مؤرَّخ {decision['date']} — "
+                    f"لا عطبَ عندنا، والثمنُ المُفرَجُ عنه {remedy_rows} صفّاً من التدريب "
+                    f"(والمعطوباتُ لا يُغطّيها القرار)")
+        why = (f" — والسقفُ المُعلَن {decision['accepted_pages']} (قرار {decision['date']}): "
+               f"القرارُ لا يتمدّد فوقه" if decision else " — والقرارُ للمالك")
         return (f"FAIL **شرطيٌّ** — لا عطبَ عندنا: الحزمةُ مشروعةٌ بشرطِ إفراجٍ مُسعَّر عن "
-                f"{len(inter)} صفحة ({remedy_rows} صفّاً من التدريب) — والقرارُ للمالك")
+                f"{len(inter)} صفحة ({remedy_rows} صفّاً من التدريب){why}")
     return "FAIL — غيرُ مُصنَّف (لا عطبَ مُسمّى ولا شرطَ مُسعَّر): يُراجَع"
 
 
@@ -856,11 +898,28 @@ def cmd_build(args) -> int:
         "cost_usd": "0 — لا نداءَ نموذج: القياسُ من results/pg-*.json والإطاراتِ المطبوعة",
         "built_at": __import__("datetime").date.today().isoformat(),
     }
+    # **القرارُ يُقاس قبل الكتابة** فيدخل `pack.json` مقتبَسًا لا موصوفًا — مصدرٌ واحدٌ
+    # (`gate3_closed`) يُغذّي النصَّ و`rc` والملفّ معاً؛ وإلا وُجد حكمان: نصٌّ في المخرَج ورقمٌ في الملفّ
+    # (وهو صنفُ «يطبع ✗ ثم يقول PASS» الذي أمسكته مراجعة ٤٥).
+    blockers = []
+    if not all_gates:
+        blockers.append("بواباتُ المديات")
+    if not chosen["size_gate"]["pass"]:
+        blockers.append("بوابةُ الحجم")
+    if not pois["_coverage"]["every_check_has_a_poison"]:
+        blockers.append("تغطيةُ السموم")
+    if anchor_drift:
+        blockers.append("المجمَّعةُ المُلتزمة (محتوى القرص تغيّر بعد الشهادة)")
+    gate3_shut = gate3_closed(inter=inter, blockers=blockers, decision=GATE3_DECISION)
+    gate3_state = ("مُغلَقةٌ بالتقاطع المقبول" if gate3_shut else
+                   ("مُغلَقةٌ بلا تقاطع" if not inter else "مفتوحةٌ — القرارُ لا يُغطّيها"))
+    pack["intersection_gate"]["owner_decision"] = {
+        **GATE3_DECISION, "build_state": gate3_state, "measured_intersection": len(inter)}
     out = _path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "pack.json").write_text(json.dumps(pack, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    ok = (all_gates and chosen["size_gate"]["pass"] and not inter
-          and pois["_coverage"]["every_check_has_a_poison"] and not anchor_drift)
+    ok = (all_gates and chosen["size_gate"]["pass"] and pois["_coverage"]["every_check_has_a_poison"]
+          and not anchor_drift and (not inter or gate3_shut))
     if comp.get("classes"):
         print("\n── أصنافُ الإحصاء — مقيسةٌ من القرص (شرطُ review-29 §٦/٢: العددُ من الأداة):")
         print(f"   المجموعُ الساذج = {comp['structural_sum']} · وبعد طرح المتقاطع = "
@@ -880,16 +939,11 @@ def cmd_build(args) -> int:
               f"  · والعلاقةُ بالخطة: {comp['plan_claim_22']}")
         print(f"   {'القائمة المختارة':>22} : {len(chosen_census['pages'])} صفحة"
               f"  (والإحصاءُ المختارُ يُطبع بمصادره أعلاه)")
-    blockers = []
-    if not all_gates:
-        blockers.append("بواباتُ المديات")
-    if not chosen["size_gate"]["pass"]:
-        blockers.append("بوابةُ الحجم")
-    if not pois["_coverage"]["every_check_has_a_poison"]:
-        blockers.append("تغطيةُ السموم")
-    if anchor_drift:
-        blockers.append("المجمَّعةُ المُلتزمة (محتوى القرص تغيّر بعد الشهادة)")
-    verdict = classify_verdict(ok=ok, inter=inter, blockers=blockers, remedy_rows=remedy_rows)
+    # **إغلاقُ البوابة (٣) يُطبع مع قياسه** — فالقرارُ له قارئٌ في المخرَج لا في النثر وحده.
+    print(f"\nبوابةُ التقاطع (٣): {len(inter)} صفحةً · القرارُ: «{GATE3_DECISION['text']}» "
+          f"(مالك · {GATE3_DECISION['date']}) ⇒ {gate3_state}")
+    verdict = classify_verdict(ok=ok and not inter, inter=inter, blockers=blockers,
+                               remedy_rows=remedy_rows, decision=GATE3_DECISION)
     print(f"\nالحكم: {verdict} · كُتبت في {out / 'pack.json'} · cost_usd 0")
     return 0 if ok else 1
 
@@ -1000,12 +1054,28 @@ def cmd_verify(args) -> int:
     _seal_src = _seal()                         # **يُعلن من أيّ شجرةٍ قُرئ الختم** (S-2)
     seal_msg = _seal_violation(facts, live_seal)   # **الختمُ المُلتزم صار له قارئ** (وبصمتُه المجمَّعة)
     seal_ok_members = seal_msg is None
-    ok = (not inter) and pack["size_gate"]["pass"] and census_ok and ranges_ok and seal_ok_members and seal_ok
-    failures = ([f"التقاطع {len(inter)}"] if inter else []) + \
-               ([] if pack["size_gate"]["pass"] else ["بوابةُ الحجم"]) + \
-               ([] if census_ok else ["بصمةُ الإحصاء"]) + \
-               ([] if ranges_ok else ["إعادةُ قياس المديات" + (f" ({' · '.join(range_reasons)})" if range_reasons else "")]) + \
-               ([seal_msg] if seal_msg else []) + seal_failures
+    other_failures = ([] if pack["size_gate"]["pass"] else ["بوابةُ الحجم"]) + \
+                     ([] if census_ok else ["بصمةُ الإحصاء"]) + \
+                     ([] if ranges_ok else ["إعادةُ قياس المديات" + (f" ({' · '.join(range_reasons)})" if range_reasons else "")]) + \
+                     ([seal_msg] if seal_msg else []) + seal_failures
+    # **قرارُ إغلاق البوابة (٣) يُقاس في `--verify`** — فيصير للقرار قارئٌ لا نثر: قرارُ الحزمة
+    # المُلتزم يُقابَل بقرار الأداة **ولا يُقرأ منه** (حزمةٌ مُحرَّفةٌ لا تُوسّع سقفَها بنفسها)،
+    # والتقاطعُ يُقاس الآن على القرص. والقرارُ لا يُغطّي عطباً: كلُّ إخفاقٍ آخر يبقى في `failures`.
+    packed_decision = ((pack.get("intersection_gate") or {}).get("owner_decision") or {})
+    decision_mismatch = [k for k, v in GATE3_DECISION.items() if packed_decision.get(k) != v]
+    gate3_shut = gate3_closed(inter=inter, blockers=other_failures, decision=GATE3_DECISION)
+    gate3_ok = gate3_shut and not decision_mismatch
+    ok = ((not inter or gate3_ok) and pack["size_gate"]["pass"] and census_ok and ranges_ok
+          and seal_ok_members and seal_ok)
+    failures = ([f"التقاطع {len(inter)} (خارجَ القرار: سقفٌ {GATE3_DECISION['accepted_pages']}"
+                 + (f" · قرارُ الحزمة مخالفٌ في {decision_mismatch}" if decision_mismatch else "") + ")"]
+                if (inter and not gate3_ok) else []) + other_failures
+    print(f"بوابةُ التقاطع (٣): {len(inter)} صفحةً · القرارُ المُلتزم: «{GATE3_DECISION['text']}» "
+          f"(مالك · {GATE3_DECISION['date']} · السقفُ {GATE3_DECISION['accepted_pages']}) ⇒ "
+          + ("مُغلَقةٌ بلا تقاطع ✓" if not inter else
+             ("مُغلَقةٌ بقرارٍ سليم ✓" if gate3_ok else "✗ التقاطعُ لم يُغلقْه القرار"))
+          + " · قرارُ الحزمة: " + ("مطابقٌ لقرار الأداة ✓" if not decision_mismatch
+                                  else f"غائبٌ/مخالفٌ في {decision_mismatch} ⇒ يُعاد `--build`"))
     print(f"الحكم: {'PASS — الحزمةُ تشهد لنفسها' if ok else 'FAIL — بالاسم: ' + ' · '.join(failures)}")
     print(f"  (قارئُ الشهادة: {_evidence_path() or 'لا شهادةَ مُلتزمة'} · من شجرة: {(_seal_src or {}).get('tree', '—')})")
     return 0 if ok else 1

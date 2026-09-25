@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import pytest
 import re
 import sys
 from pathlib import Path
@@ -22,8 +23,8 @@ for _p in (str(PROJ), str(PROJ / "src")):
         sys.path.insert(0, _p)
 
 from tools.eval_pack import (  # noqa: E402
-    CLASS_SOURCES, DEFINITIONS, PACK_SIZE, Run, _sha16, build_census, census_classes,
-    longest_run, main, measure_range, poisons, classify_verdict,
+    CLASS_SOURCES, DEFINITIONS, GATE3_DECISION, PACK_SIZE, Run, _sha16, build_census,
+    census_classes, gate3_closed, longest_run, main, measure_range, poisons, classify_verdict,
 )
 
 DOC = "aaaaaaaaaaaaaaaa"
@@ -301,3 +302,47 @@ def test_the_verdict_separates_an_owner_condition_from_our_own_defect():
     with_defect = classify_verdict(ok=False, inter=[52], blockers=["بواباتُ المديات"], remedy_rows=9)
     assert "عطبٌ" in with_defect and "شرطيٌّ" not in with_defect
     assert "غيرُ مُصنَّف" in classify_verdict(ok=False, inter=[], blockers=[], remedy_rows=0)
+
+
+def test_gate3_decision_is_dated_bounded_and_declared():
+    """قرارُ المالك لا يُقبل كائناً بلا **تاريخ** وبلا **سقفٍ معلَن** — وإلا صار عرفاً سائباً."""
+    assert GATE3_DECISION["date"] and GATE3_DECISION["accepted_pages"] > 0, \
+        "قرارٌ بلا تاريخٍ أو بلا سقفٍ ليس قراراً"
+    assert "لا يُغطّي عطباً" in GATE3_DECISION["limits"], "الحدُّ الحاكم يُصرَّح به في القرار نفسه"
+    assert GATE3_DECISION["scope"], "بلا مجتمعٍ معلَن لا يُقاس التقاطعُ على من يقع"
+
+
+def test_the_owner_decision_closes_the_intersection_only_within_its_ceiling():
+    """القرارُ يُغلق بندَ التقاطع **داخل سقفه**، ولا يتمدّد ولا يُغطّي عطباً — والثلاثةُ تُقاس."""
+    ceiling = GATE3_DECISION["accepted_pages"]
+    inside = classify_verdict(ok=False, inter=list(range(1, 11)), blockers=[], remedy_rows=1253,
+                              decision=GATE3_DECISION)
+    assert inside.startswith("PASS") and GATE3_DECISION["date"] in inside, \
+        "داخلَ السقف: PASS بتاريخ القرار لا PASS صامت"
+    assert str(ceiling) in inside, "والسقفُ يُطبع مع الحكم"
+    over = classify_verdict(ok=False, inter=list(range(1, ceiling + 2)), blockers=[], remedy_rows=1253,
+                            decision=GATE3_DECISION)
+    assert "شرطيٌّ" in over and "لا يتمدّد" in over, "فوق السقف: يعود شرطيًّا — القرارُ لا يتمدّد"
+    masked = classify_verdict(ok=False, inter=list(range(1, 11)), blockers=["بواباتُ المديات"],
+                              remedy_rows=1253, decision=GATE3_DECISION)
+    assert "عطبٌ" in masked and "PASS" not in masked, "القرارُ لا يُغطّي عطباً — ولا يُقرأ PASS"
+    assert gate3_closed(inter=[], blockers=[], decision=GATE3_DECISION) is False, \
+        "بلا تقاطع لا يوجد ما يُغلق: الحالةُ «مُغلَقةٌ بلا تقاطع» لا «مُغلَقةٌ بقرار»"
+    assert gate3_closed(inter=[1, 2], blockers=[], decision=None) is False, \
+        "بلا قرارٍ يبقى الحكمُ شرطيًّا («القرارُ للمالك»)"
+    assert gate3_closed(inter=[1, 2], blockers=["x"], decision=GATE3_DECISION) is False, \
+        "الحدُّ ① يُقاس في الدالّة نفسها لا في النصّ"
+
+
+def test_the_recorded_decision_cannot_rot_on_disk():
+    """**القرارُ المُلتزم في الحزمة يُقابَل بمصدره** — فإن تغيّر القرارُ (تاريخاً أو سقفاً) بقي
+    `pack.json` قديماً فيُكشَف بدل أن يُقرأ قراراً سارياً. (تُتخطّى حيث لا حزمةَ على القرص: `data/` مستثنى.)"""
+    pack_path = PROJ / "data" / "eval_pack" / "pack.json"
+    if not pack_path.exists():
+        pytest.skip("لا حزمةَ على القرص (data/ مستثنى) — المقابلةُ تُجرى في شجرة العمل")
+    rec = ((json.loads(pack_path.read_text(encoding="utf-8")).get("intersection_gate") or {})
+           .get("owner_decision") or {})
+    drifted = [k for k, v in GATE3_DECISION.items() if rec.get(k) != v]
+    assert not drifted, f"قرارُ الحزمة قديمٌ في {drifted} ⇒ يُعاد `tools/eval_pack.py --build`"
+    assert rec.get("measured_intersection") == 0, \
+        "يومَ القرار كان التقاطعُ صفراً بالبناء — وزيادتُه قرارٌ جديدٌ لا قرارٌ قائم"

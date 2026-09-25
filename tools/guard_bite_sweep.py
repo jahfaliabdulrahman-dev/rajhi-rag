@@ -61,6 +61,7 @@ TURN = ROOT / "tools/turn.py"
 INTRUDER = ROOT / "handoff/claude/20260924-9999-REPORT-to-claude-poison.md"
 PROOF_T = "tests/test_eval_proof_rows.py"
 QG = ROOT / "tools/qa_gate.py"
+EP = ROOT / "tools/eval_pack.py"
 
 CASES = [
     ("م١ · الموضعُ خارج النطاق يُرفض (R52-2)", EQ,
@@ -178,6 +179,13 @@ CASES = [
      '            return stamp_of(m.group(1)) == own',
      '            return True',
      "tests/test_turn_derivation.py::test_the_fenced_header_is_read_not_ignored"),
+
+    # **م١٩ · سقفُ قرار المالك (إغلاقُ البوابة (٣) · 2026-09-25):** القرارُ يُغلق التقاطعَ **داخل سقفه**
+    # ولا يتمدّد؛ فسمُّه يُلغي السقفَ فيصير القرارُ ممرَّ عبورٍ لأيّ تقاطعٍ كان — ويجب أن يُسقط ضابطَه.
+    ("م١٩ · قرارُ المالك لا يتمدّد فوق سقفه المُعلَن", EP,
+     '    return len(inter) <= int(decision["accepted_pages"])',
+     '    return True',
+     "tests/test_eval_pack.py::test_the_owner_decision_closes_the_intersection_only_within_its_ceiling"),
 ]
 
 
