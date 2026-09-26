@@ -548,17 +548,33 @@ def test_the_count_hint_lives_in_both_ci_steps():
     assert wf.count("git diff --exit-code -- docs/claims.json") == 2, (
         "والفرقُ الفاشلُ في الخطوتين معًا")
 
-    # **ولا رقمَ من أرقام الدعوى مكتوبًا بيدٍ في الـworkflow (مقعدُ المواصفة F2 · ٦٨ج):** قيمةٌ منسوخةٌ
-    # من اللقطة بلا ضابطٍ رابطةٍ تتقادم بصمتٍ عند أوّل اختبارٍ يُضاف — وهي ميكانيكا P5 نفسُها.
-    import json
+    # **ولا رقمَ دعوى مكتوبًا بيدٍ في آلة الدعوى (مقعدا المواصفة والبنية · ٦٨ج/٦٨د):** كان الضابطُ
+    # يقابِل الـworkflow بقيم **اللقطة الحاليّة** فقط ⇒ فعودةُ الرقم المتقادم (العلّةُ التاريخيّةُ نفسُها:
+    # ٧٣٨/٨٨٩ ثم ٦٦٦) تمرّ خضراء، والأرقامُ الهنديّةُ غيرُ مرئيّة. فصار الضابطُ على **الصنف**:
+    # لا عددٌ (٢+ خانات، لاتينيّةً أو هنديّة) قريبٌ من لفظ دعوى في **سطور تعليق** ملفَّي الآلة.
     import re
-    snap = json.loads((Path(__file__).resolve().parents[1] / "docs" / "claims.json")
-                      .read_text(encoding="utf-8"))
-    hand = [str(v) for v in [snap["tests"], *snap["tests_by_env"].values()]]
-    # وحَدُّ التمييز مُعلَن: عدّادٌ لا يسبقه ولا يتبعه محرفٌ ستّعشريّ (فلا يُصطاد ذيلُ تجزئة).
-    stuck = [v for v in hand if re.search(rf"(?<![0-9a-f]){v}(?![0-9a-f])", wf)]
-    assert not stuck, (
-        f"أرقامُ الدعوى {stuck} مكتوبةٌ بيدٍ في الـworkflow ⇒ تُقرأ من اللقطة (مؤشّرًا) لا تُنسَخ")
+    AR = "٠١٢٣٤٥٦٧٨٩"
+    CLAIM_STEM = re.compile(r"جمع|اختبار|عدد|قياس")
+
+    def claim_numbers(text: str) -> list[str]:
+        norm = "".join(str(AR.index(c)) if c in AR else c for c in text)
+        out = []
+        for ln in norm.splitlines():
+            if not ln.strip().startswith("#"):
+                continue
+            for m in re.finditer(r"[0-9]{3,}", ln):
+                if CLAIM_STEM.search(ln[max(0, m.start() - 45): m.end() + 45]):
+                    out.append(m.group(0))
+        return out
+    # وحَدُّ التمييز مُعلَن: **ثلاثُ خاناتٍ فأكثر** — فعدّادُ المجموعة في هذه الشجرة بالمئات، وحالاتُ
+    # الصنف المقيسة كلُّها 3 خانات (٦٦٦ · ٧٣٨ · ٨٨٩ · ٧٤٠ · ٨٩١)، وسطرٌ مثل «فرقٌ ثابتٌ +10» ليس دعوى
+    # عن عدد الاختبارات. (وعددٌ من خانتين يفلت ⇒ مُعلَن، ولا يُدَّعى إغلاقُ ما لم يُقس.)
+
+    for rel in (".github/workflows/publish-guard.yml", "tools/render_claims.py"):
+        f = Path(__file__).resolve().parents[1] / rel
+        stuck = claim_numbers(f.read_text(encoding="utf-8"))
+        assert not stuck, (
+            f"عددُ دعوى مكتوبٌ بيدٍ في تعليقات {rel}: {stuck} ⇒ يُقرأ من اللقطة (مؤشّرًا) لا يُنسَخ")
 
 
 def test_the_guard_and_the_ignore_rules_share_one_list_of_real_data_dirs():
@@ -593,33 +609,84 @@ def test_the_tool_reaches_git_through_one_core_only():
     (والقياسُ الذي أنتج هذا الضابط: `_read_blobs` — وهي التي تُنزل محتوى الكائنات، أي موضعُ الحكم
     نفسُه — كانت القراءةَ **الرابعة** بلا فحصِ رمز خروج.)
 
-    **والعدُّ النصّيّ كان أعمى (المقعدان · ٦٨ج):** نداءٌ مباشرٌ **بسطرٍ منكسر** (`subprocess.run(\\n    ["git", …]`)
-    يحمل صفرًا في `src.count('subprocess.run(["git"')` — أثبتَه المقعدان بمقارئٍ خامسٍ مزروع ⇒ فصار
-    الفحصُ على **شجرة AST**: كلُّ نداءٍ لـ`subprocess.<fn>` يُعدّ بعُقده، والمسموحُ واحدٌ وموضعُه
-    داخل `_run_git` حصرًا (لا في الشجرة التي قد تحمل شكله بأيّ كسرِ أسطر).
+    **والعدُّ النصّيّ كان أعمى (المقعدان · ٦٨ج):** نداءٌ مباشرٌ **بسطرٍ منكسر** (`subprocess.run(\n    ["git", …]`)
+    يحمل صفرًا في `src.count('subprocess.run(["git"')` — أثبته المقعدان بمقارئٍ خامسٍ مزروع ⇒ فصار
+    الفحصُ على **شجرة AST**: كلُّ نداءٍ للقراءة يُعدّ بعُقده، والمسموحُ واحدٌ وموضعُه داخل `_run_git`.
+
+    **والاسمُ الحرفيّ كان أعمى أيضًا (المقعدان · ٦٨د):** `import subprocess as sp` · `from subprocess
+    import run as _r` · `os.popen("git …")` — كلُّها قراءةٌ خارج النواة وتمرّ أمام مطابقة الاسم ⇒
+    فصار الفحصُ **بتتبّع الربط**: أسماءُ الوحدة/الدوالّ المستوردة من `subprocess` (بأيّ كنية)، وأيّ
+    نداءٍ لـ`popen`/`system`، وضابطٌ نصّيّ احتياطيّ: لا يظهر `subprocess`/`popen` في أيّ سطرٍ خارج
+    `_run_git` (خلا سطر الاستيراد).
     """
     import ast
 
     src = Path(pg.__file__).read_text("utf-8")
     tree = ast.parse(src)
 
-    def calls_in(node) -> list[ast.Call]:
-        return [n for n in ast.walk(node)
-                if isinstance(n, ast.Call)
-                and isinstance(n.func, ast.Attribute)
-                and isinstance(n.func.value, ast.Name)
-                and n.func.value.id == "subprocess"]
+    mod_names, fn_names = {"subprocess"}, set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name == "subprocess":
+                    mod_names.add(a.asname or a.name)
+        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
+            for a in node.names:
+                fn_names.add(a.asname or a.name)
 
+    def is_read_call(n) -> bool:
+        f = n.func
+        if isinstance(f, ast.Attribute):
+            if isinstance(f.value, ast.Name) and f.value.id in mod_names:
+                return True
+            return f.attr in ("popen", "system")     # `os.popen` وشقيقاتُه
+        if isinstance(f, ast.Name):
+            return f.id in fn_names                  # `from subprocess import run as _r`
+        return False
+
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and is_read_call(n)]
     core = [n for n in ast.walk(tree)
             if isinstance(n, ast.FunctionDef) and n.name == "_run_git"]
     assert len(core) == 1, "نواةُ القراءة `_run_git` معدودةٌ بالنصّ (AST)"
-    core_calls = calls_in(core[0])
-    assert len(core_calls) == 1, "النواةُ تنادي subprocess مرّةً واحدة (وإلّا فمسارُ فشلٍ بلا فحص)"
-    outside = [n.lineno for n in calls_in(tree) if n not in core_calls]
+    core_ids = {id(c) for c in ast.walk(core[0]) if isinstance(c, ast.Call)}
+    in_core = [c for c in calls if id(c) in core_ids]
+    assert len(in_core) == 1, "النواةُ تنادي القراءة مرّةً واحدة (وإلّا فمسارُ فشلٍ بلا فحص)"
+    outside = [c.lineno for c in calls if id(c) not in core_ids]
     assert not outside, (
-        f"نداءُ subprocess خارج النواة `_run_git` في السطور {outside} ⇒ سياسةُ قراءةٍ ثانية "
-        f"(قراءةٌ فاشلةٌ تُقرأ «صفرًا» = «نظيفًا»)")
+        f"نداءُ قراءةٍ (subprocess/alias · popen/system) خارج النواة `_run_git` في السطور {outside} "
+        f"⇒ سياسةُ قراءةٍ ثانية (قراءةٌ فاشلةٌ تُقرأ «صفرًا» = «نظيفًا»)")
+
+    core_lines = set(range(core[0].lineno, (core[0].end_lineno or core[0].lineno) + 1))
+    stray = [i for i, ln in enumerate(src.splitlines(), 1)
+             if ("subprocess" in ln or "popen" in ln)
+             and not ln.lstrip().startswith(("import ", "from ")) and i not in core_lines]
+    assert not stray, f"أثرُ قراءةٍ لـgit خارج النواة في السطور {stray} (ضابطٌ نصّيّ احتياطيّ)"
     assert src.count("_run_git(") >= 4, "نواةُ القراءة لا يستهلكها كلُّ المسارات"
+
+
+def test_an_unknown_cat_file_record_is_a_failure_not_a_skip(monkeypatch):
+    """**الفرعُ الثالثُ في `_read_blobs` بلا ضابط (مقعدا المعايير والبنية · ٦٨د):** سجلٌّ لا نوعَ
+    كائنٍ فيه (صيغةٌ تغيّرت) كان يُدَّعى إغلاقُه بحكم «فشلٌ مُغلَق»، ومقعدٌ أسقطه إلى تخطٍّ صامتٍ فلم
+    يسقط اختبارٌ واحد ⇒ فهو فرعٌ جديدٌ بلا ضابط: يُقاس الآن بمُخرَجٍ مُحاكى (`zzblob`)، وبالشاهد الموجب
+    (سجلٌّ مشروع) في الضابط المقابل.
+    """
+    import publish_guard as pg
+
+    monkeypatch.setattr(pg, "_run_git", lambda *a, **k: b"deadbeef zzblob 5\nhello\n")
+    with pytest.raises(pg.GitReadError):
+        pg._read_blobs(["deadbeef"])
+
+
+def test_the_remote_reachability_rule_lives_in_one_place():
+    """**«قاعدةٌ واحدةٌ في موضعٍ واحد» تُقاس بالنصّ لا بالنيّة (مقعدُ البنية T4 · ٦٨د):** استُخرجت
+    `_commits_not_on_remotes` من فرعَي `scan_pre_push`، وإعادةُ كتابة التعبير يدويًّا في أحدهما كانت
+    تمرّ بلا اعتراض — خلافًا لعُرف المدى (كلُّ دعوى «قاعدةٌ واحدة» لها ضابطٌ باسمها).
+    """
+    src = Path(pg.__file__).read_text("utf-8")
+    assert src.count('"--not", "--remotes"') == 1, (
+        "تعبيرُ «ما ليس على الريموت» مكتوبٌ أكثرَ من مرّة ⇒ نسخةٌ ثانيةٌ لا تُقاس")
+    assert src.count("_commits_not_on_remotes(") == 3, (
+        "التعريفُ + موضعا النداء (المرجعُ الجديد والبديلُ المحافظ)")
 
 
 def _tool_repo(tmp_path, name="repo"):
