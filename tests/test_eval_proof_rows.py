@@ -16,6 +16,8 @@ import sys
 
 import pytest
 
+from tests._local_evidence import require_pack
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 RUN = ROOT / "data/local_sample/slice_629p"
 
@@ -158,6 +160,10 @@ def test_a_silent_loss_in_a_matching_locus_is_refused():
 def _corpus_ready():
     if not RUN.exists():
         pytest.skip(f"العيّنةُ غير موجودة ({RUN}) — لا يُقاس الإثباتُ بلا قرص")
+    # ⇐ و**الحزمةُ المجمَّدة شرطٌ لهذا القسم**: الثلاثةُ التي تقرأ `pack_io.pack_path()` هنا (وواحدٌ يقرأ
+    #   صفحاتِها) كانت تسقط بـ`FileNotFoundError` في بيئةٍ فيها العيّنةُ بلا الحزمة (قِيس في مراجعة إغلاق ٦٤)
+    #   ⇒ الشرطُ يُعلن الحاجةَ كاملةً: قرصٌ **وحزمة**. (وموضعُ الشرط هنا لا في كلّ فحص: كلُّ مناديه يحتاجها.)
+    require_pack()
 
 
 def test_all_fifty_questions_have_a_proof_or_a_declared_exception():

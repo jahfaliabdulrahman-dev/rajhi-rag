@@ -16,12 +16,16 @@ import sys
 
 import pytest
 
+from tests._local_evidence import pack_is_present
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
 RUN = ROOT / "data/local_sample/slice_629p"
-needs_run = pytest.mark.skipif(not (RUN / "results").exists(), reason="بلا أدلّةِ القرص (data/local_sample)")
+needs_run = pytest.mark.skipif(
+    not (RUN / "results").exists() or not pack_is_present(),
+    reason="بلا أدلّةِ القرص (data/local_sample) أو بلا الحزمة المجمَّدة (data/eval_pack)")
 
 
 def _load(name: str, rel: str):
