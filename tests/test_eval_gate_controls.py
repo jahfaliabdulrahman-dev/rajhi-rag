@@ -16,7 +16,7 @@ import sys
 
 import pytest
 
-from tests._local_evidence import pack_is_present
+from tests._local_evidence import pack_is_present, run_is_ready
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -24,8 +24,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 RUN = ROOT / "data/local_sample/slice_629p"
 needs_run = pytest.mark.skipif(
-    not (RUN / "results").exists() or not pack_is_present(),
-    reason="بلا أدلّةِ القرص (data/local_sample) أو بلا الحزمة المجمَّدة (data/eval_pack)")
+    not run_is_ready(RUN) or not pack_is_present(),
+    reason="بلا أدلّةِ القرص (data/local_sample: results/pg-*.json) أو بلا الحزمة المجمَّدة (data/eval_pack)")
 
 
 def _load(name: str, rel: str):
