@@ -23,6 +23,29 @@ spec = importlib.util.spec_from_file_location("local_reader_probe", ROOT / "tool
 lrp = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(lrp)
 
+
+@pytest.fixture(autouse=True)
+def _clean_scan_cache():
+    """المسحُ المخزَّن حالةٌ عامّة ⇒ يُصفَّر بين الاختبارات كي لا يعبر اختبارٌ اختبارًا."""
+    lrp.forget_scan_cache()
+    yield
+    lrp.forget_scan_cache()
+
+
+def test_a_run_scans_each_design_once(monkeypatch, tmp_path):
+    """**R64-3 (مقيس في مراجعة ٦٤):** كان المسحُ يتكرّر — تصفيةً في `design_dir` ثم في `main` ثم في `--list`
+    (٥٧٧ قراءةَ `label.json` لـ٢٩٤ ملفًا في تشغيلٍ عاديّ، و٨٧١ في `--list`) بينما النصُّ يقول «مسحٌ واحد».
+    """
+    calls: list[str] = []
+    dirs = [tmp_path / "a", tmp_path / "b"]
+    for d in dirs:
+        d.mkdir()
+    monkeypatch.setattr(lrp, "design_candidates", lambda: dirs)
+    monkeypatch.setattr(lrp, "_scan_one", lambda name: calls.append(name) or [])
+    assert lrp.eligible() == []
+    lrp.eligible()
+    assert calls == ["a", "b"], f"مسحٌ متكرّر: {calls}"
+
 # أرقامٌ مبنيّةٌ من أجزاء: ثلاثُ خاناتٍ صحيحة (تحت مدى حارس المبالغ: ≥٤ + كسر) فلا ظهورَ جديد
 _D = "9"
 _AR = "٩"
@@ -81,8 +104,9 @@ def test_value_matches_across_separator_styles():
 
 # ---------------------------------------------------------------- القواعدُ الثلاث تُسمّى ولا تُخلط
 
-def test_the_three_rules_are_named_in_one_place():
-    assert lrp.RULES == ("شكل", "قيمة", "أرقام")
+def test_the_four_lenses_are_named_and_the_published_one_is_first():
+    assert lrp.RULES == ("ورق", "شكل", "قيمة", "أرقام")
+    assert lrp.PUBLISHED_RULE == "ورق"
     assert set(lrp.numeric_sets("")) == set(lrp.RULES)
 
 
@@ -102,17 +126,48 @@ def test_numeric_sets_collects_from_free_text():
 
 
 def test_numeric_sets_keeps_the_rules_apart():
-    """الخلطُ يكذب: «أرقام» تحمل المجرَّد نصًّا، و«قيمة» تحمل `Decimal` — فلا تُسأل واحدةٌ عن الأخرى."""
+    """الخلطُ يكذب: «ورق» بصيغة الورق، و«شكل» كانونيٌّ نصًّا، و«قيمة» أعداد، و«أرقام» مجرَّدة."""
     got = lrp.numeric_sets(THOU_LAT)
     assert got["قيمة"] == {Decimal(CANON_THOU)}
     assert got["شكل"] == {CANON_THOU}
+    assert got["ورق"] == {CANON_THOU}
     assert got["أرقام"] == {DIGITS_THOU}
 
 
-def test_value_unifies_shapes_that_carry_the_same_number():
-    """**عطبٌ مقيسٌ في مراجعة الجولة ٦٣ (R63-1):** الأداةُ كانت تُخزّن «قيمة» نصًّا ⇒ «٩٩٩» ≠ «٩٩٩٫٠٠».
+def test_the_published_rule_requires_the_printed_fraction():
+    """**عطبُ R64-1 (مقيس في مراجعة ٦٤):** قاعدةُ القيمة تحتسب رمزًا تائهًا **بلا كسر** إصابةً لمبلغٍ مطبوع.
 
-    فالرقمُ نفسُه يفترق شكلًا ويتّفق قيمةً — ومن قارن النصَّ أهدر استرجاعًا كان بيده (٣٧.١٪ ⟶ ٤٨.٦٪).
+    فثلاثُ إصاباتٍ عارضة من أربع كان رمزُها خانةً مفردة، والرابعةُ أرقامًا في سطر وصف. والقاعدةُ المُعلَنة
+    («ورق») لا تحتسب إلّا الصيغةَ التي يطبعها العمود: الكسرُ شرطُ مطابقة.
+    """
+    printed = f"{_D * 3}." + "0" * 2            # كما يطبعه العمود: بكسره من خانتين
+    stray = f"{_D * 3}"                          # ما يُقرأ خطأً: رمزٌ تائه بلا كسر
+    assert Decimal(printed) == Decimal(stray) and printed != stray
+    found = lrp.numeric_sets(stray)
+    assert Decimal(printed) in found["قيمة"]                  # العدسةُ التشخيصيّةُ تبتلعه
+    assert found["ورق"] == set()                              # والمُعلَنةُ لا
+    assert lrp.has_paper_shape(lrp.canonical(printed)) and not lrp.has_paper_shape(lrp.canonical(stray))
+
+
+def test_rows_are_counted_apart_from_distinct_values():
+    """الوحدتان مختلفتان: صفّان بالمبلغ نفسه = صفّان، وقيمةٌ واحدة — والّلبسُ بينهما كان عطبًا معلَنًا."""
+    rows = [{"printed_amount": SMALL}, {"printed_amount": SMALL}]
+    hit, total, single = lrp.row_counts(rows, lrp.numeric_sets(SMALL))
+    assert (hit, total, single) == (2, 2, 0)
+    assert len(lrp.truth_sets(rows)["مبالغ"][lrp.PUBLISHED_RULE]) == 1
+
+
+def test_single_integer_digit_amounts_are_declared():
+    """المبالغُ ذاتُ الخانة الصحيحة المفردة تُعلَن منفصلةً: رمزٌ تائه واحدٌ في صفحةٍ من ٥٦ سطرًا يطابقها."""
+    rows = [{"printed_amount": f"{_D}." + "0" * 2}, {"printed_amount": f"{_D * 2}." + "0" * 2}]
+    hit, total, single = lrp.row_counts(rows, lrp.numeric_sets(""))
+    assert (hit, total, single) == (0, 2, 1)
+    assert lrp.integer_digits_of("5.00") == 1 and lrp.integer_digits_of("55.00") == 2
+
+
+def test_value_unifies_shapes_that_carry_the_same_number():
+    """**عدسةٌ تشخيصيّة:** `Decimal` توحّد الصيغ المتساوية (`«٩٩٩» == «٩٩٩٫٠٠»` قيمةً وتختلف شكلًا) — وهي
+    بالضبط ما جعل «قيمة» تحتسب إصاباتٍ عارضة (R64-1)، فلا يُنشَر رقمُها كمقياس.
     """
     plain, padded = f"{_D * 3}", f"{_D * 3}." + "0" * 2
     assert Decimal(plain) == Decimal(padded) and plain != padded
@@ -156,19 +211,37 @@ def test_both_sides_drop_single_digit_forms_from_the_digits_rule():
 
 # ---------------------------------------------------------------- الصفحاتُ المُجمَّدة ورموزُ الخروج
 
-def test_the_published_ratio_is_arithmetically_the_one_in_the_document():
-    """**الربطُ الذي طلبه مقعدُ المعايير:** الرقمُ المنشور (١٧/٣٥ = ٤٨.٦٪) يُقاس حسابيًّا من مستنده.
-
-    لا يُعاد قياسُ المحرّك هنا (الحزمةُ لا تُشحن وVision ليست في الـCI) — لكن ما يمكن فحصُه بلا بيانات
-    يُفحَص: نسبةُ ما نُشر تساوي قسمةَ بسطها على مقامها، والحصيلةُ مكتوبةٌ في الوثيقة. فلا ينزلق الرقمُ
-    في الوثيقة عن الأدلة التي يُعلنها بسطُها.
+def test_the_document_agrees_with_the_arithmetic_of_its_own_numbers():
+    """**اتّساقُ الوثيقة — لا ربطُ الأداة.** صرّح مقعدُ التحقّق في مراجعة ٦٤ (R64-2) بأنّ هذا الضابط
+    لا يلمس الأداةَ ولا البيانات (سمّموا `value_of` فبقي يمرّ): فهو اتّساقٌ حسابيٌّ للوثيقة، وقد سُمّي بما هو.
+    والربطُ الحقيقيّ هو الضابطُ التالي — يُشغّل الأداةَ فعلًا.
     """
     doc = ROOT / "handoff" / "sulaiman" / "20260926-0205-MEASUREment-q4-local-reader-five-pages.md"
     text = doc.read_text(encoding="utf-8")
-    assert round(100 * 17 / 35, 1) == 48.6                    # المبالغ: «قيمة»
-    assert round(100 * 29 / 35, 1) == 82.9                    # الأرصدة: «قيمة»
-    for shown in ("١٧/٣٥", "٢٩/٣٥", "٤٨.٦٪", "٨٢.٩٪"):
+    assert round(100 * 13 / 35, 1) == 37.1                    # القيمُ المتمايزة: «ورق»
+    assert round(100 * 20 / 46, 1) == 43.5                    # الصفوف: «ورق»
+    assert round(100 * 29 / 35, 1) == 82.9                    # الأرصدة: «ورق»
+    for shown in ("١٣/٣٥", "٢٠/٤٦", "٢٩/٣٥", "٣٧.١٪", "٤٣.٥٪", "٨٢.٩٪"):
         assert shown in text, f"رقمٌ منشورٌ غاب عن الوثيقة: {shown}"
+
+
+def test_the_probe_reproduces_the_published_counts_locally(capsys):
+    """**الربطُ الحقيقيّ (R64-2):** يُشغّل الأداةَ على الصفحات الخمس ويُثبّت **أعدادَ كلّ صفحة** — لا قيمًا.
+
+    ويُتخطّى بسببٍ مُعلَنٍ عند غياب البيانات أو محرّك Vision (ليس من متطلّبات المشروع) — فيسقط في الموضع
+    الوحيد الذي يقدر أن يقيس فيه: جهازٌ فيه الصورُ والمحرّك. وتغييرُ قاعدةٍ يُحرّك الرقمَ يسقط هنا.
+    """
+    if not lrp.eligible():
+        pytest.skip("لا بياناتِ تدريبٍ محلّيّة (data/ لا تُشحن مع المستودع)")
+    try:
+        import Vision  # noqa: F401
+    except ImportError:
+        pytest.skip("محرّكُ macOS Vision غيرُ متاحٍ (بيئةٌ معزولة، ليست من متطلّبات المشروع)")
+    rc = lrp.main([])
+    out = capsys.readouterr().out
+    assert rc == lrp.EXIT_OK
+    for shown in ("13/35 = 37.1", "20/46 = 43.5", "29/35 = 82.9", "9 من 46"):
+        assert shown in out, f"عددٌ لم تعُد الأداةُ تُنتجه: {shown}"
 
 
 def test_page_numbers_parse_strictly():
