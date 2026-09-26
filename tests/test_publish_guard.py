@@ -1,6 +1,8 @@
 """Publish guard tests — the dedup bug, the digit-table exemption, and the
 four structural holes an external audit opened are regressions; lock them
-here. No git operations.
+here. Mostly no git operations — **إلّا ثلاثةُ ضوابط في الذيل** تنشئ نسخةَ git مستقلّةً في
+`tmp_path` (ثقبُ المسار غير ASCII · تسريبٌ في التاريخ وحدَه · وقراءةٌ فاشلةٌ ليست قراءةً فارغة)،
+وهي لا تلمس مستودع المشروع ولا فهرسه.
 
 INVARIANT (enforced below, not promised in prose): this file ships no real
 statement data — every account-shaped value is invented — and every payload
@@ -15,6 +17,7 @@ Re-verify the invented value against the real cache whenever it exists
 `data/local_sample/*/results/pg-*.json` and expect ZERO.
 """
 
+import pytest
 import sys
 from pathlib import Path
 
@@ -367,7 +370,60 @@ def test_a_non_ascii_path_cannot_hide_from_the_guard(tmp_path):
                        cwd=root, capture_output=True, text=True)
     assert r.returncode == 1, (
         f"مسارٌ غيرُ ASCII تحت مجلّد بياناتٍ حقيقيّةٍ لم يُكشَف (rc={r.returncode})\n{r.stdout}")
-    assert "كشوف" in r.stdout, "والرسالةُ تسمّي المسارَ بعينه (أي أنّ القراءةَ كانت بلا تقويس)"
+    assert "كشوف" in r.stdout, "والرسالةُ تسمّي المسارَ نفسَه (القراءةُ بلا تقويس)"
+
+
+def test_a_leak_that_lives_only_in_history_is_caught(tmp_path):
+    """**مراجعة ٦٨ · R68-1 — الضابطُ الذي كان غائبًا سببَ العطل:** لا اختبارَ كان يفحص مسحَ
+    التاريخ، فمرّ عطلٌ **صامت** أوقف نصفَ الحارس: `rev-list --objects --all -z` يُخرج **سجلّاتٍ**
+    (`<sha>\\0<sha>\\0path=<المسار>\\0`) لا أسطرًا بفراغ ⇒ فقارئٌ يفصل على الفراغ يقرأ **صفرَ كائن**،
+    ويُخرج «نظيف» وهو لم يقرأ شيئًا (قِيس في الشجرة: `history: 0 · 0 BLOCK · rc=0`).
+    **والضابطُ يزرع تسريبًا في التاريخ وحدَه** (مسارُ منزلٍ وهميّ يُضاف ثم يُحذَف في التزامٍ تالٍ).
+    """
+    import shutil
+    import subprocess
+    import sys
+
+    root = tmp_path / "repo"
+    (root / "tools").mkdir(parents=True)
+    shutil.copy(Path(__file__).resolve().parents[1] / "tools" / "publish_guard.py", root / "tools")
+
+    def g(*a):
+        return subprocess.run(["git", *a], cwd=root, capture_output=True, text=True)
+
+    g("init", "-q", ".")
+    g("config", "user.email", "t@example.invalid")
+    g("config", "user.name", "t")
+    note = root / "notes.md"
+    note.write_text("workdir: /Users/" + "auditor" + "/secret/project\n", encoding="utf-8")
+    g("add", "-A")
+    g("commit", "-qm", "add")
+    note.unlink()
+    g("add", "-A")
+    g("commit", "-qm", "remove")
+
+    r = subprocess.run([sys.executable, "tools/publish_guard.py", "--history"],
+                       cwd=root, capture_output=True, text=True)
+    assert "history: 0" not in r.stdout, (
+        "القارئُ لم يقرأ التاريخَ أصلًا — صيغةُ `-z` تغيّرت أو عاد الفصلُ على الفراغ:\n" + r.stdout)
+    assert r.returncode == 1, f"تسريبٌ في التاريخ (وحده) يجب أن يُحجب (rc={r.returncode})\n{r.stdout}"
+    assert "BLOCK" in r.stdout, "ويكون الحكمُ حجبًا لا تحذيرًا:\n" + r.stdout
+
+
+def test_a_failed_git_read_is_not_an_empty_read():
+    """**R68-1:** كانت `_git_z` تُعيد المخرَجَ بلا فحصِ رمزِ الخروج ⇒ فأمرٌ فاشلٌ يُقرأ «قائمةً
+    فارغةً» = «نظيفًا». والآن يرفع `GitReadError` (ورمزُ الخروج ٢: تعذّرُ قياسٍ لا وجودُ محجوب)."""
+    import publish_guard as pg
+    with pytest.raises(pg.GitReadError):
+        pg._git_z("rev-list", "--definitely-not-a-git-flag-068")
+
+
+def test_an_empty_history_read_is_a_failure_not_cleanliness(monkeypatch):
+    """**R68-1:** «صفرُ كائنات» من مستودعٍ له تاريخٌ ليست نظافةً بل **تعذّرَ قراءة** ⇒ استثناءٌ صريح."""
+    import publish_guard as pg
+    monkeypatch.setattr(pg, "_git_z", lambda *a, **k: ["", ""])
+    with pytest.raises(pg.GitReadError):
+        pg._history_pairs()
 
 
 def test_the_guard_and_the_ignore_rules_share_one_list_of_real_data_dirs():
