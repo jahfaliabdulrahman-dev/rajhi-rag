@@ -22,6 +22,11 @@
 
 **وحدودُه مُعلَنة** (ولا تُدَّعى أوسعَ منها):
 - **ما يُقاس:** قائمةُ ضوابط الـCI (مقروءةٌ من الـworkflow) + `publish_guard --tree --ci`.
+- **وساعةُ الختم ساعةُ الشجرة لا ساعةُ العدّاء (R65-1 · مراجعة ٦٥):** اللحظةُ تُحوَّل إلى `NAMING_TZ`
+  (‎+03، إزاحةُ كلّ اسمٍ في `handoff/`) وتُرفَع فوق أحدثِ ختمٍ في الشجرة المقيسة، فيخرج الشاهدُ من كلّ
+  نافذة `(شاهد, جواب]` قائمة. والعطبُ المقيس قبل الإصلاح: تشغيلٌ بـUTC ختم `034032` فوقع بين شاهد
+  الجواب `032854` والجواب `0455` ⇒ سقط `test_every_landed_answer_names_a_witness_in_the_same_tree`
+  على جوابٍ صحيح (وأخضرُ المنفّذ المحلّيُّ أعمى عنه لأنّ ساعته +03).
 - **ما لا يُقاس:** `publish_guard --history` (التاريخُ لا يتغيّر بهبوط نصّ · وهو ثقيل)، وبوّاباتُ
   المال/الثوابت/اللقطة على خطوات الـworkflow (تقرأ الشيفرةَ لا صندوقَ المراسلة)، و«هل المراجعةُ
   الاصطناعيّةُ تشبه مراجعةً حقيقيّةً بالكامل» — الشكلُ متّفقٌ عليه بين الطرفَين (شرطُ المدقّق نفسه).
@@ -40,8 +45,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Iterable
 
 PROJ = Path(__file__).resolve().parent.parent
 #: مسارُ الـworkflow **نسبةً إلى جذر الشجرة** — فيُقرأ من الشجرة التي تُقاس لا من شجرة المنفّذ دائمًا.
@@ -55,6 +61,19 @@ BOX = "handoff/claude"
 TATWEEL = "\u0640"
 #: قائمةُ الـCI: **تُقرأ من الـworkflow** لا من نسخةٍ ثانية (وتُرتيبُ ورودها محفوظ).
 CI_FILE_RE = re.compile(r"tests/[A-Za-z0-9_/]+\.py")
+#: **ساعةُ الأسماء التي تحملها الشجرة — لا ساعةُ العدّاء (R65-1 · مراجعة ٦٥).** كلُّ اسمٍ في
+#: `handoff/` بتوقيت +03 (ويشهد به `tests/test_report_names.py`)، وعدّاءُ GitHub بتوقيت UTC ⇒ ختمٌ
+#: بساعة العدّاء يقع **قبل** أسماء الجولة نفسِها فيصير هو «أحدثَ حُكمٍ قبل الجواب» ⇒ يسقط ضابطُ §٢٧
+#: على جوابٍ هبط فعلًا. والنافذةُ المقيسة: كلُّ تشغيلٍ بين `الشاهد+3h` و`الجواب+3h` يسقط، وتتكرّر
+#: مع كلّ جوابٍ جديد.
+NAMING_TZ = timezone(timedelta(hours=3))
+#: **صندوقا المراسلة**: أحدثُ ختمٍ فيهما **أرضيّةٌ** لختم الشاهد الاصطناعيّ، فلا يدخل نافذةَ جوابٍ
+#: منشورٍ أبدًا. والأرضيّةُ لا تُغيّر الحالةَ العاديّة (ساعةُ الشجرة +03 فوق أسماء الجولة عادةً).
+BOXES = (BOX, "handoff/sulaiman")
+#: نمطُ الاسم واصطلاحُ زمنه من **مصدرٍ واحد** (`tools/turn.py` — ST-4: لا نسخةً ثانية تفترق عنه)،
+#: والمسارُ يُضاف صريحًا لأنّ المسبارَ يُستورَد من الاختبارات أيضًا ⇒ فلا افتراضَ على `sys.path`.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from turn import as_datetime, stamp_of  # noqa: E402
 
 
 def ci_files(workflow: Path = WORKFLOW) -> list[str]:
@@ -226,13 +245,55 @@ def _name(stamp: str, poison: str | None) -> str:
     return f"{stamp}-third-eye-review-99-landing-probe.md"
 
 
-def _commit(review: Path, dst: Path, stamp: str) -> tuple[int, str]:
+def _tree_stamps(root: Path) -> list[str]:
+    """مفاتيحُ أزمنة الأسماء في **صندوقَي المراسلة** داخل الشجرة المقيسة (ولا ملفَّ بلا زمن).
+
+    والمصدرُ `turn.stamp_of` ⇒ **نمطٌ واحد** مع حارس أسماء التقارير (`tests/test_report_names.py`)،
+    فلا نسخةَ ثانية تفترق عنه.
+    """
+    out: list[str] = []
+    for box in BOXES:
+        d = root / box
+        if not d.is_dir():
+            continue
+        for p in sorted(d.glob("*.md")):
+            key = stamp_of(p.name)
+            if key:
+                out.append(key)
+    return out
+
+
+def _probe_stamp(now: datetime, stamps: Iterable[str]) -> datetime:
+    """لحظةُ الشاهد الاصطناعيّ — **بساعة الشجرة، وفوق أحدثِ ختمٍ فيها** (R65-1 · مراجعة ٦٥).
+
+    **ولماذا لا ساعةُ العدّاء:** أسماءُ الشجرة كلُّها بتوقيت +03، وعدّاءُ CI بتوقيت UTC ⇒ ختمٌ من
+    العدّاء يقع ثلاثَ ساعاتٍ **قبل** جوابٍ كُتب في الجولة نفسِها، فيصير هو «أحدثَ حُكمٍ قبل الجواب»
+    ويسقط `tests/test_answer_names_witness.py` على جوابٍ صحيح — عطبٌ كامنٌ منذ `27b8d43` ظهر مع
+    أوّل جوابٍ يحمل شاهدًا حقيقيًّا، وأخضرُ المنفّذ المحلّيُّ **أعمى عنه بالبناء** (بتوقيت +03 يأتي
+    الختمُ بعد كلّ اسم).
+
+    **والأرضيّة** (`+1s` فوق أحدث ختمٍ في الشجرة المقيسة) تُخرج الشاهدَ من **كلّ** نافذة `(شاهد, جواب]`
+    قائمة — حتى لو تأخّر الاسمُ عن ساعة الجهاز أو جاء الاسمُ من إيداعٍ مُبكَّر. ولا تُخلّ باتّساق
+    الاسم↔الإيداع: الإيداعُ يُشتقّ من هذه اللحظة نفسِها (مصدرٌ واحد).
+    """
+    t = now.astimezone(NAMING_TZ)
+    keys = sorted(k for k in stamps if k)
+    if keys:
+        floor = as_datetime(keys[-1]).replace(tzinfo=NAMING_TZ)
+        if t <= floor:
+            t = floor + timedelta(seconds=1)
+    return t
+
+
+def _commit(review: Path, dst: Path, when: datetime) -> tuple[int, str]:
     """يُودِع المراجعةَ في النسخة بزمن اللحظة (مؤلفٌ ومُودِع) — فاسمُها يطابق إيداعَها.
 
-    والزمنُ من **مصدرٍ واحد** (`stamp` نفسُه الذي في الاسم) ⇒ لا ساعتان تفترقان.
+    والزمنُ من **مصدرٍ واحد**: اللحظةُ نفسُها التي صيغ منها الاسم، **مُدرَكةً** (aware) فتحمل إزاحةَ
+    الشجرة (+03) — فلا يفترق الاسمُ عن الإيداع في أيّ منطقة عدّاء (R65-1: كان الاثنان يُصاغان من
+    ساعة العدّاء فيتّسقان معًا ويخالفان **أسماء الجولة** في الوقت نفسه).
     """
-    when = _stamp_dt(stamp).astimezone()
-    env = {"GIT_AUTHOR_DATE": when.isoformat(), "GIT_COMMITTER_DATE": when.isoformat(),
+    iso = when.isoformat()
+    env = {"GIT_AUTHOR_DATE": iso, "GIT_COMMITTER_DATE": iso,
            "GIT_AUTHOR_NAME": "landing-probe", "GIT_AUTHOR_EMAIL": "probe@invalid",
            "GIT_COMMITTER_NAME": "landing-probe", "GIT_COMMITTER_EMAIL": "probe@invalid"}
     rc, out = _git(dst, "add", str(review.relative_to(dst)), env=env)
@@ -264,7 +325,6 @@ def measure(ref: str, from_worktree: bool, poison: str | None, keep: bool,
     if not sha:
         print(f"⛔ تعذّر القياس: المرجعُ `{ref}` غيرُ موجود ⇒ لا نسخةَ تُقاس.")
         return 2
-    stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     tmp = Path(tempfile.mkdtemp(prefix="landing-probe-"))
     dst = tmp / "tree"
     try:
@@ -283,12 +343,16 @@ def measure(ref: str, from_worktree: bool, poison: str | None, keep: bool,
         if not files:
             print(f"⛔ تعذّر القياس: النسخةُ لا تحمل قائمةَ ضوابط في {WORKFLOW_REL} ⇒ فشلٌ مُغلَق.")
             return 2
+        # **الختمُ يُشتقّ من الشجرة المقيسة نفسِها** (لا من شجرة المنفّذ): أحدثُ ختمٍ فيها أرضيّةٌ
+        # لختم الشاهد، فالاسمُ لا يدخل نافذةَ جوابٍ منشورٍ في الشجرة التي يُقاس عليها (R65-1).
+        stamp_dt = _probe_stamp(datetime.now().astimezone(), _tree_stamps(dst))
+        stamp = stamp_dt.strftime("%Y%m%d-%H%M%S")
         box = dst / BOX
         box.mkdir(parents=True, exist_ok=True)
         name = _name(stamp, poison)
         review = box / name
         review.write_text(_synthetic_review(stamp, sha[:7], branch, poison), encoding="utf-8")
-        rc, out = _commit(review, dst, stamp)
+        rc, out = _commit(review, dst, stamp_dt)
         if rc != 0:
             print(f"⛔ تعذّر القياس: لم يُودَع الشاهدُ في النسخة:\n{out.strip()[:600]}")
             return 2
