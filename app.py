@@ -63,8 +63,8 @@ from statement_qa.footer_oracle import (
 )
 from statement_qa.job_lock import JobBusyError, job_lock
 from statement_qa.ordering import (
-    check_order, check_page_numbers, summarize_ar as summarize_order_ar,
-    summarize_page_numbers,
+    check_order, check_page_numbers, footer_order, summarize_ar as summarize_order_ar,
+    summarize_footer_order, summarize_page_numbers,
 )
 
 STATE = {}
@@ -387,6 +387,8 @@ def _process_pdf_locked(pdf_path: str, progress):
     footer_checks: list[dict] = []
     era_pages: dict[int, list] = {}
     page_dates: dict[int, list] = {}
+    # الإجمالياتُ التراكمية لكلّ صفحة: مفتاحُ الترتيب الحقيقي (ordering.footer_order)
+    page_footers: dict[int, tuple] = {}
     boundaries = {"txn": 0, "carry": 0, "anchor": 0}
     usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cost": 0.0}
     # cumulative debits/credits for the footer oracle (footer totals are
@@ -465,6 +467,7 @@ def _process_pdf_locked(pdf_path: str, progress):
         except Exception:
             footer = None
         _merge_usage(fst)
+        page_footers[pg] = (footer.debits, footer.credits) if footer else None
         # تحكيم الصفحة: انزياح عن الفوتر يُطلق قراءة جديدة واحدة، تُقبل فقط
         # إذا كانت بلا شكوك وتُطابق دلتا الفوتر (معزولة عن أي تلوث سابق).
         if (not gap_missing
@@ -548,6 +551,7 @@ def _process_pdf_locked(pdf_path: str, progress):
     order = check_order(page_dates)
     STATE["era"] = era_fp
     STATE["order"] = order
+    STATE["footer_order"] = footer_order(page_footers)
     n_ok = sum(1 for r in all_rows if r["ok"])
     n_susp = len(all_rows) - n_ok
     last_bal = next((r["balance"] for r in reversed(all_rows)
@@ -620,6 +624,7 @@ def _process_pdf_locked(pdf_path: str, progress):
             summarize_era_ar(era_fp,
                              format_effects(_verdicts, _suspect_pages)),
             summarize_order_ar(order, boundaries),
+            summarize_footer_order(STATE["footer_order"]),
             summarize_page_numbers(check_page_numbers(page_nos))]
     if abort_reason:
         segs.insert(0, "⛔ " + abort_reason)

@@ -168,21 +168,37 @@ def analyze_page(gray: np.ndarray, dpi: int) -> PageBands:
     return PageBands(dpi, kind, zone, bands, orphan, extra)
 
 
-def link_pages(pages: list[PageBands]) -> list[dict]:
-    """تكملةُ أعلى الصفحة i ⇒ آخرُ صفٍّ في الصفحة i-1.
+def link_pages(pages, order: list[int] | None = None,
+               pairs: dict[tuple[int, int], str] | None = None) -> list[dict]:
+    """تكملةُ أعلى الصفحة ⇒ آخرُ صفٍّ في **سابقتها في الترتيب الحقيقي** لا في الملف.
 
-    والتكملةُ في أوّل صفحةٍ من الدفعة **صاحبُها غائب**: تُعلَّم ولا تُحذف ولا تُنسب لغيرها.
-    المواضعُ هنا ترتيبُ الدفعة؛ وربطُها بأرقام الصفحات المطبوعة على المستدعي.
+    `pages`: قائمةٌ (المواضعُ فهارسُها) أو {موضع: PageBands}. `order`: الترتيبُ الحقيقي
+    (`ordering.footer_order`)؛ وبدونه ترتيبُ الملف. `pairs`: حالةُ كلّ جارَين
+    (`ordering.adjacency`):
+
+    - `adjacent` ⇒ الربطُ مؤكَّد (`confirmed: True`).
+    - `gap` ⇒ بينهما ورقةٌ غائبة، فالتكملةُ لصفٍّ **ليس عندنا**: صاحبُها غائب، لا تُنسب لغيره.
+    - غيرُ ذلك أو بلا `pairs` ⇒ ربطٌ غيرُ مؤكَّد (`confirmed: False`) — يُقرأ ويُعلَّم.
+
+    والتكملةُ في أوّل الترتيب أو بعد صفحةٍ ليست صفحةَ حركات ⇒ صاحبُها غائب: تُعلَّم ولا تُحذف.
     """
+    if isinstance(pages, list):
+        pages = dict(enumerate(pages))
+    order = list(order) if order is not None else sorted(pages)
     links = []
-    for i, p in enumerate(pages):
-        if p.orphan is None:
+    for i, pos in enumerate(order):
+        if pages[pos].orphan is None:
             continue
-        prev = pages[i - 1] if i > 0 else None
-        if prev is not None and prev.bands and prev.kind in ("transactions", "first"):
-            links.append({"page": i, "continues": [i - 1, len(prev.bands) - 1]})
+        prev = order[i - 1] if i else None
+        status = (pairs or {}).get((prev, pos))
+        owner = pages.get(prev) if prev is not None else None
+        if owner is None or not owner.bands or owner.kind not in ("transactions", "first"):
+            links.append({"page": pos, "owner_missing": True})
+        elif status == "gap":
+            links.append({"page": pos, "owner_missing": True, "gap_before": True})
         else:
-            links.append({"page": i, "owner_missing": True})
+            links.append({"page": pos, "continues": [prev, len(owner.bands) - 1],
+                          "confirmed": status == "adjacent"})
     return links
 
 
