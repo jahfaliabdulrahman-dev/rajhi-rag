@@ -7,20 +7,22 @@ __pycache__/
 vectorstore/
 .DS_Store
 
-# Real bank data NEVER leaves this machine
-data/local_sample/
-data/training/
-data/eval_pack/
+# Real bank data NEVER leaves this machine — **وبأيّ عمق** (مراجعة ٦٧ · الصنف نفسه): كان النمطُ جذريًّا،
+# فيفلت منه تداخلٌ يقع طبيعيًّا بـ`cp -R data <نسخةٍ فيها data/>` ⇒ `data/data/local_sample/…` (٣٦١٠ ملفًا
+# منها المفتاح) خارجَ الحماية. و`**/data/…` يقابل الجذرَ وأيّ عمقٍ معًا، ولا يوسّع المطابقةَ إلى غير `data/`.
+**/data/local_sample/
+**/data/training/
+**/data/eval_pack/
 
 # Single-job lock (transient)
-data/.rajhi-job.lock
+**/data/.rajhi-job.lock
 
 # PDFs are generated locally; only the synthetic sample is published
 *.pdf
 !data/sample/*.pdf
-data/.amount-guard-key
-data/eval_pack/amount-manifest.json
-data/eval_pack/amount_redaction_map.json
+**/data/.amount-guard-key
+**/data/eval_pack/amount-manifest.json
+**/data/eval_pack/amount_redaction_map.json
 docs/security/amount-denylist.json
 
 # أثرُ تنقيحٍ لخطّاف الدفع: لا يُتتبَّع أبداً (ولا يُكتب في الشجرة أصلاً)
@@ -32,3 +34,4 @@ handoff/*.bak
 # مراجعُ الانكشاف المُوسَمة (معرّفاتُ التزاماتِ ما قبل التنقية) — لا تُنشر:
 # كانت في `tools/refs_exposure_probe.py` (مُتتبَّع) ⇒ صارت رابطاً موسوماً إلى ما لم يُطهَّر (مراجعة ٥٣).
 data/security/
+**/data/security/

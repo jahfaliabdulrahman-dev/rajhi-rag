@@ -297,6 +297,25 @@ def test_a_nested_real_data_copy_is_never_excused():
         "اسمٌ يشبه المجلّدَ في مسارٍ آخر ليس بياناتٍ حقيقيّة (ضبطٌ موجب ثانٍ)"
 
 
+def test_the_ignore_rules_are_depth_agnostic_too():
+    """**خطُّ الدفاع الأول، بالصنف نفسه (مراجعة ٦٧):** كان `.gitignore` جذريًّا، فقِيس أنّ
+    `git check-ignore data/data/local_sample/x.json` ⇒ **`rc=1`** (غيرُ محجوب) بينما الجذريُّ محجوب ⇒
+    فالمتداخلُ يصير مرشَّحًا لـ`git add .` قبل أن يراه الحارس. فالمقابلةُ الآن على أيّ عمقٍ تحت `data/`.
+    """
+    import subprocess
+
+    root = Path(__file__).resolve().parents[1]
+
+    def ignored(rel: str) -> bool:
+        return subprocess.run(["git", "check-ignore", "-q", rel], cwd=root).returncode == 0
+
+    assert ignored("data/local_sample/x.json"), "الجذريُّ محجوب"
+    assert ignored("data/data/local_sample/x.json"), "المتداخلُ محجوب — وهو موضعُ العلّة"
+    assert ignored("data/eval_pack/amount-manifest.json"), "خريطةُ التطهير محجوبة"
+    assert not ignored("data/sample/statement_sample.pdf"), \
+        "اللقطةُ المسموحةُ تبقى غيرَ محجوبة (ضبطٌ موجب)"
+
+
 def test_the_ci_step_and_the_guard_share_one_rule():
     """**مالكٌ واحد للقاعدة (مراجعة ٦٧):** كانت خطوةُ الـCI تحمل نمطًا جذريًّا خاصًّا بها ⇒ فالنسخةُ
     المتداخلةُ تفلت من الاثنين معًا. فلا يُعاد النمطُ الثاني، والخطوةُ تستدعي قاعدةَ الحارس.
