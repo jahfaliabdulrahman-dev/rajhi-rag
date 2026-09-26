@@ -34,6 +34,14 @@ RESULTS = PROJ / "data" / "local_sample" / "slice_629p" / "results"
 # and calls the fresh document the drift (this happened with the test count).
 SNAPSHOT = PROJ / "docs" / "claims.json"
 
+# **وللرقم بيئةٌ تُعلَن (مراجعة ٦٧ · حصيلةُ R67-2):** العدُّ يتغيّر بما هو مُثبَّت؛ قِيس: بيئةُ المالك
+# (تبعيّاتٌ كاملة) تُجمَع **٨٧٤**، وبيئةُ الـCI (تبعيّاتٌ خفيفة: `pytest openpyxl PyYAML`) تُجمَع **٦٦٣**
+# لأنّ وحداتٍ لا تُستورَد فلا تُجمَع. **فمقابلةُ رقمَي بيئتين مقابلةُ كمّيّتين مختلفتين** — وهي بعينها
+# الخطأُ الذي كشفه إغلاقُ R67-2 أوّلَ مرّة (خطوةٌ حمراء على ٨٧٤ مقابل ٦٦٣). فاللقطةُ تحمل **قياسَ كلّ
+# بيئةٍ بمفتاحها** (`tests_by_env`)، والمفتاحُ تُعلنه الجهةُ المشغِّلة (`RAJHI_CLAIMS_ENV` — تضبطه مهمّةُ
+# الـCI في مستواها)، **والعددُ المنشور** (`tests`) هو قياسُ بيئة `full` وحدَها.
+CLAIMS_ENV = os.environ.get("RAJHI_CLAIMS_ENV", "full")
+
 # **كائنُ القرار يُستورد في أعلى الملفّ — بلا `try/except` يُخفي** (مقعدُ البنية · مراجعة ٦١): كان
 # يُستورد داخل دالّةٍ عبر `sys.path.insert` **ويبتلع الخطأ** فيُعيد `None` ⇒ تُصاغ الوثيقةُ بـ`{None}`
 # ويُكتب في اللقطة `null` بصمت. والآن الوحدةُ المجرّدةُ (`tools/gate3.py` — لا تبعيّةَ خارج المكتبة
@@ -184,15 +192,21 @@ def main() -> None:
         if args.write:
             live = _test_count()
             if live is None:
-                print("⚠ تعذّر العدُّ الحيُّ للاختبارات ⇒ لا كتابة.")
+                print(f"⚠ تعذّر العدُّ الحيُّ في بيئة `{CLAIMS_ENV}` ⇒ لا كتابة.")
                 sys.exit(1)
-            before = snapdoc.get("tests")
-            snapdoc["tests"] = live
+            env_map = dict(snapdoc.get("tests_by_env") or {})
+            before = env_map.get(CLAIMS_ENV)
+            env_map[CLAIMS_ENV] = live
+            snapdoc["tests_by_env"] = env_map
+            if CLAIMS_ENV == "full":
+                snapdoc["tests"] = live            # «العددُ المنشور» = قياسُ البيئة الكاملة
             SNAPSHOT.write_text(json.dumps(snapdoc, ensure_ascii=False, indent=1) + "\n",
                                 encoding="utf-8")
-            print(f"[claims] كُتبت اللقطةُ بلا تقريرٍ مقيس: tests {before!r} ⇒ {live!r} | "
-                  f"**وحدُّ الكتابة مُعلَن:** بقيةُ الحقول تحتاج تقريرًا مقيسًا "
-                  f"(`{REPORT.relative_to(PROJ)}`) ولم تُمسّ.")
+            print(f"[claims] كُتبت اللقطةُ بلا تقريرٍ مقيس: tests_by_env[{CLAIMS_ENV}] "
+                  f"{before!r} ⇒ {live!r}"
+                  + (" · و`tests` (العددُ المنشور) تبعه" if CLAIMS_ENV == "full" else "")
+                  + f" | **وحدُّ الكتابة مُعلَن:** بقيةُ الحقول تحتاج تقريرًا مقيسًا "
+                    f"(`{REPORT.relative_to(PROJ)}`) ولم تُمسّ.")
         # **والعددُ المنشور يُقاس حيًّا حتى بلا تقرير (R66-1 · مراجعة ٦٦):** مقابلةُ الوثيقةِ باللقطة
         # وحدَهما تجعل الانزياحَ **غيرَ مرئيٍّ في CI** — لقطةٌ متقادمةٌ توافق وثيقةً متقادمةً بالعدد نفسه —
         # و`_test_count()` لا يحتاج كاشَ التصريح. **قِيس قبل الإغلاق:** لقطةٌ `865` والعدُّ الحيُّ `868`
@@ -205,8 +219,13 @@ def main() -> None:
             print("⛔ فشلٌ مُغلَق — تعذّر قياسُ العدد حيًّا (لا `pytest` في هذه البيئة): لا يُقابَل "
                   "رقمٌ برقمٍ لا يُقاس. ثبّت `pytest` في الخطوة نفسِها التي تُشغّل هذا الفحص (R67-2).")
             sys.exit(1)
-        if snapdoc.get("tests") != live:
-            print(f"⚠ عددُ الاختبارات المنشور {snapdoc.get('tests')!r} ≠ المعدود حيًّا {live!r} "
+        expected = (snapdoc.get("tests_by_env") or {}).get(CLAIMS_ENV)
+        if expected is None:
+            print(f"⛔ فشلٌ مُغلَق — بيئةُ القياس `{CLAIMS_ENV}` غيرُ مُعلَنةٍ في اللقطة "
+                  f"(المُعلَن: {sorted((snapdoc.get('tests_by_env') or {}))}) ⇒ سجِّل قياسَها بـ`--write`.")
+            sys.exit(1)
+        if expected != live:
+            print(f"⚠ عددُ `{CLAIMS_ENV}` في اللقطة {expected!r} ≠ المعدود حيًّا {live!r} "
                   f"⇒ `--write` (والوثيقةُ تُصحَّح في سطرها)")
             sys.exit(1)
         sdrifts = check(snapdoc)

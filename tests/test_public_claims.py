@@ -65,14 +65,21 @@ def test_the_committed_snapshot_matches_the_live_count():
     كان إغلاقُ R66-1 يعتمد على خطوة الـCI وحدَها، **وهي تجري قبل تثبيت `pytest`** ⇒ `_test_count()`
     تُعيد `None` فيتخطّى القياسُ الحيُّ بصمت، فتُقابَل لقطةٌ متقادمةٌ بوثيقةٍ متقادمةٍ مثلها.
     وضابطٌ في المجموعة لا يعتمد على ترتيب خطوات الـCI — حيث `pytest` موجودٌ بالضرورة.
+
+    **وبمفتاح بيئةٍ مُعلَن** (`RAJHI_CLAIMS_ENV`): فالعدُّ يتغيّر بما هو مُثبَّت (قِيس: ٨٧٤ في بيئة
+    المالك الكاملة مقابل ٦٦٣ في بيئة الـCI الخفيفة) ⇒ فلا يُقابَل رقمُ بيئةٍ برقمِ أخرى.
     """
     import render_claims as rc
 
     live = rc._test_count()
     assert live is not None, "لا `pytest` هنا ⇒ لا قياس (والبوّابةُ تفشل مُغلَقةً في الخطوة)"
     snap = json.loads(rc.SNAPSHOT.read_text(encoding="utf-8"))
-    assert snap["tests"] == live, (
-        f"اللقطةُ الملتزمة تقول {snap['tests']} والمعدودُ حيًّا {live} ⇒ "
+    expected = (snap.get("tests_by_env") or {}).get(rc.CLAIMS_ENV)
+    assert expected is not None, (
+        f"بيئةُ القياس `{rc.CLAIMS_ENV}` غيرُ مُعلَنةٍ في اللقطة "
+        f"(المُعلَن: {sorted((snap.get('tests_by_env') or {}))}) ⇒ سجِّل قياسَها بـ`--write`")
+    assert expected == live, (
+        f"عددُ `{rc.CLAIMS_ENV}` في اللقطة {expected} والمعدودُ حيًّا {live} ⇒ "
         f"`python3 tools/render_claims.py --write` ثم تصحيحُ سطر الوثيقة")
 
 

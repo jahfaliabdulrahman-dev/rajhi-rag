@@ -279,8 +279,9 @@ def test_the_snapshot_gate_actually_fires(monkeypatch, tmp_path):
     (tmp_path / "docs").mkdir(parents=True, exist_ok=True)
     doc = tmp_path / "docs" / "QA_CHECKLIST.md"
     doc.write_text("حالياً 999 اختباراً\n", encoding="utf-8")
-    (tmp_path / "docs" / "claims.json").write_text(_json.dumps({"tests": 606}, ensure_ascii=False),
-                                                   encoding="utf-8")
+    (tmp_path / "docs" / "claims.json").write_text(
+        _json.dumps({"tests": 606, "tests_by_env": {rc.CLAIMS_ENV: 606}}, ensure_ascii=False),
+        encoding="utf-8")
     monkeypatch.setattr(rc, "claims",
                         lambda d: [("docs/QA_CHECKLIST.md", f"حالياً {d['tests']}", "عدد الاختبارات")])
     # **ويُعلن المشهدُ قياسَه (R67-2 · مراجعة ٦٧):** البوّابةُ صارت تفشل **مُغلَقةً** حين لا يُقاس العدد،
