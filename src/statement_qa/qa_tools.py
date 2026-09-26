@@ -24,6 +24,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 
 _MONEY = "{:,.2f}"
+_ROW_DESC_LEN = 70     # حدُّ الوصف في سطر الصفّ — **موضعٌ واحد** (كان ٦٠ في `page_rows` و٧٠ في `search_rows`)
 
 _SIDE_AR = {"debit": "مدين", "credit": "دائن"}
 
@@ -95,23 +96,34 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None):
             trace.append({"tool": name,
                           "row_nos": [r["row_no"] for r in sel]})
 
+    def _on_page(r: dict, page: int) -> bool:
+        """**مطابقةُ الصفحة في موضعٍ واحد** — يستهلكها `_page_scope` و`_filtered` معًا.
+
+        (قِيس في مقعد البنية: كان `_filtered` يبني مقارنتَه بنفسه (`!= pg`) ⇒ تغييرُ مطابقة الصفحة
+        يستلزم تعديلَ موضعين متباعدين. **ونطاقا الصفوف يبقيان مختلفين بإعلان**: `_page_scope` كلُّ
+        صفوف الصفحة · و`_filtered` الحركاتُ وحدها.)
+        """
+        return r.get("page") == int(page)
+
     def _page_scope(page: int) -> list[dict]:
         """**موضعٌ واحد لنطاق الصفحة**: كلُّ صفوف الصفحة (بما فيها الافتتاحيّ) بأرقام الكشف.
 
         (كان مبنيًّا حرفيًّا في `page_summary` و`page_rows` معًا ⇒ نطاقان قد يفترقان بصمت).
         """
-        return [r for r in numbered if r.get("page") == int(page)]
+        return [r for r in numbered if _on_page(r, page)]
 
-    def _row_line(r: dict, desc_len: int = 70) -> str:
+    def _row_line(r: dict) -> str:
         """**تنسيقُ سطرِ صفٍّ واحد** — يستعملُه `page_rows` و`search_rows`.
 
-        (كان مكرَّرًا في الأداةين بحدَّي وصفٍ **صامتين** (`[:60]` مقابل `[:70]`) ⇒ صار حدًّا واحدًا معامَلًا).
+        (كان مكرَّرًا في الأداةين بحدَّي وصفٍ **صامتين** (`[:60]` مقابل `[:70]`) ⇒ صار حدًّا واحدًا
+        مسمًّى `_ROW_DESC_LEN`، ولم يبقَ معامَلٌ لا يمرّره أحدٌ — قِيس في مقعد البنية: كان `desc_len`
+        معامَلًا بلا مستدعٍ. **وتغيّرُ مخرَج `page_rows` بذلك (٦٠ ⇒ ٧٠ خانة) مُعلَن** ولا مستهلكَ له.)
         """
         move = _MONEY.format(r["movement"]) if r.get("movement") is not None else "—"
         bal = _MONEY.format(r["balance"]) if r.get("balance") is not None else "—"
         return (f"{_ref(r)}: [{r.get('type') or 'غير مصنّف'}] "
                 f"{_SIDE_AR.get(r.get('side') or '', 'غير محسوم')} {move}"
-                f" → الرصيد {bal} — {_desc(r)[:desc_len]}")
+                f" → الرصيد {bal} — {_desc(r)[:_ROW_DESC_LEN]}")
 
     def _filtered(side: str = "الكل", keyword: str = "", tx_type: str = "",
                   amount=None, page: int | None = None) -> list[dict]:
@@ -121,7 +133,7 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None):
         pg = None if page is None else int(page)
         out = []
         for r in movements:
-            if pg is not None and r.get("page") != pg:
+            if pg is not None and not _on_page(r, pg):
                 continue
             if not _side_match(r.get("side", ""), side):
                 continue
@@ -202,21 +214,21 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None):
     def page_summary(page: int) -> str:
         """ملخص صفحة واحدة: أول/آخر رصيد + إجمالي المدين وإجمالي الدائن فيها.
         مثال: page_summary(page=10)."""
-        page_rows = _page_scope(page)
-        if not page_rows:
+        rows_on_page = _page_scope(page)
+        if not rows_on_page:
             return f"لا توجد بيانات للصفحة {page} في هذا الكشف."
-        _record("page_summary", page_rows)
-        with_bal = [r for r in page_rows if r.get("balance") is not None]
-        debits = sum((r["movement"] for r in page_rows
+        _record("page_summary", rows_on_page)
+        with_bal = [r for r in rows_on_page if r.get("balance") is not None]
+        debits = sum((r["movement"] for r in rows_on_page
                       if r.get("kind") == "txn" and r.get("side") == "debit"
                       and r.get("movement") is not None), Decimal("0"))
-        credits = sum((r["movement"] for r in page_rows
+        credits = sum((r["movement"] for r in rows_on_page
                        if r.get("kind") == "txn" and r.get("side") == "credit"
                        and r.get("movement") is not None), Decimal("0"))
         # Rows whose direction the chain could not decide are NOT in either
         # total. Staying silent about them made a page total look complete
         # while a real movement was missing from it (audit P3-2).
-        undecided = [r for r in page_rows
+        undecided = [r for r in rows_on_page
                      if r.get("kind") == "txn"
                      and r.get("side") not in ("debit", "credit")
                      and r.get("movement") is not None]
@@ -229,13 +241,13 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None):
             return (f"صفحة {page}: لا توجد أرصدة مقروءة"
                     f" | إجمالي مدين = {_MONEY.format(debits)}"
                     f" | إجمالي دائن = {_MONEY.format(credits)}"
-                    f" | عدد الصفوف = {len(page_rows)}" + note)
+                    f" | عدد الصفوف = {len(rows_on_page)}" + note)
         first, last = with_bal[0], with_bal[-1]
         return (f"صفحة {page}: أول رصيد = {_MONEY.format(first['balance'])} {_ref(first)}"
                 f" | آخر رصيد = {_MONEY.format(last['balance'])} {_ref(last)}"
                 f" | إجمالي مدين = {_MONEY.format(debits)}"
                 f" | إجمالي دائن = {_MONEY.format(credits)}"
-                f" | عدد الصفوف = {len(page_rows)}" + note)
+                f" | عدد الصفوف = {len(rows_on_page)}" + note)
 
     @tool
     def page_rows(page: int, limit: int = 40) -> str:
@@ -265,7 +277,10 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None):
         مثال: search_rows(amount=1000) = كل الحركات بمبلغ 1000 مع أنواعها الحقيقية.
         مثال: search_rows(page=40) = حركاتُ الصفحة ٤٠ وحدها (مرتّبةً بأرقام صفوفها).
         **و`page` معامَلٌ لفظيٌّ وحدَه** (`page=`) — فالنداءُ الموضعيُّ القديم لا يتغيّر معناه.
-        **وتُسقِط غيرَ الحركة** (صفَّ الرصيد الافتتاحيّ): لِسرد الصفحة كاملةً استعمل `page_rows`."""
+        **وتُسقِط غيرَ الحركة** (صفَّ الرصيد الافتتاحيّ): لِسرد الصفحة كاملةً استعمل `page_rows`.
+        **والأثرُ:** يُسجَّل **كلُّ ما اختارته** الأداة لا المقصوصَ بالحدّ — سلوكٌ قائمٌ قبل هذه الجولة،
+        ومُعلَن: أمّا `page_rows` فتسجّل ما **ظهر** فيها. (و`search_rows` بقي على حاله عمدًا بلا ضابطٍ
+        يفرض غيرَه — تغييرُه يمسّ مقاييسَ الأثر على تشغيلٍ حقيقيّ غيرِ مقيس.)"""
         sel = _filtered("الكل", keyword, tx_type, amount, page)
         _record("search_rows", sel)
         if not sel:

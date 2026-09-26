@@ -122,6 +122,17 @@ def test_sum_by_type():
     assert "المجموع = 9,001.00" in out
 
 
+def test_the_trace_records_what_was_shown_not_the_whole_page():
+    """**الضابطُ الغائب (مقيسٌ في مقعدَي المراجعة):** `page_rows` تسجّل `shown` — لكن لا شيءَ يعضّ:
+    الضابطُ القائمُ يناديها بالحدّ الافتراضيّ (٤٠) على صفحةٍ بصفّين ⇒ `shown == sel`، فتمرّ الطفرةُ
+    (قِيست: إعادةُ `_record(…, sel)` ⇒ 20 passed ولا سقوط). فالمَشهدُ هنا **يقصّ فعلًا**."""
+    trace = []
+    tools = {t.name: t for t in make_qa_tools(_rows(), trace=trace)}
+    out = tools["page_rows"].invoke({"page": 2, "limit": 1})
+    assert "و1 أخرى" in out, out
+    assert trace == [{"tool": "page_rows", "row_nos": [4]}], trace
+
+
 def test_trace_records_tool_selections():
     """Evidence trace: every non-empty call records the rows it selected."""
     trace = []

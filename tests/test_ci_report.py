@@ -141,6 +141,26 @@ def test_every_configured_remote_is_tried_and_unknown_names_are_not_stripped(mon
     assert cr.branch_of("feature/x") == "feature/x"
 
 
+def test_a_remote_that_is_not_origin_is_tried_when_it_holds_the_pushed_commit(monkeypatch):
+    """**طَفرةٌ قِيست على إغلاق F7 (مقعد المعايير):** إبدالُ الدورة على `remotes()` بقائمةٍ مغلقة
+    `["origin"]` **لم يُسقط شيئًا** (29 passed) ⇒ فالضابطُ القائمُ يقيس **تطبيعَ الأسماء** في `branch_of`
+    لا **دورانَ الريموتات** في `_pushed_sha`. فالمَشهدُ هنا يجعل المدفوعَ على ريموتٍ غير `origin` **وحدَه**."""
+    reads: list[str] = []
+    monkeypatch.setattr(cr, "_git_remotes", lambda: "upstream\norigin\n")
+
+    def local(ref):
+        reads.append(ref)
+        return OTHER if ref == "upstream/main" else HEAD
+
+    monkeypatch.setattr(cr, "_local_sha", local)
+    assert cr._pushed_sha("main") == OTHER, "يُجرَّب **كلُّ** ريموتٍ مُهيَّأ لا `origin` وحدَه"
+    assert "upstream/main" in reads, f"وإلّا ما كان الريموتُ الثاني يُقرأ أصلًا: {reads}"
+
+    # **والعكسُ مُقاسٌ كذلك:** بريموتٍ واحدٍ لا يملك المدفوعَ يُقرأ المرجعُ المحلّيّ (فيُعَلن التقادم).
+    monkeypatch.setattr(cr, "_git_remotes", lambda: "origin\n")
+    assert cr._pushed_sha("main") == HEAD
+
+
 def test_an_unresolvable_ref_cannot_be_called_green(monkeypatch, capsys):
     """ولا صمتَ: مرجعٌ لا نعرف التزامَه ⇒ «غيرُ مقروء» (رمزٌ 2) لا «أخضر»."""
     _fake(monkeypatch, _run("success"), sha=None)
