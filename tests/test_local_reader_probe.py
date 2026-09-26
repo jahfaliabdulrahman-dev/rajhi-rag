@@ -1,14 +1,18 @@
-"""أداةُ القارئ المحلّيّ — اختبارُ **قواعد الأرقام** (وهي ما كذب في أوّل قياس، لا المحرّك).
+"""أداةُ القارئ المحلّيّ — اختبارُ **المقياس نفسه** (قواعد الأرقام · الوحدة · الإشارة · الرموز · الربط).
 
-الدرسُ المُختبَر (أ-٧): مطابقةُ الأرقام العربيّة بلا توحيدٍ **بحكم موقع الفاصل** تُنتج فروقًا كاذبة؛
-فالأداةُ تُخرج ثلاثَ مجموعاتٍ مسمّاة (`شكل` · `قيمة` · `أرقام`) وتُعلن أيَّها أنتج الرقمَ المنشور،
-كي لا يُحكم على المحرّك بمقياسٍ مكسور. **ولا تُخلط القواعدُ في مجموعةٍ واحدة** — الخلطُ نفسُه يكذب.
+الدرسُ المُختبَر (أ-٧): مطابقةُ الأرقام العربيّة بلا توحيدٍ **بحكم موقع الفاصل** تُنتج فروقًا كاذبة.
+و**القاعدةُ المُعلَنة اليوم واحدة**: `ورق` — بصيغة الورق بكسره من خانتين (وهي الأضيق: `ورق ⊆ شكل`)؛
+وشقيقاها تشخيصيّان (`شكل` · `قيمة` — وقِيس في مراجعة ٦٤ أنّ `قيمة` تحتسب إصاباتٍ عارضة) ⇒ تُطبع كلُّها
+**بمقامها** ولا يُنشَر رقمُها. **ولا تُخلط العدساتُ في مجموعةٍ واحدة** — الخلطُ نفسُه يكذب.
+
+**والوحدتان معًا** (لبسُهما كان عطبًا): القيمُ المتمايزةُ في كلّ صفحة، والصفوفُ — وكلٌّ بمقامه.
 
 **الأرقامُ هنا مبنيّةٌ من أجزاء لا مكتوبة** (`_D`)، فلا يُدخل اختبارٌ قيمةً من الكوربوس إلى مستودعٍ عامّ
 (القاعدةُ ١٢/١٤: لا يُعفى موضع، ولا يُنشر ظهور).
 
 **وما يحتاج البياناتَ أو المحرّكَ يُتخطّى معلَنًا** (الحزمةُ لا تُشحن، وVision ليست من متطلّبات المشروع)
-فيمرّ هذا الملفُّ في الـCI — حيث يُقاس نصفُ المقارنة وحده.
+فيمرّ هذا الملفُّ في الـCI — ويقع ضابطُ الربط وحدَه في الموضع الذي يقدر أن يقيس فيه (شجرةٌ فيها الصورُ
+والمحرّك)، وهو مُصرَّحٌ به في الوثيقة.
 """
 from __future__ import annotations
 
@@ -33,15 +37,16 @@ def _clean_scan_cache():
 
 
 def test_a_run_scans_each_design_once(monkeypatch, tmp_path):
-    """**R64-3 (مقيس في مراجعة ٦٤):** كان المسحُ يتكرّر — تصفيةً في `design_dir` ثم في `main` ثم في `--list`
-    (٥٧٧ قراءةَ `label.json` لـ٢٩٤ ملفًا في تشغيلٍ عاديّ، و٨٧١ في `--list`) بينما النصُّ يقول «مسحٌ واحد».
+    """**بندُ «مسحٌ واحد» في مراجعة ٦٤ (المرقَّمُ R64-4 عند المدقّق):** كان المسحُ يتكرّر — تصفيةً في
+    `resolve_design` ثم في `main` ثم في `--list` (٥٧٧ قراءةَ `label.json` لـ٢٩٤ ملفًا في تشغيلٍ عاديّ،
+    و٨٧١ في `--list`) بينما النصُّ يقول «مسحٌ واحد». والمفتاحُ اليوم **المسارُ المُحلَّل** لا الاسم.
     """
     calls: list[str] = []
     dirs = [tmp_path / "a", tmp_path / "b"]
     for d in dirs:
         d.mkdir()
     monkeypatch.setattr(lrp, "design_candidates", lambda: dirs)
-    monkeypatch.setattr(lrp, "_scan_one", lambda name: calls.append(name) or [])
+    monkeypatch.setattr(lrp, "_scan_one", lambda path: calls.append(path.name) or [])
     assert lrp.eligible() == []
     lrp.eligible()
     assert calls == ["a", "b"], f"مسحٌ متكرّر: {calls}"
@@ -152,17 +157,25 @@ def test_the_published_rule_requires_the_printed_fraction():
 def test_rows_are_counted_apart_from_distinct_values():
     """الوحدتان مختلفتان: صفّان بالمبلغ نفسه = صفّان، وقيمةٌ واحدة — والّلبسُ بينهما كان عطبًا معلَنًا."""
     rows = [{"printed_amount": SMALL}, {"printed_amount": SMALL}]
-    hit, total, single = lrp.row_counts(rows, lrp.numeric_sets(SMALL))
-    assert (hit, total, single) == (2, 2, 0)
+    hit, total, dropped, single = lrp.row_counts(rows, lrp.numeric_sets(SMALL))
+    assert (hit, total, dropped, single) == (2, 2, 0, 0)
     assert len(lrp.truth_sets(rows)["مبالغ"][lrp.PUBLISHED_RULE]) == 1
 
 
 def test_single_integer_digit_amounts_are_declared():
     """المبالغُ ذاتُ الخانة الصحيحة المفردة تُعلَن منفصلةً: رمزٌ تائه واحدٌ في صفحةٍ من ٥٦ سطرًا يطابقها."""
     rows = [{"printed_amount": f"{_D}." + "0" * 2}, {"printed_amount": f"{_D * 2}." + "0" * 2}]
-    hit, total, single = lrp.row_counts(rows, lrp.numeric_sets(""))
-    assert (hit, total, single) == (0, 2, 1)
+    hit, total, dropped, single = lrp.row_counts(rows, lrp.numeric_sets(""))
+    assert (hit, total, dropped, single) == (0, 2, 0, 1)
     assert lrp.integer_digits_of("5.00") == 1 and lrp.integer_digits_of("55.00") == 2
+
+
+def test_a_row_whose_shape_the_rule_cannot_match_is_counted_as_dropped():
+    """**عطبٌ قِيس في مقعد المواصفة:** مبلغٌ مطبوعٌ بكسورٍ **من خانةٍ واحدة** كان يختفي من البسط والمقام
+    بلا عدّاد ⇒ المقامُ يُرشَّح بالقاعدة المُعلَنة نفسِها **ويُعلَن عددُ المُسقَط** (لا يُفرَّغ بصمت)."""
+    rows = [{"printed_amount": f"{_D * 3}.{_D}"}, {"printed_amount": SMALL}]   # خانةٌ واحدة ثم خانتان
+    hit, total, dropped, single = lrp.row_counts(rows, lrp.numeric_sets(SMALL))
+    assert (hit, total, dropped, single) == (1, 1, 1, 0)
 
 
 def test_value_unifies_shapes_that_carry_the_same_number():
@@ -228,11 +241,14 @@ def test_the_document_agrees_with_the_arithmetic_of_its_own_numbers():
 def test_the_probe_reproduces_the_published_counts_locally(capsys):
     """**الربطُ الحقيقيّ (R64-2):** يُشغّل الأداةَ على الصفحات الخمس ويُثبّت **أعدادَ كلّ صفحة** — لا قيمًا.
 
-    ويُتخطّى بسببٍ مُعلَنٍ عند غياب البيانات أو محرّك Vision (ليس من متطلّبات المشروع) — فيسقط في الموضع
-    الوحيد الذي يقدر أن يقيس فيه: جهازٌ فيه الصورُ والمحرّك. وتغييرُ قاعدةٍ يُحرّك الرقمَ يسقط هنا.
+    وقِيس في مقعد المعايير أنّ تثبيتَ المجاميع وحدَها لا يكفي: تبديلٌ بين صفحتين (١٨٧ ⇄ ٥٣٩) يُبقي
+    المجاميعَ ويمرّ ⇒ صار يُثبَّت صفُّ كلّ صفحة.
+    ويُتخطّى بسببٍ مُعلَنٍ عند غياب الصفحات الخمس أو محرّك Vision (ليس من متطلّبات المشروع) — فيسقط في
+    الموضع الوحيد الذي يقدر أن يقيس فيه: جهازٌ فيه الصورُ والمحرّك. وتغييرُ قاعدةٍ يُحرّك الرقمَ يسقط هنا.
     """
-    if not lrp.eligible():
-        pytest.skip("لا بياناتِ تدريبٍ محلّيّة (data/ لا تُشحن مع المستودع)")
+    pool = {int(lab["page"]) for _, lab, _ in lrp.eligible()}
+    if not set(lrp.PUBLISHED_PAGES) <= pool:
+        pytest.skip("الصفحاتُ الخمسُ المُجمَّدة ليست على القرص (أو لا بياناتَ محلّيّة) ⇒ لم يُقَس")
     try:
         import Vision  # noqa: F401
     except ImportError:
@@ -240,6 +256,13 @@ def test_the_probe_reproduces_the_published_counts_locally(capsys):
     rc = lrp.main([])
     out = capsys.readouterr().out
     assert rc == lrp.EXIT_OK
+    seen: dict[int, tuple[int, ...]] = {}
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == len(lrp.RULES) + 3 and parts[0].isdigit():
+            seen[int(parts[0])] = tuple(int(x) for x in parts[1:])
+    assert seen == {1: (11, 3, 3, 3, 3, 2), 187: (10, 0, 0, 2, 0, 8), 320: (9, 4, 4, 4, 4, 8),
+                    404: (8, 4, 4, 4, 4, 7), 539: (8, 2, 2, 4, 2, 4)}, f"صفوفٌ غيرُ متوقَّعة: {seen}"
     for shown in ("13/35 = 37.1", "20/46 = 43.5", "29/35 = 82.9", "9 من 46"):
         assert shown in out, f"عددٌ لم تعُد الأداةُ تُنتجه: {shown}"
 
@@ -258,7 +281,7 @@ def test_the_published_five_are_a_named_frozen_set():
 
 def test_selected_pages_are_the_published_five_or_the_data_is_absent():
     """الحصيلةُ المنشورةُ تُعاد من القرص — أو يُعلَن غيابُ البيانات (لا تخمين)."""
-    if not lrp.design_dir().exists():
+    if not lrp.resolve_design().exists():
         pytest.skip("لا بياناتُ تدريبٍ محلّيّة (الحزمةُ لا تُشحن)")
     pages = [int(lab["page"]) for _, lab, _ in lrp.selected()]
     assert pages == [1, 187, 320, 404, 539]
@@ -268,7 +291,7 @@ def test_list_mode_runs_without_the_engine(capsys):
     """`--list` يعمل بلا محرّكٍ وبلا قراءةِ صورة — فمن قاس يُعيد القياس في أيّ بيئة."""
     rc = lrp.main(["--list"])
     out = capsys.readouterr().out
-    if lrp.design_dir().exists():
+    if lrp.resolve_design().exists():
         assert rc == lrp.EXIT_OK and "الصفحاتُ المُجمَّدةُ المنشورة" in out and "المُؤهَّلُ الآن" in out
     else:
         assert rc == lrp.EXIT_NO_DATA and "لا بياناتِ تدريبٍ محلّيّة" in out
@@ -339,3 +362,69 @@ def test_missing_engine_is_a_named_refusal_not_a_crash(monkeypatch):
     monkeypatch.setattr(lrp, "selected",
                         lambda *a, **k: [(ROOT / "tests", {"page": 1}, [{"balance": 1}])])
     assert lrp.main([]) == lrp.EXIT_NO_ENGINE
+
+
+# ------------------------------------------------- إغلاقُ بنود المقاعد الثلاثة (٦٤)
+
+
+def test_a_second_run_rescans_because_the_cache_never_crosses_runs(monkeypatch, capsys):
+    """**لا يعبر المخزَّنُ التشغيلات** (تعليقُ الشيفرة يدّعيه بلا ضابط — قِيس في مقعد المعايير: حذفُ
+    `forget_scan_cache()` من `main` كان يمرّ في المجموعة). تشغيلان في عمليةٍ واحدة ⇒ مسحٌ لكلّ تشغيل.
+    """
+    calls: list[str] = []
+    monkeypatch.setattr(lrp, "_scan_one", lambda path: calls.append(path.name) or [])
+    monkeypatch.setattr(lrp, "design_candidates", lambda: [])
+    assert lrp.main(["--list"]) == lrp.EXIT_NO_DATA
+    assert lrp.main(["--list"]) == lrp.EXIT_NO_DATA
+    capsys.readouterr()
+    assert calls == ["-", "-"], f"المخزَّنُ عبر التشغيلات: {calls}"
+
+
+def test_flags_without_a_value_are_bad_arguments(capsys):
+    """فرعان مُوصَلان بلا ضابط (قِيس في مقعد البنية بتتبّع الأسطر): `--pages` و`--design` بلا قيمة."""
+    assert lrp.main(["--pages"]) == lrp.EXIT_BAD_ARGS
+    assert "وسيطٌ مشوَّه" in capsys.readouterr().out
+    assert lrp.main(["--design"]) == lrp.EXIT_BAD_ARGS
+    assert "وسيطٌ مشوَّه" in capsys.readouterr().out
+
+
+def test_the_sign_is_dropped_from_both_sides():
+    """**عطبٌ قِيس في مقعد البنية:** رمزُ المحرّك لا يحمل إشارةً، والورقُ كان يُبقيها ⇒ رصيدٌ سالبٌ متعذِّرُ
+    الإصابة **بحكم البناء لا بحكم المحرّك** (١٨ حقلًا موقَّعًا في ١٢ صفحةً من ٢٨٢). فالإسقاطُ في موضعٍ واحد.
+    """
+    assert lrp.canonical(f"-{SMALL}") == lrp.canonical(SMALL)
+    rows = [{"balance": f"-{SMALL}"}, {"balance": SMALL}]
+    found = lrp.numeric_sets(SMALL)
+    assert found["ورق"] == {SMALL}
+    assert len(lrp.truth_sets(rows)["أرصدة"][lrp.PUBLISHED_RULE] & found[lrp.PUBLISHED_RULE]) == 1
+
+
+def test_a_zero_hit_run_refuses_instead_of_publishing_zero(monkeypatch, capsys):
+    """**قاعدة ٩ (قِيس في مقعد المعايير):** كان تشغيلٌ صفرُ الإصابات يُنشَر «٠.٠٪» بوصفه قياسًا تمّ (rc=0) —
+    والصفرُ بالضبط علامةُ مسارٍ مكسورٍ أو محرّكٍ أعمى، لا نموذجٍ فاشل."""
+    rows = [{"printed_amount": SMALL, "balance": SMALL}]
+    monkeypatch.setattr(lrp, "eligible", lambda *a, **k: [(ROOT / "tests", {"page": 1}, rows)])
+    monkeypatch.setattr(lrp, "ocr", lambda _p: "لا أرقامَ هنا")
+    rc = lrp.main(["--pages", "1"])
+    out = capsys.readouterr().out
+    assert rc == lrp.EXIT_NO_DATA and "صفرُ إصاباتٍ" in out
+
+
+def test_an_empty_engine_text_is_named(monkeypatch, capsys):
+    """محرّكٌ يُرجع نصًّا فارغًا يُسمّى بسطر ⚠ باسم صفحته — فلا يُقرأ صمتُه قاعدةً أُغلقت."""
+    rows = [{"printed_amount": SMALL, "balance": SMALL}]
+    monkeypatch.setattr(lrp, "eligible", lambda *a, **k: [(ROOT / "tests", {"page": 1}, rows)])
+    monkeypatch.setattr(lrp, "ocr", lambda _p: "   \n  ")
+    rc = lrp.main(["--pages", "1"])
+    out = capsys.readouterr().out
+    assert "نصًّا فارغًا" in out and rc == lrp.EXIT_NO_DATA
+
+
+def test_both_sides_derive_their_lenses_from_one_place():
+    """**الاشتقاقُ واحد** (قِيس في مقعد البنية: البناءُ كان مكتوبًا مرّتين): عيّنةُ المحرّك تُساوي دمجَ
+    `lenses_of` على رموزها — فافتراقُ الطرفين في الإشارة أو حدّ الإدراج صار مستحيلًا بالبناء."""
+    text = f"سطر: {THOU_LAT} و {SMALL} وبلا شيء"
+    merged: dict[str, set] = {name: set() for name in lrp.RULES}
+    for raw in lrp.TOKEN.findall(lrp.to_ascii_digits(text)):
+        lrp._merge(merged, lrp.lenses_of(lrp.canonical(raw)))
+    assert lrp.numeric_sets(text) == merged

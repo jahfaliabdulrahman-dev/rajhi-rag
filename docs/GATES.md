@@ -96,4 +96,7 @@ gate_pii · gate_amount · gate_static · gate_claims · gate_suite · gate_land
 ⇒ يجعل الطبقةَ ١ محروسةً في الـCI لا بالتهيئة المحلّيّة وحدها) و`tests/test_static_gate.py` ·
 `tests/test_amount_guard.py` (ضوابطُ أدواتٍ يشغّلها الـCI نفسُه فكان من غير المتّسق إبقاءُ ضوابطها خارجه).
 وقياسُ القبول: في **نسخةٍ نقيّة** (بلا `data/` وبلا `.venv`) ⇒ ملفّاتُ الـCI كلُّها أخضر، والمرشّحون الثلاثة
-`34 passed, 14 skipped` بتخطٍّ **مُعلَن** لا صامت.
+(`tests/test_hook_gates.py` · `tests/test_static_gate.py` · `tests/test_amount_guard.py`) كانوا `34 passed,
+14 skipped` **بتخطٍّ مُعلَن لا صامت** — وهو **قياسٌ مؤرَّخٌ على جولة ٥٥** لا حيًّا: الملفّاتُ نمت بعده، والعددُ
+الحاليُّ يُقاس بالأمر نفسه (`pytest tests/test_hook_gates.py tests/test_static_gate.py tests/test_amount_guard.py`)
+ولا يُنقَل من هنا (قاعدةُ «مؤشِّرٌ لا قيمةٌ مخزَّنة»).
