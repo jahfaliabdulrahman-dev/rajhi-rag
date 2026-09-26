@@ -72,7 +72,10 @@ def _pushed_sha(ref: str, remotes_list: "list[str] | None" = None) -> str | None
     `_run` المُعلَنة، والمعامَلُ يُعطي الوحدةَ نفسَها بلا حالةٍ خفيّة.
     """
     branch = branch_of(ref, remotes_list)
-    for remote in (remotes_list or remotes()):
+    # **وعقدُ المعامَل واحد:** `None` ⇒ «اسأل git» · قائمةٌ مُمرَّرة — **ولو فارغة** ⇒ «هذه هي الريموتات،
+    # لا تسأل» (كما في `branch_of`). وكان `or` يجعل `[]` تُسقط إلى السؤال ⇒ عقدان مختلفان لمعامَلٍ واحد
+    # في ملفٍّ يعلن توحيدَ الموضع (قِيس في مقعد البنية: `_pushed_sha("origin/main", [])` **سأل git**).
+    for remote in (remotes() if remotes_list is None else remotes_list):
         pushed = _local_sha(f"{remote}/{branch}") if branch else None
         if pushed:
             return pushed
