@@ -186,17 +186,26 @@ def main() -> None:
             print(f"لا تقرير مقيس هنا ({REPORT}) ولا لقطةٌ ملتزمة — لا شيء يُحرس.")
             sys.exit(0)
         snapdoc = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
+        # **«المنشور = قياسُ بيئة `full`» محروسًا (مقعدُ البنية · جولة ٦٧):** كان `tests` مربوطًا
+        # بالوثيقة، و`tests_by_env[البيئة النشطة]` بالسياق، **ولا شيءَ يربط الاثنين** ⇒ فتعديلٌ يدويّ
+        # متزامن في اللقطة والوثيقة يمرّ أخضرَ في الـCI (لأنّ الـCI يقيس `ci-light`، والوثيقةَ تُقابَل
+        # بـ`tests`). فالعلاقةُ المُعلَنة تُقابَل هاهنا، فلا يبقى فراغٌ في مسار الـCI.
+        _full = (snapdoc.get("tests_by_env") or {}).get("full")
+        if _full is not None and snapdoc.get("tests") != _full:
+            print(f"⛔ فشلٌ مُغلَق — العددُ المنشور `tests`={snapdoc.get('tests')!r} ≠ قياسُ بيئة `full` "
+                  f"({_full!r}): الاثنان يجب أن يتطابقا (تُصحَّح اللقطةُ بـ`--write` في بيئة `full`).")
+            sys.exit(1)
         # **وللقطةِ كاتبٌ حتى بلا تقريرٍ مقيس (R66-1 · مراجعة ٦٦):** كان `--write` لا يعمل إلّا بتقريرٍ
         # مقيس ⇒ فاللقطةُ في بيئة الـCI **بلا كاتب**، وتُقابَل بالوثيقة وحدَها ⇒ يتقادمان معًا بصمت.
         # **وحدُّ الكتابة يُعلَن:** يُحدَّث ما يُقاس هنا (`tests` من `_test_count()`)، وبقيةُ الحقول لا تُمسّ.
         if args.write:
             if CLAIMS_ENV == "off":
                 print("⚠ بيئةٌ تُعلن أنّها لا تقيس (`off`) ⇒ لا كتابة.")
-                sys.exit(1)
+                sys.exit(2)
             live = _test_count()
             if live is None:
-                print(f"⚠ تعذّر العدُّ الحيُّ في بيئة `{CLAIMS_ENV}` ⇒ لا كتابة.")
-                sys.exit(1)
+                print(f"⚠ تعذّر العدُّ الحيُّ في بيئة `{CLAIMS_ENV}` ⇒ لا كتابة. [الرمز ٢ = تعذّرُ القياس]")
+                sys.exit(2)
             env_map = dict(snapdoc.get("tests_by_env") or {})
             before = env_map.get(CLAIMS_ENV)
             env_map[CLAIMS_ENV] = live
@@ -225,9 +234,12 @@ def main() -> None:
         else:
             live = _test_count()
             if live is None:
+                # **ورمحُ الخروج ٢ لا ١ (مقعدُ المعايير · جولة ٦٧):** قاعدتُنا المُعلَنة في `docs/GATES.md`
+                # تفصل: «١ = تحوّل/غياب · ٢ = تعذّرُ القياس» — وهذا تعذُّرُ قياسٍ لا تحوّل ⇒ رمزُه ٢.
                 print("⛔ فشلٌ مُغلَق — تعذّر قياسُ العدد حيًّا (لا `pytest` في هذه البيئة): لا يُقابَل "
-                      "رقمٌ برقمٍ لا يُقاس. ثبّت `pytest` في الخطوة نفسِها التي تُشغّل هذا الفحص (R67-2).")
-                sys.exit(1)
+                      "رقمٌ برقمٍ لا يُقاس. ثبّت `pytest` في الخطوة نفسِها التي تُشغّل هذا الفحص (R67-2). "
+                      "[الرمز ٢ = تعذّرُ القياس — `docs/GATES.md`]")
+                sys.exit(2)
             expected = (snapdoc.get("tests_by_env") or {}).get(CLAIMS_ENV)
             if expected is None:
                 print(f"⛔ فشلٌ مُغلَق — بيئةُ القياس `{CLAIMS_ENV}` غيرُ مُعلَنةٍ في اللقطة "
@@ -249,10 +261,20 @@ def main() -> None:
     for k, v in d.items():
         print(f"  {k}: {v}")
     if args.write:
+        # **الكاتبُ لا يمحو ما أُعلِن (مقعدا المعايير والبنية · جولة ٦٧):** كان هذا الفرعُ يكتب مخرَجَ
+        # `derive()` كما هو، وهو لا يحمل `tests_by_env` ⇒ فـ`--write` (وهو العلاجُ الذي توصي به رسالةُ
+        # الانزياح نفسُها) **يمحو خريطةَ البيئات**، ثم تفشل خطوةُ الـCI مُغلَقةً على «بيئةٍ غير مُعلَنة»
+        # — أي أنّ الكاتبَ يهدم ما يحرسه الفشلُ المُغلَق. فالمفاتيحُ المُعلَنة تنجو، ويُسجَّل فيها
+        # قياسُ البيئة النشطة (والمنشورُ `tests` يبقى قياسَ `full` وحدَه).
+        if CLAIMS_ENV == "off":
+            print("⚠ بيئةٌ تُعلن أنّها لا تقيس (`off`) ⇒ لا كتابة.")
+            sys.exit(2)
+        d["tests_by_env"] = {**(json.loads(SNAPSHOT.read_text(encoding="utf-8")).get("tests_by_env") or {}),
+                             CLAIMS_ENV: d.get("tests", _test_count())}
         SNAPSHOT.write_text(json.dumps(d, ensure_ascii=False, indent=1) + "\n",
                             encoding="utf-8")
         print(f"\nكُتبت اللقطة: {SNAPSHOT.relative_to(PROJ)} "
-              f"(مشتقّة من التقرير، لا مكتوبة بيد).")
+              f"(مشتقّة من التقرير، لا مكتوبة بيد) · وقياسُ بيئة `{CLAIMS_ENV}` سُجِّل في المفاتيح.")
     # **اللقطةُ شاهدٌ يُقابَل** (مراجعة ٥٠ · CI): كانت `check` تقابل الوثائقَ بالاشتقاق الحيّ وحده،
     # فلا ترى لقطةً متقادمة يقرأها CI ⇒ البوّابةُ تمرّ محليًّا وتسقط هناك.
     snap = snapshot_drift(d)

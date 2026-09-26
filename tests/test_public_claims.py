@@ -48,8 +48,13 @@ def test_a_stale_snapshot_cannot_hide_behind_a_stale_document(tmp_path, monkeypa
     import json
     import render_claims as rc
 
+    if rc.CLAIMS_ENV == "off":
+        pytest.skip("بيئةٌ تُعلن أنّها لا تقيس (`off`) ⇒ لا قياسَ حيًّا يُقابَل (الإعلانُ في الأداة)")
     snap = tmp_path / "claims.json"
-    snap.write_text(json.dumps({"tests": 0}, ensure_ascii=False), encoding="utf-8")
+    # **واللقطةُ تُعلن بيئتَها (مقعدُ البنية · جولة ٦٧):** فالمقيسُ هنا **انزياحُ العدد** لا «مفتاحٌ
+    # ناقص» — وإلّا لخرج الفشلُ من سببٍ آخرَ فلم تُقَس العلّةُ المقصودة.
+    snap.write_text(json.dumps({"tests": 0, "tests_by_env": {rc.CLAIMS_ENV: 0}}, ensure_ascii=False),
+                    encoding="utf-8")
     monkeypatch.setattr(rc, "SNAPSHOT", snap)
     monkeypatch.setattr(rc, "REPORT", tmp_path / "no-report-here.json")
     monkeypatch.setattr(rc, "check", lambda _d: [])          # الوثيقةُ توافق اللقطةَ المتقادمة (العطب)
@@ -67,10 +72,13 @@ def test_the_committed_snapshot_matches_the_live_count():
     وضابطٌ في المجموعة لا يعتمد على ترتيب خطوات الـCI — حيث `pytest` موجودٌ بالضرورة.
 
     **وبمفتاح بيئةٍ مُعلَن** (`RAJHI_CLAIMS_ENV`): فالعدُّ يتغيّر بما هو مُثبَّت (قِيس: ٨٧٤ في بيئة
-    المالك الكاملة مقابل ٦٦٣ في بيئة الـCI الخفيفة) ⇒ فلا يُقابَل رقمُ بيئةٍ برقمِ أخرى.
+    المالك الكاملة · ٧٢٣ في بيئة مجموعة الـCI · ٦٦٣ في خطوة الـclaims قبل التبعيّات) ⇒ فلا يُقابَل
+    رقمُ بيئةٍ برقمِ أخرى.
     """
     import render_claims as rc
 
+    if rc.CLAIMS_ENV == "off":
+        pytest.skip("بيئةٌ تُعلن أنّها لا تقيس (`off`) ⇒ لا قياسَ حيًّا يُقابَل (الإعلانُ في الأداة)")
     live = rc._test_count()
     assert live is not None, "لا `pytest` هنا ⇒ لا قياس (والبوّابةُ تفشل مُغلَقةً في الخطوة)"
     snap = json.loads(rc.SNAPSHOT.read_text(encoding="utf-8"))
@@ -85,12 +93,13 @@ def test_the_committed_snapshot_matches_the_live_count():
 
 def test_an_unmeasurable_count_fails_closed(tmp_path, monkeypatch):
     """**R67-2 · مراجعة ٦٧:** كان `_test_count()` إن عاد `None` يُتخطّى **بصمت** ⇒ مصادقةٌ على رقمٍ
-    لا يُقاس. والآن الفشلُ مُغلَق — وهذه الضابطةُ تكسر القياس فتُطالب بالخروج ١.
+    لا يُقاس. والآن الفشلُ مُغلَق — **ورمزُه ٢ لا ١** (قاعدةُ `docs/GATES.md`: «١ = تحوّل/غياب ·
+    ٢ = تعذّرُ القياس» — وهو تعذُّرُ قياسٍ لا تحوّل).
     """
     import render_claims as rc
 
     snap = tmp_path / "claims.json"
-    snap.write_text(json.dumps({"tests": 5}), encoding="utf-8")
+    snap.write_text(json.dumps({"tests": 5, "tests_by_env": {rc.CLAIMS_ENV: 5}}), encoding="utf-8")
     monkeypatch.setattr(rc, "SNAPSHOT", snap)
     monkeypatch.setattr(rc, "REPORT", tmp_path / "no-report.json")
     # **ويُعطَّل فرعُ «الوثيقة ≠ اللقطة» عن قصد:** وإلّا خرج رمزُ الخروج ١ من عدمِ القياس لا من التخطّي،
@@ -100,7 +109,22 @@ def test_an_unmeasurable_count_fails_closed(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["render_claims.py", "--check"])
     with pytest.raises(SystemExit) as e:
         rc.main()
-    assert e.value.code == 1, "قياسٌ متعذّرٌ لم يفشل مُغلَقًا ⇒ التخطّي الصامت عاد"
+    assert e.value.code == 2, "قياسٌ متعذّرٌ لم يفشل مُغلَقًا برمز «تعذّر القياس» ⇒ التخطّي الصامت عاد"
+
+
+def test_the_published_count_is_the_full_environment_measurement():
+    """**«المنشور = قياسُ بيئة `full`» (مقعدُ البنية · جولة ٦٧):** كان `tests` مربوطًا بالوثيقة وحدَها،
+    و`tests_by_env[البيئة النشطة]` بالسياق، **ولا شيءَ يربط الاثنين** ⇒ فتعديلٌ يدويّ متزامن في اللقطة
+    والوثيقة يمرّ أخضرَ في الـCI (الذي يقيس بيئةً أخرى). فالعلاقةُ المُعلَنة تُقابَل هنا، وفي الأداة.
+    """
+    import render_claims as rc
+
+    snap = json.loads(rc.SNAPSHOT.read_text(encoding="utf-8"))
+    full = (snap.get("tests_by_env") or {}).get("full")
+    assert full is not None, "لا مفتاحَ لبيئة `full` في اللقطة ⇒ لا يُعرف ما يقيسه العددُ المنشور"
+    assert snap.get("tests") == full, (
+        f"العددُ المنشور {snap.get('tests')} ≠ قياسُ بيئة `full` {full}: الوثيقةُ العامّةُ تُقابَل "
+        f"بالمنشور، فيجب أن يكون قياسَ بيئته المُعلَنة بعينها")
 
 
 def test_claims_lists_every_metric_it_promises():
