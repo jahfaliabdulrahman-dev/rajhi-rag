@@ -141,6 +141,17 @@ def test_every_configured_remote_is_tried_and_unknown_names_are_not_stripped(mon
     assert cr.branch_of("feature/x") == "feature/x"
 
 
+def test_an_explicitly_empty_remote_list_is_never_overridden_by_asking_git(monkeypatch):
+    """**وعقدُ المعامَل واحد (مقعدُ البنية · مراجعة إغلاق ٦٤):** `None` ⇒ «اسأل git» · و`[]` ⇒ «هذه هي
+    الريموتات — لا تسأل». وكان `or` في `_pushed_sha` يجعل `[]` تُسقط إلى السؤال، بينما `branch_of` تعتبر
+    القائمةَ المُمرَّرة نهائيّةً ⇒ عقدان مختلفان لمعامَلٍ واحدٍ في ملفٍّ يعلن توحيدَ الموضع."""
+    calls = []
+    monkeypatch.setattr(cr, "_run", lambda cmd: (calls.append(cmd), (0, ""))[1])
+    cr._pushed_sha("main", [])
+    asked = [c for c in calls if c[:2] == ["git", "remote"]]
+    assert not asked, f"قائمةٌ فارغةٌ مُعلَنة لا تُستبدَل بسؤال git (قِيس: {asked})"
+
+
 def test_the_remote_list_is_asked_fresh_and_never_cached_globally(monkeypatch):
     """**إغلاقُ ملاحظة مقعد البنية:** التخزينُ العالميُّ (`lru_cache`) كان يُبطل سِمَةَ `_run` التي
     يُعلنها هذا الملفّ على أنّها **نقطةُ الاستبدال الوحيدة**: بعد نداءٍ حقيقيّ يصير تبديلُها بلا أثر

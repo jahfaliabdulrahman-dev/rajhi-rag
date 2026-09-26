@@ -79,7 +79,27 @@ DECLARED_NON_VERDICT = (
 WITNESS_FROM = "20260925-044600"
 #: **الثوابت المُقابَلة بالقياس** (لا ادّعاءَ بلا معدود): دَينُ ما قبل القاعدة · عددُ المُخاطَبين بها ·
 #: وملفّاتُ الصندوق بعد القاعدة خارج الصنف المُعلَن (البند ٦).
-PRE_RULE_ANSWERS = 15
+#:
+#: **ودَينُ ما قبل القاعدة صار بالهويّة لا بالعدد (مقعدُ البنية · مراجعة إغلاق ٦٤):** كان `15` عدّادًا،
+#: ورفعُه صامتًا يُدخل جوابًا قديمًا بلا اسم — وهو صنفُ R61-1 نفسُه في الجار. الآن **اسمٌ وزمن** لكلٍّ،
+#: ويُقابَل المجموعان **بالاتّجاهين**، **ويُقابَل زمنُ كلّ اسمٍ بالزمن الذي يحمله ثابتًا** (فلا تجمّدَ زمنٍ خلف اسم).
+PRE_RULE_ANSWERS = {
+    "handoff/sulaiman/20260923-050000-REPORT-to-claude-rounds-40-41-complete.md": "20260923-050000",
+    "handoff/sulaiman/20260923-120000-REPORT-to-claude-review-41-closed.md": "20260923-120000",
+    "handoff/sulaiman/20260923-1514-REPORT-to-claude-item4-pack-free-capture.md": "20260923-151400",
+    "handoff/sulaiman/20260923-2100-REPORT-to-claude-review-45-fixes.md": "20260923-210000",
+    "handoff/sulaiman/20260923-2220-REPORT-to-claude-bias-declaration-option-a.md": "20260923-222000",
+    "handoff/sulaiman/20260923-2238-REPORT-to-claude-review-47-closure-and-the-delivery-gate.md": "20260923-223800",
+    "handoff/sulaiman/20260923-2350-REPORT-to-claude-review-46-and-the-fixes.md": "20260923-235000",
+    "handoff/sulaiman/20260924-1242-REPORT-to-claude-round49-triage-and-fixes.md": "20260924-124200",
+    "handoff/sulaiman/20260924-1350-REPORT-to-claude-round50-triage-seats-and-fixes.md": "20260924-135000",
+    "handoff/sulaiman/20260924-1421-REPORT-to-claude-round51-stop-control-exit-codes-and-three-missing-controls.md": "20260924-142100",
+    "handoff/sulaiman/20260924-2359-REPORT-to-claude-round52-seats-fixed-14-gates-bite-and-three-recommendations.md": "20260924-235900",
+    "handoff/sulaiman/20260925-0118-REPORT-to-claude-round53-gate-attacked-and-root-fixed.md": "20260925-011800",
+    "handoff/sulaiman/20260925-0203-REPORT-to-claude-round54-three-notes-mechanised-P4-P5-P6-and-two-recommendations.md": "20260925-020300",
+    "handoff/sulaiman/20260925-0247-REPORT-to-claude-round55-three-seats-attacked-my-fixes-and-the-registry.md": "20260925-024700",
+    "handoff/sulaiman/20260925-0355-REPORT-to-claude-round56-closure-the-gate-that-replaced-the-window.md": "20260925-035500",
+}
 #: **أصنافُ ما ليس جوابًا — بالهويّة لا بالعدد (R61-1).** كلُّ ملفٍّ في صندوق المنفّذ هبط بعد
 #: `WITNESS_FROM` وليس من صنف `ANSWER_MARK` **يُسمّى هنا باسمه وصنفه**. وكان عدّادًا (`6`): ورفعُ رقمٍ
 #: يُدخل ملفًّا بلا أن يُسمّى اسمُه ولا صنفُه — فيُدخَل الجديدُ بلا سؤال، وهو ما يُرخي البوّابة.
@@ -381,9 +401,14 @@ def test_the_rule_is_not_silent_about_its_subjects():
     """
     answers = box_answers(tree_files())
     pre = [p for p in answers if not (s := stamp_of(p)) or s < WITNESS_FROM]
-    assert len(pre) == PRE_RULE_ANSWERS, (
-        f"دَينُ ما قبل القاعدة تغيّر: المُقاس {len(pre)} والمُعلَن {PRE_RULE_ANSWERS} ⇒ هبط جوابٌ قديمٌ أو "
-        f"نُزع (المُنزَّعُ يُعلَن في `handoff/RENAMES.md`)")
+    assert set(pre) == set(PRE_RULE_ANSWERS), (
+        "دَينُ ما قبل القاعدة تغيّر — **بالهويّة لا بالعدد** (R61-1: عدّادٌ يُرفَع صامتًا يُرخي البوّابة):\n"
+        f"  جديدٌ لم يُسمَّ: {sorted(set(pre) - set(PRE_RULE_ANSWERS))}\n"
+        f"  ناقصٌ مُسمًّى: {sorted(set(PRE_RULE_ANSWERS) - set(pre))}\n"
+        "  ⇒ يُحدَّث الثابتُ **بالاسم والزمن** في الالتزام نفسه (والمُنزَّعُ يُعلَن في `handoff/RENAMES.md`)")
+    drifted = {p: [stamp_of(p), s] for p, s in PRE_RULE_ANSWERS.items() if stamp_of(p) != s}
+    assert not drifted, (
+        f"زمنُ الدَّين تغيّر — والاسمُ يحمل زمنَه والثابتُ يحمله ⇒ {drifted}")
     subjects = _subjects(answers)
     assert set(subjects) == set(SUBJECTS_LANDED), (
         f"المُخاطَبون بالقاعدة تغيّروا — **بالهويّة لا بالعدد**:\n  المُقاس: {sorted(subjects)}\n"

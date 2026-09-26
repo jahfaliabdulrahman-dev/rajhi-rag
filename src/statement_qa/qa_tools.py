@@ -104,6 +104,10 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None):
         ثلاثةُ مواضعَ أخرى تبني المطابقةَ نفسَها **خارج هذا الملفّ** — `src/statement_qa/footer_oracle.py`
         · `src/statement_qa/render.py` · `tools/eval_questions.py` (الواصفُ الذي يشتقّ أرقامَ صفوف
         الصفحة لعائلة `argmax_row`) ⇒ فتوحيدُ الحزمة كلِّها **لم يُدَّع**، ويُقاس إن طُلب.
+        **والتعدادُ لا يُدَّعى حصرًا (قِيس في مراجعة إغلاق ٦٤ — «ثلاثة» كانت أدنى من الواقع):** المطابقةُ
+        تُبنى كذلك في `tools/eval_questions.py:118,292,549,556` · `tools/qa_gate.py:380` ·
+        `tools/to_xlsx.py:116,840` · `tools/audit_types.py:130` · `src/statement_qa/footer_oracle.py:402` ·
+        `src/statement_qa/render.py:109` — و**لا ضابطَ اليومَ يمنع تباعدَها**، فتُعلَن ولا تُوحَّد بالادّعاء.
 
         **وعقدُ المعامَل: `page` عددٌ صحيح** (`int`) — فالتحويلُ يقع مرّةً عند مدخل كلّ مستهلك لا لكلّ صفّ.
         **ونطاقا الصفوف يبقيان مختلفين بإعلان**: `_page_scope` كلُّ صفوف الصفحة · و`_filtered` الحركاتُ وحدها.
