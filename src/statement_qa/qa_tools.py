@@ -95,6 +95,24 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None):
             trace.append({"tool": name,
                           "row_nos": [r["row_no"] for r in sel]})
 
+    def _page_scope(page: int) -> list[dict]:
+        """**موضعٌ واحد لنطاق الصفحة**: كلُّ صفوف الصفحة (بما فيها الافتتاحيّ) بأرقام الكشف.
+
+        (كان مبنيًّا حرفيًّا في `page_summary` و`page_rows` معًا ⇒ نطاقان قد يفترقان بصمت).
+        """
+        return [r for r in numbered if r.get("page") == int(page)]
+
+    def _row_line(r: dict, desc_len: int = 70) -> str:
+        """**تنسيقُ سطرِ صفٍّ واحد** — يستعملُه `page_rows` و`search_rows`.
+
+        (كان مكرَّرًا في الأداةين بحدَّي وصفٍ **صامتين** (`[:60]` مقابل `[:70]`) ⇒ صار حدًّا واحدًا معامَلًا).
+        """
+        move = _MONEY.format(r["movement"]) if r.get("movement") is not None else "—"
+        bal = _MONEY.format(r["balance"]) if r.get("balance") is not None else "—"
+        return (f"{_ref(r)}: [{r.get('type') or 'غير مصنّف'}] "
+                f"{_SIDE_AR.get(r.get('side') or '', 'غير محسوم')} {move}"
+                f" → الرصيد {bal} — {_desc(r)[:desc_len]}")
+
     def _filtered(side: str = "الكل", keyword: str = "", tx_type: str = "",
                   amount=None, page: int | None = None) -> list[dict]:
         kw = (keyword or "").strip()
@@ -117,10 +135,8 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None):
             out.append(r)
         return out
 
-    def _filter_note(side, keyword, tx_type, amount, page=None) -> str:
+    def _filter_note(side, keyword, tx_type, amount) -> str:
         bits = [f"الاتجاه={side or 'الكل'}"]
-        if page is not None:
-            bits.append(f"الصفحة={int(page)}")
         if (tx_type or "").strip():
             bits.append(f"النوع يحتوي '{tx_type.strip()}'")
         if (keyword or "").strip():
@@ -186,7 +202,7 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None):
     def page_summary(page: int) -> str:
         """ملخص صفحة واحدة: أول/آخر رصيد + إجمالي المدين وإجمالي الدائن فيها.
         مثال: page_summary(page=10)."""
-        page_rows = [r for r in numbered if r["page"] == int(page)]
+        page_rows = _page_scope(page)
         if not page_rows:
             return f"لا توجد بيانات للصفحة {page} في هذا الكشف."
         _record("page_summary", page_rows)
@@ -229,45 +245,33 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None):
         «آخرُ حركةٍ في الصفحة ٧» — فهي الموضعُ الذي يُظهر الصفوفَ ورقمَ كلٍّ منها (ومنه يُقرأ الأكبرُ/الأخير).
         **والتنبيهُ الملازم:** أرقامُ الصفوف هنا **على مستوى الكشف** (تكمل من صفحةٍ إلى التي بعدها) وهي نفسُها
         التي تُقتبَس بها المصادرُ (صفحة N، صف M) — فلا تُعَدّ من ١ داخل الصفحة.
+        **والفرقُ عن `search_rows(page=…)` مُعلَن:** هذه تُظهر **كلَّ** صفوف الصفحة (ومنه صفُّ الرصيد
+        الافتتاحيّ)، وتلك تُظهر **الحركات** وحدَها (تُسقط غيرَ الحركة).
         مثال: page_rows(page=40)."""
-        p = int(page)
-        sel = [r for r in numbered if r.get("page") == p]
-        _record("page_rows", sel)
+        sel = _page_scope(page)
         if not sel:
-            return f"لا توجد صفوفٌ للصفحة {p} في هذا الكشف."
+            return f"لا توجد صفوفٌ للصفحة {int(page)} في هذا الكشف."
         shown = sel[:max(1, int(limit))]
-        lines = [
-            f"{_ref(r)}: [{r.get('type') or 'غير مصنّف'}] "
-            f"{_SIDE_AR.get(r.get('side') or '', 'غير محسوم')} "
-            f"{_MONEY.format(r['movement']) if r.get('movement') is not None else '—'}"
-            f" → الرصيد {_MONEY.format(r['balance']) if r.get('balance') is not None else '—'}"
-            f" — {_desc(r)[:60]}"
-            for r in shown
-        ]
+        _record("page_rows", shown)     # **ما ظهر فعلًا** لا كلَّ الصفحة (كان يُسجّل الصفوفَ التي لم تُعرَض)
         more = "" if len(sel) <= len(shown) else f" (و{len(sel) - len(shown)} أخرى)"
-        return (f"صفحة {p}: {len(sel)} صفًّا{more} — والأرقامُ على مستوى الكشف:\n"
-                + "\n".join(lines))
+        return (f"صفحة {int(page)}: {len(sel)} صفًّا{more} — والأرقامُ على مستوى الكشف:\n"
+                + "\n".join(_row_line(r) for r in shown))
 
     @tool
     def search_rows(keyword: str = "", tx_type: str = "", amount: float | None = None,
-                    page: int | None = None, limit: int = 15) -> str:
+                    limit: int = 15, *, page: int | None = None) -> str:
         """ابحث وأعد سطور الحركات المطابقة (الموقع/النوع/الاتجاه/المبلغ/الرصيد/الوصف).
         فلاتر: keyword (وصف) | tx_type (النوع) | amount (مبلغ محدد، مثال 1000) | page (صفحة واحدة).
         مثال: search_rows(amount=1000) = كل الحركات بمبلغ 1000 مع أنواعها الحقيقية.
-        مثال: search_rows(page=40) = حركاتُ الصفحة ٤٠ وحدها (مرتّبةً بأرقام صفوفها)."""
+        مثال: search_rows(page=40) = حركاتُ الصفحة ٤٠ وحدها (مرتّبةً بأرقام صفوفها).
+        **و`page` معامَلٌ لفظيٌّ وحدَه** (`page=`) — فالنداءُ الموضعيُّ القديم لا يتغيّر معناه.
+        **وتُسقِط غيرَ الحركة** (صفَّ الرصيد الافتتاحيّ): لِسرد الصفحة كاملةً استعمل `page_rows`."""
         sel = _filtered("الكل", keyword, tx_type, amount, page)
         _record("search_rows", sel)
         if not sel:
             return "لا توجد حركات مطابقة."
         shown = sel[:max(1, int(limit))]
-        lines = [
-            f"{_ref(r)}: [{r.get('type') or 'غير مصنّف'}] "
-            f"{_SIDE_AR.get(r.get('side') or '', 'غير محسوم')} "
-            f"{_MONEY.format(r['movement'])}"
-            f" → الرصيد {_MONEY.format(r['balance']) if r.get('balance') is not None else '—'}"
-            f" — {_desc(r)[:70]}"
-            for r in shown
-        ]
+        lines = [_row_line(r) for r in shown]
         more = "" if len(sel) <= len(shown) else f" (و{len(sel) - len(shown)} أخرى)"
         return f"{len(sel)} حركة مطابقة{more}:\n" + "\n".join(lines)
 
