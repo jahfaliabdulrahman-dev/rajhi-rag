@@ -210,3 +210,26 @@ def test_json_mode_is_machine_readable_and_keeps_the_limit_on_stderr(monkeypatch
     data = json.loads(cap.out)                       # كان يسقط: جملةُ الحدّ تُطبَع بعد فرع `--json`
     assert isinstance(data, list) and data[0]["state"] == "أخضر"
     assert "حدُّ هذا الفحص" in cap.err and "حدُّ هذا الفحص" not in cap.out
+
+
+def test_a_tracking_ref_is_measured_by_its_branch_name(monkeypatch, capsys):
+    """**قِيس قبل الإغلاق (ملاحظةُ الجولة ٦٤):** `ci_report.py origin/main` كان يقول «بلا تشغيل»
+    ويُسقط `BLOCK` **كاذبًا** — لأنّ `gh run list --branch origin/main` لا يعرف فرعاً بهذا الاسم،
+    والتشغيلُ موجودٌ باسم الفرع الحقيقيّ (`main`). فالمقابلةُ على اسم الفرع، والمرجعُ المرجعيُّ
+    يبقى مقبولًا في البيان **والتحويلُ يُعلَن** (لا صمت)."""
+    seen: list[list[str]] = []
+
+    def gh(args):
+        seen.append(list(args))
+        return 0, json.dumps([{"conclusion": "success", "status": "completed",
+                               "headSha": HEAD, "workflowName": "publish-guard"}])
+
+    monkeypatch.setattr(cr, "_gh", gh)
+    monkeypatch.setattr(cr, "_pushed_sha", lambda ref: HEAD)
+    monkeypatch.setattr(cr, "_local_sha", lambda ref: HEAD)
+    assert cr.main(["origin/main"]) == 0
+    out = capsys.readouterr().out
+    assert seen[0][2] == "--branch" and seen[0][3] == "main", \
+        "يُسأل `gh` باسم الفرع لا بالمرجع المرجعيّ"
+    assert "قِيس على الفرع `main`" in out, "ويُعلَن التحويلُ (لا صمت)"
+    assert cr.branch_of("refs/heads/x") == "x" and cr.branch_of("main") == "main"

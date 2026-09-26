@@ -96,12 +96,15 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None):
                           "row_nos": [r["row_no"] for r in sel]})
 
     def _filtered(side: str = "الكل", keyword: str = "", tx_type: str = "",
-                  amount=None) -> list[dict]:
+                  amount=None, page: int | None = None) -> list[dict]:
         kw = (keyword or "").strip()
         tt = (tx_type or "").strip()
         amt = _parse_amount_arg(amount)
+        pg = None if page is None else int(page)
         out = []
         for r in movements:
+            if pg is not None and r.get("page") != pg:
+                continue
             if not _side_match(r.get("side", ""), side):
                 continue
             if kw and kw not in _desc(r):
@@ -114,8 +117,10 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None):
             out.append(r)
         return out
 
-    def _filter_note(side, keyword, tx_type, amount) -> str:
+    def _filter_note(side, keyword, tx_type, amount, page=None) -> str:
         bits = [f"الاتجاه={side or 'الكل'}"]
+        if page is not None:
+            bits.append(f"الصفحة={int(page)}")
         if (tx_type or "").strip():
             bits.append(f"النوع يحتوي '{tx_type.strip()}'")
         if (keyword or "").strip():
@@ -217,12 +222,40 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None):
                 f" | عدد الصفوف = {len(page_rows)}" + note)
 
     @tool
+    def page_rows(page: int, limit: int = 40) -> str:
+        """اعرض **سطور صفحةٍ بعينها** بأرقامها: رقمُ الصفّ ومبلغُه واتجاهُه ورصيدُه ووصفُه.
+
+        استعملها حين يكون السؤال عن **صفٍّ داخل صفحة**: «أكبر حركةٍ في الصفحة ٤٠» · «صفوفُ الصفحة ١٢» ·
+        «آخرُ حركةٍ في الصفحة ٧» — فهي الموضعُ الذي يُظهر الصفوفَ ورقمَ كلٍّ منها (ومنه يُقرأ الأكبرُ/الأخير).
+        **والتنبيهُ الملازم:** أرقامُ الصفوف هنا **على مستوى الكشف** (تكمل من صفحةٍ إلى التي بعدها) وهي نفسُها
+        التي تُقتبَس بها المصادرُ (صفحة N، صف M) — فلا تُعَدّ من ١ داخل الصفحة.
+        مثال: page_rows(page=40)."""
+        p = int(page)
+        sel = [r for r in numbered if r.get("page") == p]
+        _record("page_rows", sel)
+        if not sel:
+            return f"لا توجد صفوفٌ للصفحة {p} في هذا الكشف."
+        shown = sel[:max(1, int(limit))]
+        lines = [
+            f"{_ref(r)}: [{r.get('type') or 'غير مصنّف'}] "
+            f"{_SIDE_AR.get(r.get('side') or '', 'غير محسوم')} "
+            f"{_MONEY.format(r['movement']) if r.get('movement') is not None else '—'}"
+            f" → الرصيد {_MONEY.format(r['balance']) if r.get('balance') is not None else '—'}"
+            f" — {_desc(r)[:60]}"
+            for r in shown
+        ]
+        more = "" if len(sel) <= len(shown) else f" (و{len(sel) - len(shown)} أخرى)"
+        return (f"صفحة {p}: {len(sel)} صفًّا{more} — والأرقامُ على مستوى الكشف:\n"
+                + "\n".join(lines))
+
+    @tool
     def search_rows(keyword: str = "", tx_type: str = "", amount: float | None = None,
-                    limit: int = 15) -> str:
+                    page: int | None = None, limit: int = 15) -> str:
         """ابحث وأعد سطور الحركات المطابقة (الموقع/النوع/الاتجاه/المبلغ/الرصيد/الوصف).
-        فلاتر: keyword (وصف) | tx_type (النوع) | amount (مبلغ محدد، مثال 1000).
-        مثال: search_rows(amount=1000) = كل الحركات بمبلغ 1000 مع أنواعها الحقيقية."""
-        sel = _filtered("الكل", keyword, tx_type, amount)
+        فلاتر: keyword (وصف) | tx_type (النوع) | amount (مبلغ محدد، مثال 1000) | page (صفحة واحدة).
+        مثال: search_rows(amount=1000) = كل الحركات بمبلغ 1000 مع أنواعها الحقيقية.
+        مثال: search_rows(page=40) = حركاتُ الصفحة ٤٠ وحدها (مرتّبةً بأرقام صفوفها)."""
+        sel = _filtered("الكل", keyword, tx_type, amount, page)
         _record("search_rows", sel)
         if not sel:
             return "لا توجد حركات مطابقة."
@@ -239,4 +272,4 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None):
         return f"{len(sel)} حركة مطابقة{more}:\n" + "\n".join(lines)
 
     return [sum_movements, count_movements, balance_extremes,
-            closing_balance, page_summary, search_rows]
+            closing_balance, page_summary, page_rows, search_rows]

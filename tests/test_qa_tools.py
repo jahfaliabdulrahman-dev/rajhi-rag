@@ -130,13 +130,32 @@ def test_trace_records_tool_selections():
     tools["balance_extremes"].invoke({})
     tools["closing_balance"].invoke({})
     tools["page_summary"].invoke({"page": 2})
+    tools["page_rows"].invoke({"page": 2})
     assert [c["tool"] for c in trace] == [
         "count_movements", "search_rows", "balance_extremes",
-        "closing_balance", "page_summary"]
+        "closing_balance", "page_summary", "page_rows"]
     assert trace[0]["row_nos"] == [3, 5]      # the fixture's two debit rows
     assert trace[2]["row_nos"] == [2, 1]      # hi (300.00) then lo (0.00)
     assert trace[3]["row_nos"] == [5]         # last balance-bearing row
     assert trace[4]["row_nos"] == [4, 5]      # page-2 rows
+    assert trace[5]["row_nos"] == [4, 5]      # page-2 rows, listed
+
+
+def test_page_rows_answers_the_row_family_with_statement_wide_numbers():
+    """**ثقبُ سطح الأدوات (P-5) يُغلق:** لم تكن أداةٌ تعرض صفوفَ صفحةٍ ⇒ عائلةُ `argmax_row`
+    («أكبر حركةٍ في الصفحة») غيرُ قابلةٍ للإجابة. وهذه الأداةُ تعرضها **بترقيم الكشف** لا من ١ داخل
+    الصفحة — وهو عطبٌ مقيسٌ سابقًا (REVIEW-48 · P-1: أُجيب `tops=[3]` ترقيمًا داخلَ الصفحة فسقط)."""
+    out = _tools()["page_rows"].invoke({"page": 2})
+    assert "(صفحة 2، صف 4)" in out and "(صفحة 2، صف 5)" in out
+    assert "(صفحة 2، صف 1)" not in out             # لا ترقيمَ داخلَ الصفحة
+    assert "50.00" in out and "150.00" in out       # المبلغُ والرصيدُ ⇒ الأكبرُ قابلٌ للحساب
+
+
+def test_search_rows_can_be_scoped_to_one_page():
+    """`search_rows(page=…)` — النصفُ الثاني من الثقب: البحثُ كان بلا فلترِ صفحة."""
+    tools = _tools()
+    assert "50.00" in tools["search_rows"].invoke({"page": 2})
+    assert tools["search_rows"].invoke({"page": 1}).count("(صفحة 1") == 2   # حركتا الصفحة ١
 
 
 def test_trace_skips_empty_selections():
