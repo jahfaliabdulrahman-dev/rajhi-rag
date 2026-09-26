@@ -178,6 +178,30 @@ def main() -> None:
             print(f"لا تقرير مقيس هنا ({REPORT}) ولا لقطةٌ ملتزمة — لا شيء يُحرس.")
             sys.exit(0)
         snapdoc = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
+        # **وللقطةِ كاتبٌ حتى بلا تقريرٍ مقيس (R66-1 · مراجعة ٦٦):** كان `--write` لا يعمل إلّا بتقريرٍ
+        # مقيس ⇒ فاللقطةُ في بيئة الـCI **بلا كاتب**، وتُقابَل بالوثيقة وحدَها ⇒ يتقادمان معًا بصمت.
+        # **وحدُّ الكتابة يُعلَن:** يُحدَّث ما يُقاس هنا (`tests` من `_test_count()`)، وبقيةُ الحقول لا تُمسّ.
+        if args.write:
+            live = _test_count()
+            if live is None:
+                print("⚠ تعذّر العدُّ الحيُّ للاختبارات ⇒ لا كتابة.")
+                sys.exit(1)
+            before = snapdoc.get("tests")
+            snapdoc["tests"] = live
+            SNAPSHOT.write_text(json.dumps(snapdoc, ensure_ascii=False, indent=1) + "\n",
+                                encoding="utf-8")
+            print(f"[claims] كُتبت اللقطةُ بلا تقريرٍ مقيس: tests {before!r} ⇒ {live!r} | "
+                  f"**وحدُّ الكتابة مُعلَن:** بقيةُ الحقول تحتاج تقريرًا مقيسًا "
+                  f"(`{REPORT.relative_to(PROJ)}`) ولم تُمسّ.")
+        # **والعددُ المنشور يُقاس حيًّا حتى بلا تقرير (R66-1 · مراجعة ٦٦):** مقابلةُ الوثيقةِ باللقطة
+        # وحدَهما تجعل الانزياحَ **غيرَ مرئيٍّ في CI** — لقطةٌ متقادمةٌ توافق وثيقةً متقادمةً بالعدد نفسه —
+        # و`_test_count()` لا يحتاج كاشَ التصريح. **قِيس قبل الإغلاق:** لقطةٌ `865` والعدُّ الحيُّ `868`
+        # والحكمُ «توافق» (`rc=0`) ⇒ صار يُقاس.
+        live = _test_count()
+        if live is not None and snapdoc.get("tests") != live:
+            print(f"⚠ عددُ الاختبارات المنشور {snapdoc.get('tests')!r} ≠ المعدود حيًّا {live!r} "
+                  f"⇒ `--write` (والوثيقةُ تُصحَّح في سطرها)")
+            sys.exit(1)
         sdrifts = check(snapdoc)
         if sdrifts:
             print("⚠ الوثائقُ تخالف لقطتها الملتزمة:")
