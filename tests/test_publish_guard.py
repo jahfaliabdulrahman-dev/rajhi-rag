@@ -548,31 +548,56 @@ def test_the_count_hint_lives_in_both_ci_steps():
     assert wf.count("git diff --exit-code -- docs/claims.json") == 2, (
         "والفرقُ الفاشلُ في الخطوتين معًا")
 
-    # **ولا رقمَ دعوى مكتوبًا بيدٍ في آلة الدعوى (مقعدا المواصفة والبنية · ٦٨ج/٦٨د):** كان الضابطُ
-    # يقابِل الـworkflow بقيم **اللقطة الحاليّة** فقط ⇒ فعودةُ الرقم المتقادم (العلّةُ التاريخيّةُ نفسُها:
-    # ٧٣٨/٨٨٩ ثم ٦٦٦) تمرّ خضراء، والأرقامُ الهنديّةُ غيرُ مرئيّة. فصار الضابطُ على **الصنف**:
-    # لا عددٌ (٢+ خانات، لاتينيّةً أو هنديّة) قريبٌ من لفظ دعوى في **سطور تعليق** ملفَّي الآلة.
+    # **والضابطُ لا يُضعِف ما قبله (مقعدُ المواصفة F2 · ٦٨د):** شدُّه إلى الصنف **أسقط** الخاصيّةَ التي
+    # كان يحرسها: «لا نسخةَ بيدٍ من قيمة اللقطة». قِيس: صيغةٌ بلا ألفاظ دعوى («القيمةُ القديمةُ في الـCI:
+    # 738 … 889») مرّت خضراء — **وهي العلّةُ التاريخيّةُ نفسُها** التي أُغلقت في ٦٨/٦٨ج، أي أنّ الشدَّ
+    # استبدل قاعدةً بقاعدةٍ لا أن يضمّها. فالضابطُ الآن **اتّحادُ قاعدتين**:
+    #   (أ) **لا قيمةٌ من قيم اللقطة مكتوبةً بيدٍ** في تعليقات الملفَّين (لاتينيّةً كانت أو هنديّة)؛
+    #   (ب) **ولا عددٌ (٣ خانات فأكثر) قريبٌ من لفظ دعوى** — يستّر الأرقامَ التي لم تصر قيمةَ لقطةٍ بعد.
+    import json
     import re
-    AR = "٠١٢٣٤٥٦٧٨٩"
-    CLAIM_STEM = re.compile(r"جمع|اختبار|عدد|قياس")
+    snap = json.loads((Path(__file__).resolve().parents[1] / "docs" / "claims.json")
+                      .read_text(encoding="utf-8"))
+    snapshot_values = {str(v) for v in [snap["tests"], *snap["tests_by_env"].values()]}
+    AR = "٠١٢٣٤٥٦٧٨٩"          # U+0660–0669
+    AR_EXT = "۰۱۲۳۴۵۶۷۸۹"      # U+06F0–06F9 — هنديّةٌ ممتدّة، قِيس عند مقعد المعايير أنّها كانت تفلت
+    # **وسياقُ الدعوى** (لا ألفاظُها الأربعة وحدَها): كلمةُ «الـCI» في تعليقٍ يحمل ٧٣٨ تجعله دعوى أصناف،
+    # وهي الصيغةُ التي قِيس أنّ الضابطَ السابق مرّ عليها («القيمةُ القديمةُ في الـCI: 738 … 889»).
+    CONTEXT = re.compile(r"الـCI|الCI|\bCI\b|المجموعة|اللقطة|بيئة|خطوة|اختبار|عدد|snapshot|\benv\b",
+                         re.IGNORECASE)
 
-    def claim_numbers(text: str) -> list[str]:
-        norm = "".join(str(AR.index(c)) if c in AR else c for c in text)
+
+    def _latinise(text: str) -> str:
+        return "".join(
+            str(AR.index(c)) if c in AR else str(AR_EXT.index(c)) if c in AR_EXT else c
+            for c in text)
+
+    def hand_written(text: str) -> list[str]:
         out = []
-        for ln in norm.splitlines():
+        for ln in _latinise(text).splitlines():
             if not ln.strip().startswith("#"):
-                continue
-            for m in re.finditer(r"[0-9]{3,}", ln):
-                if CLAIM_STEM.search(ln[max(0, m.start() - 45): m.end() + 45]):
-                    out.append(m.group(0))
+                continue          # غيرُ سطور التعليق خارج الحدّ ⇒ مُعلَن (كتلة `run:` مثلًا)
+            for v in sorted(snapshot_values, key=len, reverse=True):
+                if re.search(rf"(?<![0-9]){v}(?![0-9])", ln):
+                    out.append(f"قيمةُ لقطةٍ مكتوبة بيدٍ: {v}")
+            # **والتواريخُ مستثناةٌ بنصّها** (قِيس: تعليقٌ يحمل `2026-09-18` بجوار كلمة CI أُصطيد خطأً):
+            # تاريخٌ ليس دعوى على عددٍ، ويُزال قبل عدّ الخانات بحدِّه المعلَن (yyyy-mm-dd وحدَه).
+            scan = re.sub(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", "«تاريخ»", ln)
+            for m in re.finditer(r"[0-9]{3,}", scan):
+                if CONTEXT.search(scan[max(0, m.start() - 45): m.end() + 45]):
+                    out.append(f"عددٌ في سياق دعوى: {m.group(0)}")
         return out
-    # وحَدُّ التمييز مُعلَن: **ثلاثُ خاناتٍ فأكثر** — فعدّادُ المجموعة في هذه الشجرة بالمئات، وحالاتُ
-    # الصنف المقيسة كلُّها 3 خانات (٦٦٦ · ٧٣٨ · ٨٨٩ · ٧٤٠ · ٨٩١)، وسطرٌ مثل «فرقٌ ثابتٌ +10» ليس دعوى
-    # عن عدد الاختبارات. (وعددٌ من خانتين يفلت ⇒ مُعلَن، ولا يُدَّعى إغلاقُ ما لم يُقس.)
-
+    # **وحدودُ الضابط مُعلَنة كما هي، لا كما تُتمنّى:**
+    #  - **عددٌ من خانتين** يفلت (٦٦ ⇒ أخضر بالقياس)؛ والعدّاداتُ هنا بالمئات.
+    #  - **السياقُ وحدَه ±٤٥ محرفًا في السطر نفسه:** رقمٌ بلا لفظِ سياقٍ قريبًا يفلت — **وهو البندُ
+    #    المقيسُ عند مقعد المواصفة («القيمةُ القديمةُ في الـCI: 738 · … 889» بلا ألفاظ الدعوى الأربعة)**
+    #    فلا يُدَّعى إغلاقُه: المُغلَقُ هو الصيغةُ التي تحمل سياقًا (٧٣٨ في الـCI · خطوة المجموعة · اللقطة).
+    #  - **سطورُ التعليق وحدَها** (رقمٌ في كتلة `run:` يفلت) — و**الملفّان** فقط؛ وثيقةُ `docs/` لا يراها
+    #    هذا الضابطُ ولا دعاوى `render_claims` (لأنّها تقيس وجودَ الصيغة الصحيحة لا غيابَ رقمٍ آخر).
+    #  - **أرقامٌ مفصولةٌ بفراغ** («7 4 0») تفلت — كسرُ الصورة لا الرقم.
     for rel in (".github/workflows/publish-guard.yml", "tools/render_claims.py"):
         f = Path(__file__).resolve().parents[1] / rel
-        stuck = claim_numbers(f.read_text(encoding="utf-8"))
+        stuck = hand_written(f.read_text(encoding="utf-8"))
         assert not stuck, (
             f"عددُ دعوى مكتوبٌ بيدٍ في تعليقات {rel}: {stuck} ⇒ يُقرأ من اللقطة (مؤشّرًا) لا يُنسَخ")
 
@@ -624,24 +649,30 @@ def test_the_tool_reaches_git_through_one_core_only():
     src = Path(pg.__file__).read_text("utf-8")
     tree = ast.parse(src)
 
-    mod_names, fn_names = {"subprocess"}, set()
+    # **وتتبّعُ الربط لا يقتصر على الوحدة الواحدة (مقعدُ البنية T1 · ٦٨د):** كان الشرطُ على
+    # `node.module == "subprocess"` حصرًا، فالكنيةُ من `os` (`from os import popen as _p`) تمرّ.
+    # فيُتبَّع كلُّ استيرادٍ من الوحدتين، بالاسم أو بأيّ كنية.
+    EXEC_MODULES = {"subprocess", "os"}
+    EXEC_FUNCS = {"popen", "system"}
+    mod_names, fn_names = set(EXEC_MODULES), set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for a in node.names:
-                if a.name == "subprocess":
+                if a.name in EXEC_MODULES:
                     mod_names.add(a.asname or a.name)
-        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
+        elif isinstance(node, ast.ImportFrom) and node.module in EXEC_MODULES:
             for a in node.names:
-                fn_names.add(a.asname or a.name)
+                if a.name in EXEC_FUNCS:
+                    fn_names.add(a.asname or a.name)
 
     def is_read_call(n) -> bool:
         f = n.func
         if isinstance(f, ast.Attribute):
             if isinstance(f.value, ast.Name) and f.value.id in mod_names:
                 return True
-            return f.attr in ("popen", "system")     # `os.popen` وشقيقاتُه
+            return f.attr in EXEC_FUNCS                  # `os.popen` وشقيقاتُه
         if isinstance(f, ast.Name):
-            return f.id in fn_names                  # `from subprocess import run as _r`
+            return f.id in fn_names                       # `from subprocess import run as _r`
         return False
 
     calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and is_read_call(n)]
@@ -657,10 +688,22 @@ def test_the_tool_reaches_git_through_one_core_only():
         f"⇒ سياسةُ قراءةٍ ثانية (قراءةٌ فاشلةٌ تُقرأ «صفرًا» = «نظيفًا»)")
 
     core_lines = set(range(core[0].lineno, (core[0].end_lineno or core[0].lineno) + 1))
+    # **والضابطُ النصّيّ الاحتياطيّ كان يقرأ التعليقات والسلاسل (مقعدُ البنية T1 · ٦٨د):**
+    # سطرٌ **يذكر** `subprocess` في تعليقٍ خارج النواة كان يُحمرّه (إيجابيّةٌ كاذبةٌ مقيسة) ⇒
+    # تُستثنى سطورُ التعليق وسطورُ الثوابت النصّيّة، فيبقى الحدُّ على ما يُنفَّذ فعلًا.
+    skip_lines = {i for i, ln in enumerate(src.splitlines(), 1) if ln.lstrip().startswith("#")}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            skip_lines.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
     stray = [i for i, ln in enumerate(src.splitlines(), 1)
              if ("subprocess" in ln or "popen" in ln)
-             and not ln.lstrip().startswith(("import ", "from ")) and i not in core_lines]
+             and i not in core_lines and i not in skip_lines
+             and not ln.lstrip().startswith(("import ", "from "))]
     assert not stray, f"أثرُ قراءةٍ لـgit خارج النواة في السطور {stray} (ضابطٌ نصّيّ احتياطيّ)"
+    # **وحدودُ الإعلان كما هي مُنفَّذةً، لا أوسعَ منها:** المتبعُ هو الكنى **المستوردة** من
+    # `subprocess`/`os` ونداءاتُ `popen`/`system` بالاسم. **وما يفلت مُعلَن:** نداءٌ غيرُ مباشر
+    # (`getattr(sp, "run")(…)` · `_R = sp.run; _R(…)` — استعارةُ سمةٍ في متغيّر) ومنفّذٌ ثالثٌ لا
+    # يحمل الاسم (`pty.spawn`) — تُصطاد الأخيرةُ بالضابط النصّيّ وحدَه، والأوليان لا.
     assert src.count("_run_git(") >= 4, "نواةُ القراءة لا يستهلكها كلُّ المسارات"
 
 
@@ -683,10 +726,25 @@ def test_the_remote_reachability_rule_lives_in_one_place():
     تمرّ بلا اعتراض — خلافًا لعُرف المدى (كلُّ دعوى «قاعدةٌ واحدة» لها ضابطٌ باسمها).
     """
     src = Path(pg.__file__).read_text("utf-8")
-    assert src.count('"--not", "--remotes"') == 1, (
-        "تعبيرُ «ما ليس على الريموت» مكتوبٌ أكثرَ من مرّة ⇒ نسخةٌ ثانيةٌ لا تُقاس")
-    assert src.count("_commits_not_on_remotes(") == 3, (
-        "التعريفُ + موضعا النداء (المرجعُ الجديد والبديلُ المحافظ)")
+    lines = src.splitlines()
+    # **والحَدُّ بالأمس كان يربط الحكمَ بعدد النداءات (مقعدُ البنية T4 · ٦٨د):** `== 3` يُحمرّ
+    # لنداءٍ رابعٍ مشروع، **وتكرارٌ بترتيبٍ معكوس** (`("--remotes", "--not")`) يفوت. فيُقاس
+    # **موضعُ التعبير** لا عددُ نداءاته: كلُّ ذكرٍ لأحد العلمين داخل `_commits_not_on_remotes` وحدَها،
+    # ومعها شاهدٌ أنّ التعريفَ قائمٌ (وإلّا فالإسقاطُ الكامل يمرّ).
+    import ast
+    tree = ast.parse(src)
+    owners = [n for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef) and n.name == "_commits_not_on_remotes"]
+    assert len(owners) == 1, "دالّةُ «ما ليس على الريموت» معدودةٌ بالنصّ (AST)"
+    body = set(range(owners[0].lineno, (owners[0].end_lineno or owners[0].lineno) + 1))
+    outside = [i for i, ln in enumerate(lines, 1)
+               if ("--not" in ln or "--remotes" in ln) and i not in body]
+    assert not outside, (
+        f"تعبيرُ «ما ليس على الريموت» مكتوبٌ خارج الدالّة في السطور {outside} ⇒ نسخةٌ ثانيةٌ لا تُقاس")
+    assert any("--not" in lines[i - 1] and "--remotes" in lines[i - 1] for i in body), (
+        "التعبيرُ نفسه غائبٌ عن الدالّة ⇒ الإسقاطُ الكامل يمرّ (شاهدٌ سالب)")
+    assert src.count("_commits_not_on_remotes(") >= 3, (
+        "التعريفُ + موضعا النداء (المرجعُ الجديد والبديلُ المحافظ) — والزيادةُ مشروعة")
 
 
 def _tool_repo(tmp_path, name="repo"):
@@ -800,3 +858,40 @@ def test_a_remote_ref_absent_locally_does_not_block_a_push(tmp_path, monkeypatch
     out = capsys.readouterr().out
     assert "غيرُ موجودٍ محليًّا" in out, out
     assert not [f for f in findings if f[0] == "BLOCK"], findings
+
+
+def test_every_published_partition_in_the_checklist_adds_up():
+    """**«صفٌّ لا يجمع» أُغلق بالحالة لا بضابط (مقعدا المعايير والمواصفة · ٦٨د):** الجدولُ «٨٦٩·٢٤·٠ = ٨٩١»
+    وصل من تشغيلٍ أحمرَ سقط منه الحدُّ الفاشل، **ولا شيءَ كان يحسب التقسيم**. فيُحسب الآن كلُّ صفٍّ منشورٍ
+    بهذه الصيغة: تمرّ + تُتخطّى + فاشلة = الجمعُ المعلَن، وأحدُها (صفُّ الشجرة الحيّة) يساوي لقطةَ `full`
+    — فيسقط الضابطُ عند أوّل حركةِ عدّادٍ لا يُحدَّث الصفُّ معها.
+
+    **وحدُّه مُعلَن:** الصفوفُ التي تُصرّح بـ«والجمعُ …» وحدَها (صفوفُ الالتزامات تخلو من التصريح).
+    """
+    import json
+    import re
+    root = Path(__file__).resolve().parents[1]
+    doc = (root / "docs" / "QA_CHECKLIST.md").read_text(encoding="utf-8")
+    snap = json.loads((root / "docs" / "claims.json").read_text(encoding="utf-8"))
+    rows = re.findall(
+        r"(\d+) تمرّ\s*·\s*(\d+) تُتخطّى\s*·\s*(\d+) فاشلة\s*·\s*\*\*والجمعُ\s*(\d+)\*\*",
+        doc, re.DOTALL)
+    assert rows, "لا صفَّ منشورًا بهذه الصيغة ⇒ الضابطُ يقيس العدم"
+    bad = [r for r in rows if int(r[0]) + int(r[1]) + int(r[2]) != int(r[3])]
+    assert not bad, f"صفٌّ لا يجمع (تمرّ + تُتخطّى + فاشلة ≠ الجمعُ المعلَن): {bad}"
+    full = snap["tests_by_env"]["full"]
+    assert str(full) in [r[3] for r in rows], (
+        f"صفُّ الشجرة الحيّة يجب أن يحمل جمعَ `full` ({full}) — المنشور: {[r[3] for r in rows]}")
+
+
+def test_every_declared_environment_has_a_claim_on_the_document():
+    """**دعاوى البيئات بلا ضابطٍ على وجودها (مقعدُ البنية T5 · ٦٨د):** حذفُ كتلةِ الدعاوى من `claims()`
+    لا يُسقط شيئًا — لأنّ الحذفَ يُزيل الدعوى والمقابلةَ معًا، فيمرّ الصنفُ الذي أُغلق أمس. فيُقاس
+    **وجودُ** دعوى لكلّ مفتاحٍ في `tests_by_env` (وبالحذف يسقط هذا الضابط)."""
+    import json
+    import render_claims as rc
+    snap = json.loads((Path(__file__).resolve().parents[1] / "docs" / "claims.json")
+                      .read_text(encoding="utf-8"))
+    labels = " ".join(c[2] for c in rc.claims(snap))
+    missing = [e for e in snap["tests_by_env"] if f"قيمةُ بيئة `{e}` المنشورة" not in labels]
+    assert not missing, f"مفتاحُ بيئةٍ بلا دعوى على الوثيقة: {missing}"

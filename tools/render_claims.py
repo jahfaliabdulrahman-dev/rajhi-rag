@@ -120,6 +120,20 @@ def derive() -> dict | None:
     }
 
 
+def _env_values(d: dict) -> dict:
+    """**دعاوى البيئات تُبنى في المسارين (مقعدُ المواصفة F3 · ٦٨د):** `derive()` — مسارُ شجرة المالك —
+    لا يحمل `tests_by_env`، فكانت دعاوى البيئات تُبنى في مسار اللقطة وحدَه ⇒ وثيقةٌ رقمُ بيئتها متقادمٌ
+    **تمرّ محليًّا** حتى يراها الـCI. فصار المصدرُ المُمرَّر، وإلّا فاللقطةُ الملتزمة: فالدعوى قائمةٌ في
+    المسارين، والانزياحُ يُحمرّ في الموضع الذي يُحرَّر فيه الرقم."""
+    tb = d.get("tests_by_env")
+    if not tb and SNAPSHOT.exists():
+        try:
+            tb = (json.loads(SNAPSHOT.read_text(encoding="utf-8")) or {}).get("tests_by_env")
+        except (OSError, ValueError):
+            tb = None
+    return tb or {}
+
+
 def claims(d: dict) -> list[tuple[str, str, str]]:
     """(file, must-contain, label) — the literal a reader will see."""
     return [
@@ -133,10 +147,10 @@ def claims(d: dict) -> list[tuple[str, str, str]]:
         ("docs/QA_CHECKLIST.md", f"حالياً {d['tests']}", "عدد الاختبارات"),
         # **وأرقامُ البيئات المنشورة تُقابَل بلقطتها (مقعدا المعايير والبنية · ٦٨د · T5):** كانت قيمتا
         # `ci-light`/`ci-claims` مكتوبتين بيدٍ في الوثيقة **بلا ربطٍ باللقطة** ⇒ تتقادمان بصمت (وهو ما
-        # وقع فعلًا: بقيت ٧٣٢/٦٧٢ في موضعٍ وحدّثتُ الثاني). فالآن كلُّ مفتاحٍ في `tests_by_env` له دعوى
+        # وقع فعلًا: بقيت قيمةٌ متقادمةٌ في موضعٍ وحدّثتُ الآخر). فالآن كلُّ مفتاحٍ في `tests_by_env` له دعوى
         # على الوثيقة بصيغتها المنشورة، والانزياحُ يُحمرّ البوّابةَ.
         *[("docs/QA_CHECKLIST.md", f"⇒ **{v}**", f"قيمةُ بيئة `{e}` المنشورة")
-          for e, v in sorted((d.get("tests_by_env") or {}).items())],
+          for e, v in sorted(_env_values(d).items())],
         # The ABOUT screen said «about 1.6% of 629 pages» long after the project
         # accounted for every page: the number a stranger reads first had no
         # guard at all (external audit).
@@ -229,7 +243,7 @@ def main() -> None:
                     f"(`{REPORT.relative_to(PROJ)}`) ولم تُمسّ.")
         # **والعددُ المنشور يُقاس حيًّا حتى بلا تقرير (R66-1 · مراجعة ٦٦):** مقابلةُ الوثيقةِ باللقطة
         # وحدَهما تجعل الانزياحَ **غيرَ مرئيٍّ في CI** — لقطةٌ متقادمةٌ توافق وثيقةً متقادمةً بالعدد نفسه —
-        # و`_test_count()` لا يحتاج كاشَ التصريح. **قِيس قبل الإغلاق:** لقطةٌ `865` والعدُّ الحيُّ `868`
+        # و`_test_count()` لا يحتاج كاشَ التصريح. **قِيس قبل الإغلاق:** لقطةٌ متقادمةٌ والعدُّ الحيّ مخالفٌ لها
         # والحكمُ «توافق» (`rc=0`) ⇒ صار يُقاس.
         if CLAIMS_ENV == "off":
             # **وبيئةٌ تُعلن أنّها لا تقيس (R67-2 · حصيلةُ القياس):** خطوةُ `gate_claims` تجري **قبل**
