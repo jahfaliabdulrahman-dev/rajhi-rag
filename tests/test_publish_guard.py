@@ -319,13 +319,69 @@ def test_the_ignore_rules_are_depth_agnostic_too():
 def test_the_ci_step_and_the_guard_share_one_rule():
     """**مالكٌ واحد للقاعدة (مراجعة ٦٧):** كانت خطوةُ الـCI تحمل نمطًا جذريًّا خاصًّا بها ⇒ فالنسخةُ
     المتداخلةُ تفلت من الاثنين معًا. فلا يُعاد النمطُ الثاني، والخطوةُ تستدعي قاعدةَ الحارس.
+
+    **ويُقاس الواقعُ لا النصّ (مقعدُ البنية · جولة ٦٧):** كان الفحصُ يبحث عن الاسم في الملفّ كلِّه
+    ⇒ يمرّ لو صار السطرُ `echo "…"` (سلبيّةٌ كاذبة)، ويسقط لو ذُكر النمطُ القديم في **تعليق**
+    (إيجابيّةٌ كاذبة). فالمقيسُ الآن: **سطرُ `run:` نفسُه** هو الاستدعاء، ولا سطرَ **فاعلًا** يحمل النمط.
     """
     root = Path(__file__).resolve().parents[1]
     wf = (root / ".github" / "workflows" / "publish-guard.yml").read_text(encoding="utf-8")
-    assert "publish_guard.py --tracked-real-data" in wf, \
-        "خطوةُ الـCI تستدعي قاعدةَ الحارس نفسَها (مالكٌ واحد)"
-    assert "grep -E '^data/(local_sample" not in wf, \
-        "النمطُ الجذريُّ المكرَّر أُزيل — وإلّا عاد التداخلُ فمرّ (الشرحُ يبقى، والنمطُ لا)"
+    stripped = [ln.strip() for ln in wf.splitlines()]
+    calls = [ln for ln in stripped
+             if ln.startswith("run:") and "publish_guard.py --tracked-real-data" in ln]
+    assert calls == ["run: python3 tools/publish_guard.py --tracked-real-data"], \
+        f"خطوةُ الـCI تستدعي قاعدةَ الحارس نفسَها (وُجد: {calls})"
+    effective = [ln for ln in stripped if not ln.startswith("#")]
+    assert not any("^data/(local_sample" in ln for ln in effective), \
+        "نمطٌ جذريٌّ فاعلٌ آخر — الشرحُ في تعليقٍ لا يُحسب، والتنفيذُ يُحسب"
+
+
+def test_a_non_ascii_path_cannot_hide_from_the_guard(tmp_path):
+    """**ثقبٌ مقيسٌ في إغلاق R67-1 نفسه (مقعدُ المواصفة · جولة ٦٧):** `core.quotePath` يقوّس كلَّ
+    مسارٍ فيه محرفٌ غيرُ ASCII (`"data/training/\\331\\203…"`) ⇒ فمقابلةُ مقاطع المسار تفشل و**يُفلت
+    الملفُّ**: قِيس أنّ `data/training/كشوف/عميل.json` المُتتبَّع أعطى «0 تحت مجلّدات البيانات
+    الحقيقيّة» و`rc=0` — أي أنّ الخطوةَ التي أُضيفت لسدّ R67-1 كانت هي التي تمرّ منه. والعلاجُ `_git_z`
+    (`-z`: بلا تقويسٍ ولا فاصلٍ يمكن أن يظهر في اسم ملفّ).
+
+    **ويُقاس على نسخةٍ حقيقيّةٍ صغيرة** (تُشغَّل الأداةُ فيها) لا بمحاكاةٍ — فالأداةُ تقرأ `ROOT` من
+    موقعها.
+    """
+    import shutil
+    import subprocess
+    import sys as _sys
+
+    root = tmp_path / "repo"
+    (root / "tools").mkdir(parents=True)
+    shutil.copy(Path(__file__).resolve().parents[1] / "tools" / "publish_guard.py", root / "tools")
+    for cmd in (["git", "init", "-q"],
+                ["git", "config", "user.email", "t@t"],
+                ["git", "config", "user.name", "t"]):
+        subprocess.run(cmd, cwd=root, check=True)
+    leak = root / "data" / "training" / "كشوف"
+    leak.mkdir(parents=True)
+    (leak / "عميل-1439.json").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "add", "-f", "data/training/كشوف/عميل-1439.json"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "leak"], cwd=root, check=True)
+
+    r = subprocess.run([_sys.executable, "tools/publish_guard.py", "--tracked-real-data"],
+                       cwd=root, capture_output=True, text=True)
+    assert r.returncode == 1, (
+        f"مسارٌ غيرُ ASCII تحت مجلّد بياناتٍ حقيقيّةٍ لم يُكشَف (rc={r.returncode})\n{r.stdout}")
+    assert "كشوف" in r.stdout, "والرسالةُ تسمّي المسارَ بعينه (أي أنّ القراءةَ كانت بلا تقويس)"
+
+
+def test_the_guard_and_the_ignore_rules_share_one_list_of_real_data_dirs():
+    """**لا قائمتان تفترقان (مقعدُ البنية · جولة ٦٧):** `.gitignore` يحمل أسماءَ مجلّدات البيانات
+    الحقيقيّة بيده، و`publish_guard` في `REAL_DATA_DIRS` ⇒ فزيادةُ مجلّدٍ في أحدهما لا يتبعها الآخر،
+    ويعود الدرسُ نفسُه (خطّا دفاعٍ يفترقان). فيُقابَلان — وبالصيغة العميقة (`**/`) التي بها التداخلُ
+    لا يُعفي.
+    """
+    import publish_guard as pg
+
+    gi = (Path(__file__).resolve().parents[1] / ".gitignore").read_text(encoding="utf-8")
+    for d in pg.REAL_DATA_DIRS:
+        assert f"**/{d}/" in gi, (
+            f"`{d}` في `REAL_DATA_DIRS` وليس في `.gitignore` بصيغته العميقة ⇒ يفترق خطّا الدفاع")
 
 
 def test_a_three_wide_space_grouped_account_is_blocked():

@@ -154,6 +154,20 @@ def _git(*args: str) -> str:
     return out.stdout.decode("utf-8", "replace")
 
 
+def _git_z(*args: str) -> list[str]:
+    """مخرَجُ git **بفواصل NUL وبلا تقويس** — لمقابلة المسارات (جولة ٦٧ · مقعدُ المواصفة).
+
+    **العلّةُ المقيسة:** `core.quotePath` يقوّس كلَّ مسارٍ فيه محرفٌ غيرُ ASCII فيُخرجه
+    `"data/training/\\331\\203\\330\\264…"` ⇒ فمقابلةُ مقاطع المسار تفشل و**يُفلت الملفُّ**:
+    قِيس في نسخةٍ حقيقيّة أنّ مسارًا عربيًّا واحدًا تحت `data/training/` أعطى
+    «0 تحت مجلّدات البيانات الحقيقيّة» و`rc=0` — أي أنّ **الخطوةَ التي أُضيفت لسدّ R67-1 كانت هي
+    التي تمرّ منه**. و`git -c core.quotePath=false ls-files` أعطى `flagged=1` — فالعلاجُ قراءةٌ واحدة.
+    و`-z` أصحُّ من `-c`: لا يقوّس **ولا** يستعمل فاصلًا يمكن أن يظهر في اسم ملفّ (سطرٌ جديد).
+    """
+    out = subprocess.run(["git", *args, "-z"], cwd=ROOT, capture_output=True).stdout
+    return [x for x in out.decode("utf-8", "replace").split("\0") if x]
+
+
 def _read_blobs(shas: list[str]) -> dict[str, bytes]:
     """Batch-read blobs in ONE git process (fast even for history mode)."""
     if not shas:
@@ -446,13 +460,12 @@ def _check_path(path: str, where: str, findings, entries) -> None:
 
 
 def _tree_entries(rev: str) -> list[tuple[str, str]]:
-    """[(path, blob_sha)] for a commit tree."""
-    out = _git("ls-tree", "-r", rev)
+    """[(path, blob_sha)] for a commit tree — **بلا تقويس** (`_git_z`)."""
     pairs = []
-    for line in out.splitlines():
-        if "\t" not in line:
+    for rec in _git_z("ls-tree", "-r", rev):
+        if "\t" not in rec:
             continue
-        meta, path = line.split("\t", 1)
+        meta, path = rec.split("\t", 1)
         parts = meta.split()
         if len(parts) >= 3 and parts[1] == "blob":
             pairs.append((path, parts[2]))
@@ -498,10 +511,10 @@ def scan_history(findings, entries, seen) -> int:
     # be scanned, or an older commit that still carries PII slips through.
     # (An earlier version deduped by path and kept only the newest blob —
     # caught by running it: older test fixtures with real names were masked.)
-    out = _git("rev-list", "--objects", "--all")
+    out = _git_z("rev-list", "--objects", "--all")
     pairs, dedup = [], set()
-    for line in out.splitlines():
-        parts = line.split(" ", 1)
+    for rec in out:
+        parts = rec.split(" ", 1)
         if len(parts) != 2:
             continue
         sha, path = parts
@@ -630,8 +643,16 @@ def main() -> None:
         # **مالكٌ واحد للقاعدة (مراجعة ٦٧):** كانت خطوةُ الـCI تحمل نمطًا جذريًّا خاصًّا بها
         # (`^data/(local_sample|training|eval_pack)/`) ⇒ فاتها التداخلُ — وفات التداخلُ هذا الحارسَ أيضًا.
         # فصار الاثنان يستدعيان `real_data_path` نفسَها: قاعدةٌ واحدة، ولا نمطَ ثانٍ يزيح معها.
-        tracked = subprocess.run(["git", "ls-files"], capture_output=True, text=True,
-                                 check=True).stdout.splitlines()
+        # **ولا يُسكِت نمطًا آخر بصمت (مقعدُ البنية · جولة ٦٧):** كان `return` في النهاية يُهمل
+        # `--tree/--history/--ci` إن اجتمعت معه ⇒ فإمّا تُستدعى وحدَها، وإمّا يُعلَن الرفض.
+        others = [n for n, v in (("--tree", args.tree), ("--history", args.history),
+                                 ("--ci", args.ci), ("--pre-push", bool(args.pre_push))) if v]
+        if others:
+            print(f"⛔ `--tracked-real-data` نمطٌ **واحدٌ قائمٌ بذاته**: لا يُجمع مع {others} "
+                  f"(وإلّا أُهمل الآخرُ بصمت) ⇒ شغّلهما في استدعاءَين.")
+            sys.exit(2)
+        # **بلا تقويس (جولة ٦٧):** `git ls-files` وحدَه يقوّس المسارَ العربيَّ فيُفلت ⇒ `_git_z`.
+        tracked = _git_z("ls-files")
         bad = [p for p in tracked if real_data_path(p)]
         print(f"[publish-guard] tracked-real-data: {len(tracked)} ملفًّا مُتتبَّعًا — "
               f"{len(bad)} تحت مجلّدات البيانات الحقيقيّة")

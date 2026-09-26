@@ -47,19 +47,22 @@ jobs:
       # docs/claims.json and asserts the public documents still match it.
       - name: Public claims must match their derived snapshot
         id: gate_claims
-        # **والخطوةُ تُعلن أنّها لا تقيس — استثناءٌ عن افتراض المهمّة (R67-2):** تجري **قبل** تثبيت
-        # `openpyxl`/`PyYAML` ⇒ جمعُها جزئيٌّ: قِيس في المهمّة نفسِها **٦٦٣** هنا مقابل **٧٢٣** في الخطوات
-        # التي ثبّتت تبعيّاتها. فالقياسُ الحيُّ **مُعلَّقٌ بإعلانٍ** (لا تخطٍّ صامت)، والوثيقةُ تُقابَل
-        # بلقطتها. **وحدُّ هذا الإعلان:** لا يُستعمل ليُسكِت قياسًا **مُمكِنًا** في بيئةٍ كاملة.
+        # **والخطوةُ **تقيس** — ولا تُسكِت قياسًا مُمكِنًا (مقعدا المعايير والمواصفة · جولة ٦٧):** كان
+        # الإعلانُ `off` هنا يُسكِت قياسًا **مُمكِنًا** (‎`pytest` يُثبَّت في السطر التالي!) ⇒ فصار للخطوة
+        # مفتاحُها المُعلَن `ci-claims` (قياسُها: **٦٦٣** — من تشغيلٍ حقيقيّ)، ويصير `off` ملجأً أخيرًا
+        # لا غطاءً. **وحدُّ `off` يبقى مكتوبًا في موضعه:** لا يُستعمل ليُسكِت قياسًا مُمكِنًا.
         env:
-          RAJHI_CLAIMS_ENV: off
+          RAJHI_CLAIMS_ENV: ci-claims
         run: |
-          python3 -m pip install --quiet pytest
+          # **وتُثبَّت النسخةُ لا تُترك للتحديث (مقعدُ البنية · جولة ٦٧):** العدُّ دالّةٌ في إصدار
+          # المفسّر و`pytest` معًا (قِيس: فرقٌ ثابتٌ +10 بين مقياسي ومقياس العدّاء) ⇒ فإصدارٌ غيرُ
+          # مثبَّتٍ يجعل قيمةَ `ci-claims` تتحرّك بلا كودٍ ⇒ تضبطها ترقيةٌ صامتة. فالمثبَّت هو الذي يُقاس.
+          python3 -m pip install --quiet "pytest==9.1.1"
           python3 tools/render_claims.py --check
       - name: Lightweight suite (no ML deps — compile, lock, public claims, gate injection)
         id: gate_suite
         run: |
-          python3 -m pip install --quiet pytest openpyxl==3.1.5 PyYAML==6.0.3
+          python3 -m pip install --quiet "pytest==9.1.1" openpyxl==3.1.5 PyYAML==6.0.3
           python3 -m pytest tests/test_compile_all.py \
                            tests/test_requirements_lock.py \
                            tests/test_public_claims.py \
