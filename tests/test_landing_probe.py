@@ -10,8 +10,10 @@
 """
 from __future__ import annotations
 
+import importlib.util
 import re
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -155,3 +157,74 @@ def test_a_detached_head_does_not_ask_for_a_branch_called_head():
     assert "_clone(PROJ, dst, sha, _branch_for_clone(branch))" in src.replace("clone_branch", "_branch_for_clone(branch)") \
         or "clone_branch = _branch_for_clone(branch)" in src, \
         "`measure` ما زال يمرّر اسمَ الفرع الخام ⇒ الإصلاحُ في دالّةٍ لا تُنادى"
+
+
+def _witness_gate():
+    """**حارسُ §٢٧ نفسُه** (لا محاكاةً ثانية): مناطُ الرابطِ ورسائلُه من `tests/test_answer_names_witness.py`."""
+    spec = importlib.util.spec_from_file_location(
+        "witness_gate", ROOT / "tests" / "test_answer_names_witness.py")
+    assert spec is not None and spec.loader is not None, "تعذّر تحميلُ حارس §٢٧ ⇒ لا قياس"
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_the_stamp_follows_the_tree_clock_and_never_lands_in_an_answer_window():
+    """**R65-1 (قاسها المدقّق في مراجعة ٦٥): الختمُ بساعة الشجرة لا ساعة العدّاء.**
+
+    والعطبُ صنفيٌّ لا حادثة: أسماءُ `handoff/` بتوقيت +03 وعدّاءُ GitHub بتوقيت UTC ⇒ ختمٌ من العدّاء
+    يقع ثلاثَ ساعاتٍ قبل اسم الجواب نفسِه، فيصير الشاهدُ الاصطناعيُّ **أحدثَ حُكمٍ قبل الجواب** ويسقط
+    `tests/test_answer_names_witness.py` على جوابٍ هبط صحيحًا — ويُخفي المنفّذَ محلّيًّا (ساعتُه +03).
+
+    والضابطُ يقيس **الاتّجاهين بأسماء الجولة الحقيقيّة وبآلة الحارس نفسِها** (لا نسخةً ثانية من المنطق):
+    ‹١› عطبٌ قبل الإصلاح: ختمُ العدّاء يقع في النافذة فيُسقِط الجوابَ، ‹٢› وبعد الإصلاح: الختمُ بساعة
+    الشجرة ⇒ الجوابُ يمرّ، ‹٣› والأرضيّة: ختمٌ في الشجرة يتجاوز ساعة العدّاء ⇒ الشاهدُ يتجاوزه،
+    ‹٤› والوصل: `measure` ينادي الدالّةَ ويُمرّر اللحظةَ نفسَها للإيداع (وإلّا فالإصلاحُ في دالّةٍ لا تُنادى).
+    """
+    gate = _witness_gate()
+    answer = ("handoff/sulaiman/20260926-0455-REPORT-to-claude-round64-seat-verdict-closure-"
+              "and-two-measured-mutations.md")
+    witness = ("handoff/claude/20260926-032854-third-eye-review-64-the-instrument-counts-a-stray-digit.md")
+    # `turn.stamp_of` يُطابِق من **بداية الاسم** ⇒ القياسُ بالأسماء لا بالمسارات (كما تفعل `_tree_stamps`)
+    stamps = [lp.stamp_of(Path(answer).name), lp.stamp_of(Path(witness).name)]
+    assert stamps == ["20260926-045500", "20260926-032854"], f"مفاتيحُ الزمن لم تُقرأ: {stamps}"
+    # ساعةُ العدّاء كما تكون فعلًا: ٠٦:٤٠:٣٢ (+03) هي ٠٣:٤٠:٣٢ UTC — داخل النافذة المقيسة
+    runner_clock = datetime(2026, 9, 26, 3, 40, 32, tzinfo=timezone.utc)
+
+    # ‹١› **العطبُ قبل الإصلاح** (الاسمُ بساعة العدّاء كما كان `datetime.now().astimezone()` تحتها)
+    old_key = runner_clock.astimezone(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    old_path = f"handoff/claude/{old_key}-third-eye-review-99-landing-probe.md"
+    bad = gate.ungated_answers({answer: f"in-reply-to: {witness}\n"}, {answer, witness, old_path})
+    assert len(bad) == 1 and "ليس أحدث" in bad[0], (old_key, bad)
+
+    # ‹٢› **وبعد الإصلاح**: ساعةُ الشجرة (+03) ⇒ الشاهدُ يبقى أحدثَ حُكمٍ قبل الجواب
+    stamp = lp._probe_stamp(runner_clock, stamps)
+    assert stamp.utcoffset() == timedelta(hours=3), f"الختمُ ليس بساعة الشجرة: {stamp}"
+    key = stamp.strftime("%Y%m%d-%H%M%S")
+    assert key == "20260926-064032", f"الختمُ لم يُحوَّل إلى +03: {key}"
+    assert gate.ungated_answers(
+        {answer: f"in-reply-to: {witness}\n"},
+        {answer, witness, f"handoff/claude/{key}-third-eye-review-99-landing-probe.md"}) == []
+
+    # ‹٣› **والأرضيّة**: ختمٌ في الشجرة متأخّرٌ عن ساعة العدّاء (ساعةٌ متأخّرة · إيداعٌ مُبكَّر الاسم)
+    ahead = "20260926-080000-REPORT-to-claude-later.md"
+    later = lp._probe_stamp(runner_clock, stamps + [lp.stamp_of(ahead)])
+    later_key = later.strftime("%Y%m%d-%H%M%S")
+    assert later > datetime(2026, 9, 26, 8, 0, 0, tzinfo=lp.NAMING_TZ), later
+    assert later.utcoffset() == timedelta(hours=3)
+    # والقاعدةُ العامّة: لا نافذةَ (شاهد, جواب] يحلّ فيها الختمُ — بالختم الذي يخصّ كلَّ حالة
+    for stamped, a, w in ((key, answer, witness), (later_key, f"handoff/sulaiman/{ahead}", witness)):
+        assert not (lp.stamp_of(Path(w).name) < stamped <= lp.stamp_of(Path(a).name)), \
+            f"الختمُ {stamped} يقع في نافذة {a}"
+    # والساعةُ لا تعتمد على منطقة العملية: **اللحظةُ نفسها** (وإن اختلف تمثيلها) تُعطي الختمَ نفسه
+    aware_local = datetime(2026, 9, 26, 6, 40, 32).astimezone()
+    assert lp._probe_stamp(aware_local, []) == lp._probe_stamp(aware_local.astimezone(timezone.utc), []), \
+        "الختمُ يتغيّر بتغيّر منطقة العملية بدل أن يتبع ساعة الشجرة"
+
+    # ‹٤› **والوصل لا الوعد**: `measure` ينادي الدالّةَ، والإيداعُ يأخذ اللحظةَ نفسَها (مصدرٌ واحد)
+    src = (ROOT / "tools" / "landing_probe.py").read_text(encoding="utf-8")
+    assert "_probe_stamp(datetime.now().astimezone(), _tree_stamps(dst))" in src, \
+        "`measure` ما زال يختم بساعة العدّاء ⇒ الإصلاحُ في دالّةٍ لا تُنادى"
+    assert "_commit(review, dst, stamp_dt)" in src, \
+        "زمنُ الإيداع لا يتبع اللحظةَ المُصلَحة ⇒ الاسمُ والإيداع يفترقان عن الشجرة"
+    assert "_tree_stamps(dst)" in src, "الأرضيّةُ تُقرأ من شجرة المنفّذ لا من الشجرة المقيسة"
