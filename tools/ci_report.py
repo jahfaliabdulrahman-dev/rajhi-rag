@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from functools import lru_cache
 import subprocess
 import sys
 from pathlib import Path
@@ -56,7 +57,7 @@ def _local_sha(ref: str) -> str | None:
 
 
 def _pushed_sha(ref: str) -> str | None:
-    """**الالتزامُ الذي دُفع فعلًا** لا الذي في يدي: `origin/<ref>` أوّلًا.
+    """**الالتزامُ الذي دُفع فعلًا** لا الذي في يدي: `<remote>/<branch>` أوّلًا (والمرجعُ يُطبَّع).
 
     (تصحيحٌ بعد قياسٍ حيّ: كان القياسُ على المرجع المحلّيّ، وفرعٌ محلّيٌّ متقدّمٌ على المدفوع
     يُوسَم «قديمًا» وهو **أحمرُ** في الحقيقة ⇒ وسمٌ مضلِّل. المقصودُ صدقُ تقرير الدفع،
@@ -64,7 +65,8 @@ def _pushed_sha(ref: str) -> str | None:
 
     **وقياسٌ ثانٍ (إغلاقُ ملاحظة الجولة ٦٤):** كان يُبنى `origin/{ref}` **بلا تطبيع**، فمرجعٌ
     بصيغة git (`refs/heads/main`) يُنتج `origin/refs/heads/main` (لا وجودَ له) ⇒ يسقط إلى
-    **المرجع المحلّيّ** فيُوسَم الرأسُ المدفوع «قديمًا» **كذبًا**. فصار التطبيعُ (اسم الفرع) قبل البناء.
+    **المرجع المحلّيّ** فيُوسَم الرأسُ المدفوع «قديمًا» **كذبًا**. فصار المسارُ: `branch_of(ref)`
+    أوّلًا، ثم يُجرَّب **كلُّ ريموتٍ مُهيَّأ** (`git remote`) لا `origin` وحدَه.
     """
     branch = branch_of(ref)
     for remote in remotes():
@@ -77,8 +79,14 @@ def _pushed_sha(ref: str) -> str | None:
 FALLBACK_REMOTES = ("origin", "upstream")      # حين يتعذّر سؤالُ git (يُعلَن ولا يُخفي)
 
 
+@lru_cache(maxsize=1)
 def _git_remotes() -> str:
-    """سطرٌو `git remote` الخامّ — نقطةُ نداءٍ واحدة تُستبدَل في الضوابط."""
+    """سطرٌو `git remote` الخامّ — نقطةُ نداءٍ واحدة تُستبدَل في الضوابط.
+
+    **ومُخزَّنة:** كان كلُّ نداءٍ يُشغّل `git remote` من جديد (قِيس في مقعد البنية: خمسةُ نداءاتٍ
+    خارجيّةٍ لمرجعٍ واحد)، والقائمةُ لا تتغيّر داخل التشغيل. والضوابطُ تُبدّل الدالّةَ نفسَها
+    (سمةُ الوحدة) ⇒ فالاستبدالُ يمرّ ولا يلتصق تخزينٌ قديم.
+    """
     rc, out = _run(["git", "remote"])
     return out if rc == 0 else ""
 
@@ -248,11 +256,14 @@ def main(argv: list[str] | None = None) -> int:
     if not a.refs:
         ap.error("مرجعٌ واحدٌ على الأقلّ — أو `--remind`/`--pre-push`")
 
+    def _line(v: dict) -> str:
+        """سطرُ حكمِ مرجعٍ واحد: `branch_of` **مرّةً واحدة** (قِيس في مقعد البنية: كان يُنادى مرّتين على القيمة نفسها)."""
+        br = branch_of(v["ref"])
+        tail = f" (قِيس على الفرع `{br}`)" if br != v["ref"] else ""
+        return f"{'✓' if v['state'] == 'أخضر' else '·'} {v['state']:<11} {v['ref']} — {v['why']}{tail}"
+
     vs = [verdict(r) for r in a.refs]
-    lines = [f"{'✓' if v['state'] == 'أخضر' else '·'} {v['state']:<11} {v['ref']} — {v['why']}"
-             + (f" (قِيس على الفرع `{branch_of(v['ref'])}`)"
-                if branch_of(v["ref"]) != v["ref"] else "")
-             for v in vs]
+    lines = [_line(v) for v in vs]
     lines.append(LIMIT)
 
     unreadable = [v for v in vs if v["state"] == "غيرُ مقروء"]
