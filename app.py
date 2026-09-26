@@ -63,13 +63,17 @@ from statement_qa.footer_oracle import (
     check_page_footer, delta_checkable, delta_status, page_diverged,
     read_footer, try_page_reread,
 )
+from statement_qa.desc_reader import (
+    continuation_for, merge_descriptions, read_page_descriptions,
+    summarize_ar as summarize_desc_ar,
+)
 from statement_qa.intake import (
     blocked_message_ar, inspect_locally, plan, summary_ar as summarize_intake_ar,
 )
 from statement_qa.job_lock import JobBusyError, job_lock
 from statement_qa.row_bands import analyze_page
 from statement_qa.ordering import (
-    check_order, check_page_numbers, footer_order, summarize_ar as summarize_order_ar,
+    adjacency, check_order, check_page_numbers, footer_order, summarize_ar as summarize_order_ar,
     summarize_footer_order, summarize_page_numbers,
 )
 
@@ -382,6 +386,52 @@ def _local_checks(pages: list[str]):
     return gate_fn, kind_fn
 
 
+def _page_descriptions(path: str, next_path: str | None, stats: dict):
+    """(بياناتُ صفوف الصفحة من عمود البيان، هل لُصقت تكملة؟) — استدعاءٌ واحد (statement_qa.desc_reader)."""
+    img = Image.open(path).convert("RGB")
+    pb = analyze_page(np.asarray(img.convert("L")), RENDER_DPI)
+    if not pb.bands:
+        raise ValueError("لا صفوف في شكل الصفحة")
+    cont = None
+    if next_path:
+        nimg = Image.open(next_path).convert("RGB")
+        cont = continuation_for(pb, analyze_page(np.asarray(nimg.convert("L")), RENDER_DPI), nimg)
+    return read_page_descriptions(img, pb, cont, stats), cont is not None
+
+
+def _desc_pass(order: list[int], pages: list[str], all_rows: list[dict],
+               pairs: dict, charge, over_budget) -> dict:
+    """البيانُ لكلّ صفحة من عمود البيان، والأرقامُ لا تُمسّ.
+
+    التكملةُ تُلصق بالصفّ الأخير **فقط** حين يُثبت الحسابُ أن الصفحةَ التالية في الترتيب الحقيقي
+    هي الورقةُ التالية فعلًا (`adjacent`). وأيُّ فشلٍ يُبقي بيانَ قراءة الصفحة ويُسمّى — لا يُسقط التشغيل.
+    """
+    rep = {"merged": [], "stitched": 0, "failed": [], "unaligned": [], "skipped": []}
+    for i, pg in enumerate(order):
+        rows = [r for r in all_rows if r["page"] == pg]
+        if not rows:
+            continue                     # صفحةٌ لم تُقرأ أرقامُها: لا بيانَ يُدفع لها
+        if over_budget():
+            rep["skipped"] = [p for p in order[i:] if any(r["page"] == p for r in all_rows)]
+            break
+        nxt = order[i + 1] if i + 1 < len(order) else None
+        nxt_path = pages[nxt - 1] if nxt and pairs.get((pg, nxt)) == "adjacent" else None
+        st: dict = {}
+        try:
+            descs, stitched = _page_descriptions(pages[pg - 1], nxt_path, st)
+        except Exception:  # noqa: BLE001
+            rep["failed"].append(pg)
+            continue
+        finally:
+            charge(st)
+        if merge_descriptions(rows, descs):
+            rep["merged"].append(pg)
+            rep["stitched"] += int(stitched)
+        else:
+            rep["unaligned"].append(pg)
+    return rep
+
+
 def process_pdf(pdf_path: str, skip_rejected: bool = False, progress=gr.Progress()):
     """Tab 1 handler — single-job lock → read all pages → chain-audit →
     footer oracle + era/order checks → chunks+index.
@@ -475,6 +525,7 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
     fo = footer_order({pg: (f.debits, f.credits) if f else None
                        for pg, f in footers.items()})
     order_now = fo["order"]
+    own_by_pg: dict[int, tuple] = {}
     for i, pg in enumerate(order_now):
         img = pages[pg - 1]
         progress(0.05 + 0.9 * i / len(order_now),
@@ -568,6 +619,8 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
             cum["debits"] += chk["own"]["debits"]
             cum["credits"] += chk["own"]["credits"]
         footer_checks.append({"page": pg, **chk})
+        if chk.get("own"):
+            own_by_pg[pg] = (chk["own"]["debits"], chk["own"]["credits"])
         prev_footer = footer
         prev_page_no = page_no
         for r in rows:
@@ -587,8 +640,16 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
                                  "desc": r.get("desc"), "date": r.get("date")})
             prev_closing = r["balance"]
 
-    annotate_types(all_rows)
+    # التواريخُ أولًا: تُستعاد أحيانًا من نصّ بيان قراءة الصفحة، وبيانُ العمود بلا تاريخٍ عن قصد.
     filled_dates = fill_missing_dates(all_rows)
+    progress(0.93, "قراءة البيان من عمود البيان…")
+    pairs = adjacency(order_now,
+                      {pg: (f.debits, f.credits) if f else None for pg, f in footers.items()},
+                      own_by_pg, {pos: n for pos, n in page_nos if isinstance(n, int)})
+    desc_rep = _desc_pass(order_now, pages, all_rows, pairs, _merge_usage,
+                          lambda: usage["cost"] > MAX_UI_COST_USD)
+    # والتصنيفُ بعد البيان الأصحّ.
+    annotate_types(all_rows)
     rows_view = _rows_df(all_rows)
 
     progress(0.95, "بناء الفهرس…")
@@ -608,6 +669,7 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
     STATE["era"] = era_fp
     STATE["order"] = order
     STATE["footer_order"] = fo
+    STATE["desc_pass"] = desc_rep
     STATE["intake"] = {"gate": intake.gate, "kinds": intake.kinds, **decision}
     n_ok = sum(1 for r in all_rows if r["ok"])
     n_susp = len(all_rows) - n_ok
@@ -683,7 +745,9 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
             summarize_order_ar(order, boundaries),
             summarize_footer_order(fo, applied=True),
             summarize_page_numbers(check_page_numbers(sorted(page_nos))),
-            summarize_intake_ar(intake, decision["skipped"])]
+            summarize_intake_ar(intake, decision["skipped"]),
+            summarize_desc_ar(desc_rep, sum(1 for pg in order_now
+                                            if any(r["page"] == pg for r in all_rows)))]
     if abort_reason:
         segs.insert(0, "⛔ " + abort_reason)
     if filled_dates:

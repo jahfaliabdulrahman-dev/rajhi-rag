@@ -267,10 +267,16 @@ def derive_pages(raw_by_page: list[tuple[int, list[dict]]]) -> list[list[dict]]:
     return out
 
 
-def load(run: Path) -> tuple[list[dict], dict, dict, dict]:
+def load(run: Path, desc_column: bool = False) -> tuple[list[dict], dict, dict, dict]:
     """(rows, report, per-page verdicts, per-page repair flags) — straight from
     the run's own files. The repair flags live in the checkpoints (the evidence),
-    not in the report's legacy fields."""
+    not in the report's legacy fields.
+
+    `desc_column`: take each page's descriptions from `results/desc/pg-NNN.json`
+    (`tools/desc_pass.py`) — numbers untouched, and only where the row count
+    matches. What was applied is reported in `report["desc_column"]`. Off by
+    default: without the flag the workbook is exactly what it was.
+    """
     report = json.loads((run / "slice_report.json").read_text(encoding="utf-8"))
     per_page = {int(e["page"]): e for e in report.get("per_page") or []}
     flags: dict[int, dict] = {}
@@ -285,6 +291,23 @@ def load(run: Path) -> tuple[list[dict], dict, dict, dict]:
         page = int(data.get("pg") or 0)
         loaded.append((page, data, data.get("raw_rows") or [],
                        per_page.get(page, {})))
+
+    if desc_column:
+        # **استيرادٌ متأخّر**: وحدةُ البيان تحتاج numpy، والجناحُ الخفيف في CI يبني مصنّفاتٍ من هنا بلا numpy.
+        from statement_qa.desc_reader import merge_into_page, read_sidecar, sidecar_path
+
+        applied, unaligned, absent = [], [], []
+        for n, (page, data, raw, verdict) in enumerate(loaded):
+            descs = read_sidecar(sidecar_path(run / "results", page))
+            merged = merge_into_page(raw, descs) if descs is not None else None
+            if descs is None:
+                absent.append(page)
+            elif merged is None:
+                unaligned.append(page)
+            else:
+                loaded[n] = (page, data, merged, verdict)
+                applied.append(page)
+        report["desc_column"] = {"applied": applied, "unaligned": unaligned, "absent": absent}
 
     derived_pages = derive_pages([(p, raw) for p, _d, raw, _v in loaded])
     rows: list[dict] = []
@@ -779,8 +802,8 @@ def _contract_footer_role(profile: Path | str | None) -> str:
 
 
 def build(run: Path, out: Path, gate: Path | None,
-          profile: Path | str | None = None) -> dict:
-    rows, report, per_page, flags = load(run)
+          profile: Path | str | None = None, desc_column: bool = False) -> dict:
+    rows, report, per_page, flags = load(run, desc_column=desc_column)
     if not rows:
         raise SystemExit(f"لا صفوف في {run}/results — هل المسار صحيح؟")
 
@@ -1215,6 +1238,7 @@ def build(run: Path, out: Path, gate: Path | None,
         "dates_ok": facts["dates_ok"],
         "date_status": facts["date_status"],
         "rejected_by_gate": len(gate_verdict.get("rejected_pages") or []),
+        "desc_column": report.get("desc_column"),
         "out": str(out),
     }
 
@@ -1227,15 +1251,21 @@ def main() -> None:
     ap.add_argument("--profile", default=str(Path(__file__).resolve().parents[1] /
                                            "profiles" / "al-rajhi.json"),
                     help="عقد البنك/التصميم — يُقرأ منه دورُ التذييل ويُقابَل بالتقرير")
+    ap.add_argument("--desc-column", action="store_true",
+                    help="البيانُ من results/desc/ (tools/desc_pass.py) — الأرقامُ لا تُمسّ")
     args = ap.parse_args()
     info = build(Path(args.run).expanduser(), Path(args.out).expanduser(),
                  Path(args.gate).expanduser() if args.gate else None,
-                 profile=args.profile)
+                 profile=args.profile, desc_column=args.desc_column)
     print(f"[to-xlsx] {info['out']}")
     print(f"  صفوف: {info['rows']} · صفحات: {info['pages']} · بلا إثبات: {info['unproven']}"
           f" · مرفوضة من البوابة: {info['rejected_by_gate']}")
     print(f"  أسئلة: {info['questions']} · صفوف داعمة: {info['evidence']}"
           f" · تواريخ مكتملة: {info['dates_ok']} (الحالة: {info['date_status']})")
+    if info.get("desc_column"):
+        dc = info["desc_column"]
+        print(f"  البيانُ من عمود البيان: {len(dc['applied'])} صفحة · عددٌ لا يطابق: "
+              f"{dc['unaligned']} · بلا ملفٍّ جانبي: {len(dc['absent'])}")
 
 
 if __name__ == "__main__":

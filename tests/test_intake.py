@@ -143,8 +143,13 @@ def app_run(monkeypatch, tmp_path):
     def rows(img, stats=None, **_):
         calls.append(("rows", img))
         n = len([c for c in calls if c[0] == "rows"])
-        return [{"movement": D("1.00"), "balance": D(n), "desc": "حركة", "date": None,
+        # التاريخُ ليس في خانته بل في نصّ البيان — تستعيده `fill_missing_dates` من البيان القديم
+        return [{"movement": D("1.00"), "balance": D(n), "desc": "حركة ٢٠٢٣٠٢٢٥", "date": None,
                  "raw_movement": "1.00", "raw_balance": str(n)}]
+
+    def descriptions(path, next_path, stats):
+        calls.append(("desc", path))
+        return [f"بيانُ العمود {Path(path).stem}"], False
 
     def no_network(*a, **k):
         raise AssertionError("استدعاءُ نموذجٍ حقيقيّ في اختبار")
@@ -157,6 +162,7 @@ def app_run(monkeypatch, tmp_path):
     import statement_qa.vlm_reader as vr
     monkeypatch.setattr(vr, "chat_vlm_image", no_network)
     monkeypatch.setattr(app, "build_index", lambda chunks: object())
+    monkeypatch.setattr(app, "_page_descriptions", descriptions)
     monkeypatch.setattr(app, "_local_checks",
                         lambda pages: (_gate(verdicts), lambda img: "transactions"))
 
@@ -220,3 +226,57 @@ def test_the_read_button_sends_the_skip_checkbox():
     wired = [f for f in fns if getattr(f, "fn", None) is app.process_pdf]
     assert len(wired) == 1
     assert [type(i).__name__ for i in wired[0].inputs] == ["File", "Checkbox"]
+
+
+def test_dates_are_settled_from_the_page_reading_before_its_description_is_replaced(app_run):
+    """ترتيبٌ مقصود: بيانُ العمود بلا تاريخ، فلو استُبدل البيانُ أوّلًا لضاع التاريخُ المستعاد من نصّه."""
+    out, calls, pages, state = app_run([("10", "5"), ("40", "9"), ("25", "7")])
+    assert [img for kind, img in calls if kind == "desc"] == [pages[0], pages[2], pages[1]]
+    for r in state["rows"]:
+        assert r["desc"].startswith("بيانُ العمود") and r["desc_source"] == "column"
+        assert "٢٠٢٣٠٢٢٥" in r["desc_page"]
+        assert r["date"] and r["date_source"] == "recovered-from-description"
+    assert "البيانُ من عمود البيان: 3/3 صفحة" in out[0]
+
+
+def _desc_pass_setup(monkeypatch, fail=()):
+    if not _app_stack():
+        pytest.skip("حزمة التطبيق غير مثبّتة هنا (CI خفيف) — فحص محلي فقط")
+    import app
+
+    seen: list[tuple[str, str | None]] = []
+
+    def descriptions(path, next_path, stats):
+        seen.append((path, next_path))
+        stats["cost"] = 0.01
+        if path in fail:
+            raise RuntimeError("VLM JSON")
+        return [f"جديد {Path(path).stem}"], next_path is not None
+    monkeypatch.setattr(app, "_page_descriptions", descriptions)
+    pages = _images(3)
+    rows = [{"page": p, "desc": f"قديم {p}"} for p in (1, 2, 3)]
+    return app, pages, rows, seen
+
+
+def test_the_continuation_is_joined_only_across_proven_neighbours(monkeypatch):
+    app, pages, rows, seen = _desc_pass_setup(monkeypatch)
+    rep = app._desc_pass([1, 3, 2], pages, rows, {(1, 3): "adjacent", (3, 2): "mismatch"},
+                         lambda st: None, lambda: False)
+    assert seen == [(pages[0], pages[2]), (pages[2], None), (pages[1], None)]
+    assert rep["merged"] == [1, 3, 2] and rep["stitched"] == 1
+
+
+def test_a_failed_page_keeps_its_page_reading_and_is_named(monkeypatch):
+    app, pages, rows, _seen = _desc_pass_setup(monkeypatch, fail={_images(3)[1]})
+    charged = []
+    rep = app._desc_pass([1, 2, 3], pages, rows, {}, charged.append, lambda: False)
+    assert rep["failed"] == [2] and rows[1]["desc"] == "قديم 2"
+    assert len(charged) == 3, "المحاولةُ الفاشلة تُحتسب كلفتُها أيضًا"
+
+
+def test_the_description_pass_stops_at_the_cost_cap(monkeypatch):
+    app, pages, rows, seen = _desc_pass_setup(monkeypatch)
+    spent = []
+    rep = app._desc_pass([1, 2, 3], pages, rows, {}, spent.append, lambda: len(spent) >= 1)
+    assert len(seen) == 1 and rep["skipped"] == [2, 3]
+    assert rows[1]["desc"] == "قديم 2"
