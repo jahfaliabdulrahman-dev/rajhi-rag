@@ -164,6 +164,17 @@ def test_the_last_row_stops_before_the_footer():
     assert _inside(lines_of[-1][-1], pb.bands[-1])
 
 
+def test_a_full_page_keeps_its_last_row_above_the_footer():
+    """الانحدارُ المقيس: تاريخُ آخرِ حركةٍ في صفحةٍ ممتلئة (~٩٠٥) أُخذ عنوانَ التذييل فسقط صفّها
+    — ١٧٧ صفحةً من ٦٢٥ في الكشف الحقيقي."""
+    rows = [{"lines": 4}] + [{"lines": 3}] * 10 + [{"lines": 1}]   # آخرُ سطرِ حركةٍ عند ~٩١٥
+    g, lines_of, _ = _page(rows)
+    assert lines_of[-1][0][0] > 900
+    pb = analyze_page(g, DPI)
+    assert len(pb.bands) == len(rows)
+    assert pb.bands[-1].bottom < _px(FOOTER_TOP)
+
+
 def test_the_summary_page_has_balances_but_no_dates():
     g, _, _ = _page([{"lines": 1, "dated": False}] * 4, orphan_lines=1)
     pb = analyze_page(g, DPI)
