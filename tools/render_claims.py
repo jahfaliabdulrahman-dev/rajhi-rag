@@ -131,6 +131,12 @@ def claims(d: dict) -> list[tuple[str, str, str]]:
         ("PLAN.md", f"{d['recoveries']} مرساة", "عدد المراسي المُستدركة"),
         ("PLAN.md", f"{d['rereads']} إعادة قراءة", "عدد إعادات القراءة"),
         ("docs/QA_CHECKLIST.md", f"حالياً {d['tests']}", "عدد الاختبارات"),
+        # **وأرقامُ البيئات المنشورة تُقابَل بلقطتها (مقعدا المعايير والبنية · ٦٨د · T5):** كانت قيمتا
+        # `ci-light`/`ci-claims` مكتوبتين بيدٍ في الوثيقة **بلا ربطٍ باللقطة** ⇒ تتقادمان بصمت (وهو ما
+        # وقع فعلًا: بقيت ٧٣٢/٦٧٢ في موضعٍ وحدّثتُ الثاني). فالآن كلُّ مفتاحٍ في `tests_by_env` له دعوى
+        # على الوثيقة بصيغتها المنشورة، والانزياحُ يُحمرّ البوّابةَ.
+        *[("docs/QA_CHECKLIST.md", f"⇒ **{v}**", f"قيمةُ بيئة `{e}` المنشورة")
+          for e, v in sorted((d.get("tests_by_env") or {}).items())],
         # The ABOUT screen said «about 1.6% of 629 pages» long after the project
         # accounted for every page: the number a stranger reads first had no
         # guard at all (external audit).
