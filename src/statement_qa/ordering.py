@@ -275,8 +275,13 @@ def adjacency(order: list[int], footers: dict[int, tuple], own: dict[int, tuple]
     return out
 
 
-def summarize_footer_order(fo: dict) -> str:
-    """Run-level one-liner: is the file in its true order, and what moved?"""
+def summarize_footer_order(fo: dict, applied: bool = False) -> str:
+    """Run-level one-liner: is the file in its true order, and what moved?
+
+    `applied`: the run READ the pages in this true order (the pre-read footers
+    were available) — said explicitly, so «out of place» is never read as
+    «processed out of place».
+    """
     total = len(fo["order"])
     ranked = total - len(fo["unplaced"])
     if not total or ranked / total < MIN_PAGE_COVERAGE:
@@ -289,7 +294,8 @@ def summarize_footer_order(fo: dict) -> str:
            if not fo["moved"] else
            f"⚠ الترتيب بالإجماليات التراكمية: صفحاتٌ في غير موضعها — المواقع "
            f"{'، '.join(str(p) for p in fo['moved'][:5])}"
-           f"{' …' if len(fo['moved']) > 5 else ''} ({ranked}/{total})")
+           f"{' …' if len(fo['moved']) > 5 else ''} ({ranked}/{total})"
+           f"{' — قُرئت بترتيبها الحقيقي' if applied else ''}")
     if fo["duplicates"]:
         seg += " — إجمالياتٌ مكرّرة: " + "، ".join(
             "/".join(str(p) for p in ps) for ps in fo["duplicates"][:3])

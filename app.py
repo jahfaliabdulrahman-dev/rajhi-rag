@@ -30,8 +30,10 @@ from decimal import Decimal
 from pathlib import Path
 
 import gradio as gr
+import numpy as np
 import pandas as pd
 from pdf2image import convert_from_path, pdfinfo_from_path
+from PIL import Image
 
 import sys
 
@@ -61,7 +63,11 @@ from statement_qa.footer_oracle import (
     check_page_footer, delta_checkable, delta_status, page_diverged,
     read_footer, try_page_reread,
 )
+from statement_qa.intake import (
+    blocked_message_ar, inspect_locally, plan, summary_ar as summarize_intake_ar,
+)
 from statement_qa.job_lock import JobBusyError, job_lock
+from statement_qa.row_bands import analyze_page
 from statement_qa.ordering import (
     check_order, check_page_numbers, footer_order, summarize_ar as summarize_order_ar,
     summarize_footer_order, summarize_page_numbers,
@@ -322,7 +328,10 @@ MAX_UI_COST_USD = 3.0
 FAIL_STREAK_LIMIT = 5
 
 
-def _pages_to_pngs(pdf_path: str, dpi: int = 200):
+RENDER_DPI = 200      # مقاسُ الماسح المرجعي الذي عُويرت عليه بوابةُ الجودة (A4 ≈ 1654×2338)
+
+
+def _pages_to_pngs(pdf_path: str, dpi: int = RENDER_DPI):
     try:
         n_pages = int(pdfinfo_from_path(pdf_path).get("Pages") or 0)
     except Exception:
@@ -346,7 +355,34 @@ def _pages_to_pngs(pdf_path: str, dpi: int = 200):
     return out
 
 
-def process_pdf(pdf_path: str, progress=gr.Progress()):
+def _local_checks(pages: list[str]):
+    """(gate_fn, kind_fn): طبقتا فحص ما قبل القراءة المجانيتان (`statement_qa.intake`).
+
+    البوابةُ تُحمَّل مرّةً واحدة، **وفشلُ تحميلها يوقف التشغيل** بجملةٍ واضحة: تشغيلٌ بلا بوابة
+    هو بالضبط ما يُراد منعه (درسُ `tools/scale_slice.py`: استيرادٌ أخفق بصمتٍ فمرّت صفحةٌ فارغة
+    إلى استدعاءٍ مدفوع). ولم يُدفع شيءٌ بعد.
+    """
+    try:
+        root = str(Path(__file__).resolve().parent)
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        from tools.page_gate import check_page, modal_page_size  # noqa: PLC0415
+    except Exception as e:  # noqa: BLE001
+        raise gr.Error(f"تعذّر تحميل فحص جودة الصفحات ({type(e).__name__}) — "
+                       f"لم تبدأ القراءة ولم يُدفع شيء.")
+    modal = modal_page_size([{"size": list(Image.open(p).size)} for p in pages]) \
+        if pages else None
+
+    def gate_fn(p):
+        return check_page(Path(p), modal_size=modal)
+
+    def kind_fn(p):
+        return analyze_page(np.asarray(Image.open(p).convert("L")), RENDER_DPI).kind
+
+    return gate_fn, kind_fn
+
+
+def process_pdf(pdf_path: str, skip_rejected: bool = False, progress=gr.Progress()):
     """Tab 1 handler — single-job lock → read all pages → chain-audit →
     footer oracle + era/order checks → chunks+index.
 
@@ -361,14 +397,25 @@ def process_pdf(pdf_path: str, progress=gr.Progress()):
         raise gr.Error("ارفع ملف PDF أولاً ثم اضغط «قراءة الكشف».")
     try:
         with job_lock(LOCK_PATH):
-            return _process_pdf_locked(pdf_path, progress)
+            return _process_pdf_locked(pdf_path, progress, skip_rejected)
     except JobBusyError:
         raise gr.Error("يوجد تشغيل جارٍ الآن (نافذة أو طلب آخر) — "
                        "انتظر انتهاءه ثم أعد المحاولة.")
 
 
-def _process_pdf_locked(pdf_path: str, progress):
+def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
     pages = _pages_to_pngs(pdf_path)
+
+    # فحصُ ما قبل القراءة (statement_qa.intake): مجانيٌّ ويسبق **أيَّ** استدعاءٍ مدفوع — حتى
+    # فحصَ المصرف. صفحةٌ مرفوضة ⇒ لا تبدأ القراءة، ويُقال للعميل ما يعيد تصويره.
+    progress(0.0, "فحص الصفحات قبل القراءة…")
+    gate_fn, kind_fn = _local_checks(pages)
+    intake = inspect_locally(pages, gate_fn, kind_fn)
+    decision = plan(intake, skip_rejected)
+    if decision["blocked"]:
+        STATE.clear()   # لا تُجيب الأسئلةُ عن ملفٍّ سابقٍ بعد رفعِ ملفٍّ لم يُقرأ
+        STATE["intake"] = {"gate": intake.gate, "kinds": intake.kinds, **decision}
+        return (blocked_message_ar(intake), _rows_df([]), "", pages, "")
 
     # «بنك غير مدعوم» جملة واضحة بدل فشل غامض — فحص واحد للصفحة الأولى،
     # ويفشل مفتوحاً: أي التباس يمرّر التشغيل (لا قرار على تخمين).
@@ -387,8 +434,6 @@ def _process_pdf_locked(pdf_path: str, progress):
     footer_checks: list[dict] = []
     era_pages: dict[int, list] = {}
     page_dates: dict[int, list] = {}
-    # الإجمالياتُ التراكمية لكلّ صفحة: مفتاحُ الترتيب الحقيقي (ordering.footer_order)
-    page_footers: dict[int, tuple] = {}
     boundaries = {"txn": 0, "carry": 0, "anchor": 0}
     usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cost": 0.0}
     # cumulative debits/credits for the footer oracle (footer totals are
@@ -415,8 +460,25 @@ def _process_pdf_locked(pdf_path: str, progress):
     page_rereads: list[dict] = []
     fail_streak = 0
     abort_reason = ""
-    for pg, img in enumerate(pages, start=1):
-        progress((pg - 1) / len(pages), f"قراءة صفحة {pg}/{len(pages)}…")
+    # التذييلاتُ أولًا (قصاصةٌ صغيرةٌ لكلّ صفحة): مفتاحُ الترتيب الحقيقي (ordering.footer_order)،
+    # وهي نفسُها تُستعمل في تحكيم الصفحة أدناه — فلا يُدفع التذييلُ مرّتين.
+    footers: dict = {}
+    for i, pg in enumerate(decision["process"]):
+        progress(0.05 * i / len(decision["process"]),
+                 f"قراءة إطار الإجماليات {i + 1}/{len(decision['process'])}…")
+        fst: dict = {}
+        try:
+            footers[pg] = read_footer(pages[pg - 1], stats=fst)
+        except Exception:
+            footers[pg] = None
+        _merge_usage(fst)
+    fo = footer_order({pg: (f.debits, f.credits) if f else None
+                       for pg, f in footers.items()})
+    order_now = fo["order"]
+    for i, pg in enumerate(order_now):
+        img = pages[pg - 1]
+        progress(0.05 + 0.9 * i / len(order_now),
+                 f"قراءة صفحة {pg} ({i + 1}/{len(order_now)})…")
         if usage["cost"] > MAX_UI_COST_USD:
             abort_reason = (f"أُوقف التشغيل عند الصفحة {pg}: تجاوز سقف الكلفة "
                             f"(${MAX_UI_COST_USD:.2f} لهذا المسار).")
@@ -453,7 +515,7 @@ def _process_pdf_locked(pdf_path: str, progress):
             gap_missing = list(range(prev_page_no + 1, page_no))
         # مرساة حدّية غير محسومة؟ استدراك مقيد: إعادة قراءة موضعية تُقبل
         # فقط إذا أغلقت السلسلة (ما كشفه ص11 في السلايس).
-        if pg > 1 and rows and rows[0].get("boundary") == "anchor":
+        if i > 0 and rows and rows[0].get("boundary") == "anchor":
             rst: dict = {}
             raw_rows, recovered = recover_anchor(
                 raw_rows, prev_closing, img, pg, rst)
@@ -461,13 +523,7 @@ def _process_pdf_locked(pdf_path: str, progress):
             if recovered is not None:
                 rows = chain_derive(raw_rows, prev_balance=prev_closing)
                 recoveries.append({"page": pg, "amount": str(recovered)})
-        fst: dict = {}
-        try:
-            footer = read_footer(img, stats=fst)
-        except Exception:
-            footer = None
-        _merge_usage(fst)
-        page_footers[pg] = (footer.debits, footer.credits) if footer else None
+        footer = footers.get(pg)
         # تحكيم الصفحة: انزياح عن الفوتر يُطلق قراءة جديدة واحدة، تُقبل فقط
         # إذا كانت بلا شكوك وتُطابق دلتا الفوتر (معزولة عن أي تلوث سابق).
         if (not gap_missing
@@ -479,7 +535,7 @@ def _process_pdf_locked(pdf_path: str, progress):
             if accepted and fresh_raw is not None:
                 raw_rows = fresh_raw
                 rows = chain_derive(raw_rows, prev_balance=prev_closing)
-                if pg > 1 and rows and rows[0].get("boundary") == "anchor":
+                if i > 0 and rows and rows[0].get("boundary") == "anchor":
                     rst2: dict = {}
                     raw_rows, rec = recover_anchor(
                         raw_rows, prev_closing, img, pg, rst2)
@@ -489,7 +545,7 @@ def _process_pdf_locked(pdf_path: str, progress):
                                             prev_balance=prev_closing)
                         recoveries.append({"page": pg, "amount": str(rec)})
                 page_rereads.append({"page": pg, "note": note})
-        if pg > 1 and rows:
+        if i > 0 and rows:
             b = rows[0].get("boundary")
             if b in boundaries:
                 boundaries[b] += 1
@@ -546,12 +602,13 @@ def _process_pdf_locked(pdf_path: str, progress):
     STATE["usage"] = usage
     STATE["boundary_recoveries"] = recoveries
     STATE["page_rereads"] = page_rereads
-    STATE["page_numbers"] = check_page_numbers(page_nos)
+    STATE["page_numbers"] = check_page_numbers(sorted(page_nos))   # بمواضع الملف
     era_fp = fingerprint_pages(era_pages)
     order = check_order(page_dates)
     STATE["era"] = era_fp
     STATE["order"] = order
-    STATE["footer_order"] = footer_order(page_footers)
+    STATE["footer_order"] = fo
+    STATE["intake"] = {"gate": intake.gate, "kinds": intake.kinds, **decision}
     n_ok = sum(1 for r in all_rows if r["ok"])
     n_susp = len(all_rows) - n_ok
     last_bal = next((r["balance"] for r in reversed(all_rows)
@@ -624,8 +681,9 @@ def _process_pdf_locked(pdf_path: str, progress):
             summarize_era_ar(era_fp,
                              format_effects(_verdicts, _suspect_pages)),
             summarize_order_ar(order, boundaries),
-            summarize_footer_order(STATE["footer_order"]),
-            summarize_page_numbers(check_page_numbers(page_nos))]
+            summarize_footer_order(fo, applied=True),
+            summarize_page_numbers(check_page_numbers(sorted(page_nos))),
+            summarize_intake_ar(intake, decision["skipped"])]
     if abort_reason:
         segs.insert(0, "⛔ " + abort_reason)
     if filled_dates:
@@ -808,6 +866,10 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي") as demo:
                                      file_types=[".pdf"], elem_id="file-panel")
                     btn = gr.Button("قراءة الكشف وبناء الفهرس", variant="primary",
                                     interactive=False)
+                    skip_box = gr.Checkbox(
+                        label="متابعة مع استبعاد الصفحات المرفوضة "
+                              "(لا تُقرأ ولا تُدفع، وتُسمّى في الملخّص)",
+                        value=False)
                     gr.Markdown(
                         "*نسخة تجريبية: كشوف الراجحي فقط · العيّنة قيد التوسع. "
                         "تُقرأ الصفحات عبر خدمة سحابية — لا ترفع كشفاً حقيقياً "
@@ -834,7 +896,7 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي") as demo:
                 gallery = gr.Gallery(columns=5, show_label=False)
             pdf_in.change(lambda f: gr.update(interactive=bool(f)),
                           inputs=pdf_in, outputs=btn)
-            btn.click(process_pdf, inputs=pdf_in,
+            btn.click(process_pdf, inputs=[pdf_in, skip_box],
                       outputs=[ticker, table, kpi, gallery, filter_box],
                       show_progress_on=[ticker])
         with gr.Tab("٢. سؤال وجواب"):
