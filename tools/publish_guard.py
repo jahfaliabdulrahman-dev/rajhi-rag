@@ -158,6 +158,14 @@ def _git(*args: str) -> str:
     return out.stdout.decode("utf-8", "replace")
 
 
+class GitReadError(RuntimeError):
+    """قراءةٌ من git لم تكتمل أو أعطت ما لا يُعقل ⇒ **لا حكم** (فشلٌ مُغلَق) بدل «صفرُ مطابقات».
+
+    **مصدرُها (مراجعة ٦٨ · R68-1):** «عددُ المطابقات = صفر» كانت تُقرأ «نظيفًا»، وهي في الحقيقة
+    قد تعني «لم أقرأ شيئًا». والقاعدة: **رقمٌ لا يُقاس لا يُصادَق عليه**.
+    """
+
+
 def _git_z(*args: str) -> list[str]:
     """مخرَجُ git **بفواصل NUL وبلا تقويس** — لمقابلة المسارات (جولة ٦٧ · مقعدُ المواصفة).
 
@@ -167,9 +175,43 @@ def _git_z(*args: str) -> list[str]:
     «0 تحت مجلّدات البيانات الحقيقيّة» و`rc=0` — أي أنّ **الخطوةَ التي أُضيفت لسدّ R67-1 كانت هي
     التي تمرّ منه**. و`git -c core.quotePath=false ls-files` أعطى `flagged=1` — فالعلاجُ قراءةٌ واحدة.
     و`-z` أصحُّ من `-c`: لا يقوّس **ولا** يستعمل فاصلًا يمكن أن يظهر في اسم ملفّ (سطرٌ جديد).
+
+    **وفشلٌ مُغلَق (مراجعة ٦٨):** كانت تُعيد المخرَجَ بلا فحصِ رمزِ الخروج ⇒ فأمرٌ فاشلٌ يُقرأ
+    «قائمةً فارغةً» = «نظيفًا». والآن يرفع `GitReadError` والمستدعي يُعلنها (رمز ٢: تعذّرُ قياس).
     """
-    out = subprocess.run(["git", *args, "-z"], cwd=ROOT, capture_output=True).stdout
-    return [x for x in out.decode("utf-8", "replace").split("\0") if x]
+    proc = subprocess.run(["git", *args, "-z"], cwd=ROOT, capture_output=True)
+    if proc.returncode != 0:
+        raise GitReadError(
+            f"`git {' '.join(args)} -z` ⇒ rc={proc.returncode}: "
+            f"{proc.stderr.decode('utf-8', 'replace').strip()[:160]}")
+    return [x for x in proc.stdout.decode("utf-8", "replace").split("\0") if x]
+
+
+def _history_pairs() -> list[tuple[str, str]]:
+    """أزواجُ (المسار، المعرّف) لكلّ كائنٍ في التاريخ — بصيغة `-z` **كما هي مقيسة**.
+
+    **مراجعة ٦٨ · R68-1 — العلّةُ المقيسة:** `rev-list --objects --all -z` **لا يُخرج الأسطرَ
+    نفسَها بفاصلٍ آخر**؛ بُنيَتُه تتغيّر إلى **سجلّاتٍ منفصلة**:
+    `<sha>\\0<sha>\\0<sha>\\0path=<المسار>\\0` (والمسارُ في سجلٍّ **مسبوقٍ بـ`path=`** بلا فراغٍ يفصل).
+    وكان القارئُ يفصل كلَّ سجلٍّ على أوّل فراغ ⇒ لم يُطابق شيئًا ⇒ **٣٦٢٢ كائنًا تُتخطّى بصمت**،
+    ويُخرج الحارسُ «نظيف» وهو لم يقرأ شيئًا (قِيس في الشجرة: `history: 0 · 0 BLOCK · rc=0`).
+    أمّا `ls-tree -r -z` فبُنيَتُه لم تتغيّر (‎`\\t` باقٍ) ⇒ الشجرةُ كانت سليمة، وهو سببُ غياب الأثر.
+
+    **وصفرُ كائناتٍ فشلٌ مُغلَق:** مستودعٌ له تاريخٌ لا يكون صفرًا ⇒ الصيغةُ تغيّرت أو الأمرُ لم يُنفَّذ.
+    """
+    pairs: list[tuple[str, str]] = []
+    sha = ""
+    for rec in _git_z("rev-list", "--objects", "--all"):
+        if rec.startswith("path="):
+            if sha:
+                pairs.append((rec[5:], sha))
+        else:
+            sha = rec
+    if not pairs:
+        raise GitReadError(
+            "مسحُ التاريخ قرأ **صفرَ كائن** — ومستودعٌ له تاريخٌ لا يكون صفرًا ⇒ تغيّرت صيغةُ "
+            "`rev-list --objects -z` أو لم يُنفَّذ الأمر (فشلٌ مُغلَق: لا حكمَ على ما لم يُقرأ)")
+    return pairs
 
 
 def _read_blobs(shas: list[str]) -> dict[str, bytes]:
@@ -515,13 +557,8 @@ def scan_history(findings, entries, seen) -> int:
     # be scanned, or an older commit that still carries PII slips through.
     # (An earlier version deduped by path and kept only the newest blob —
     # caught by running it: older test fixtures with real names were masked.)
-    out = _git_z("rev-list", "--objects", "--all")
     pairs, dedup = [], set()
-    for rec in out:
-        parts = rec.split(" ", 1)
-        if len(parts) != 2:
-            continue
-        sha, path = parts
+    for path, sha in _history_pairs():
         if (path, sha) in dedup:
             continue
         dedup.add((path, sha))
@@ -680,15 +717,22 @@ def main() -> None:
     seen: set[str] = set()
     scanned = []
 
-    if args.pre_push:
-        scanned.append(("push", scan_pre_push(findings, entries, seen)))
-    if args.tree or args.ci:
-        scanned.append(("tree", scan_tree(findings, entries, seen)))
-    if args.history or args.ci:
-        scanned.append(("history", scan_history(findings, entries, seen)))
-        scanned.append(("messages", scan_messages(findings, entries)))
-    if args.messages and not (args.history or args.ci):
-        scanned.append(("messages", scan_messages(findings, entries)))
+    try:
+        if args.pre_push:
+            scanned.append(("push", scan_pre_push(findings, entries, seen)))
+        if args.tree or args.ci:
+            scanned.append(("tree", scan_tree(findings, entries, seen)))
+        if args.history or args.ci:
+            scanned.append(("history", scan_history(findings, entries, seen)))
+            scanned.append(("messages", scan_messages(findings, entries)))
+        if args.messages and not (args.history or args.ci):
+            scanned.append(("messages", scan_messages(findings, entries)))
+    except GitReadError as exc:
+        # **تعذّرُ قياسٍ ⇒ لا حكم (مراجعة ٦٨ · R68-1):** كان الخطأُ يُقرأ «مخرَجٌ فارغٌ» = «نظيفًا»
+        # ⇒ فحصٌ يمرّ لأنّه لم يقرأ شيئًا. والرمزُ ٢ (لا ١) لأنّ ١ محجوزٌ لـ«وُجد ما يُحجب» (docs/GATES).
+        print(f"⛔ تعذّر إتمامُ القراءة ⇒ **لا حكم**: {exc}")
+        print("   (فشلٌ مُغلَق: لا تُقرأ «صفرُ مطابقات» على أنّها نظافة.)")
+        sys.exit(2)
 
     blocks = [f for f in findings if f[0] == "BLOCK"]
     warns = [f for f in findings if f[0] == "WARN"]
