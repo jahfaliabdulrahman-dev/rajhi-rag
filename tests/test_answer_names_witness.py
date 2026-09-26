@@ -142,6 +142,10 @@ NON_ANSWER_FILES_SINCE_RULE = {
     # يقيس هذا الإعلان.
     "handoff/sulaiman/20260926-1515-PLAN-round65-probe-clock-section27-and-the-three-seat-review.md":
         "خطةُ جولةٍ (وثيقةُ تنفيذٍ قبل العمل) — لا تُجيب حُكماً ولا تُودِع شاهداً",
+    # **وملفُّ الجولة ٦٥ الثاني (السادس من الصنف المقيس):** نقلُ نصّ المقاعد الثلاثة **بالحرف** — والدرسُ
+    # «يُسمّى قبل أن يُقاس» يُطبَّق هنا أيضًا؛ ولا `class:` في متنه (فلا يدخل `DECLARED_NON_VERDICT` عن غير قصد).
+    "handoff/sulaiman/20260926-152950-SEATS-round65-three-isolated-seats-verbatim.md":
+        "نصُّ المقاعد الثلاثة بالحرف (نقلٌ للمُدخَل) — لا يُجيب حُكماً",
 }
 #: وأصنافُها مذكورةٌ **في القاموس نفسِه** (`NON_ANSWER_FILES_SINCE_RULE` — البند ٦) لا في تعليقٍ ثانٍ.
 #: **ومُخاطَبٌ واحدٌ هبط بالقاعدة، وهو صنفٌ مُعلَنٌ بالاسم:** `20260925-0723-REPORT-to-claude-r13-…`
@@ -158,6 +162,8 @@ SUBJECTS_LANDED = {
         "يُعلن `class:` ولا يُجيب حُكماً (R58-2) — صنفٌ مُعلَنٌ بالاسم",
     "handoff/sulaiman/20260926-0455-REPORT-to-claude-round64-seat-verdict-closure-and-two-measured-mutations.md":
         "جوابٌ بشاهدٍ حقيقيّ (`in-reply-to:` إلى أحدث حُكمٍ سابق) — الجولة ٦٤",
+    "handoff/sulaiman/20260926-153028-REPORT-to-claude-round65-section27-landed-r65-closed-and-three-seat-verdicts-closed.md":
+        "جوابٌ بشاهدٍ حقيقيّ (`in-reply-to:` إلى مراجعة ٦٥ `065039`، أحدثِ حُكمٍ سبقه) — الجولة ٦٥",
 }
 #: الحارسُ الدائريُّ الذي سُحب — يُقاس غيابُه فلا يعود صامتاً من بابٍ خلفيّ (البندُ ٤ من عِلّته).
 RETIRED_GATE = "tests/test_review_landing.py"
