@@ -442,15 +442,68 @@ def test_the_history_reader_judges_by_shape_not_by_zero(monkeypatch):
         pg._history_pairs()
 
 
-def test_every_git_reader_refuses_a_failed_read():
+def test_every_git_reader_refuses_a_failed_read(monkeypatch):
     """**قارئٌ واحد للسياسة (مقعدا المعايير والبنية · جولة ٦٨):** كانت `_git` تُعيد `''` على أمرٍ
     فاشل بينما `_git_z` ترفع ⇒ فبقيت أنصافُ المسح (الرسائل · `pre-push`) تعود «نظيفةً صامتة».
     و`_git` تحمل قراءةَ الرسائل و`rev-list` في مسار الدفع، أي المسار الذي **يوقف دفعَ المالك**.
+
+    **وتعدادُ القارئَين كان ناقصًا (مقعدُ البنية F-2 · ٦٨ج):** الاسمُ يقول «كلُّ قارئ» والعدُّ اثنان،
+    والقارئُ الثالث (`_read_blobs` — موضعُ الحكم) لم يُضَف ⇒ فعودتُه تبتلع الفشلَ تمرّ خضراء.
+    (وأثبته المقعدُ بطفرةٍ لا تسقط شيئًا.) فيُقاس الآن **سلوكيًّا** بمُخرَجٍ فاشلٍ مُحاكى.
     """
     import publish_guard as pg
     for reader in (pg._git, pg._git_z):
         with pytest.raises(pg.GitReadError):
             reader("rev-list", "--definitely-not-a-git-flag-068")
+
+    monkeypatch.setattr(pg, "_run_git", lambda *a, **k: b"")
+    with pytest.raises(pg.GitReadError):
+        pg._read_blobs(["a" * 40])
+
+
+def test_a_changed_ls_tree_format_is_a_failure_not_a_silent_skip(monkeypatch):
+    """**قارئا الشجرة والتاريخ على سياسةٍ واحدة (مقعدُ المعايير S1 · ٦٨ج):** `_tree_entries` كانت
+    تُسقط السجلَّ غيرَ المفهوم بـ`continue` ⇒ مخرجٌ **برمز خروجٍ صفرٍ** وشكلٌ تغيّر يُقرأ «شجرةً
+    نظيفةً» بصمت — وهو عينُ ما حُصّن ضدَّه `_history_pairs` في الدلتا نفسِها.
+
+    والفرقُ الذي يقيسه الضابط: `tree`/`commit` في `ls-tree` **مشروعة** (وحدةٌ فرعيّة) فلا ترفع،
+    والسجلُّ الذي لا يُفهَم (بلا TAB · أو بلا نوعٍ ومعرّف) يُوقف الحكم.
+    """
+    import publish_guard as pg
+
+    blob = "100644 blob " + "a" * 40 + "\tREADME.md"
+    submodule = "160000 commit " + "b" * 40 + "\tvendor/lib"
+    monkeypatch.setattr(pg, "_git_z", lambda *a, **k: [blob, submodule])
+    assert pg._tree_entries("HEAD") == [("README.md", "a" * 40)], (
+        "الوحدةُ الفرعيّة لا تُمسح ولا تُوقف الحكم")
+
+    monkeypatch.setattr(pg, "_git_z", lambda *a, **k: ["100644 blob " + "a" * 40])
+    with pytest.raises(pg.GitReadError):
+        pg._tree_entries("HEAD")
+
+    monkeypatch.setattr(pg, "_git_z", lambda *a, **k: ["100644 nope " + "a" * 40 + "\tx"])
+    with pytest.raises(pg.GitReadError):
+        pg._tree_entries("HEAD")
+
+
+def test_a_truncated_cat_file_stream_is_a_failure_not_a_short_read(monkeypatch):
+    """**المعلَنُ يُقابَل بالمقروء (مقعدُ البنية F-5 · ٦٨ج):** الترويسةُ تعلن الحجم، والبثُّ المقطوع
+    كان يُعاد قصيرًا بصمت (`nl < 0 ⇒ break` والشرائحُ بلا فحص طول) ⇒ يُفحَص ذيلُ الكائن جزئيًّا
+    ويُقرأ الحكمُ «نظيفًا». و**الكائنُ الفارغُ ليس عطبًا:** `size = 0` يُقرأ صفرَ بايتٍ مقصودًا.
+    """
+    import publish_guard as pg
+
+    full = b"deadbeef " + b"blob 11\n" + b"hello world" + b"\n"
+    monkeypatch.setattr(pg, "_run_git", lambda *a, **k: full)
+    assert pg._read_blobs(["deadbeef"]) == {"deadbeef": b"hello world"}
+
+    monkeypatch.setattr(pg, "_run_git", lambda *a, **k: b"deadbeef blob 11\nhello wor")
+    with pytest.raises(pg.GitReadError):
+        pg._read_blobs(["deadbeef"])
+
+    monkeypatch.setattr(pg, "_run_git", lambda *a, **k: b"deadbeef blob 0\n\n")
+    assert pg._read_blobs(["deadbeef"]) == {"deadbeef": b""}, (
+        "ملفٌّ فارغٌ داخل الشجرة كائنٌ مشروعٌ لا عطبُ قراءة")
 
 
 def test_the_tracked_data_step_declares_a_failed_read_like_the_history_step(tmp_path):
@@ -495,6 +548,18 @@ def test_the_count_hint_lives_in_both_ci_steps():
     assert wf.count("git diff --exit-code -- docs/claims.json") == 2, (
         "والفرقُ الفاشلُ في الخطوتين معًا")
 
+    # **ولا رقمَ من أرقام الدعوى مكتوبًا بيدٍ في الـworkflow (مقعدُ المواصفة F2 · ٦٨ج):** قيمةٌ منسوخةٌ
+    # من اللقطة بلا ضابطٍ رابطةٍ تتقادم بصمتٍ عند أوّل اختبارٍ يُضاف — وهي ميكانيكا P5 نفسُها.
+    import json
+    import re
+    snap = json.loads((Path(__file__).resolve().parents[1] / "docs" / "claims.json")
+                      .read_text(encoding="utf-8"))
+    hand = [str(v) for v in [snap["tests"], *snap["tests_by_env"].values()]]
+    # وحَدُّ التمييز مُعلَن: عدّادٌ لا يسبقه ولا يتبعه محرفٌ ستّعشريّ (فلا يُصطاد ذيلُ تجزئة).
+    stuck = [v for v in hand if re.search(rf"(?<![0-9a-f]){v}(?![0-9a-f])", wf)]
+    assert not stuck, (
+        f"أرقامُ الدعوى {stuck} مكتوبةٌ بيدٍ في الـworkflow ⇒ تُقرأ من اللقطة (مؤشّرًا) لا تُنسَخ")
+
 
 def test_the_guard_and_the_ignore_rules_share_one_list_of_real_data_dirs():
     """**لا قائمتان تفترقان (مقعدُ البنية · جولة ٦٧):** `.gitignore` يحمل أسماءَ مجلّدات البيانات
@@ -521,15 +586,39 @@ def test_a_three_wide_space_grouped_account_is_blocked():
 
 
 def test_the_tool_reaches_git_through_one_core_only():
-    """**«قارئٌ واحد» تُقاس بالنصّ لا بالوعد (مقعدا المعايير والبنية · الجولة ٦٨ب).**
+    """**«قارئٌ واحد» تُقاس بالخاصيّة لا بالنصّ (مقعدا المعايير والبنية · الجولة ٦٨ب/٦٨ج).**
 
     كلُّ قراءةٍ من git في الحارس تمرّ على `_run_git` (التي تفحص رمزَ الخروج وترفع `GitReadError`).
     فظهورُ نداءٍ ثانٍ مباشر يعني **سياسةً ثانية**: قراءةٌ فاشلةٌ تُقرأ «صفرًا» = «نظيفًا».
     (والقياسُ الذي أنتج هذا الضابط: `_read_blobs` — وهي التي تُنزل محتوى الكائنات، أي موضعُ الحكم
     نفسُه — كانت القراءةَ **الرابعة** بلا فحصِ رمز خروج.)
+
+    **والعدُّ النصّيّ كان أعمى (المقعدان · ٦٨ج):** نداءٌ مباشرٌ **بسطرٍ منكسر** (`subprocess.run(\\n    ["git", …]`)
+    يحمل صفرًا في `src.count('subprocess.run(["git"')` — أثبتَه المقعدان بمقارئٍ خامسٍ مزروع ⇒ فصار
+    الفحصُ على **شجرة AST**: كلُّ نداءٍ لـ`subprocess.<fn>` يُعدّ بعُقده، والمسموحُ واحدٌ وموضعُه
+    داخل `_run_git` حصرًا (لا في الشجرة التي قد تحمل شكله بأيّ كسرِ أسطر).
     """
+    import ast
+
     src = Path(pg.__file__).read_text("utf-8")
-    assert src.count('subprocess.run(["git"') == 1, "قراءةُ git خارج النواة `_run_git`"
+    tree = ast.parse(src)
+
+    def calls_in(node) -> list[ast.Call]:
+        return [n for n in ast.walk(node)
+                if isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Attribute)
+                and isinstance(n.func.value, ast.Name)
+                and n.func.value.id == "subprocess"]
+
+    core = [n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "_run_git"]
+    assert len(core) == 1, "نواةُ القراءة `_run_git` معدودةٌ بالنصّ (AST)"
+    core_calls = calls_in(core[0])
+    assert len(core_calls) == 1, "النواةُ تنادي subprocess مرّةً واحدة (وإلّا فمسارُ فشلٍ بلا فحص)"
+    outside = [n.lineno for n in calls_in(tree) if n not in core_calls]
+    assert not outside, (
+        f"نداءُ subprocess خارج النواة `_run_git` في السطور {outside} ⇒ سياسةُ قراءةٍ ثانية "
+        f"(قراءةٌ فاشلةٌ تُقرأ «صفرًا» = «نظيفًا»)")
     assert src.count("_run_git(") >= 4, "نواةُ القراءة لا يستهلكها كلُّ المسارات"
 
 
