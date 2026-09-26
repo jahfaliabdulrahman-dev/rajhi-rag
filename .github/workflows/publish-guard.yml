@@ -42,7 +42,12 @@ jobs:
       # docs/claims.json and asserts the public documents still match it.
       - name: Public claims must match their derived snapshot
         id: gate_claims
-        run: python3 tools/render_claims.py --check
+        run: |
+          # **البوّابةُ تفشلُ مُغلَقةً ويثبّت مُشغّلَها (R67-2 · مراجعة ٦٧):** كان هذا الفحصُ يجري
+          # **قبل** تثبيت `pytest` (السطر ٤٩) ⇒ `_test_count()` تُعيد `None` فيتخطّى القياسُ الحيُّ
+          # **بصمت**، ويُقابَل رقمٌ برقمٍ لا يُقاس. فلا يُثبَّت الاعتمادُ في خطوةٍ أخرى ويتّكل عليه هذا.
+          python3 -m pip install --quiet pytest
+          python3 tools/render_claims.py --check
       - name: Lightweight suite (no ML deps — compile, lock, public claims, gate injection)
         id: gate_suite
         run: |
@@ -76,14 +81,10 @@ jobs:
         run: python3 tools/landing_probe.py --quiet
       - name: Real-data files must never be tracked
         id: gate_data_untracked
-        run: |
-          bad=$(git ls-files | grep -E '^data/(local_sample|training|eval_pack)/' || true)
-          if [ -n "$bad" ]; then
-            echo "::error::real-data files tracked (local_sample/training/eval_pack):"
-            echo "$bad"
-            exit 1
-          fi
-          echo "no real-data files tracked under local_sample/training/eval_pack — OK"
+        # **مالكٌ واحد للقاعدة (مراجعة ٦٧):** كان هنا نمطٌ جذريٌّ خاصٌّ بالخطوة
+        # (`^data/(local_sample|training|eval_pack)/`) ⇒ نسخةٌ متداخلةٌ (`data/data/local_sample/…`)
+        # تفلت منه، وتفلت من الحارس في الوقت نفسه. فصارت الخطوةُ تستدعي قاعدةَ الحارس نفسَها.
+        run: python3 tools/publish_guard.py --tracked-real-data
 
       - name: Amount-guard — the key/manifest must not be tracked (no secret needed)
         id: gate_amount_key

@@ -283,6 +283,10 @@ def test_the_snapshot_gate_actually_fires(monkeypatch, tmp_path):
                                                    encoding="utf-8")
     monkeypatch.setattr(rc, "claims",
                         lambda d: [("docs/QA_CHECKLIST.md", f"حالياً {d['tests']}", "عدد الاختبارات")])
+    # **ويُعلن المشهدُ قياسَه (R67-2 · مراجعة ٦٧):** البوّابةُ صارت تفشل **مُغلَقةً** حين لا يُقاس العدد،
+    # وهذا المشهدُ `PROJ` فيه مجلّدٌ مؤقّتٌ لا شجرةَ اختباراتٍ فيه ⇒ `_test_count()` تُعيد `None` ⇒
+    # الفحصُ يحمرّ لسببٍ لا يخصّ ما يقيسه هذا الضابط. فلا يُرخى الفحص، **بل يُعلَن المدخَلُ الناقص.**
+    monkeypatch.setattr(rc, "_test_count", lambda: 606)
     monkeypatch.setattr(sys, "argv", ["render_claims.py", "--check"])
     with pytest.raises(SystemExit) as e:
         rc.main()

@@ -280,6 +280,35 @@ def test_a_four_wide_card_still_blocked_even_with_spaces():
         "بطاقةٌ برُباعياتٍ مفصولةٍ بفراغ تبقى محجوبة"
 
 
+def test_a_nested_real_data_copy_is_never_excused():
+    """**تداخلُ النسخ يُخرج بياناتٍ حقيقيّةً من الحماية (مراجعة ٦٧ · R67-1).**
+
+    قِيس: `cp -R data <نسخةٍ فيها data/>` تُنتج `data/data/` ⇒ **٣٦١٠ ملفًا ومنها المفتاح** خارج
+    `.gitignore` الجذريّ، وقابلةٌ للإيداع بـ`git add .` — والحارسُ كان يقابل **بادئة** المسار وحدَها.
+    فالمقابلةُ على **مقاطع** المسار، والتداخلُ لا يُعفي.
+    """
+    assert pg.real_data_path("data/local_sample/slice_629p/slice_report.json"), "الجذرُ محجوب"
+    assert pg.real_data_path("data/data/local_sample/slice_629p/slice_report.json"), \
+        "المتداخلُ محجوب — وهو موضعُ العلّة نفسُه"
+    assert pg.real_data_path("a/b/data/eval_pack/x.json"), "العمقُ مهما كان لا يُعفي"
+    assert not pg.real_data_path("data/sample/statement_sample.pdf"), \
+        "اللقطةُ المسموحةُ في المستودع تبقى مسموحة (ضبطٌ موجب)"
+    assert not pg.real_data_path("docs/data/local_sample.md"), \
+        "اسمٌ يشبه المجلّدَ في مسارٍ آخر ليس بياناتٍ حقيقيّة (ضبطٌ موجب ثانٍ)"
+
+
+def test_the_ci_step_and_the_guard_share_one_rule():
+    """**مالكٌ واحد للقاعدة (مراجعة ٦٧):** كانت خطوةُ الـCI تحمل نمطًا جذريًّا خاصًّا بها ⇒ فالنسخةُ
+    المتداخلةُ تفلت من الاثنين معًا. فلا يُعاد النمطُ الثاني، والخطوةُ تستدعي قاعدةَ الحارس.
+    """
+    root = Path(__file__).resolve().parents[1]
+    wf = (root / ".github" / "workflows" / "publish-guard.yml").read_text(encoding="utf-8")
+    assert "publish_guard.py --tracked-real-data" in wf, \
+        "خطوةُ الـCI تستدعي قاعدةَ الحارس نفسَها (مالكٌ واحد)"
+    assert "grep -E '^data/(local_sample" not in wf, \
+        "النمطُ الجذريُّ المكرَّر أُزيل — وإلّا عاد التداخلُ فمرّ (الشرحُ يبقى، والنمطُ لا)"
+
+
 def test_a_three_wide_space_grouped_account_is_blocked():
     """**الثغرة التي فتحها توسيعي ثم أُغلق.** مدقّقٌ خارجي قاس أن حساباً من 15 أو
     18 رقماً مكتوباً بثلاثاتٍ مفصولةٍ بفراغ كان **يمرّ**، لأنني وسّعتُ القاعدة
