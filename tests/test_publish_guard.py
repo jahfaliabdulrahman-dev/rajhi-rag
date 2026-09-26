@@ -1,8 +1,10 @@
 """Publish guard tests — the dedup bug, the digit-table exemption, and the
 four structural holes an external audit opened are regressions; lock them
-here. Mostly no git operations — **إلّا ثلاثةُ ضوابط في الذيل** تنشئ نسخةَ git مستقلّةً في
-`tmp_path` (ثقبُ المسار غير ASCII · تسريبٌ في التاريخ وحدَه · وقراءةٌ فاشلةٌ ليست قراءةً فارغة)،
-وهي لا تلمس مستودع المشروع ولا فهرسه.
+here. Mostly no git operations — **إلّا ضوابطُ الذيل، وهي كما تُقاس لا كما تُوصف:** اثنان ينشئان مستودعَ
+git كاملًا داخل `tmp_path` (ثقبُ المسار غير ASCII · تسريبٌ في التاريخ وحدَه) · وواحدٌ ينسخ الأداةَ إلى
+مجلّدٍ **ليس مستودعًا** ثم يُهيّئ فيه مستودعًا فارغًا (تعذّرُ القراءة · صفرُ ملفٍّ مُتتبَّع) · وواحدٌ يقرأ
+نصَّ الـworkflow · وواحدٌ يشغّل `_git`/`_git_z` على عَلَمٍ لا وجودَ له **داخل مستودع المشروع** (قراءةٌ
+فاشلةٌ متوقّعة: لا تلمس الشجرةَ ولا الفهرس ولا `HEAD`).
 
 INVARIANT (enforced below, not promised in prose): this file ships no real
 statement data — every account-shaped value is invented — and every payload
@@ -418,12 +420,77 @@ def test_a_failed_git_read_is_not_an_empty_read():
         pg._git_z("rev-list", "--definitely-not-a-git-flag-068")
 
 
-def test_an_empty_history_read_is_a_failure_not_cleanliness(monkeypatch):
-    """**R68-1:** «صفرُ كائنات» من مستودعٍ له تاريخٌ ليست نظافةً بل **تعذّرَ قراءة** ⇒ استثناءٌ صريح."""
+def test_an_empty_read_is_a_failure_but_an_empty_named_history_is_not(monkeypatch):
+    """**R68-1 على الخام + مقعدُ البنية (لا صرخةٌ كاذبة · جولة ٦٨):**
+
+    - صفرُ **سجلّاتٍ خام** = لم يُقرأ شيءٌ من git ⇒ استثناءٌ صريح (وإلّا قُرئ «صفرُ مطابقات» نظافةً).
+    - وصفرُ **أزواجٍ** مع سجلّاتٍ مقروءةٍ (تاريخٌ مشروعٌ بلا كائنٍ مسمّى — مستودعٌ بالتزامٍ فارغ) ⇒
+      **مشروعٌ لا استثناء**؛ وإلّا صار الحارسُ يصرخ دائمًا فيُهمَل. (قِيس: مستودعٌ بالتزامٍ فارغٍ
+      واحدٍ ⇒ `history: 0 · rc=0` بعد الإصلاح، وكان `rc=2` قبله.)
+    """
     import publish_guard as pg
-    monkeypatch.setattr(pg, "_git_z", lambda *a, **k: ["", ""])
+
+    monkeypatch.setattr(pg, "_git_z", lambda *a, **k: [])
     with pytest.raises(pg.GitReadError):
         pg._history_pairs()
+
+    monkeypatch.setattr(pg, "_git_z", lambda *a, **k: ["a" * 40, "b" * 40])
+    assert pg._history_pairs() == []
+
+    monkeypatch.setattr(pg, "_git_z", lambda *a, **k: ["path=x", "a" * 40])
+    with pytest.raises(pg.GitReadError):
+        pg._history_pairs()
+
+
+def test_every_git_reader_refuses_a_failed_read():
+    """**قارئٌ واحد للسياسة (مقعدا المعايير والبنية · جولة ٦٨):** كانت `_git` تُعيد `''` على أمرٍ
+    فاشل بينما `_git_z` ترفع ⇒ فبقيت أنصافُ المسح (الرسائل · `pre-push`) تعود «نظيفةً صامتة».
+    و`_git` تحمل قراءةَ الرسائل و`rev-list` في مسار الدفع، أي المسار الذي **يوقف دفعَ المالك**.
+    """
+    import publish_guard as pg
+    for reader in (pg._git, pg._git_z):
+        with pytest.raises(pg.GitReadError):
+            reader("rev-list", "--definitely-not-a-git-flag-068")
+
+
+def test_the_tracked_data_step_declares_a_failed_read_like_the_history_step(tmp_path):
+    """**الفرعُ الذي هو خطوةُ CI بنفسه (مقعدُ البنية P1 · مقعدُ المواصفة P2 · جولة ٦٨):**
+    كان `_git_z("ls-files")` **خارج** حدّ الاستثناء ⇒ خطأُ git يُخرج أثرًا (traceback) برمز ١، ورمزُ
+    ٢ المُعلَن في `docs/GATES.md` لا يصله. فالمقيسُ هنا: **رمز ٢ · رسالةٌ معلَنة · بلا أثر.**
+    """
+    import shutil
+    import subprocess
+    import sys
+
+    root = tmp_path / "not-a-repo"
+    (root / "tools").mkdir(parents=True)
+    shutil.copy(Path(__file__).resolve().parents[1] / "tools" / "publish_guard.py", root / "tools")
+    r = subprocess.run([sys.executable, "tools/publish_guard.py", "--tracked-real-data"],
+                       cwd=root, capture_output=True, text=True)
+    assert r.returncode == 2, f"تعذّرُ القراءة ⇒ ٢ (لا حكم) لا ١ ولا أثرًا (rc={r.returncode})"
+    assert "Traceback" not in r.stderr + r.stdout, "ولا يُسرَّب أثرُ الاستثناء:\n" + r.stderr
+    assert "لا حكم" in r.stdout, "والرسالةُ تُعلن أنّها لا تحكم:\n" + r.stdout
+
+    subprocess.run(["git", "init", "-q", "."], cwd=root, check=True)
+    r2 = subprocess.run([sys.executable, "tools/publish_guard.py", "--tracked-real-data"],
+                        cwd=root, capture_output=True, text=True)
+    assert r2.returncode == 2, (
+        f"مستودعٌ بلا ملفٍّ مُتتبَّع واحد لا يُقرأ «0 تحت مجلّدات البيانات الحقيقيّة» نظافةً "
+        f"(rc={r2.returncode})\n{r2.stdout}")
+
+
+def test_the_count_hint_lives_in_both_ci_steps():
+    """**السنُّ الذي يُفشل خطوةَ اللقطة بلا ضابطٍ كان يُمحى بصمت (مقعدُ المواصفة P3 · جولة ٦٨):**
+    `render_claims --write` ثم `git diff --exit-code` هو ما يكشف انزياحَ قياسِ البيئة **بعد** أن صار
+    `--check` يُقابِل الملفَّ الذي كتبته الخطوةُ نفسُها ⇒ فحذفُ السطرين يُبقي كلَّ شيءٍ أخضرَ ويعود
+    الانزياحُ صامتًا (وهو صنفُ R68-1 نفسه).
+    """
+    wf = (Path(__file__).resolve().parents[1] / ".github" / "workflows"
+          / "publish-guard.yml").read_text(encoding="utf-8")
+    assert wf.count("render_claims.py --write") == 2, (
+        "الخطّافُ في الخطوتين معًا (المجموعة واللقطة) — لا في واحدة")
+    assert wf.count("git diff --exit-code -- docs/claims.json") == 2, (
+        "والفرقُ الفاشلُ في الخطوتين معًا")
 
 
 def test_the_guard_and_the_ignore_rules_share_one_list_of_real_data_dirs():
