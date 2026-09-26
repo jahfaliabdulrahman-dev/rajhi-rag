@@ -146,6 +146,8 @@ NON_ANSWER_FILES_SINCE_RULE = {
     # «يُسمّى قبل أن يُقاس» يُطبَّق هنا أيضًا؛ ولا `class:` في متنه (فلا يدخل `DECLARED_NON_VERDICT` عن غير قصد).
     "handoff/sulaiman/20260926-152950-SEATS-round65-three-isolated-seats-verbatim.md":
         "نصُّ المقاعد الثلاثة بالحرف (نقلٌ للمُدخَل) — لا يُجيب حُكماً",
+    "handoff/sulaiman/20260926-153542-PUSH-round65-range-to-pr127-and-ci-green-on-the-pushed-commit.md":
+        "وثيقةُ قياسٍ مُودَعة (تقريرُ دفعٍ: مخرَجُ `ci_report` على المراجع المدفوعة) — لا تُجيب حُكماً",
 }
 #: وأصنافُها مذكورةٌ **في القاموس نفسِه** (`NON_ANSWER_FILES_SINCE_RULE` — البند ٦) لا في تعليقٍ ثانٍ.
 #: **ومُخاطَبٌ واحدٌ هبط بالقاعدة، وهو صنفٌ مُعلَنٌ بالاسم:** `20260925-0723-REPORT-to-claude-r13-…`
