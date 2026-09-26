@@ -23,7 +23,8 @@
 **وحدودُه مُعلَنة** (ولا تُدَّعى أوسعَ منها):
 - **ما يُقاس:** قائمةُ ضوابط الـCI (مقروءةٌ من الـworkflow) + `publish_guard --tree --ci`.
 - **وساعةُ الختم ساعةُ الشجرة لا ساعةُ العدّاء (R65-1 · مراجعة ٦٥):** اللحظةُ تُحوَّل إلى `NAMING_TZ`
-  (‎+03، إزاحةُ كلّ اسمٍ في `handoff/`) وتُرفَع فوق أحدثِ ختمٍ في الشجرة المقيسة، فيخرج الشاهدُ من كلّ
+  (‎+03، إزاحةُ كلّ اسمٍ في `handoff/` · مالكُها `tools/turn.py`) وتُرفَع فوق أحدثِ ختمٍ **في صندوقَي المراسلة
+  (`handoff/claude` · `handoff/sulaiman`) من الشجرة المقيسة**، فيخرج الشاهدُ من كلّ
   نافذة `(شاهد, جواب]` قائمة. والعطبُ المقيس قبل الإصلاح: تشغيلٌ بـUTC ختم `034032` فوقع بين شاهد
   الجواب `032854` والجواب `0455` ⇒ سقط `test_every_landed_answer_names_a_witness_in_the_same_tree`
   على جوابٍ صحيح (وأخضرُ المنفّذ المحلّيُّ أعمى عنه لأنّ ساعته +03).
@@ -45,7 +46,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
 
@@ -66,14 +67,17 @@ CI_FILE_RE = re.compile(r"tests/[A-Za-z0-9_/]+\.py")
 #: بساعة العدّاء يقع **قبل** أسماء الجولة نفسِها فيصير هو «أحدثَ حُكمٍ قبل الجواب» ⇒ يسقط ضابطُ §٢٧
 #: على جوابٍ هبط فعلًا. والنافذةُ المقيسة: كلُّ تشغيلٍ بين `الشاهد+3h` و`الجواب+3h` يسقط، وتتكرّر
 #: مع كلّ جوابٍ جديد.
-NAMING_TZ = timezone(timedelta(hours=3))
-#: **صندوقا المراسلة**: أحدثُ ختمٍ فيهما **أرضيّةٌ** لختم الشاهد الاصطناعيّ، فلا يدخل نافذةَ جوابٍ
-#: منشورٍ أبدًا. والأرضيّةُ لا تُغيّر الحالةَ العاديّة (ساعةُ الشجرة +03 فوق أسماء الجولة عادةً).
-BOXES = (BOX, "handoff/sulaiman")
-#: نمطُ الاسم واصطلاحُ زمنه من **مصدرٍ واحد** (`tools/turn.py` — ST-4: لا نسخةً ثانية تفترق عنه)،
+#: **والمنطقةُ ونطاقُ الصناديق ونمطُ الاسم من مالكها** (`tools/turn.py` — ST-4: لا نسخةً ثانية تفترق عنه)،
 #: والمسارُ يُضاف صريحًا لأنّ المسبارَ يُستورَد من الاختبارات أيضًا ⇒ فلا افتراضَ على `sys.path`.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from turn import as_datetime, stamp_of  # noqa: E402
+from turn import NAMING_TZ, SIDES, as_datetime, stamp_of  # noqa: E402
+#: **صندوقا المراسلة**: أحدثُ ختمٍ فيهما **أرضيّةٌ** لختم الشاهد الاصطناعيّ، فلا يدخل نافذةَ جوابٍ
+#: منشورٍ أبدًا. **والنطاقُ من مالكِ التخطيط** (`turn.SIDES`) لا نسخةً ثانية: فلو وُسّع نطاقُ حارس §٢٧
+#: بصندوقٍ ثالث لأرضت الأرضيّةُ دونَه ⇒ شاهدٌ يقع في نافذة جوابٍ حقيقيّ ⇒ `rc=1` **كاذب** على شجرةٍ
+#: سليمة (صنفُ R57-1/R58-1/R59-1 الذي لاحقته الجولات). والرابطُ **يُقاس**:
+#: `tests/test_landing_probe.py::test_the_floor_covers_the_witness_scope`.
+#: والأرضيّةُ لا تُغيّر الحالةَ العاديّة (ساعةُ الشجرة +03 فوق أسماء الجولة عادةً).
+BOXES = tuple(f"handoff/{side}" for side in sorted(SIDES))
 
 
 def ci_files(workflow: Path = WORKFLOW) -> list[str]:
@@ -227,20 +231,15 @@ def _synthetic_review(stamp: str, ref: str, branch: str, poison: str | None) -> 
     return "\n".join(lines) + "\n"
 
 
-def _stamp_dt(stamp: str) -> datetime:
-    """`%Y%m%d-%H%M%S` ⇒ لحظة (**مُحلِّلٌ واحد** · P3-١١ مراجعة ٦١ · مقعد البنية).
-
-    كانت الصيغةُ تُشريح يدويًّا في موضعَين (`_name` و`_commit`) ⇒ تغييرُ الصيغة يكسر مُحلِّلَين
-    يجب أن يتقادما معًا؛ والآن يمرّ الاثنان من هنا.
-    """
-    return datetime.fromisoformat(f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}T"
-                                  f"{stamp[9:11]}:{stamp[11:13]}:{stamp[13:15]}")
-
-
 def _name(stamp: str, poison: str | None) -> str:
-    """اسمُ الملفّ — بزمنه في مقدّمته (قاعدةُ أسماء التقارير)، وبلا كلمة REPORT في الاسم."""
+    """اسمُ الملفّ — بزمنه في مقدّمته (قاعدةُ أسماء التقارير)، وبلا كلمة REPORT في الاسم.
+
+    والزمنُ يُقرأ ويُزاح بـ**مالك الصيغة** (`turn.as_datetime` — ST-4): كان هنا مُحلِّلٌ محلّيٌّ
+    (`_stamp_dt`) **أضيقُ من مالكه** — يسقط على اصطلاح `24:00` الموثَّق بـ`ValueError` بينما المالكُ
+    يعالجه — وهو صنفُ «نسختين تفترقان» الذي رفضه المستودع (مقعدا المعايير والبنية · الجولة ٦٥).
+    """
     if poison == "name-stamp":                      # زمنُ اسمٍ منزاحٌ ٣ ساعات ⇒ يجب أن يسقط ضابطُ الأسماء
-        shifted = (_stamp_dt(stamp) - timedelta(hours=3)).strftime("%Y%m%d-%H%M%S")
+        shifted = (as_datetime(stamp) - timedelta(hours=3)).strftime("%Y%m%d-%H%M%S")
         return f"{shifted}-third-eye-review-99-landing-probe.md"
     return f"{stamp}-third-eye-review-99-landing-probe.md"
 
