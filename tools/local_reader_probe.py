@@ -11,10 +11,14 @@
 
 **والوحدتان معًا (اللبسُ بينهما كان عطبًا معلَنًا):** **الصفوف — ٤٦** (وهي التي يخدمها حكمُ «صفٌّ ناقصُ مبلغٍ
 = صفٌّ لا يُغلق») و**القيمُ المتمايزةُ في كلّ صفحة — ٣٥** (وحدةُ القياس الأولى، تُذكر للاستمراريّة).
-و`شكل` · `قيمة` · `أرقام` تُطبع كلُّها في المخرَج لتُرى، ولا يُنشَر منها رقمٌ كمقياس.
+و`شكل` · `قيمة` · `أرقام` تُطبع كلُّها في المخرَج لتُرى — **كلُّ عدسةٍ بمقامها** — ولا يُنشَر منها رقمٌ كمقياس.
+و**الاشتقاقُ واحدٌ للطرفين** (`canonical` ⇐ `lenses_of`): لا نسختان تفترقان في الإشارة ولا في حدّ الإدراج،
+و**المقامُ يُرشَّح بالقاعدة المُعلَنة نفسِها** ويُطبَع عددُ المُسقَط بها كي لا يُفرَّغ بصمت.
 
 **حدُّ القياس (مُعلَن):** المطابقةُ على مستوى **الصفحة** لا الصفّ في العمود — لا ربطَ بعمودٍ ولا إحداثيّات
-(فالرقمُ عضويّةٌ في الصفحة كلِّها)، ويُقاس الصفُّ بأنّ مبلغَه المطبوعَ ظهر في رموز الصفحة.
+(فالرقمُ عضويّةٌ في الصفحة كلِّها)، ويُقاس الصفُّ بأنّ مبلغَه المطبوعَ ظهر في رموز الصفحة ⇒ **الرقمُ حدٌّ أعلى
+متفائل لا أسفل**، ولا يُتّخذ مِقياسَ درجةٍ لنموذجٍ لاحق وحدَه. والإشارةُ (مدين/دائن) تُسقَط من الطرفين:
+رمزُ المحرّك لا يحملها، فإبقاؤها كانت تُحيل الأرصدةَ السالبةَ متعذِّرةَ الإصابة بحكم البناء لا بحكم المحرّك.
 
 **لماذا في المستودع:** رقمٌ بلا أداته ليس دليلًا — من أراد إعادةَ القياس يُشغّل:
 
@@ -24,8 +28,10 @@
     python tools/local_reader_probe.py --design <معرّف>   # والافتراضُ يُكتشف من القرص
 
 **رموزُ الخروج (كلُّها مُعلَنةٌ ومُختبَرة):** ٠ قياسٌ تمّ · ٢ محرّكُ Vision غائبٌ (إطفاءٌ برسالة) ·
-٣ لا بياناتِ تدريبٍ محلّيّة **أو لا مقامَ قابلًا للقياس** (لا مبلغَ مطبوعًا في الصفحات المطلوبة) ·
-٤ صفحةٌ مطلوبةٌ غيرُ مؤهَّلة (والرسالةُ تسمّي المؤهَّلَ اليوم) · ٥ وسيطٌ مشوَّه (`--pages` · أو عَلَمٌ غيرُ معروف).
+٣ لا بياناتِ تدريبٍ محلّيّة **أو لا مقامَ قابلًا للقياس** (لا مبلغَ مطبوعًا أو لا رصيدَ مطبوعًا في الصفحات
+المطلوبة) **أو صفرُ إصاباتٍ في كلّها** (قاعدة ٩: الصفرُ بالضبط علامةُ قياسٍ ميتٍ لا نموذجٍ فاشل، فلا يُنشَر
+«٠.٠٪» قياسًا تمّ) · ٤ صفحةٌ مطلوبةٌ غيرُ مؤهَّلة (والرسالةُ تسمّي المؤهَّلَ اليوم) · ٥ وسيطٌ مشوَّه
+(`--pages` · أو عَلَمٌ غيرُ معروف). و**نصٌّ فارغٌ من المحرّك يُسمّى** بسطر ⚠ باسم صفحته.
 
 **الترتيبُ مهمّ:** غيابُ البيانات يُسمّى (٣) **قبل** أيّ طلبِ صفحة — وإلّا صار غيابُها «صفحةً غيرَ مؤهَّلة» (٤).
 
@@ -69,11 +75,12 @@ SINGLE_INTEGER_DIGIT = 1                # يُعلَن منفصلًا: مبلغ�
 
 EXIT_OK, EXIT_NO_ENGINE, EXIT_NO_DATA, EXIT_NOT_ELIGIBLE, EXIT_BAD_ARGS = 0, 2, 3, 4, 5
 
-_SCAN_CACHE: dict[str, list] = {}       # مسحٌ واحدٌ لكلّ تصميمٍ في الوظيفة الواحدة (يُصفَّر في `main`)
+_SCAN_CACHE: dict[pathlib.Path, list] = {}   # مسحٌ واحدٌ لكلّ مجلّد (المفتاحُ المسارُ لا الاسم) — يُصفَّر في `main`
 
 AR_INDIC = {ord(c): ord("0") + i for i, c in enumerate("٠١٢٣٤٥٦٧٨٩")}
 AR_EXTENDED = {ord(c): ord("0") + i for i, c in enumerate("۰۱۲۳۴۵۶۷۸۹")}
 ALL_SEPS = ".,،٫٬"
+SIGN_CHARS = "-−–—"                     # إشارةُ السالب بأنواعها: تُسقَط من الطرفين (المحرّكُ لا يحملها)
 _SEPS = "[" + re.escape(ALL_SEPS) + "]"
 TOKEN = re.compile(r"\d[\d" + re.escape(ALL_SEPS) + r"]*\d|\d")
 TRAILING_FRACTION = re.compile(_SEPS + r"(\d{1,2})$")
@@ -97,8 +104,12 @@ def canonical(tok: str) -> str | None:
 
     والكسرُ المقبولُ خانةٌ أو خانتان: ورقةٌ تطبع «٩٩٩٫٩» لا يجوز أن تُقرأ «٩٩٩٩» (عطبٌ مقيسٌ في الاتّجاه
     المقابل: «٩٩٩٫٠٠» ⇐ «٩٩٩٫٠»).
+
+    **والإشارةُ تُسقَط هنا — وهذا موضعُ الإسقاط الوحيد للطرفين:** قِيس (مقعد البنية) أنّ رمزَ المحرّك لا
+    يحمل إشارةً أصلًا، فإبقاؤها في الورق كان يُحيل الأرصدةَ السالبةَ **متعذِّرةَ الإصابة بحكم البناء لا بحكم
+    المحرّك** (١٨ حقلًا موقَّعًا في ١٢ صفحةً من ٢٨٢). فالمقياسُ يقيس الأرقامَ لا الإشارة — ويُعلَن ذلك.
     """
-    t = to_ascii_digits(tok).strip()
+    t = to_ascii_digits(tok).strip().lstrip(SIGN_CHARS)
     if not any(ch.isdigit() for ch in t):
         return None
     m = TRAILING_FRACTION.search(t)
@@ -149,22 +160,38 @@ def integer_digits_of(canon: str | None) -> int:
     return len(canon.split(".")[0].lstrip("0") or "0")
 
 
+def lenses_of(canon: str | None) -> RuleSets:
+    """**الاشتقاقُ الوحيد**: من صيغةٍ كانونيّةٍ واحدة تُشتقّ العدساتُ الأربع — يستعملُه طرفا المقابلة معًا.
+
+    كان بناءُ العدسات مكتوبًا **مرّتين** (للمحرّك وللورق) ⇒ افتراقٌ صامتٌ قابلٌ للوقوع، وهو ما قِيس فعلًا
+    في الإشارة وحدِّ الإدراج (مقعد البنية). فصار البناءُ في موضعٍ واحد — والأرقامُ المنشورةُ لا تتغيّر.
+    """
+    out: RuleSets = {name: set() for name in RULES}
+    if not canon:
+        return out
+    out["شكل"].add(canon)
+    if has_paper_shape(canon):
+        out["ورق"].add(canon)
+    try:
+        out["قيمة"].add(Decimal(canon))
+    except InvalidOperation:
+        pass
+    d = re.sub(_SEPS, "", canon).lstrip("0") or "0"
+    if _accept_digits(d):
+        out["أرقام"].add(d)
+    return out
+
+
+def _merge(dst: RuleSets, src: RuleSets) -> None:
+    for name in RULES:
+        dst[name] |= src[name]
+
+
 def numeric_sets(text: str) -> RuleSets:
-    """أربعُ مجموعاتٍ من نصٍّ واحد: `ورق` (كانونيٌّ بكسرِ خانتين — **المُعلَنة**) · `شكل` (كانونيٌّ نصًّا) ·
-    `قيمة` (`Decimal`) · `أرقام` (مجرَّدةٌ من كل فاصل، ≥خانتين)."""
+    """عدساتُ نصٍّ مقروء: كلُّ رمزٍ على المنظِّم الواحد ثم على `lenses_of` — **بلا اشتقاقٍ ثانٍ**."""
     out: RuleSets = {name: set() for name in RULES}
     for raw in TOKEN.findall(to_ascii_digits(text)):
-        c = canonical(raw)
-        if c:
-            out["شكل"].add(c)
-            if has_paper_shape(c):
-                out["ورق"].add(c)
-        v = value_of(raw)
-        if v is not None:
-            out["قيمة"].add(v)
-        d = digits_of(raw)
-        if _accept_digits(d):
-            out["أرقام"].add(d)
+        _merge(out, lenses_of(canonical(raw)))
     return out
 
 
@@ -174,23 +201,26 @@ def design_candidates() -> list[pathlib.Path]:
     return sorted(p for p in base.glob("*") if p.is_dir() and any(p.glob("pg-*")))
 
 
-def design_dir(design: str | None = None) -> pathlib.Path:
-    """مجلّدُ التصميم: صريحًا، أو **الأوّلُ الذي يحمل الصفحاتِ المُجمَّدة** فلا يُعاد قياسٌ على غيرها."""
+def resolve_design(design: str | None = None) -> pathlib.Path:
+    """**«أيُّ تصميم؟» في دالّةٍ واحدة** — كانت `eligible` تحمل سؤالين: «أيُّ تصميم؟» و«امسح واحدًا».
+
+    صريحًا، أو **الأوّلُ الذي يحمل الصفحاتِ المُجمَّدة** فلا يُعاد قياسٌ على غيرها (والسقوطُ إلى الأوّل
+    إن لم يحملها أحدٌ يُعلَن بحكم `selected`).
+    """
     if design:
-        return (ROOT / DESIGN_ENV) / design
+        return ROOT / DESIGN_ENV / design
     dirs = design_candidates()
     for d in dirs:
         # من الأرقام التي تحملها الحقيقةُ لا من اسم المجلّد (الأسماءُ مُصفَّرة: pg-001)
-        pool = {int(lab["page"]) for _, lab, _ in eligible(d.name)}
-        if set(PUBLISHED_PAGES) <= pool:
+        if set(PUBLISHED_PAGES) <= {int(lab["page"]) for _, lab, _ in eligible(d)}:
             return d
     return dirs[0] if dirs else (ROOT / DESIGN_ENV / "-")
 
 
-def _scan_one(design: str) -> list[tuple[pathlib.Path, dict, list]]:
-    """مسحٌ خامٌّ لتصميمٍ **واحد**: فيه `page.png` و`label.json` و`len(rows) >= MIN_ROWS`."""
+def _scan_one(path: pathlib.Path) -> list[tuple[pathlib.Path, dict, list]]:
+    """مسحٌ خامٌّ لمجلّدٍ **واحد**: فيه `page.png` و`label.json` و`len(rows) >= MIN_ROWS`."""
     out = []
-    for d in sorted((ROOT / DESIGN_ENV / design).glob("pg-*"), key=lambda p: int(p.name.split("-")[1])):
+    for d in sorted(path.glob("pg-*"), key=lambda p: int(p.name.split("-")[1])):
         lj, png = d / "label.json", d / "page.png"
         if not (png.exists() and lj.exists()):
             continue
@@ -206,17 +236,22 @@ def forget_scan_cache() -> None:
     _SCAN_CACHE.clear()
 
 
-def eligible(design: str | None = None) -> list[tuple[pathlib.Path, dict, list]]:
-    """الصفحاتُ المُؤهَّلة بترتيب الرقم — **بمسحٍ واحدٍ لكلّ تصميمٍ في الوظيفة الواحدة**.
+def eligible(design: str | pathlib.Path | None = None) -> list[tuple[pathlib.Path, dict, list]]:
+    """الصفحاتُ المُؤهَّلة بترتيب الرقم — **بمسحٍ واحدٍ لكلّ مجلّدٍ في الوظيفة الواحدة**.
 
-    كان المسحُ يتكرّر: `design_dir` تمسح للتصفية، ثم `main` تمسح ثانيةً، ثم `--list` ثالثةً (قِيس في
+    كان المسحُ يتكرّر: `resolve_design` تمسح للتصفية، ثم `main` تمسح ثانيةً، ثم `--list` ثالثةً (قِيس في
     مراجعة ٦٤: ٥٧٧ قراءةَ `label.json` لـ٢٩٤ ملفًا في تشغيلٍ عاديّ، و٨٧١ في `--list`). والمرجعُ المخزَّن
-    هو نفسُه الذي يُعاد ⇒ لا نسخةَ تُبدَّل تحت مستهلك.
+    هو نفسُه الذي يُعاد ⇒ لا نسخةَ تُبدَّل تحت مستهلك. **والمفتاحُ المسارُ المُحلَّل لا الاسم**: اسمٌ واحدٌ
+    لشجرتين مختلفتين كان يُعيد مسحَ الشجرة الأولى صامتًا (قِيس في مقعد البنية).
     """
-    name = design or design_dir().name
-    if name not in _SCAN_CACHE:
-        _SCAN_CACHE[name] = _scan_one(name)
-    return _SCAN_CACHE[name]
+    if design is None:
+        path = resolve_design()
+    else:
+        given = pathlib.Path(design)
+        path = given if given.is_absolute() else ROOT / DESIGN_ENV / design
+    if path not in _SCAN_CACHE:
+        _SCAN_CACHE[path] = _scan_one(path)
+    return _SCAN_CACHE[path]
 
 
 def selected(pages: tuple[int, ...] = PUBLISHED_PAGES, design: str | None = None,
@@ -256,37 +291,34 @@ def truth_sets(rows: list) -> dict[str, RuleSets]:
         for group, val in (("مبالغ", r.get("printed_amount")), ("أرصدة", r.get("balance"))):
             if val in (None, ""):
                 continue
-            s = _truth_form(val)
-            c = canonical(s)
-            forms = (("ورق", c if has_paper_shape(c) else None), ("شكل", c),
-                     ("قيمة", value_of(s)), ("أرقام", digits_of(s)))
-            for name, form in forms:
-                if name == "أرقام":
-                    if _accept_digits(form):
-                        out[group][name].add(form)
-                elif form not in (None, ""):
-                    out[group][name].add(form)
+            # **الاشتقاقُ الوحيد للطرفين**: منظِّمٌ واحد (`canonical`) ثم أربعُ عدساتٍ من موضعٍ واحد
+            _merge(out[group], lenses_of(canonical(_truth_form(val))))
     return out
 
 
-def row_counts(rows: list, found: RuleSets, rule: str = PUBLISHED_RULE) -> tuple[int, int, int]:
-    """**على مستوى الصفّ** (لا القيمِ المتمايزة): (المطابَقة · الكلّ · مبالغُ خانتها الصحيحة مفردة).
+def row_counts(rows: list, found: RuleSets, rule: str = PUBLISHED_RULE) -> tuple[int, int, int, int]:
+    """**اشتقاقٌ صفّيّ واحد** — لا نسخةٌ ثانية من اشتقاق مبلغ الصفّ:
+    (المطابَقة · المقامُ المرشَّحُ بالصيغة · المُسقَطُ بالصيغة · ما خانته الصحيحة مفردة).
 
-    المطابقةُ عضويّةٌ في الصفحة كلِّها (لا ربطَ بعمودٍ ولا إحداثيّات — حدٌّ مُعلَن)، ويُحسب الصفُّ مطابَقًا
-    إذا ظهر مبلغُه المطبوعُ بصيغته في رموز الصفحة.
+    والمقامُ يُرشَّح بالقاعدة المُعلَنة نفسِها كما تُرشَّح عيّنةُ القيم — فلا يُقاس بخانتين في المطابقة
+    ويُقسَم على صفٍّ لا يجوز أن يُطابَق. ويُطبَع عددُ المُسقَط كي **لا يُفرَّغ المقامُ بصمت** (قِيس في
+    مقعد المواصفة: صفٌّ بمبلغٍ بكسورٍ من خانةٍ واحدة كان يختفي من البسط والمقام بلا عدّاد).
     """
-    hit = total = single = 0
+    hit = total = dropped = single = 0
     for r in rows:
         val = r.get("printed_amount")
         if val in (None, ""):
             continue
         c = canonical(_truth_form(val))
+        if not c or not has_paper_shape(c):
+            dropped += 1                      # صيغةٌ لا تُطابَق بها القاعدةُ المُعلَنة ⇒ خارجَ المقام، ويُعلَن
+            continue
         total += 1
-        if c and integer_digits_of(c) == SINGLE_INTEGER_DIGIT:
+        if integer_digits_of(c) == SINGLE_INTEGER_DIGIT:
             single += 1
-        if c and c in found[rule]:
+        if c in found[rule]:
             hit += 1
-    return hit, total, single
+    return hit, total, dropped, single
 
 
 def ocr(path: pathlib.Path) -> str:
@@ -337,7 +369,7 @@ def _list_lines(design: str | None, pool: list | None = None) -> list[str]:
     if not pool:
         return [_no_data_message(design)]
     return [
-        f"التصميمُ المُكتشف: {design_dir(design).name} · المُؤهَّلُ الآن: {len(pool)} صفحة (≥{MIN_ROWS} صفوف)",
+        f"التصميمُ المُكتشف: {resolve_design(design).name} · المُؤهَّلُ الآن: {len(pool)} صفحة (≥{MIN_ROWS} صفوف)",
         "الصفحاتُ المُجمَّدةُ المنشورة: " + ", ".join(f"pg-{p}" for p in PUBLISHED_PAGES),
         "وهي ثابتٌ مُعلَنٌ لا مُشتقٌّ في كلّ وقت: مُؤهَّلُ تصميمٍ آخرَ لا يُنتجها.",
     ]
@@ -382,25 +414,33 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_NOT_ELIGIBLE
 
     totals = {k: [0, 0] for k in ("مبالغ", "أرصدة")}   # [المقام, البسط] — بالمُعلَنة «ورق» على القيم المتمايزة
-    lens_hits = [0] * len(RULES)                       # عدّاتُ العدسات: تُرى للتشخيص ولا يُنشَر منها رقم
-    rows_hit = rows_all = rows_single = 0
+    lens_hits = {name: 0 for name in RULES}            # عدّاتُ العدسات: تُرى للتشخيص ولا يُنشَر منها رقم
+    lens_den = {name: 0 for name in RULES}             # **ولكلّ عدسةٍ مقامُها** (لا تُقسَم كلُّها على مقام غيرها)
+    rows_hit = rows_all = rows_dropped = rows_single = 0
     print(f"{'صفحة':>6} {'صفوف':>5} " + " ".join(f"{n:>9}" for n in RULES) + f" {'أرصدة':>9}")
     for d, lab, rows in chosen:
         try:
-            found = numeric_sets(ocr(d / "page.png"))
+            text = ocr(d / "page.png")
         except RuntimeError as exc:
             print(f"⛔ {exc}")
             return EXIT_NO_ENGINE
+        if not text.strip():
+            # **نصٌّ فارغٌ يُسمّى** (قاعدة ٩): محرّكٌ لم يُرجع حرفًا ليس قاعدةً أُغلقت — وصفرُ إصاباتٍ ليس قياسًا.
+            print(f"⚠ صفحة {lab['page']}: المحرّكُ أعاد نصًّا فارغًا — لا شيءَ يُقاس فيها")
+        found = numeric_sets(text)
         truth = truth_sets(rows)
         hits = {name: len(truth["مبالغ"][name] & found[name]) for name in RULES}
+        den = {name: len(truth["مبالغ"][name]) for name in RULES}
         bh = len(truth["أرصدة"][PUBLISHED_RULE] & found[PUBLISHED_RULE])
-        rh, rt, single = row_counts(rows, found)
-        for i, name in enumerate(RULES):
-            lens_hits[i] += hits[name]
+        rh, rt, rd, single = row_counts(rows, found)
+        for name in RULES:
+            lens_hits[name] += hits[name]
+            lens_den[name] += den[name]
         rows_hit += rh
         rows_all += rt
+        rows_dropped += rd
         rows_single += single
-        totals["مبالغ"][0] += len(truth["مبالغ"][PUBLISHED_RULE])
+        totals["مبالغ"][0] += den[PUBLISHED_RULE]
         totals["مبالغ"][1] += hits[PUBLISHED_RULE]
         totals["أرصدة"][0] += len(truth["أرصدة"][PUBLISHED_RULE])
         totals["أرصدة"][1] += bh
@@ -410,24 +450,33 @@ def main(argv: list[str] | None = None) -> int:
     amt_n, amt_h = totals["مبالغ"]
     bal_n, bal_h = totals["أرصدة"]
     print("-" * 78)
-    if amt_n == 0 or bal_n == 0 or rows_all == 0:
+    if amt_n == 0 or bal_n == 0:
         # **لا نسبةَ بمقامٍ صفريّ:** كان هذا ينفجر بـ`ZeroDivisionError` (تتبّعٌ خامٌ ورمز ١) لمّا تُسقَط
         # كلُّ الصفوف بلا مبلغٍ مطبوع؛ والرفضُ يُسمّى ولا يُحسَب رقمٌ كاذب.
         missing = "المبالغ" if amt_n == 0 else "الأرصدة"
         print(f"⛔ لا مقامَ قابلًا للقياس: لا {missing} مطبوعةً في الصفحات المطلوبة ⇒ لا نسبةَ تُحسَب "
               f"(المبالغ {amt_h}/{amt_n} · الأرصدة {bal_h}/{bal_n} · الصفوف {rows_hit}/{rows_all})")
         return EXIT_NO_DATA
+    if amt_h == 0 and bal_h == 0 and rows_hit == 0:
+        # **الصفرُ بالضبط يُستثنى ولو كان ممكنًا** (قاعدة ٩): صفرُ إصاباتٍ علامةُ مسارٍ مكسورٍ أو محرّكٍ أعمى،
+        # لا نتيجةُ نموذجٍ فاشل — والمقامُ غيرُ صفريّ هنا، فالرفضُ يُسمّى ولا يُنشَر «٠.٠٪» قياسًا تمّ.
+        print(f"⛔ صفرُ إصاباتٍ في كلّ الصفحات ⇒ علامةُ قياسٍ ميتٍ لا نموذجٍ فاشل: راجع الصورَ والمحرّكَ "
+              f"(المقامات: المبالغ {amt_n} · الأرصدة {bal_n} · الصفوف {rows_all})")
+        return EXIT_NO_DATA
     print(f"قاعدةُ «{PUBLISHED_RULE}» (**المُعلَنة** — بصيغة الورق بكسره من خانتين): القيمُ المتمايزةُ في كلّ "
           f"صفحة — المبالغ {amt_h}/{amt_n} = {100 * amt_h / amt_n:.1f}٪ · "
           f"الأرصدة {bal_h}/{bal_n} = {100 * bal_h / bal_n:.1f}٪")
+    dropped = f" · مُسقَطٌ بصيغته: {rows_dropped}" if rows_dropped else ""
     print(f"وعلى مستوى **الصفّ** (وحدةُ الحكم: «صفٌّ ناقصُ مبلغٍ = صفٌّ لا يُغلق»): "
-          f"المبالغ {rows_hit}/{rows_all} = {100 * rows_hit / rows_all:.1f}٪")
-    print("عدساتٌ تشخيصيّة (تُرى ولا تُنشَر): "
-          + " · ".join(f"{n} {lens_hits[i]}/{amt_n}" for i, n in enumerate(RULES[1:], start=1))
-          + f" · إصاباتٌ عارضةٌ في «قيمة» (رمزٌ بلا كسر): {lens_hits[2] - lens_hits[0]}")
+          f"المبالغ {rows_hit}/{rows_all} = {100 * rows_hit / rows_all:.1f}٪{dropped}")
+    print("عدساتٌ تشخيصيّة (تُرى ولا تُنشَر) — كلُّ عدسةٍ **بمقامها**: "
+          + " · ".join(f"{n} {lens_hits[n]}/{lens_den[n]}" for n in RULES[1:])
+          + f" · فرقُ «قيمة» عن «ورق» (إصاباتٌ عارضة، قد يزيدها رمزٌ بكسرٍ من خانة): "
+            f"{lens_hits['قيمة'] - lens_hits[PUBLISHED_RULE]}")
     print(f"مبالغُ خانتها الصحيحة مفردة (تُعلَن منفصلةً — رمزٌ تائه يطابقها): {rows_single} من {rows_all} صفًّا")
-    print("حدُّ القياس: مطابقةٌ عضويّةٌ في الصفحة (لا ربطَ بعمودٍ ولا إحداثيّات) لاسترجاعِ نصٍّ من الورق — "
-          "لا إغلاقَ سلسلةٍ ولا مطابقةَ تذييل ولا شكلَ صفّ.")
+    print("حُدودُ القياس (مُعلَنة): (١) المطابقةُ عضويّةٌ في الصفحة — لا ربطَ بعمودٍ ولا إحداثيّات ⇒ الرقمُ "
+          "**حدٌّ أعلى** متفائل لا أسفل، ولا يُتّخذ مِقياسَ درجةٍ لنموذجٍ لاحق وحدَه؛ (٢) الإشارةُ (مدين/دائن) "
+          "تُسقَط من الطرفين؛ (٣) استرجاعُ نصٍّ فقط — لا إغلاقَ سلسلةٍ ولا مطابقةَ تذييل ولا شكلَ صفّ.")
     return EXIT_OK
 
 
