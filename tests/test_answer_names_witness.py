@@ -147,7 +147,9 @@ NON_ANSWER_FILES_SINCE_RULE = {
     "handoff/sulaiman/20260926-152950-SEATS-round65-three-isolated-seats-verbatim.md":
         "نصُّ المقاعد الثلاثة بالحرف (نقلٌ للمُدخَل) — لا يُجيب حُكماً",
     "handoff/sulaiman/20260926-153542-PUSH-round65-range-to-pr127-and-ci-green-on-the-pushed-commit.md":
-        "وثيقةُ قياسٍ مُودَعة (تقريرُ دفعٍ: مخرَجُ `ci_report` على المراجع المدفوعة) — لا تُجيب حُكماً",
+        "تقريرُ دفعٍ (لا حُكمَ فيه) — مخرَجُ `ci_report` بشهادة الالتزام؛ والجوابُ الحاكم هو `153028`",
+    "handoff/sulaiman/20260926-183255-PUSH-round66-the-answer-and-r66-1-closure-to-pr127.md":
+        "تقريرُ دفعٍ (لا حُكمَ فيه) — مخرَجُ `ci_report` بشهادة الالتزام؛ والجوابُ الحاكم هو `182947`",
 }
 #: وأصنافُها مذكورةٌ **في القاموس نفسِه** (`NON_ANSWER_FILES_SINCE_RULE` — البند ٦) لا في تعليقٍ ثانٍ.
 #: **ومُخاطَبٌ واحدٌ هبط بالقاعدة، وهو صنفٌ مُعلَنٌ بالاسم:** `20260925-0723-REPORT-to-claude-r13-…`
