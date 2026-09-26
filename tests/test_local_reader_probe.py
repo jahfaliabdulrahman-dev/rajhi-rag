@@ -232,6 +232,24 @@ def test_a_zero_denominator_refuses_instead_of_crashing(monkeypatch, capsys):
     assert rc == lrp.EXIT_NO_DATA and "لا مقامَ قابلًا للقياس" in capsys.readouterr().out
 
 
+def test_a_zero_denominator_in_one_column_only_refuses(monkeypatch, capsys):
+    """والفرعُ الثاني: مبالغُ مطبوعةٌ بلا أرصدة ⇒ الرفضُ يسمّي العمودَ الناقص (كان فرعُ `bal_n==0` غيرَ مُختبَر)."""
+    monkeypatch.setattr(lrp, "eligible",
+                        lambda *a, **k: [(ROOT / "tests", {"page": 1}, [{"printed_amount": THOU,
+                                                                          "balance": None}])])
+    monkeypatch.setattr(lrp, "ocr", lambda _p: "")
+    rc = lrp.main(["--pages", "1"])
+    out = capsys.readouterr().out
+    assert rc == lrp.EXIT_NO_DATA and "لا الأرصدة مطبوعةً" in out and "لا مقامَ قابلًا للقياس" in out
+
+
+def test_list_does_not_swallow_a_malformed_argument(capsys):
+    """**عطبُ اتّساقٍ كشفه مقعدُ تحقّق:** `--list` كان يعود قبل تدقيق `--pages` فيبتلع وسيطًا مشوَّهًا
+    صامتًا (`--list --pages أ` ⇒ ٠) — والترويسةُ تُعلن ٥ لوسيطٍ مشوَّه بلا استثناء ⇒ التدقيقُ صار قبل الفرعين."""
+    assert lrp.main(["--list", "--pages", "أ"]) == lrp.EXIT_BAD_ARGS
+    assert "وسيطٌ مشوَّه" in capsys.readouterr().out
+
+
 def test_bad_arguments_get_their_own_named_code(capsys):
     """وسيطٌ مشوَّه ⇒ ٥ باسمه: كان `--pages أ` يموت بـ١ (موتٌ غيرُ مسمّى)، و`--nope` بـ٢ (رمزِ المحرّك)."""
     assert lrp.main(["--pages", "أ"]) == lrp.EXIT_BAD_ARGS
