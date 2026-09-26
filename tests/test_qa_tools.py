@@ -1,5 +1,6 @@
 """Unit tests: deterministic QA tools over the verified rows (no network)."""
 
+import re
 from decimal import Decimal
 
 from statement_qa.qa_tools import make_qa_tools
@@ -139,6 +140,9 @@ def test_trace_records_tool_selections():
     assert trace[3]["row_nos"] == [5]         # last balance-bearing row
     assert trace[4]["row_nos"] == [4, 5]      # page-2 rows
     assert trace[5]["row_nos"] == [4, 5]      # page-2 rows, listed
+    # **والعقدُ مُثبَّتٌ لا ضمنيّ:** كان الوصولُ بالفهرس وحدَه ⇒ إضافةُ مفتاحٍ ثالثٍ تمرّ صامتة
+    # (مقيسٌ في مقعد البنية) ⇒ فيُقاس **مجموعُ المفاتيح** في كلّ قيد.
+    assert all(set(c) == {"tool", "row_nos"} for c in trace), trace
 
 
 def test_page_rows_answers_the_row_family_with_statement_wide_numbers():
@@ -148,14 +152,33 @@ def test_page_rows_answers_the_row_family_with_statement_wide_numbers():
     out = _tools()["page_rows"].invoke({"page": 2})
     assert "(صفحة 2، صف 4)" in out and "(صفحة 2، صف 5)" in out
     assert "(صفحة 2، صف 1)" not in out             # لا ترقيمَ داخلَ الصفحة
-    assert "50.00" in out and "150.00" in out       # المبلغُ والرصيدُ ⇒ الأكبرُ قابلٌ للحساب
+    # **وحدُّ المبلغ بحدودٍ رقميّة لا باحتواءٍ نصّيّ:** `"50.00" in out` كان **أعمى** لأنّه يصدُق
+    # على `"150.00"` (قِيس في مقعد البنية: نسخةٌ بلا عمودِ مبلغٍ كانت تمرّ) ⇒ الصفُّ ٥ مبلغُه ٥٠
+    # ورصيدُه ١٥٠، فيُقاس الأوّلُ بحدودِ رقمٍ لا باحتواء.
+    row5 = next(ln for ln in out.splitlines() if "(صفحة 2، صف 5)" in ln)
+    assert re.findall(r"(?<!\d)50\.00(?!\d)", row5) == ["50.00"], row5
+    assert "150.00" in row5, row5
 
 
 def test_search_rows_can_be_scoped_to_one_page():
     """`search_rows(page=…)` — النصفُ الثاني من الثقب: البحثُ كان بلا فلترِ صفحة."""
     tools = _tools()
-    assert "50.00" in tools["search_rows"].invoke({"page": 2})
-    assert tools["search_rows"].invoke({"page": 1}).count("(صفحة 1") == 2   # حركتا الصفحة ١
+    assert "(صفحة 2، صف 5)" in tools["search_rows"].invoke({"page": 2})
+    page1 = tools["search_rows"].invoke({"page": 1})
+    assert len(re.findall(r"\(صفحة 1،", page1)) == 2, page1   # حركتا الصفحة ١ (لا `(صفحة 10`)
+
+
+def test_page_is_keyword_only_so_old_positional_calls_keep_their_meaning():
+    """**مقيسٌ في مقعد المواصفة:** `page` دخل **موضعَ `limit` الرابع** ⇒ نداءٌ موضعيٌّ قديمٌ
+    (`search_rows("", "", None, 20)`) كان يصير «صفحة ٢٠» صامتًا. صار لفظيًّا وحدَه ⇒ المعنى محفوظ."""
+    import inspect
+
+    tools = _tools()
+    params = inspect.signature(tools["search_rows"].func).parameters
+    assert params["page"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert list(params)[:3] == ["keyword", "tx_type", "amount"]
+    out = tools["search_rows"].invoke({"limit": 1})
+    assert "حركة" in out and "(صفحة 1،" in out
 
 
 def test_trace_skips_empty_selections():

@@ -61,27 +61,54 @@ def _pushed_sha(ref: str) -> str | None:
     (تصحيحٌ بعد قياسٍ حيّ: كان القياسُ على المرجع المحلّيّ، وفرعٌ محلّيٌّ متقدّمٌ على المدفوع
     يُوسَم «قديمًا» وهو **أحمرُ** في الحقيقة ⇒ وسمٌ مضلِّل. المقصودُ صدقُ تقرير الدفع،
     وتقريرُ الدفع يتكلّم عن **المدفوع**.)
+
+    **وقياسٌ ثانٍ (إغلاقُ ملاحظة الجولة ٦٤):** كان يُبنى `origin/{ref}` **بلا تطبيع**، فمرجعٌ
+    بصيغة git (`refs/heads/main`) يُنتج `origin/refs/heads/main` (لا وجودَ له) ⇒ يسقط إلى
+    **المرجع المحلّيّ** فيُوسَم الرأسُ المدفوع «قديمًا» **كذبًا**. فصار التطبيعُ (اسم الفرع) قبل البناء.
     """
-    pushed = _local_sha(f"origin/{ref}")
-    return pushed or _local_sha(ref)
+    branch = branch_of(ref)
+    for remote in remotes():
+        pushed = _local_sha(f"{remote}/{branch}") if branch else None
+        if pushed:
+            return pushed
+    return _local_sha(branch or ref)
 
 
-REMOTE_PREFIXES = ("origin/", "upstream/")
+FALLBACK_REMOTES = ("origin", "upstream")      # حين يتعذّر سؤالُ git (يُعلَن ولا يُخفي)
 
 
-def branch_of(ref: str) -> str:
+def _git_remotes() -> str:
+    """سطرٌو `git remote` الخامّ — نقطةُ نداءٍ واحدة تُستبدَل في الضوابط."""
+    rc, out = _run(["git", "remote"])
+    return out if rc == 0 else ""
+
+
+def remotes() -> list[str]:
+    """**أسماءُ الريموتات المُهيَّأة** (يُسأل git — لا قائمةٌ مغلقة بيد).
+
+    (قِيس في مقعد المعايير: قائمةٌ مغلقةٌ (`origin/` · `upstream/`) تُمرّر أيَّ اسمِ ريموتٍ آخر
+    **بلا تحويل** ⇒ `BLOCK` الكاذبُ نفسُه يعود في ذلك الشكل.)
+    """
+    names = [line.strip() for line in (_git_remotes() or "").splitlines() if line.strip()]
+    return names or list(FALLBACK_REMOTES)
+
+
+def branch_of(ref: str, remotes_list: "list[str] | None" = None) -> str:
     """**اسمُ الفرع** من مرجعٍ كما يكتبه git: `origin/main` ⇒ `main` (و`refs/heads/x` ⇒ `x`).
 
     (قِيس بعد إغلاق ملاحظة الجولة ٦٤: `gh run list --branch origin/main` يُعيد لا شيء ⇒ «بلا تشغيل»
     ⇒ `BLOCK` **كاذبٌ** على مرجعٍ له تشغيلٌ أخضرُ باسمه الحقيقيّ. والمرجعُ يُقبل بالصيغتين،
-    والتحويلُ إلى اسم الفرع في موضعٍ واحد.)
+    والتحويلُ إلى اسم الفرع في موضعٍ واحد — **وأسماءُ الريموتات تُسأل git** لا تُكتب بيد.)
     """
     name = (ref or "").strip()
-    for prefix in REMOTE_PREFIXES:
-        if name.startswith(prefix):
-            return name[len(prefix):]
     if name.startswith("refs/heads/"):
         return name[len("refs/heads/"):]
+    if name.startswith("refs/remotes/"):
+        name = name[len("refs/remotes/"):]
+    for remote in (remotes_list if remotes_list is not None else remotes()):
+        prefix = remote.rstrip("/") + "/"
+        if name.startswith(prefix):
+            return name[len(prefix):]
     return name
 
 

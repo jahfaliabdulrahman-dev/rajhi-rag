@@ -96,8 +96,11 @@ def test_one_red_among_greens_is_enough_to_block(monkeypatch, capsys):
 def test_the_compared_commit_is_the_pushed_one_not_the_local_one(monkeypatch):
     """**مُثبَتٌ بقياسٍ حيّ:** القياسُ كان على المرجع المحلّيّ، وفرعٌ محلّيٌّ متقدّمٌ على المدفوع
     يُوسَم «قديمًا» وهو **أحمرُ** في الحقيقة ⇒ وسمٌ مضلِّل. المقصودُ صدقُ تقرير الدفع،
-    وتقريرُ الدفع يتكلّم عن **المدفوع** ⇒ `origin/<ref>` أوّلًا."""
+    وتقريرُ الدفع يتكلّم عن **المدفوع** ⇒ `origin/<ref>` أوّلًا.
+    (والترتيبُ يُقاس بين **قراءتَي الالتزام** لا على أوّل نداءٍ خارجيّ: الأداةُ تسأل `git remote`
+    قبلَهما ⇒ كان الشرطُ يقيس النداءَ الأوّل لا القاعدة.)"""
     calls: list[str] = []
+    monkeypatch.setattr(cr, "_git_remotes", lambda: "origin\n")
 
     def run(cmd):
         calls.append(cmd[-1])
@@ -105,7 +108,37 @@ def test_the_compared_commit_is_the_pushed_one_not_the_local_one(monkeypatch):
 
     monkeypatch.setattr(cr, "_run", run)
     assert cr._pushed_sha("x") == OTHER, "المدفوعُ هو ما يُقاس، لا ما في اليد"
-    assert calls[0] == "origin/x", "ويُقرأ `origin/<ref>` أوّلًا"
+    assert calls == ["origin/x"], f"وحين يُوجَد المدفوع لا يُقرأ المحلّيّ (يُختصر): {calls}"
+
+    # **والعكسُ يُقاس كذلك:** بلا مرجعٍ متعقَّبٍ يُقرأ المحلّيّ ولا يُترك الفرعُ بلا مرساة.
+    monkeypatch.setattr(cr, "_run", lambda cmd: (0, HEAD))
+    assert cr._pushed_sha("x") == HEAD
+
+
+def test_a_git_style_ref_resolves_to_the_pushed_commit_not_the_local_one(monkeypatch):
+    """**مقيسٌ في مقعد البنية:** `refs/heads/main` كان يُنتج `origin/refs/heads/main` (لا وجودَ له)
+    ⇒ يسقط إلى **المرجع المحلّيّ** فيُوسَم الرأسُ المدفوع «قديمًا» كذبًا. والآن يُطبَّع في الموضعين."""
+    reads: list[str] = []
+
+    def local(ref):
+        reads.append(ref)
+        return OTHER if ref == "origin/main" else HEAD
+
+    monkeypatch.setattr(cr, "_local_sha", local)
+    monkeypatch.setattr(cr, "_git_remotes", lambda: "origin\n")
+    assert cr._pushed_sha("refs/heads/main") == OTHER
+    assert reads[0] == "origin/main", f"يُبنى من **اسم الفرع** لا من المرجع: {reads}"
+
+
+def test_every_configured_remote_is_tried_and_unknown_names_are_not_stripped(monkeypatch):
+    """قائمةُ الريموتات **تُسأل git** لا تُكتب بيد (مقعد المعايير): ريموتٌ غيرُ `origin`/`upstream`
+    كان يمرّ بلا تحويل ⇒ `BLOCK` الكاذبُ يعود في ذلك الشكل. ومع اسمٍ ليس ريموتًا **لا نصّ**
+    (لا نخترع تطبيعًا)."""
+    monkeypatch.setattr(cr, "_git_remotes", lambda: "origin\nfork\n")
+    assert cr.branch_of("fork/main") == "main"
+    assert cr.branch_of("refs/remotes/fork/main") == "main"
+    assert cr.branch_of("refs/heads/main") == "main"
+    assert cr.branch_of("feature/x") == "feature/x"
 
 
 def test_an_unresolvable_ref_cannot_be_called_green(monkeypatch, capsys):
