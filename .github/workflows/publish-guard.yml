@@ -16,11 +16,6 @@ permissions:
 jobs:
   guard:
     runs-on: ubuntu-latest
-    # **بيئةُ القياس مُعلَنة (مراجعة ٦٧ · R67-2):** هذه المهمّةُ تُثبّت تبعيّاتٍ خفيفة ⇒ يُجمَع **٦٦٣**
-    # لا **٨٧٤** (وحداتٌ لا تُستورَد فلا تُجمَع). فالعددُ يُقابَل بقياس **بيئته المُعلَنة** لا بقياس بيئةٍ
-    # أخرى — ومقابلةُ رقمَي بيئتين كانت تُحمرّ الخطوة، وهي مقابلةُ كمّيّتين مختلفتين.
-    env:
-      RAJHI_CLAIMS_ENV: ci-light
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
         with:
@@ -47,14 +42,21 @@ jobs:
       # docs/claims.json and asserts the public documents still match it.
       - name: Public claims must match their derived snapshot
         id: gate_claims
+        # **والخطوةُ تُعلن أنّها لا تقيس (R67-2 · مراجعة ٦٧):** تجري **قبل** تثبيت `openpyxl`/`PyYAML`
+        # ⇒ جمعُها جزئيٌّ: قِيس في المهمّة نفسِها **٦٦٣** هنا مقابل **٧٢٣** في خطوة المجموعة. فالقياسُ
+        # الحيُّ **مُعلَّقٌ بإعلانٍ** (لا تخطٍّ صامت)، والوثيقةُ تُقابَل بلقطتها، والقياسُ الحيّ في الخطوة
+        # التي تُعلن بيئتها. **وحدُّ هذا الإعلان:** لا يُستعمل ليُسكِت قياسًا **مُمكِنًا** في بيئةٍ كاملة.
+        env:
+          RAJHI_CLAIMS_ENV: off
         run: |
-          # **البوّابةُ تفشلُ مُغلَقةً ويثبّت مُشغّلَها (R67-2 · مراجعة ٦٧):** كان هذا الفحصُ يجري
-          # **قبل** تثبيت `pytest` (السطر ٤٩) ⇒ `_test_count()` تُعيد `None` فيتخطّى القياسُ الحيُّ
-          # **بصمت**، ويُقابَل رقمٌ برقمٍ لا يُقاس. فلا يُثبَّت الاعتمادُ في خطوةٍ أخرى ويتّكل عليه هذا.
           python3 -m pip install --quiet pytest
           python3 tools/render_claims.py --check
       - name: Lightweight suite (no ML deps — compile, lock, public claims, gate injection)
         id: gate_suite
+        # **وبيئةُ المجموعة مُعلَنة (ci-light):** تبعيّاتُها مُثبَّتةٌ في الخطوة ⇒ القياسُ الحيّ فيها،
+        # وضابطُ `tests/test_public_claims.py` يقابل قياسَ هذه البيئة بقياسها لا بقياس بيئةٍ أخرى.
+        env:
+          RAJHI_CLAIMS_ENV: ci-light
         run: |
           python3 -m pip install --quiet pytest openpyxl==3.1.5 PyYAML==6.0.3
           python3 -m pytest tests/test_compile_all.py \
