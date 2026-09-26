@@ -10,6 +10,8 @@ on CI, and manually:
     python3 tools/publish_guard.py --history     # everything ever committed
     python3 tools/publish_guard.py --pre-push    # refs fed by the git hook
     python3 tools/publish_guard.py --tree --history --ci
+    python3 tools/publish_guard.py --tracked-real-data   # فشلٌ إن كان ملفُّ بياناتٍ حقيقيّةٍ مُتتبَّعًا
+                                                   # (قائمٌ بذاته: لا يُجمع مع الأنماط الأخرى)
 
 Severity model (practical by design — a guard that cries wolf gets disabled):
 - BLOCK: personal home paths · the original statement filename · real family
@@ -17,7 +19,9 @@ Severity model (practical by design — a guard that cries wolf gets disabled):
   **including runs a plain scan cannot see**: runs broken by a grouping
   separator (uniform groups of 3 or 4 wide, joined by space/dot/hyphen/
   underscore) and runs rebuilt by adding two string literals together ·
-  real-data paths (data/local_sample/*) · .env files · media binaries that
+  real-data paths (the three dirs of REAL_DATA_DIRS — `data/local_sample` · `data/training` ·
+  `data/eval_pack` — **at any depth**, including a nested `data/data/…` copy, and matched from git's
+  path output **unquoted** so a non-ASCII name cannot hide) · .env files · media binaries that
   are not explicitly allowed · unscannable binaries (archives/databases/
   fonts) with no allowlist line of their own · any tracked blob that cannot
   be decoded as text. Any BLOCK fails the run (exit 1).
