@@ -165,15 +165,19 @@ def eligible(design: str | None = None) -> list[tuple[pathlib.Path, dict, list]]
     return out
 
 
-def selected(pages: tuple[int, ...] = PUBLISHED_PAGES,
-             design: str | None = None) -> list[tuple[pathlib.Path, dict, list]]:
-    """يجد الأرقامَ المطلوبة في المُؤهَّل، ويرفع `IneligiblePage` باسمِ الصفحة والمؤهَّلِ اليوم."""
-    pool = {int(lab["page"]): (d, lab, rows) for d, lab, rows in eligible(design)}
+def selected(pages: tuple[int, ...] = PUBLISHED_PAGES, design: str | None = None,
+             pool: list | None = None) -> list[tuple[pathlib.Path, dict, list]]:
+    """يجد الأرقامَ المطلوبة في المُؤهَّل، ويرفع `IneligiblePage` باسمِ الصفحة والمؤهَّلِ اليوم.
+
+    `pool` يُمرَّر من `main` فيُمسَح القرصُ مرّةً واحدة (وكان يُمسَح مرّتين).
+    """
+    rows = eligible(design) if pool is None else pool
+    by_page = {int(lab["page"]): (d, lab, r) for d, lab, r in rows}
     out = []
     for p in pages:
-        if p not in pool:
-            raise IneligiblePage(f"صفحةٌ غيرُ مؤهَّلة: {p} (المُؤهَّلُ اليوم: {sorted(pool)})")
-        out.append(pool[p])
+        if p not in by_page:
+            raise IneligiblePage(f"صفحةٌ غيرُ مؤهَّلة: {p} (المُؤهَّلُ اليوم: {sorted(by_page)})")
+        out.append(by_page[p])
     return out
 
 
@@ -249,8 +253,8 @@ def _no_data_message(design: str | None) -> str:
             f"والقياسُ يحتاج نسخةً محلّيّة من `data/training/`")
 
 
-def _list_lines(design: str | None) -> list[str]:
-    pool = eligible(design)
+def _list_lines(design: str | None, pool: list | None = None) -> list[str]:
+    pool = eligible(design) if pool is None else pool
     if not pool:
         return [_no_data_message(design)]
     return [
@@ -275,23 +279,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"⛔ وسيطٌ مشوَّه: {' '.join(extra)}")
         return EXIT_BAD_ARGS
 
-    if args.list:
-        lines = _list_lines(args.design)
-        print("\n".join(lines))
-        return EXIT_NO_DATA if lines[0].startswith("لا بياناتِ") else EXIT_OK
-
     try:
-        pages = _parse_pages(args.pages)   # **الوسيطُ يُدقَّق قبل البيانات:** لا يُقال «لا بيانات» لوسيطٍ مشوَّه
+        pages = _parse_pages(args.pages)   # **الوسيطُ يُدقَّق قبل كلّ شيء** — و`--list` ليس استثناءً
     except BadArguments as exc:
         print(f"⛔ وسيطٌ مشوَّه: {exc}")
         return EXIT_BAD_ARGS
 
-    if not eligible(args.design):
+    pool = eligible(args.design)           # **مسحٌ واحد يُعاد استعمالُه** (كان يُمسَح مرّتين: هنا وفي `selected`)
+    if args.list:
+        lines = _list_lines(args.design, pool)
+        print("\n".join(lines))
+        return EXIT_NO_DATA if lines[0].startswith("لا بياناتِ") else EXIT_OK
+
+    if not pool:
         # **غيابُ البيانات يُسمّى (٣) قبل أيّ طلبِ صفحة** — وإلّا سُمّي «صفحةً غيرَ مؤهَّلة» (٤) كذبًا.
         print(f"⛔ {_no_data_message(args.design)}")
         return EXIT_NO_DATA
     try:
-        chosen = selected(pages, args.design)
+        chosen = selected(pages, args.design, pool)
     except IneligiblePage as exc:
         print(f"⛔ {exc}")
         return EXIT_NOT_ELIGIBLE
