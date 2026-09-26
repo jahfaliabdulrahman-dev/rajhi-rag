@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from functools import lru_cache
 import subprocess
 import sys
 from pathlib import Path
@@ -56,7 +55,7 @@ def _local_sha(ref: str) -> str | None:
     return out if rc == 0 and out else None
 
 
-def _pushed_sha(ref: str) -> str | None:
+def _pushed_sha(ref: str, remotes_list: "list[str] | None" = None) -> str | None:
     """**الالتزامُ الذي دُفع فعلًا** لا الذي في يدي: `<remote>/<branch>` أوّلًا (والمرجعُ يُطبَّع).
 
     (تصحيحٌ بعد قياسٍ حيّ: كان القياسُ على المرجع المحلّيّ، وفرعٌ محلّيٌّ متقدّمٌ على المدفوع
@@ -67,9 +66,13 @@ def _pushed_sha(ref: str) -> str | None:
     بصيغة git (`refs/heads/main`) يُنتج `origin/refs/heads/main` (لا وجودَ له) ⇒ يسقط إلى
     **المرجع المحلّيّ** فيُوسَم الرأسُ المدفوع «قديمًا» **كذبًا**. فصار المسارُ: `branch_of(ref)`
     أوّلًا، ثم يُجرَّب **كلُّ ريموتٍ مُهيَّأ** (`git remote`) لا `origin` وحدَه.
+
+    **والقائمةُ تُمرَّر لا تُخزَّن:** `main` يسأل `remotes()` مرّةً واحدةً ويُمرّرها هنا (قِيس: ٤ نداءاتِ
+    `git remote` لمرجعٍ واحد قبل ذلك ⇒ ١ للتشغيل كلّه بعده) — فالتخزينُ العالميُّ كان يُبطل سِمَةَ
+    `_run` المُعلَنة، والمعامَلُ يُعطي الوحدةَ نفسَها بلا حالةٍ خفيّة.
     """
-    branch = branch_of(ref)
-    for remote in remotes():
+    branch = branch_of(ref, remotes_list)
+    for remote in (remotes_list or remotes()):
         pushed = _local_sha(f"{remote}/{branch}") if branch else None
         if pushed:
             return pushed
@@ -79,13 +82,14 @@ def _pushed_sha(ref: str) -> str | None:
 FALLBACK_REMOTES = ("origin", "upstream")      # حين يتعذّر سؤالُ git (يُعلَن ولا يُخفي)
 
 
-@lru_cache(maxsize=1)
 def _git_remotes() -> str:
     """سطرٌو `git remote` الخامّ — نقطةُ نداءٍ واحدة تُستبدَل في الضوابط.
 
-    **ومُخزَّنة:** كان كلُّ نداءٍ يُشغّل `git remote` من جديد (قِيس في مقعد البنية: خمسةُ نداءاتٍ
-    خارجيّةٍ لمرجعٍ واحد)، والقائمةُ لا تتغيّر داخل التشغيل. والضوابطُ تُبدّل الدالّةَ نفسَها
-    (سمةُ الوحدة) ⇒ فالاستبدالُ يمرّ ولا يلتصق تخزينٌ قديم.
+    **وبلا تخزين — بقرارٍ مقيس:** أُدخِل تخزينٌ (`lru_cache`) في محاولةٍ أولى فردّه مقعد البنية بقياس:
+    بعد نداءٍ حقيقيّ يصبح تبديلُ `_run` — وهو النمطُ الذي يُعلنه هذا الملفّ نفسُه على أنّه **نقطةُ
+    الاستبدال الوحيدة** — **بلا أثر** (قِيس: `remotes()` تُعيد `['origin']` والمتوقَّع `['upstream']`)،
+    فحالةٌ عالميّةٌ خفيّةٌ بلا مُبطِل تُبطل السِّمَةَ المُعلَنة. **والحلُّ نقلُ الوحدة إلى المعامَل:**
+    `main` يسأل مرّةً واحدةً ويمرّر القائمة، والدالّةُ تبقى طازجةً لكلّ نداءٍ مباشر.
     """
     rc, out = _run(["git", "remote"])
     return out if rc == 0 else ""
@@ -160,15 +164,18 @@ def parse_pushed_refs(text: str) -> tuple[list[str], int, int]:
     return refs, non_branch, deleted
 
 
-def verdict(ref: str, *, gh=None, sha_of=None, local_of=None) -> dict:
+def verdict(ref: str, *, gh=None, sha_of=None, local_of=None,
+            remotes_list: "list[str] | None" = None) -> dict:
     """حُكمٌ على مرجعٍ واحد: «أخضر» لا يُقال إلّا بتشغيلٍ مكتملٍ ناجح **على الالتزام المدفوع**.
 
     الوسائطُ تُحلّ في وقت النداء (لا تُربَط في التعريف) لتُستبدَل في الضوابط بلا سِحر.
+    **و`remotes_list` مرورٌ للقائمة المسؤول عنها `main`** (مرّةً واحدةً لكلّ تشغيل) — وغيابُه يعني
+    «سَلْ git» فلا حالةَ مخزَّنة.
     """
     gh = gh or _gh
-    sha_of = sha_of or _pushed_sha
+    sha_of = sha_of or (lambda r: _pushed_sha(r, remotes_list))
     local_of = local_of or _local_sha
-    branch = branch_of(ref)        # **ما يُسأل به `gh` اسمُ الفرع** — والمرجعُ كما كُتب يبقى في البيان
+    branch = branch_of(ref, remotes_list)   # **ما يُسأل به `gh` اسمُ الفرع** — والمرجعُ كما كُتب يبقى في البيان
     rc, txt = gh(["run", "list", "--branch", branch, "--limit", "1",
                   "--json", "conclusion,status,headSha,workflowName"])
     if rc != 0:
@@ -256,13 +263,15 @@ def main(argv: list[str] | None = None) -> int:
     if not a.refs:
         ap.error("مرجعٌ واحدٌ على الأقلّ — أو `--remind`/`--pre-push`")
 
+    rmts = remotes()        # **مرّةً واحدةً لكلّ تشغيل** — تُمرَّر لكلّ ما يحتاجها (لا تخزينَ عالميّ)
+
     def _line(v: dict) -> str:
-        """سطرُ حكمِ مرجعٍ واحد: `branch_of` **مرّةً واحدة** (قِيس في مقعد البنية: كان يُنادى مرّتين على القيمة نفسها)."""
-        br = branch_of(v["ref"])
+        """سطرُ حكمِ مرجعٍ واحد: `branch_of` **مرّةً واحدة** على القائمة المارّة (كان يُنادى مرّتين)."""
+        br = branch_of(v["ref"], rmts)
         tail = f" (قِيس على الفرع `{br}`)" if br != v["ref"] else ""
         return f"{'✓' if v['state'] == 'أخضر' else '·'} {v['state']:<11} {v['ref']} — {v['why']}{tail}"
 
-    vs = [verdict(r) for r in a.refs]
+    vs = [verdict(r, remotes_list=rmts) for r in a.refs]
     lines = [_line(v) for v in vs]
     lines.append(LIMIT)
 
