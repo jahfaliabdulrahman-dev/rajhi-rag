@@ -105,6 +105,8 @@ PRE_RULE_ANSWERS = {
 #: يُدخل ملفًّا بلا أن يُسمّى اسمُه ولا صنفُه — فيُدخَل الجديدُ بلا سؤال، وهو ما يُرخي البوّابة.
 #: (والقياسُ يبقى على `HEAD`، والقائمةُ تُقابَل **في الاتّجاهين**: ناقصٌ يُسقط، وزائدٌ يُسقط.)
 NON_ANSWER_FILES_SINCE_RULE = {
+    "handoff/sulaiman/20260927-0015-PLAN-round68d-closing-the-seats-findings.md": "20260927-001500",
+    "handoff/sulaiman/20260927-0130-SEATS-round68d-the-three-seats-and-the-closure-of-their-findings.md": "20260927-013000",
     "handoff/sulaiman/20260925-0520-REPORT-to-owner-round57-closure-and-the-landing-decision.md":
         "تقريرٌ للمالك — لا يُجيب حُكماً",
     "handoff/sulaiman/20260925-0540-DECISION-to-claude-land-on-the-pushed-branch.md":
