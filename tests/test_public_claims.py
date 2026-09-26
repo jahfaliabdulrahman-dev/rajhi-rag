@@ -36,6 +36,29 @@ def test_public_documents_match_the_measured_report():
     assert drifts == [], f"انزياح بين الوثيقة ومصدرها: {drifts}"
 
 
+def test_a_stale_snapshot_cannot_hide_behind_a_stale_document(tmp_path, monkeypatch):
+    """**الثقبُ الذي أمسكته المراجعة ٦٦ (R66-1): بلا تقريرٍ مقيس، كانت الوثيقةُ تُقابَل باللقطة وحدَها.**
+
+    فلقطةٌ `tests=865` ووثيقةٌ تقول «حالياً 865» **توافقان بعضَهما** بينما العدُّ الحيُّ `868` ⇒ الحكمُ
+    أخضرُ في الـCI ولا أحدَ يرى الانزياح (قِيس: `render_claims.py --check` ⇒ «الوثائقُ توافق لقطتها
+    الملتزمة» والعدُّ الحيُّ `868`). و`_test_count()` **لا يحتاج** كاشَ التصريح ⇒ فصار العددُ يُقاس حيًّا
+    في هذا المسار أيضًا؛ وهذا الضابطُ يقيس **العلّةَ نفسَها**: يُثبّت لقطةً متقادمة، ويُطالب بالخروج `1`.
+    (والوثيقةُ تُطابَق بـ`check` مُبدَّلةٍ هنا لتُحاكي «وثيقةٌ موافقةٌ للقطة» — وهو حالُ العطب بعينه.)
+    """
+    import json
+    import render_claims as rc
+
+    snap = tmp_path / "claims.json"
+    snap.write_text(json.dumps({"tests": 0}, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(rc, "SNAPSHOT", snap)
+    monkeypatch.setattr(rc, "REPORT", tmp_path / "no-report-here.json")
+    monkeypatch.setattr(rc, "check", lambda _d: [])          # الوثيقةُ توافق اللقطةَ المتقادمة (العطب)
+    monkeypatch.setattr(sys, "argv", ["render_claims.py", "--check"])
+    with pytest.raises(SystemExit) as e:
+        rc.main()
+    assert e.value.code == 1, "لقطةٌ متقادمةٌ مرّت: العددُ لم يُقَس حيًّا في مسار اللقطة"
+
+
 def test_claims_lists_every_metric_it_promises():
     import render_claims as rc
 
