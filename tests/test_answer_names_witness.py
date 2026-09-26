@@ -107,6 +107,7 @@ PRE_RULE_ANSWERS = {
 NON_ANSWER_FILES_SINCE_RULE = {
     "handoff/sulaiman/20260926-2345-PLAN-round68d-closing-the-seats-findings.md": "20260926-234500",
     "handoff/sulaiman/20260926-2352-SEATS-round68d-the-three-seats-and-the-closure-of-their-findings.md": "20260926-235200",
+    "handoff/sulaiman/20260927-0005-REPORT-to-owner-rounds65-68-comprehensive-eight-phases-review-closure-and-quality.md": "20260927-000500",
     "handoff/sulaiman/20260925-0520-REPORT-to-owner-round57-closure-and-the-landing-decision.md":
         "تقريرٌ للمالك — لا يُجيب حُكماً",
     "handoff/sulaiman/20260925-0540-DECISION-to-claude-land-on-the-pushed-branch.md":
