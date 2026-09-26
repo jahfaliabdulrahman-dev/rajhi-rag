@@ -16,6 +16,8 @@ import sys
 
 import pytest
 
+from tests._local_evidence import require_pack, require_run, run_is_ready
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 RUN = ROOT / "data/local_sample/slice_629p"
 
@@ -156,8 +158,27 @@ def test_a_silent_loss_in_a_matching_locus_is_refused():
 # ————————————————————— ضابطان على العيّنة (يتخطّيان معلنين بلا بيانات) —————————————————————
 
 def _corpus_ready():
-    if not RUN.exists():
-        pytest.skip(f"العيّنةُ غير موجودة ({RUN}) — لا يُقاس الإثباتُ بلا قرص")
+    require_run(RUN)
+    # ⇐ و**الحزمةُ المجمَّدة شرطٌ لهذا القسم**: الثلاثةُ التي تقرأ `pack_io.pack_path()` هنا (وواحدٌ يقرأ
+    #   صفحاتِها) كانت تسقط بـ`FileNotFoundError` في بيئةٍ فيها العيّنةُ بلا الحزمة (قِيس في مراجعة إغلاق ٦٤)
+    #   ⇒ الشرطُ يُعلن الحاجةَ كاملةً: قرصٌ **وحزمة**. (وموضعُ الشرط هنا لا في كلّ فحص: كلُّ مناديه يحتاجها.)
+    require_pack()
+
+
+def test_an_empty_run_dir_is_declared_not_failed(tmp_path):
+    """**العطبُ الذي وُلد منه (مقعدُ المعايير · الدفعةُ الثالثة · مقيس):** `mkdir -p …/slice_629p` **فارغًا**
+    كان يُمرِّر شرطَ `RUN.exists()` ⇒ ثلاثةُ فحوصٍ سقطت فشلًا عاريًا (`SystemExit: لا نتائج في …` من
+    `tools/refusal_test.py:85`). والمقيسُ الآن: المجلّدُ الفارغ **يُعلن التخطّي** بنصٍّ يسمّي ما ينقص.
+    """
+    empty = tmp_path / "slice_629p"
+    empty.mkdir()
+    assert not run_is_ready(empty), "مجلّدٌ بلا `results/pg-*.json` ليس عيّنةً جاهزة"
+    with pytest.raises(pytest.skip.Exception) as excinfo:
+        require_run(empty)
+    assert "results/pg-*.json" in str(excinfo.value), "الإعلانُ يسمّي ما ينقص ولا يُخفيه"
+    (empty / "results").mkdir()
+    (empty / "results" / "pg-001.json").write_text("{}", encoding="utf-8")
+    assert run_is_ready(empty), "وبالمحتوى المعلَن تمرّ"
 
 
 def test_all_fifty_questions_have_a_proof_or_a_declared_exception():

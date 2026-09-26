@@ -16,6 +16,11 @@ permissions:
 jobs:
   guard:
     runs-on: ubuntu-latest
+    # **بيئةُ المهمّة مُعلَنة (R67 · مراجعة ٦٧):** كلُّ خطوةٍ هنا تعمل في هذه المهمّة — وتبعيّاتُها
+    # (‎`pytest openpyxl PyYAML`) تُجمَع **٧٢٣** لا **٨٧٤** (بيئةُ المالك). فالافتراضُ هنا، والاستثناءُ
+    # يُعلَن في خطوته (`off`) — فلا تُضاف خطوةٌ جديدةٌ فتقع في بيئةٍ منسوبةٍ خطأً بالصمت.
+    env:
+      RAJHI_CLAIMS_ENV: ci-light
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
         with:
@@ -42,7 +47,15 @@ jobs:
       # docs/claims.json and asserts the public documents still match it.
       - name: Public claims must match their derived snapshot
         id: gate_claims
-        run: python3 tools/render_claims.py --check
+        # **والخطوةُ تُعلن أنّها لا تقيس — استثناءٌ عن افتراض المهمّة (R67-2):** تجري **قبل** تثبيت
+        # `openpyxl`/`PyYAML` ⇒ جمعُها جزئيٌّ: قِيس في المهمّة نفسِها **٦٦٣** هنا مقابل **٧٢٣** في الخطوات
+        # التي ثبّتت تبعيّاتها. فالقياسُ الحيُّ **مُعلَّقٌ بإعلانٍ** (لا تخطٍّ صامت)، والوثيقةُ تُقابَل
+        # بلقطتها. **وحدُّ هذا الإعلان:** لا يُستعمل ليُسكِت قياسًا **مُمكِنًا** في بيئةٍ كاملة.
+        env:
+          RAJHI_CLAIMS_ENV: off
+        run: |
+          python3 -m pip install --quiet pytest
+          python3 tools/render_claims.py --check
       - name: Lightweight suite (no ML deps — compile, lock, public claims, gate injection)
         id: gate_suite
         run: |
@@ -76,14 +89,10 @@ jobs:
         run: python3 tools/landing_probe.py --quiet
       - name: Real-data files must never be tracked
         id: gate_data_untracked
-        run: |
-          bad=$(git ls-files | grep -E '^data/(local_sample|training|eval_pack)/' || true)
-          if [ -n "$bad" ]; then
-            echo "::error::real-data files tracked (local_sample/training/eval_pack):"
-            echo "$bad"
-            exit 1
-          fi
-          echo "no real-data files tracked under local_sample/training/eval_pack — OK"
+        # **مالكٌ واحد للقاعدة (مراجعة ٦٧):** كان هنا نمطٌ جذريٌّ خاصٌّ بالخطوة
+        # (`^data/(local_sample|training|eval_pack)/`) ⇒ نسخةٌ متداخلةٌ (`data/data/local_sample/…`)
+        # تفلت منه، وتفلت من الحارس في الوقت نفسه. فصارت الخطوةُ تستدعي قاعدةَ الحارس نفسَها.
+        run: python3 tools/publish_guard.py --tracked-real-data
 
       - name: Amount-guard — the key/manifest must not be tracked (no secret needed)
         id: gate_amount_key

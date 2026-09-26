@@ -28,7 +28,7 @@ def _fake(monkeypatch, payload, *, rc=0, sha: str | None = HEAD, local=None):
     """يُستبدَل نداءُ `gh` وقراءةُ الالتزام — فلا شبكةَ ولا GitHub في الضابط."""
     monkeypatch.setattr(cr, "_gh",
                         lambda args: (rc, json.dumps(payload) if rc == 0 else "gh: not found"))
-    monkeypatch.setattr(cr, "_pushed_sha", lambda ref: sha)
+    monkeypatch.setattr(cr, "_pushed_sha", lambda ref, remotes_list=None: sha)
     monkeypatch.setattr(cr, "_local_sha", lambda ref: local if local is not None else sha)
 
 
@@ -96,8 +96,11 @@ def test_one_red_among_greens_is_enough_to_block(monkeypatch, capsys):
 def test_the_compared_commit_is_the_pushed_one_not_the_local_one(monkeypatch):
     """**مُثبَتٌ بقياسٍ حيّ:** القياسُ كان على المرجع المحلّيّ، وفرعٌ محلّيٌّ متقدّمٌ على المدفوع
     يُوسَم «قديمًا» وهو **أحمرُ** في الحقيقة ⇒ وسمٌ مضلِّل. المقصودُ صدقُ تقرير الدفع،
-    وتقريرُ الدفع يتكلّم عن **المدفوع** ⇒ `origin/<ref>` أوّلًا."""
+    وتقريرُ الدفع يتكلّم عن **المدفوع** ⇒ `<remote>/<branch>` أوّلًا (والريموتُ يُسأل git).
+    (والترتيبُ يُقاس بين **قراءتَي الالتزام** لا على أوّل نداءٍ خارجيّ: الأداةُ تسأل `git remote`
+    قبلَهما ⇒ كان الشرطُ يقيس النداءَ الأوّل لا القاعدة.)"""
     calls: list[str] = []
+    monkeypatch.setattr(cr, "_git_remotes", lambda: "origin\n")
 
     def run(cmd):
         calls.append(cmd[-1])
@@ -105,7 +108,82 @@ def test_the_compared_commit_is_the_pushed_one_not_the_local_one(monkeypatch):
 
     monkeypatch.setattr(cr, "_run", run)
     assert cr._pushed_sha("x") == OTHER, "المدفوعُ هو ما يُقاس، لا ما في اليد"
-    assert calls[0] == "origin/x", "ويُقرأ `origin/<ref>` أوّلًا"
+    assert calls == ["origin/x"], f"وحين يُوجَد المدفوع لا يُقرأ المحلّيّ (يُختصر): {calls}"
+
+    # **والعكسُ يُقاس كذلك:** بلا مرجعٍ متعقَّبٍ يُقرأ المحلّيّ ولا يُترك الفرعُ بلا مرساة.
+    monkeypatch.setattr(cr, "_run", lambda cmd: (0, HEAD))
+    assert cr._pushed_sha("x") == HEAD
+
+
+def test_a_git_style_ref_resolves_to_the_pushed_commit_not_the_local_one(monkeypatch):
+    """**مقيسٌ في مقعد البنية:** `refs/heads/main` كان يُنتج `origin/refs/heads/main` (لا وجودَ له)
+    ⇒ يسقط إلى **المرجع المحلّيّ** فيُوسَم الرأسُ المدفوع «قديمًا» كذبًا. والآن يُطبَّع في الموضعين."""
+    reads: list[str] = []
+
+    def local(ref):
+        reads.append(ref)
+        return OTHER if ref == "origin/main" else HEAD
+
+    monkeypatch.setattr(cr, "_local_sha", local)
+    monkeypatch.setattr(cr, "_git_remotes", lambda: "origin\n")
+    assert cr._pushed_sha("refs/heads/main") == OTHER
+    assert reads[0] == "origin/main", f"يُبنى من **اسم الفرع** لا من المرجع: {reads}"
+
+
+def test_every_configured_remote_is_tried_and_unknown_names_are_not_stripped(monkeypatch):
+    """قائمةُ الريموتات **تُسأل git** لا تُكتب بيد (مقعد المعايير): ريموتٌ غيرُ `origin`/`upstream`
+    كان يمرّ بلا تحويل ⇒ `BLOCK` الكاذبُ يعود في ذلك الشكل. ومع اسمٍ ليس ريموتًا **لا نصّ**
+    (لا نخترع تطبيعًا)."""
+    monkeypatch.setattr(cr, "_git_remotes", lambda: "origin\nfork\n")
+    assert cr.branch_of("fork/main") == "main"
+    assert cr.branch_of("refs/remotes/fork/main") == "main"
+    assert cr.branch_of("refs/heads/main") == "main"
+    assert cr.branch_of("feature/x") == "feature/x"
+
+
+def test_an_explicitly_empty_remote_list_is_never_overridden_by_asking_git(monkeypatch):
+    """**وعقدُ المعامَل واحد (مقعدُ البنية · مراجعة إغلاق ٦٤):** `None` ⇒ «اسأل git» · و`[]` ⇒ «هذه هي
+    الريموتات — لا تسأل». وكان `or` في `_pushed_sha` يجعل `[]` تُسقط إلى السؤال، بينما `branch_of` تعتبر
+    القائمةَ المُمرَّرة نهائيّةً ⇒ عقدان مختلفان لمعامَلٍ واحدٍ في ملفٍّ يعلن توحيدَ الموضع."""
+    calls = []
+    monkeypatch.setattr(cr, "_run", lambda cmd: (calls.append(cmd), (0, ""))[1])
+    cr._pushed_sha("main", [])
+    asked = [c for c in calls if c[:2] == ["git", "remote"]]
+    assert not asked, f"قائمةٌ فارغةٌ مُعلَنة لا تُستبدَل بسؤال git (قِيس: {asked})"
+
+
+def test_the_remote_list_is_asked_fresh_and_never_cached_globally(monkeypatch):
+    """**إغلاقُ ملاحظة مقعد البنية:** التخزينُ العالميُّ (`lru_cache`) كان يُبطل سِمَةَ `_run` التي
+    يُعلنها هذا الملفّ على أنّها **نقطةُ الاستبدال الوحيدة**: بعد نداءٍ حقيقيّ يصير تبديلُها بلا أثر
+    (قِيس عند المقعد: `remotes()` ⇒ `['origin']` والمتوقَّع `['upstream']`). فالضابطُ يعضّ على إعادة
+    أيّ تخزين: يستهلك نداءً حقيقيًّا أوّلًا، ثمّ يُبدّل `_run` ويسأل."""
+    cr.remotes()                        # يستهلك أيَّ حالةٍ مخزَّنةٍ محتملة (نداءٌ حقيقيّ إلى git)
+
+    def run(cmd):
+        return (0, "upstream\n") if cmd[:2] == ["git", "remote"] else (0, "")
+
+    monkeypatch.setattr(cr, "_run", run)
+    assert cr.remotes() == ["upstream"], "القائمةُ تُسأل طازجةً من `_run` لا من حالةٍ مخزَّنة"
+
+
+def test_a_remote_that_is_not_origin_is_tried_when_it_holds_the_pushed_commit(monkeypatch):
+    """**طَفرةٌ قِيست على إغلاق F7 (مقعد المعايير):** إبدالُ الدورة على `remotes()` بقائمةٍ مغلقة
+    `["origin"]` **لم يُسقط شيئًا** (29 passed) ⇒ فالضابطُ القائمُ يقيس **تطبيعَ الأسماء** في `branch_of`
+    لا **دورانَ الريموتات** في `_pushed_sha`. فالمَشهدُ هنا يجعل المدفوعَ على ريموتٍ غير `origin` **وحدَه**."""
+    reads: list[str] = []
+    monkeypatch.setattr(cr, "_git_remotes", lambda: "upstream\norigin\n")
+
+    def local(ref):
+        reads.append(ref)
+        return OTHER if ref == "upstream/main" else HEAD
+
+    monkeypatch.setattr(cr, "_local_sha", local)
+    assert cr._pushed_sha("main") == OTHER, "يُجرَّب **كلُّ** ريموتٍ مُهيَّأ لا `origin` وحدَه"
+    assert "upstream/main" in reads, f"وإلّا ما كان الريموتُ الثاني يُقرأ أصلًا: {reads}"
+
+    # **والعكسُ مُقاسٌ كذلك:** بريموتٍ واحدٍ لا يملك المدفوعَ يُقرأ المرجعُ المحلّيّ (فيُعَلن التقادم).
+    monkeypatch.setattr(cr, "_git_remotes", lambda: "origin\n")
+    assert cr._pushed_sha("main") == HEAD
 
 
 def test_an_unresolvable_ref_cannot_be_called_green(monkeypatch, capsys):
@@ -196,7 +274,7 @@ def test_a_run_without_a_headsha_cannot_be_called_green(monkeypatch, capsys):
                     {"conclusion": "success", "status": "completed", "headSha": "",
                      "workflowName": "publish-guard"}):
         monkeypatch.setattr(cr, "_gh", lambda args, p=payload: (0, json.dumps([p])))
-        monkeypatch.setattr(cr, "_pushed_sha", lambda ref: HEAD)
+        monkeypatch.setattr(cr, "_pushed_sha", lambda ref, remotes_list=None: HEAD)
         assert cr.main(["chore/round56-evidence"]) == 2, payload
         assert "غيرُ مقروء" in capsys.readouterr().out
 
@@ -210,3 +288,26 @@ def test_json_mode_is_machine_readable_and_keeps_the_limit_on_stderr(monkeypatch
     data = json.loads(cap.out)                       # كان يسقط: جملةُ الحدّ تُطبَع بعد فرع `--json`
     assert isinstance(data, list) and data[0]["state"] == "أخضر"
     assert "حدُّ هذا الفحص" in cap.err and "حدُّ هذا الفحص" not in cap.out
+
+
+def test_a_tracking_ref_is_measured_by_its_branch_name(monkeypatch, capsys):
+    """**قِيس قبل الإغلاق (ملاحظةُ الجولة ٦٤):** `ci_report.py origin/main` كان يقول «بلا تشغيل»
+    ويُسقط `BLOCK` **كاذبًا** — لأنّ `gh run list --branch origin/main` لا يعرف فرعاً بهذا الاسم،
+    والتشغيلُ موجودٌ باسم الفرع الحقيقيّ (`main`). فالمقابلةُ على اسم الفرع، والمرجعُ المرجعيُّ
+    يبقى مقبولًا في البيان **والتحويلُ يُعلَن** (لا صمت)."""
+    seen: list[list[str]] = []
+
+    def gh(args):
+        seen.append(list(args))
+        return 0, json.dumps([{"conclusion": "success", "status": "completed",
+                               "headSha": HEAD, "workflowName": "publish-guard"}])
+
+    monkeypatch.setattr(cr, "_gh", gh)
+    monkeypatch.setattr(cr, "_pushed_sha", lambda ref, remotes_list=None: HEAD)
+    monkeypatch.setattr(cr, "_local_sha", lambda ref: HEAD)
+    assert cr.main(["origin/main"]) == 0
+    out = capsys.readouterr().out
+    assert seen[0][2] == "--branch" and seen[0][3] == "main", \
+        "يُسأل `gh` باسم الفرع لا بالمرجع المرجعيّ"
+    assert "قِيس على الفرع `main`" in out, "ويُعلَن التحويلُ (لا صمت)"
+    assert cr.branch_of("refs/heads/x") == "x" and cr.branch_of("main") == "main"

@@ -100,6 +100,14 @@
 ## ٩ · ملفّاتُ الجولة
 `tools/ci_report.py` (٣٧٣ سطرًا · `--json`/`--remind`/`--pre-push` · `parse_pushed_refs`) ·
 `tests/test_ci_report.py` (١٨ ضابطًا) · `tests/test_hook_gates.py` (+٦: الخطّافُ الحقيقيّ) ·
+
+> **تصحيحٌ مؤرَّخ (٢٠٢٦-٠٩-٢٦ · مراجعةُ الإغلاق الثالثة للجولة ٦٤):** الرقمان أعلاه **لا يحملهما أيُّ التزام** في
+> المستودع. **كان:** «`tools/ci_report.py` (٣٧٣ سطرًا)» و«`tests/test_ci_report.py` (١٨ ضابطًا)». **صار** — بالقياس:
+> عند التزام إيداع هذا التقرير (`a961f7a`) كان `ci_report.py` **٢٣٣ سطرًا** و`tests/test_ci_report.py` **١٦ دالةَ فحص**؛
+> وسلسلةُ الملفّ في التزاماته: **٢٣٣ ⟶ ٢٨٣ ⟶ ٢٩٤ ⟶ ٣٠٦** سطرًا، ودوالُ الفحص: **١٦ ⟶ ١٩ ⟶ ٢٠ ⟶ ٢٢**
+> (والمُجمَّعُ يتغيّر بالتوسيع البارامتريّ لا بعدد الدوال). **والمقيسُ الآن:** `wc -l tools/ci_report.py` ·
+> `git show <لحظة>:tools/ci_report.py | wc -l`. **والصنفُ:** «رقمٌ بلا شجرته» — وهو الصنفُ الذي تُغلقه الجولة ٦٤،
+> فالثمنُ يُدفع في موضعه: كُتب هذا التصحيحُ في الملفّ الذي حمل الرقمَ، ولم يُمحَ الأصل.
 `.githooks/pre-push` (الجودو + `exit 0`) · `tools/guard_bite_sweep.py` (م٢٥ · م٢٦) ·
 `.github/workflows/publish-guard.yml` · `docs/GATES.md` (الصفّان ٩ و١٧) · `docs/handoff-protocol.md` (§٢٩) ·
 `docs/QA_CHECKLIST.md` · `docs/claims.json` · `handoff/sulaiman/20260926-0045-SEATS-…` · هذا التقرير ·

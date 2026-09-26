@@ -79,8 +79,27 @@ DECLARED_NON_VERDICT = (
 WITNESS_FROM = "20260925-044600"
 #: **الثوابت المُقابَلة بالقياس** (لا ادّعاءَ بلا معدود): دَينُ ما قبل القاعدة · عددُ المُخاطَبين بها ·
 #: وملفّاتُ الصندوق بعد القاعدة خارج الصنف المُعلَن (البند ٦).
-PRE_RULE_ANSWERS = 15
-SUBJECTS_LANDED = 1
+#:
+#: **ودَينُ ما قبل القاعدة صار بالهويّة لا بالعدد (مقعدُ البنية · مراجعة إغلاق ٦٤):** كان `15` عدّادًا،
+#: ورفعُه صامتًا يُدخل جوابًا قديمًا بلا اسم — وهو صنفُ R61-1 نفسُه في الجار. الآن **اسمٌ وزمن** لكلٍّ،
+#: ويُقابَل المجموعان **بالاتّجاهين**، **ويُقابَل زمنُ كلّ اسمٍ بالزمن الذي يحمله ثابتًا** (فلا تجمّدَ زمنٍ خلف اسم).
+PRE_RULE_ANSWERS = {
+    "handoff/sulaiman/20260923-050000-REPORT-to-claude-rounds-40-41-complete.md": "20260923-050000",
+    "handoff/sulaiman/20260923-120000-REPORT-to-claude-review-41-closed.md": "20260923-120000",
+    "handoff/sulaiman/20260923-1514-REPORT-to-claude-item4-pack-free-capture.md": "20260923-151400",
+    "handoff/sulaiman/20260923-2100-REPORT-to-claude-review-45-fixes.md": "20260923-210000",
+    "handoff/sulaiman/20260923-2220-REPORT-to-claude-bias-declaration-option-a.md": "20260923-222000",
+    "handoff/sulaiman/20260923-2238-REPORT-to-claude-review-47-closure-and-the-delivery-gate.md": "20260923-223800",
+    "handoff/sulaiman/20260923-2350-REPORT-to-claude-review-46-and-the-fixes.md": "20260923-235000",
+    "handoff/sulaiman/20260924-1242-REPORT-to-claude-round49-triage-and-fixes.md": "20260924-124200",
+    "handoff/sulaiman/20260924-1350-REPORT-to-claude-round50-triage-seats-and-fixes.md": "20260924-135000",
+    "handoff/sulaiman/20260924-1421-REPORT-to-claude-round51-stop-control-exit-codes-and-three-missing-controls.md": "20260924-142100",
+    "handoff/sulaiman/20260924-2359-REPORT-to-claude-round52-seats-fixed-14-gates-bite-and-three-recommendations.md": "20260924-235900",
+    "handoff/sulaiman/20260925-0118-REPORT-to-claude-round53-gate-attacked-and-root-fixed.md": "20260925-011800",
+    "handoff/sulaiman/20260925-0203-REPORT-to-claude-round54-three-notes-mechanised-P4-P5-P6-and-two-recommendations.md": "20260925-020300",
+    "handoff/sulaiman/20260925-0247-REPORT-to-claude-round55-three-seats-attacked-my-fixes-and-the-registry.md": "20260925-024700",
+    "handoff/sulaiman/20260925-0355-REPORT-to-claude-round56-closure-the-gate-that-replaced-the-window.md": "20260925-035500",
+}
 #: **أصنافُ ما ليس جوابًا — بالهويّة لا بالعدد (R61-1).** كلُّ ملفٍّ في صندوق المنفّذ هبط بعد
 #: `WITNESS_FROM` وليس من صنف `ANSWER_MARK` **يُسمّى هنا باسمه وصنفه**. وكان عدّادًا (`6`): ورفعُ رقمٍ
 #: يُدخل ملفًّا بلا أن يُسمّى اسمُه ولا صنفُه — فيُدخَل الجديدُ بلا سؤال، وهو ما يُرخي البوّابة.
@@ -118,12 +137,42 @@ NON_ANSWER_FILES_SINCE_RULE = {
         "تقريرٌ للمالك (تقريرُ الجولة) — لا يُجيب حُكماً",
     "handoff/sulaiman/20260926-0205-MEASUREment-q4-local-reader-five-pages.md":
         "وثيقةُ قياسٍ مُودَعة (نتيجةُ قياس ٤) — لا تُجيب حُكماً ولا تُودِع شاهداً، ورقمُها مقيسٌ في متنها",
+    # **وملفُّ الجولة ٦٥ (الخامس من الصنف المقيس: R57-1 · R58-1 · R59-1 · R61/R62 · وهذه):** يُسمّى **قبل**
+    # أن يُقاس — فالدرسُ القائم لا يُمحى بمرور الجولات، وهذه الجولةُ نفسُها تصلح **لإصلاح الختم** الذي
+    # يقيس هذا الإعلان.
+    "handoff/sulaiman/20260926-1515-PLAN-round65-probe-clock-section27-and-the-three-seat-review.md":
+        "خطةُ جولةٍ (وثيقةُ تنفيذٍ قبل العمل) — لا تُجيب حُكماً ولا تُودِع شاهداً",
+    # **وملفُّ الجولة ٦٥ الثاني (السادس من الصنف المقيس):** نقلُ نصّ المقاعد الثلاثة **بالحرف** — والدرسُ
+    # «يُسمّى قبل أن يُقاس» يُطبَّق هنا أيضًا؛ ولا `class:` في متنه (فلا يدخل `DECLARED_NON_VERDICT` عن غير قصد).
+    "handoff/sulaiman/20260926-152950-SEATS-round65-three-isolated-seats-verbatim.md":
+        "نصُّ المقاعد الثلاثة بالحرف (نقلٌ للمُدخَل) — لا يُجيب حُكماً",
+    "handoff/sulaiman/20260926-153542-PUSH-round65-range-to-pr127-and-ci-green-on-the-pushed-commit.md":
+        "تقريرُ دفعٍ (لا حُكمَ فيه) — مخرَجُ `ci_report` بشهادة الالتزام؛ والجوابُ الحاكم هو `153028`",
+    "handoff/sulaiman/20260926-183255-PUSH-round66-the-answer-and-r66-1-closure-to-pr127.md":
+        "تقريرُ دفعٍ (لا حُكمَ فيه) — مخرَجُ `ci_report` بشهادة الالتزام؛ والجوابُ الحاكم هو `182947`",
 }
 #: وأصنافُها مذكورةٌ **في القاموس نفسِه** (`NON_ANSWER_FILES_SINCE_RULE` — البند ٦) لا في تعليقٍ ثانٍ.
 #: **ومُخاطَبٌ واحدٌ هبط بالقاعدة، وهو صنفٌ مُعلَنٌ بالاسم:** `20260925-0723-REPORT-to-claude-r13-…`
 #: (يُعلن `class:` ولا يُجيب حُكماً — R58-2). وبعده (مراجعة ٥٩ · مقعدا المعايير والبنية) صار الشاهدُ في
 #: حقله يُسقطه: **الإعلانُ مع استشهادٍ = غطاء، لا صنف** ⇒ فلم يبقَ مُخاطَبٌ بشاهدٍ حُكم في الشجرة،
 #: والعدُّ **بالهويّة** لا بعدّاد (S-3/P2-5: نقلُ الإعلان إلى جوابٍ آخر كان يمرّ بعدّادٍ ثابت).
+#: **وثانيهما (الجولة ٦٤):** `20260926-0455-REPORT-to-claude-round64-seat-verdict-closure-and-two-measured-mutations.md`
+#: — جوابٌ **بشاهدٍ حقيقيّ** (`in-reply-to:` إلى أحدثِ حُكمٍ سابقٍ في `handoff/claude/`، ولا يحمل `class:`).
+#: **وصار العدُّ بالهويّة لا بالعدد (مقعدُ البنية · ويُقاس في الاتّجاهين):** كان `int` قابلًا للرفع صامتًا
+#: مع جوابٍ جديد يمرّ قاعدةَ الشاهد ⇒ فصار قاموسًا **بالاسم والصنف**، كمَا في `NON_ANSWER_FILES_SINCE_RULE`
+#: المجاورة (R61-1)؛ والثابتُ يُحدَّث **في الالتزام الحامل للجواب** لا في جولةٍ لاحقة.
+SUBJECTS_LANDED = {
+    "handoff/sulaiman/20260925-0723-REPORT-to-claude-r13-green-gate-three-root-causes-and-three-seat-review.md":
+        "يُعلن `class:` ولا يُجيب حُكماً (R58-2) — صنفٌ مُعلَنٌ بالاسم",
+    "handoff/sulaiman/20260926-0455-REPORT-to-claude-round64-seat-verdict-closure-and-two-measured-mutations.md":
+        "جوابٌ بشاهدٍ حقيقيّ (`in-reply-to:` إلى أحدث حُكمٍ سابق) — الجولة ٦٤",
+    "handoff/sulaiman/20260926-153028-REPORT-to-claude-round65-section27-landed-r65-closed-and-three-seat-verdicts-closed.md":
+        "جوابٌ بشاهدٍ حقيقيّ (`in-reply-to:` إلى مراجعة ٦٥ `065039`، أحدثِ حُكمٍ سبقه) — الجولة ٦٥",
+    "handoff/sulaiman/20260926-182947-REPORT-to-claude-round66-r66-1-closed-the-count-is-measured-live-and-the-two-notes-closed.md":
+        "جوابٌ بشاهدٍ حقيقيّ (`in-reply-to:` إلى مراجعة ٦٦ `165806`، أحدثِ حُكمٍ سبقه) — الجولة ٦٦",
+    "handoff/sulaiman/20260926-194405-REPORT-to-claude-round67-the-item-is-withdrawn-and-the-hole-is-closed-at-both-lines.md":
+        "جوابٌ بشاهدٍ حقيقيّ (`in-reply-to:` إلى مراجعة ٦٧ `191625`، أحدثِ حُكمٍ سبقه) — الجولة ٦٧",
+}
 #: الحارسُ الدائريُّ الذي سُحب — يُقاس غيابُه فلا يعود صامتاً من بابٍ خلفيّ (البندُ ٤ من عِلّته).
 RETIRED_GATE = "tests/test_review_landing.py"
 
@@ -371,13 +420,19 @@ def test_the_rule_is_not_silent_about_its_subjects():
     """
     answers = box_answers(tree_files())
     pre = [p for p in answers if not (s := stamp_of(p)) or s < WITNESS_FROM]
-    assert len(pre) == PRE_RULE_ANSWERS, (
-        f"دَينُ ما قبل القاعدة تغيّر: المُقاس {len(pre)} والمُعلَن {PRE_RULE_ANSWERS} ⇒ هبط جوابٌ قديمٌ أو "
-        f"نُزع (المُنزَّعُ يُعلَن في `handoff/RENAMES.md`)")
+    assert set(pre) == set(PRE_RULE_ANSWERS), (
+        "دَينُ ما قبل القاعدة تغيّر — **بالهويّة لا بالعدد** (R61-1: عدّادٌ يُرفَع صامتًا يُرخي البوّابة):\n"
+        f"  جديدٌ لم يُسمَّ: {sorted(set(pre) - set(PRE_RULE_ANSWERS))}\n"
+        f"  ناقصٌ مُسمًّى: {sorted(set(PRE_RULE_ANSWERS) - set(pre))}\n"
+        "  ⇒ يُحدَّث الثابتُ **بالاسم والزمن** في الالتزام نفسه (والمُنزَّعُ يُعلَن في `handoff/RENAMES.md`)")
+    drifted = {p: [stamp_of(p), s] for p, s in PRE_RULE_ANSWERS.items() if stamp_of(p) != s}
+    assert not drifted, (
+        f"زمنُ الدَّين تغيّر — والاسمُ يحمل زمنَه والثابتُ يحمله ⇒ {drifted}")
     subjects = _subjects(answers)
-    assert len(subjects) == SUBJECTS_LANDED, (
-        f"المُخاطَبون بالقاعدة تغيّروا: المُقاس {len(subjects)} والمُعلَن {SUBJECTS_LANDED} ⇒ "
-        f"حدِّث الثابتَ في الالتزام نفسِه: {subjects}")
+    assert set(subjects) == set(SUBJECTS_LANDED), (
+        f"المُخاطَبون بالقاعدة تغيّروا — **بالهويّة لا بالعدد**:\n  المُقاس: {sorted(subjects)}\n"
+        f"  المُعلَن: {sorted(SUBJECTS_LANDED)}\n"
+        f"  ⇒ حدِّث الثابتَ **بالاسم والصنف** في الالتزام نفسِه (R61-1: عدّادٌ يُرفَع صامتًا يُرخي البوّابة)")
 
 
 def test_the_cutoff_exempts_no_answer_by_accident():

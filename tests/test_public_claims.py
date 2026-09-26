@@ -36,6 +36,73 @@ def test_public_documents_match_the_measured_report():
     assert drifts == [], f"انزياح بين الوثيقة ومصدرها: {drifts}"
 
 
+def test_a_stale_snapshot_cannot_hide_behind_a_stale_document(tmp_path, monkeypatch):
+    """**الثقبُ الذي أمسكته المراجعة ٦٦ (R66-1): بلا تقريرٍ مقيس، كانت الوثيقةُ تُقابَل باللقطة وحدَها.**
+
+    فلقطةٌ `tests=865` ووثيقةٌ تقول «حالياً 865» **توافقان بعضَهما** بينما العدُّ الحيُّ `868` ⇒ الحكمُ
+    أخضرُ في الـCI ولا أحدَ يرى الانزياح (قِيس: `render_claims.py --check` ⇒ «الوثائقُ توافق لقطتها
+    الملتزمة» والعدُّ الحيُّ `868`). و`_test_count()` **لا يحتاج** كاشَ التصريح ⇒ فصار العددُ يُقاس حيًّا
+    في هذا المسار أيضًا؛ وهذا الضابطُ يقيس **العلّةَ نفسَها**: يُثبّت لقطةً متقادمة، ويُطالب بالخروج `1`.
+    (والوثيقةُ تُطابَق بـ`check` مُبدَّلةٍ هنا لتُحاكي «وثيقةٌ موافقةٌ للقطة» — وهو حالُ العطب بعينه.)
+    """
+    import json
+    import render_claims as rc
+
+    snap = tmp_path / "claims.json"
+    snap.write_text(json.dumps({"tests": 0}, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(rc, "SNAPSHOT", snap)
+    monkeypatch.setattr(rc, "REPORT", tmp_path / "no-report-here.json")
+    monkeypatch.setattr(rc, "check", lambda _d: [])          # الوثيقةُ توافق اللقطةَ المتقادمة (العطب)
+    monkeypatch.setattr(sys, "argv", ["render_claims.py", "--check"])
+    with pytest.raises(SystemExit) as e:
+        rc.main()
+    assert e.value.code == 1, "لقطةٌ متقادمةٌ مرّت: العددُ لم يُقَس حيًّا في مسار اللقطة"
+
+
+def test_the_committed_snapshot_matches_the_live_count():
+    """**اللقطةُ تُقابَل بعددٍ حيٍّ من داخل المجموعة نفسِها (R67-2 · مراجعة ٦٧).**
+
+    كان إغلاقُ R66-1 يعتمد على خطوة الـCI وحدَها، **وهي تجري قبل تثبيت `pytest`** ⇒ `_test_count()`
+    تُعيد `None` فيتخطّى القياسُ الحيُّ بصمت، فتُقابَل لقطةٌ متقادمةٌ بوثيقةٍ متقادمةٍ مثلها.
+    وضابطٌ في المجموعة لا يعتمد على ترتيب خطوات الـCI — حيث `pytest` موجودٌ بالضرورة.
+
+    **وبمفتاح بيئةٍ مُعلَن** (`RAJHI_CLAIMS_ENV`): فالعدُّ يتغيّر بما هو مُثبَّت (قِيس: ٨٧٤ في بيئة
+    المالك الكاملة مقابل ٦٦٣ في بيئة الـCI الخفيفة) ⇒ فلا يُقابَل رقمُ بيئةٍ برقمِ أخرى.
+    """
+    import render_claims as rc
+
+    live = rc._test_count()
+    assert live is not None, "لا `pytest` هنا ⇒ لا قياس (والبوّابةُ تفشل مُغلَقةً في الخطوة)"
+    snap = json.loads(rc.SNAPSHOT.read_text(encoding="utf-8"))
+    expected = (snap.get("tests_by_env") or {}).get(rc.CLAIMS_ENV)
+    assert expected is not None, (
+        f"بيئةُ القياس `{rc.CLAIMS_ENV}` غيرُ مُعلَنةٍ في اللقطة "
+        f"(المُعلَن: {sorted((snap.get('tests_by_env') or {}))}) ⇒ سجِّل قياسَها بـ`--write`")
+    assert expected == live, (
+        f"عددُ `{rc.CLAIMS_ENV}` في اللقطة {expected} والمعدودُ حيًّا {live} ⇒ "
+        f"`python3 tools/render_claims.py --write` ثم تصحيحُ سطر الوثيقة")
+
+
+def test_an_unmeasurable_count_fails_closed(tmp_path, monkeypatch):
+    """**R67-2 · مراجعة ٦٧:** كان `_test_count()` إن عاد `None` يُتخطّى **بصمت** ⇒ مصادقةٌ على رقمٍ
+    لا يُقاس. والآن الفشلُ مُغلَق — وهذه الضابطةُ تكسر القياس فتُطالب بالخروج ١.
+    """
+    import render_claims as rc
+
+    snap = tmp_path / "claims.json"
+    snap.write_text(json.dumps({"tests": 5}), encoding="utf-8")
+    monkeypatch.setattr(rc, "SNAPSHOT", snap)
+    monkeypatch.setattr(rc, "REPORT", tmp_path / "no-report.json")
+    # **ويُعطَّل فرعُ «الوثيقة ≠ اللقطة» عن قصد:** وإلّا خرج رمزُ الخروج ١ من عدمِ القياس لا من التخطّي،
+    # فلا تفصل الضابطةُ بين «فشلٍ مُغلَق» و«تخطٍّ صامت». هنا الوثيقةُ موافقةٌ للقطة تمامًا.
+    monkeypatch.setattr(rc, "check", lambda d: [])
+    monkeypatch.setattr(rc, "_test_count", lambda: None)
+    monkeypatch.setattr(sys, "argv", ["render_claims.py", "--check"])
+    with pytest.raises(SystemExit) as e:
+        rc.main()
+    assert e.value.code == 1, "قياسٌ متعذّرٌ لم يفشل مُغلَقًا ⇒ التخطّي الصامت عاد"
+
+
 def test_claims_lists_every_metric_it_promises():
     import render_claims as rc
 

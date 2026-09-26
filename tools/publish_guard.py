@@ -111,10 +111,28 @@ OPAQUE_EXTS = {".zip", ".xlsx", ".xlsm", ".xls", ".docx", ".doc", ".pptx",
 # كلَّ قيمةٍ مُقنَّعةٍ بأصلها الحقيقيّ.
 REAL_DATA_DIRS = ("data/local_sample", "data/training", "data/eval_pack")
 
+
+def real_data_path(p: str) -> bool:
+    """هل المسارُ ملفُّ بياناتٍ حقيقيّةٍ **في أيّ عمق** — لا في الجذر وحدَه؟ (مراجعة ٦٧)
+
+    كان القيدُ على بادئة المسار (`p.startswith("data/local_sample/")`) ⇒ نسخةٌ متداخلةٌ
+    (`data/data/local_sample/…`) تمرّ من هذا الحارس **ومن خطوة الـCI معًا**. **والتداخلُ يقع طبيعيًّا:**
+    `cp -R data <نسخةٍ فيها data/>` تُنتج `data/data/`، فتخرج **٣٦١٠ ملفًا حقيقيّةً (منها المفتاح)**
+    من `.gitignore` الجذريّ وتصير قابلةً للإيداع بأمر `git add .` واحد.
+    فالمقابلةُ على **مقاطع المسار** لا على بادئته — والتداخلُ لا يُعفي.
+    """
+    parts = Path(p).parts
+    for d in REAL_DATA_DIRS:
+        want = tuple(d.split("/"))
+        n = len(want)
+        if any(parts[i:i + n] == want for i in range(len(parts) - n + 1)):
+            return True
+    return False
+
+
 PATH_RULES = [
-    ("local_data", "BLOCK",
-     lambda p: any(p == d or p.startswith(d + "/") for d in REAL_DATA_DIRS),
-     "ملف بيانات حقيقية (لقطات/تدريب/تقييم/خريطة تطهير) — ممنوع رفعه نهائياً"),
+    ("local_data", "BLOCK", real_data_path,
+     "ملف بيانات حقيقية (لقطات/تدريب/تقييم/خريطة تطهير) — ممنوع رفعه نهائياً، ولو متداخلاً"),
     ("env_file", "BLOCK", lambda p: Path(p).name == ".env", "ملف اسرار"),
     ("media_file", "BLOCK",
      lambda p: Path(p).suffix.lower() in MEDIA_EXTS
@@ -604,7 +622,29 @@ def main() -> None:
                     help="treat WARN as blocking (opt-in; default is advisory)")
     ap.add_argument("--report-only", action="store_true",
                     help="print findings but always exit 0")
+    ap.add_argument("--tracked-real-data", action="store_true", dest="tracked_real_data",
+                    help="فشلٌ إن كان أيُّ ملفٍّ مُتتبَّعٍ تحت مجلّد بياناتٍ حقيقيّة (بأيّ عمق)")
     args = ap.parse_args()
+
+    if args.tracked_real_data:
+        # **مالكٌ واحد للقاعدة (مراجعة ٦٧):** كانت خطوةُ الـCI تحمل نمطًا جذريًّا خاصًّا بها
+        # (`^data/(local_sample|training|eval_pack)/`) ⇒ فاتها التداخلُ — وفات التداخلُ هذا الحارسَ أيضًا.
+        # فصار الاثنان يستدعيان `real_data_path` نفسَها: قاعدةٌ واحدة، ولا نمطَ ثانٍ يزيح معها.
+        tracked = subprocess.run(["git", "ls-files"], capture_output=True, text=True,
+                                 check=True).stdout.splitlines()
+        bad = [p for p in tracked if real_data_path(p)]
+        print(f"[publish-guard] tracked-real-data: {len(tracked)} ملفًّا مُتتبَّعًا — "
+              f"{len(bad)} تحت مجلّدات البيانات الحقيقيّة")
+        for p in bad:
+            print(f"  BLOCK  local_data    [tracked] {p}")
+        if bad:
+            print("\nالحكم: BLOCK — ملفُّ بياناتٍ حقيقيّةٍ مُتتبَّع (ولو متداخلًا): يُزال من الفهرس "
+                  "ويُضاف إلى `.gitignore`.")
+            if not args.report_only:
+                sys.exit(1)
+        else:
+            print("الحكم: لا ملفَّ بياناتٍ حقيقيّةٍ مُتتبَّع — بأيّ عمق.")
+        return
 
     if not (args.tree or args.history or args.pre_push or args.ci
             or args.messages):
