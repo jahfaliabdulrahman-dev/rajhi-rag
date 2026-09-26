@@ -43,7 +43,7 @@ CREDIT_X = (225, 300)          # الدائن (المدين ملاصقٌ للو�
 DATE_X = (625, 712)            # التاريخان الهجري والميلادي — شاهد
 DESC_X = (330, 712)            # الوصف بعرضه
 HEADER_X, HEADER_Y = (380, 600), (300, 378)    # سطر الـIBAN — آخرُ الرأس
-FOOTER_X, FOOTER_Y = (640, 720), (900, 1060)   # عنوان «العملة» — أوّلُ التذييل
+FOOTER_X, FOOTER_Y = (640, 720), (900, 1060)   # عنوان «العملة» (٩٧٦–٩٨٦ في كل صفحة)
 BELOW_HEADER = 20              # بدايةُ منطقة الجدول تحت سطر الـIBAN
 GAP = 3                        # فراغٌ أقصر من هذا لا يفصل سطرين
 MIN_H = 2                      # أقصرُ حبرٍ يُعدّ سطرًا («٠٫٠٠» نحو ٣)
@@ -116,7 +116,10 @@ def analyze_page(gray: np.ndarray, dpi: int) -> PageBands:
         return PageBands(dpi, "unknown", None)
     foot = _runs(ink, FOOTER_X, _px(FOOTER_Y[0], k), _px(FOOTER_Y[1], k), k)
     top = head[-1][1] + _px(BELOW_HEADER, k)
-    bottom = (foot[0][0] if foot else _px(FOOTER_Y[1], k)) - _px(PAD, k)
+    # العنوانُ **أدنى** حبرٍ في شريطه لا أوّلُه: في الصفحة الممتلئة يقع تاريخُ آخرِ حركةٍ عند ~٩٠٥
+    # داخل النافذة نفسها، فأُخذ عنوانًا وقُصّ الصفُّ الأخير — ١٧٧ صفحةً من ٦٢٥ (مقيس على الكاش:
+    # القراءةُ الكاملة تزيد صفًّا واحدًا بالضبط، والسلسلةُ تُثبته حركةً حقيقية).
+    bottom = (foot[-1][0] if foot else _px(FOOTER_Y[1], k)) - _px(PAD, k)
     zone = (top, bottom)
 
     anchors = _runs(ink, BALANCE_X, top, bottom, k)
