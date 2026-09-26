@@ -59,6 +59,43 @@ def test_a_stale_snapshot_cannot_hide_behind_a_stale_document(tmp_path, monkeypa
     assert e.value.code == 1, "لقطةٌ متقادمةٌ مرّت: العددُ لم يُقَس حيًّا في مسار اللقطة"
 
 
+def test_the_committed_snapshot_matches_the_live_count():
+    """**اللقطةُ تُقابَل بعددٍ حيٍّ من داخل المجموعة نفسِها (R67-2 · مراجعة ٦٧).**
+
+    كان إغلاقُ R66-1 يعتمد على خطوة الـCI وحدَها، **وهي تجري قبل تثبيت `pytest`** ⇒ `_test_count()`
+    تُعيد `None` فيتخطّى القياسُ الحيُّ بصمت، فتُقابَل لقطةٌ متقادمةٌ بوثيقةٍ متقادمةٍ مثلها.
+    وضابطٌ في المجموعة لا يعتمد على ترتيب خطوات الـCI — حيث `pytest` موجودٌ بالضرورة.
+    """
+    import render_claims as rc
+
+    live = rc._test_count()
+    assert live is not None, "لا `pytest` هنا ⇒ لا قياس (والبوّابةُ تفشل مُغلَقةً في الخطوة)"
+    snap = json.loads(rc.SNAPSHOT.read_text(encoding="utf-8"))
+    assert snap["tests"] == live, (
+        f"اللقطةُ الملتزمة تقول {snap['tests']} والمعدودُ حيًّا {live} ⇒ "
+        f"`python3 tools/render_claims.py --write` ثم تصحيحُ سطر الوثيقة")
+
+
+def test_an_unmeasurable_count_fails_closed(tmp_path, monkeypatch):
+    """**R67-2 · مراجعة ٦٧:** كان `_test_count()` إن عاد `None` يُتخطّى **بصمت** ⇒ مصادقةٌ على رقمٍ
+    لا يُقاس. والآن الفشلُ مُغلَق — وهذه الضابطةُ تكسر القياس فتُطالب بالخروج ١.
+    """
+    import render_claims as rc
+
+    snap = tmp_path / "claims.json"
+    snap.write_text(json.dumps({"tests": 5}), encoding="utf-8")
+    monkeypatch.setattr(rc, "SNAPSHOT", snap)
+    monkeypatch.setattr(rc, "REPORT", tmp_path / "no-report.json")
+    # **ويُعطَّل فرعُ «الوثيقة ≠ اللقطة» عن قصد:** وإلّا خرج رمزُ الخروج ١ من عدمِ القياس لا من التخطّي،
+    # فلا تفصل الضابطةُ بين «فشلٍ مُغلَق» و«تخطٍّ صامت». هنا الوثيقةُ موافقةٌ للقطة تمامًا.
+    monkeypatch.setattr(rc, "check", lambda d: [])
+    monkeypatch.setattr(rc, "_test_count", lambda: None)
+    monkeypatch.setattr(sys, "argv", ["render_claims.py", "--check"])
+    with pytest.raises(SystemExit) as e:
+        rc.main()
+    assert e.value.code == 1, "قياسٌ متعذّرٌ لم يفشل مُغلَقًا ⇒ التخطّي الصامت عاد"
+
+
 def test_claims_lists_every_metric_it_promises():
     import render_claims as rc
 
