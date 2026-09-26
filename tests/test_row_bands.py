@@ -198,8 +198,38 @@ def test_a_continuation_links_to_the_previous_pages_last_row():
     pages = [analyze_page(g, DPI) for g in (first, second, summary, after_summary)]
     assert link_pages(pages) == [
         {"page": 0, "owner_missing": True},          # صاحبُها قبل الدفعة: يُعلَّم لا يُحذف
-        {"page": 1, "continues": [0, len(ROWS) - 1]},
+        {"page": 1, "continues": [0, len(ROWS) - 1], "confirmed": False},
         {"page": 3, "owner_missing": True},          # لا تُنسب إلى صفحة ملخّص
+    ]
+
+
+def _three_sheets():
+    """الورقةُ «أ» بلا تكملة، و«ب» و«ج» كلٌّ منهما يبدأ بتكملة — وعددُ صفوفها يميّزها."""
+    a, _, _ = _page(ROWS)
+    b, _, _ = _page(ROWS[:2], orphan_lines=2)
+    c, _, _ = _page(ROWS[:3], orphan_lines=1)
+    return a, b, c
+
+
+def test_a_continuation_links_by_the_true_order_not_the_file_order():
+    """في الملف: أ، ج، ب — والحقيقي أ، ب، ج. تكملةُ «ب» لآخر صفٍّ في «أ» لا في «ج»."""
+    a, b, c = _three_sheets()
+    file_pages = [analyze_page(g, DPI) for g in (a, c, b)]
+    links = link_pages(file_pages, order=[0, 2, 1])
+    assert links == [
+        {"page": 2, "continues": [0, len(ROWS) - 1], "confirmed": False},
+        {"page": 1, "continues": [2, 1], "confirmed": False},
+    ]
+
+
+def test_a_confirmed_neighbour_confirms_the_link_and_a_gap_orphans_it():
+    a, b, c = _three_sheets()
+    pages = [analyze_page(g, DPI) for g in (a, b, c)]
+    links = link_pages(pages, order=[0, 1, 2], pairs={(0, 1): "adjacent", (1, 2): "gap"})
+    assert links == [
+        {"page": 1, "continues": [0, len(ROWS) - 1], "confirmed": True},
+        # ورقةٌ غائبةٌ بين «ب» و«ج»: تكملةُ «ج» لصفٍّ ليس عندنا — لا تُنسب لآخر صفٍّ في «ب»
+        {"page": 2, "owner_missing": True, "gap_before": True},
     ]
 
 

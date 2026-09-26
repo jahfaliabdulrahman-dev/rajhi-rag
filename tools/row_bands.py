@@ -73,7 +73,9 @@ def main() -> int:
     pages = [analyze_page(g, args.dpi) for g in grays]
     links = link_pages(pages)
     by_page = {lk["page"]: lk for lk in links}
-    print("(الربطُ بترتيب الملف — يصحّ إن كانت صفحاتُه متتالية في الكشف)")
+    # بلا قراءةِ تذييلٍ لا ترتيبَ حقيقيًّا ولا تجاورَ مؤكَّدًا (ordering.footer_order/adjacency):
+    # فالربطُ هنا بترتيب الملف، وكلُّه «غيرُ مؤكَّد» — والتطبيقُ يربط بالترتيب الحقيقي.
+    print("(الربطُ بترتيب الملف وغيرُ مؤكَّد — يصحّ إن كانت صفحاتُه متتالية في الكشف)")
     for i, p in enumerate(pages):
         dated = sum(b.dated for b in p.bands)
         credit = sum(b.credit_ink for b in p.bands if b.dated)

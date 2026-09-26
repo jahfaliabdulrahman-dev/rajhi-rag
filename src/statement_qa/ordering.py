@@ -1,8 +1,10 @@
 """Page-order / chronology check — reversal must be detectable, not guessed.
 
 What-if workshop delta #1: the input file may arrive with pages shuffled or
-reversed, and the scans carry NO page-number stamp (verified on renders) —
-so the check is built on two deterministic signals instead:
+reversed. (This docstring once said the scans carry NO page-number stamp; they
+do — every sheet prints its number in the header, `tools/page_numbers.py` —
+but a vision model reads it on a minority of pages, so it cannot carry the
+order alone.) The check is built on deterministic signals instead:
 
 1. Printed dates (gregorian part, YYYYMMDD after digit translation):
    open a statement bundle reversed and dates march BACKWARD page over page;
@@ -15,12 +17,19 @@ so the check is built on two deterministic signals instead:
    conservative «anchor» (unverifiable jump — preserved as opening, movement
    never fabricated). A high anchor ratio across boundaries is a shuffle /
    misread signal; it is reported alongside the dates.
+3. **The printed footer totals are CUMULATIVE** (`footer_oracle`), so they rise
+   with every sheet: sorting by them IS the true order (`footer_order`), with
+   no page number read. Measured on the 629-page file: 625 footers readable,
+   zero descents in file order, no two sheets equal. Two neighbours in that
+   order are consecutive sheets only when their footer difference equals the
+   second sheet's own sums (`adjacency`).
 
 Output feeds the app summary; nothing here blocks a run — it NAMES what it saw.
 """
 from __future__ import annotations
 
 import re
+from bisect import bisect_left
 
 _DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 _DATE_RUN = re.compile(r"\d{8}")
@@ -174,4 +183,114 @@ def summarize_ar(order: dict, boundaries: dict | None = None) -> str:
         okb = boundaries.get("txn", 0) + boundaries.get("carry", 0)
         if anchors:
             seg += f" — التحامات الصفحات: {okb} سليمة، {anchors} مرساة غير محسومة"
+    return seg
+
+
+def _outside_lis(seq: list[int]) -> list[int]:
+    """Items NOT on one longest increasing run of `seq` — the fewest to move."""
+    tails: list[int] = []
+    tail_at: list[int] = []
+    parent: list[int | None] = [None] * len(seq)
+    for i, v in enumerate(seq):
+        j = bisect_left(tails, v)
+        if j == len(tails):
+            tails.append(v)
+            tail_at.append(i)
+        else:
+            tails[j], tail_at[j] = v, i
+        parent[i] = tail_at[j - 1] if j else None
+    keep: set[int] = set()
+    i = tail_at[-1] if tail_at else None
+    while i is not None:
+        keep.add(seq[i])
+        i = parent[i]
+    return [v for v in seq if v not in keep]
+
+
+def footer_order(footers: dict[int, tuple]) -> dict:
+    """{file position: (cumulative debits, cumulative credits)} -> the true order.
+
+    The key is the pair of printed cumulative totals, which only rise sheet
+    after sheet — so the sort needs no page number and no date. Honest edges:
+
+    - `unplaced`: a footer missing a total cannot be ranked; the sheet stays
+      right after its file predecessor (and its neighbours stay undecided).
+    - `conflicts`: debits and credits disagree on which sheet comes first —
+      a misread footer, never resolved by guessing.
+    - `duplicates`: identical totals — a sheet scanned twice (or a summary
+      page repeating the last footer).
+    - `moved`: the FEWEST sheets whose move restores the order (outside one
+      longest increasing run), in true order — what a person should look at.
+    """
+    placed = {p: v for p, v in footers.items()
+              if v is not None and v[0] is not None and v[1] is not None}
+    ranked = sorted(placed, key=lambda p: (placed[p][0], placed[p][1], p))
+    conflicts = [(a, b) for a, b in zip(ranked, ranked[1:])
+                 if placed[b][1] < placed[a][1]]
+    groups: dict[tuple, list[int]] = {}
+    for p in ranked:
+        groups.setdefault(tuple(placed[p][:2]), []).append(p)
+    order = list(ranked)
+    unplaced = sorted(set(footers) - set(placed))
+    positions = sorted(footers)
+    for p in unplaced:
+        prev = positions[positions.index(p) - 1] if positions.index(p) else None
+        order.insert(order.index(prev) + 1 if prev is not None else 0, p)
+    return {"order": order, "moved": _outside_lis(order), "unplaced": unplaced,
+            "conflicts": conflicts,
+            "duplicates": [ps for ps in groups.values() if len(ps) > 1]}
+
+
+def adjacency(order: list[int], footers: dict[int, tuple], own: dict[int, tuple],
+              printed: dict[int, int | None] | None = None) -> dict[tuple[int, int], str]:
+    """Is each pair of neighbours in the TRUE order two consecutive sheets?
+
+    `own[p]` = sheet p's own (debits, credits), derived with its TRUE
+    predecessor's closing balance (a first-row movement derived from the wrong
+    neighbour is wrong). Status per (a, b):
+
+    - adjacent  — footer(b) − footer(a) == own(b) in debits AND credits: the
+                  identity `footer_oracle.delta_ok` checks, applied to the true
+                  neighbour instead of the file neighbour. Exact on two fields,
+                  so it outranks a printed number (read on a minority of pages).
+    - gap       — the printed numbers jump: a sheet between them is missing.
+    - mismatch  — both sides read and the difference disagrees: a misread or
+                  an unnumbered missing sheet — named, not decided here.
+    - undecided — a total is missing on either side.
+    """
+    printed = printed or {}
+    out: dict[tuple[int, int], str] = {}
+    for a, b in zip(order, order[1:]):
+        fa, fb, ob = footers.get(a), footers.get(b), own.get(b)
+        known = all(t is not None and t[0] is not None and t[1] is not None
+                    for t in (fa, fb, ob))
+        if known and fb[0] - fa[0] == ob[0] and fb[1] - fa[1] == ob[1]:
+            out[(a, b)] = "adjacent"
+            continue
+        na, nb = printed.get(a), printed.get(b)
+        if isinstance(na, int) and isinstance(nb, int) and nb > na + 1:
+            out[(a, b)] = "gap"
+        else:
+            out[(a, b)] = "mismatch" if known else "undecided"
+    return out
+
+
+def summarize_footer_order(fo: dict) -> str:
+    """Run-level one-liner: is the file in its true order, and what moved?"""
+    total = len(fo["order"])
+    ranked = total - len(fo["unplaced"])
+    if not total or ranked / total < MIN_PAGE_COVERAGE:
+        return (f"⚠ الترتيب بالإجماليات التراكمية: تغطية ناقصة ({ranked}/{total}) — "
+                f"لا حكم")
+    if fo["conflicts"]:
+        return (f"⚠ الترتيب بالإجماليات التراكمية: تذييلٌ متناقض بين المواقع "
+                f"{fo['conflicts'][0][0]} و{fo['conflicts'][0][1]} — قراءةٌ تُراجَع قبل أي حكم")
+    seg = (f"الترتيب بالإجماليات التراكمية: ✓ مطابقٌ لترتيب الملف ({ranked}/{total})"
+           if not fo["moved"] else
+           f"⚠ الترتيب بالإجماليات التراكمية: صفحاتٌ في غير موضعها — المواقع "
+           f"{'، '.join(str(p) for p in fo['moved'][:5])}"
+           f"{' …' if len(fo['moved']) > 5 else ''} ({ranked}/{total})")
+    if fo["duplicates"]:
+        seg += " — إجمالياتٌ مكرّرة: " + "، ".join(
+            "/".join(str(p) for p in ps) for ps in fo["duplicates"][:3])
     return seg
