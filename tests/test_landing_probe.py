@@ -109,21 +109,27 @@ def test_the_probe_refuses_to_measure_when_it_cannot_read_the_list(capsys):
 
 
 def test_one_parser_for_the_stamp_format():
-    """**مُحلِّلٌ واحد لصيغة الختم** (P3-١١ · مراجعة ٦١ · مقعد البنية).
+    """**مُحلِّلُ الختم مالكُه واحد — بالخاصّيّة لا بالنصّ** (P3-١١ · مراجعة ٦١ · ثمّ مقعدا المعايير
+    والبنية في الجولة ٦٥).
 
-    الصيغةُ (`%Y%m%d-%H%M%S`) تُبنى في موضع وتُحلَّل في موضعَين — وفي المقعد كان التشريحُ اليدويُّ
-    مكتوبًا مرّتين ⇒ تغييرُ الصيغة يكسر مُحلِّلَين يجب أن يتقادما معًا (وهو صنفُ «نسختان تفترقان»).
-    والضابطُ: الاسمُ وزمنُ الإيداع يمرّان من المُحلِّل نفسه، وسمُّ `name-stamp` يُزحزح من المُحلِّل
-    نفسِه (٣ ساعات) — فلو تفرّق المُحلِّلان لظهر الفرقُ في الاسم.
+    كان الضابطُ يعدّ نصًّا (`src.count("stamp[9:11]") == 1`) فيبقى **أخضرَ** مع مُحلِّلٍ محلّيٍّ ثانٍ
+    (`_stamp_dt`) **أضيقَ من مالكه**: `_stamp_dt("20260922-240000")` ⇒ `ValueError` بينما
+    `turn.as_datetime` ⇒ `2026-09-23 00:00` (واصطلاحُ `24:00` موثَّقٌ وله ضابطٌ في
+    `tests/test_report_names.py`). فصار الضابطُ يقيس **الخاصّيّة** لا نصَّ الشيفرة.
     """
-    assert lp._stamp_dt("20260925-211945").strftime("%Y%m%d-%H%M%S") == "20260925-211945", \
-        "المُحلِّلُ لا يعيد الصيغةَ نفسَها ⇒ الاسمُ وزمنُ الإيداع يفترقان"
-    shifted = lp._name("20260925-211945", "name-stamp")
-    assert shifted.startswith("20260925-181945"), f"السمُّ لا يُزحزح ٣ ساعات: {shifted}"
+    # (١) الاسمُ: بلا سمٍّ يأخذ زمنه، وبالسمّ يُزاح ثلاثَ ساعات — والزمنُ من **مالك الصيغة** لا نسخة
     assert lp._name("20260925-211945", None).startswith("20260925-211945")
-    src = (lp.__file__ and Path(lp.__file__).read_text(encoding="utf-8")) or ""
-    assert src.count("stamp[9:11]") == 1, \
-        "تشريحُ الختم مكتوبٌ في أكثر من موضع ⇒ تغييرُ الصيغة يكسر نسخةً تُنسى (يُمرَّر من `_stamp_dt`)"
+    assert lp._name("20260925-211945", "name-stamp").startswith("20260925-181945")
+    # (٢) **الخاصّيّةُ لا النصّ:** لا مُحلِّلَ محلّيًّا للختم، واصطلاحُ نهاية اليوم يمرّ كما في مالكه
+    src = Path(str(lp.__file__)).read_text(encoding="utf-8")
+    assert "fromisoformat" not in src, "مُحلِّلٌ محلّيٌّ ثانٍ للختم ⇒ نسختان تفترقان (ST-4)"
+    assert "def _stamp_dt" not in src, "دالّةُ تحليلٍ محلّيّةٌ باقيةٌ (المالكُ واحد: `turn.as_datetime`)"
+    assert lp.as_datetime("20260922-240000").strftime("%Y%m%d-%H%M%S") == "20260923-000000", \
+        "اصطلاحُ نهاية اليوم لا يمرّ ⇒ نسخةٌ أضيقُ من مالكها"
+    # (٣) والحقائقُ الزمنيّةُ **مستورَدةٌ من المالك** لا معرَّفةٌ هنا (نمطُ الاسم · اصطلاحُ زمنه · منطقتُه)
+    assert lp.as_datetime.__module__ == "turn" and lp.stamp_of.__module__ == "turn", \
+        "الحقيقةُ الزمنيّةُ ليست من مالكها (`tools/turn.py`)"
+    assert lp.NAMING_TZ.utcoffset(None) == timedelta(hours=3), "منطقةُ التسمية من مالكها (+03)"
 
 
 def test_list_prints_the_measured_list_and_the_poisons(capsys):
@@ -221,10 +227,69 @@ def test_the_stamp_follows_the_tree_clock_and_never_lands_in_an_answer_window():
     assert lp._probe_stamp(aware_local, []) == lp._probe_stamp(aware_local.astimezone(timezone.utc), []), \
         "الختمُ يتغيّر بتغيّر منطقة العملية بدل أن يتبع ساعة الشجرة"
 
-    # ‹٤› **والوصل لا الوعد**: `measure` ينادي الدالّةَ، والإيداعُ يأخذ اللحظةَ نفسَها (مصدرٌ واحد)
-    src = (ROOT / "tools" / "landing_probe.py").read_text(encoding="utf-8")
-    assert "_probe_stamp(datetime.now().astimezone(), _tree_stamps(dst))" in src, \
+    # ‹٤› **والوصل لا الوعد**: `measure` ينادي الدالّةَ، والإيداعُ يأخذ اللحظةَ نفسَها (مصدرٌ واحد).
+    #     والمطابقةُ **مُطبَّعةٌ عن الفراغات** فلا يسقط الضابطُ بإعادة تنسيقٍ وكودُه سليم (نقدُ مقعد المواصفة)
+    flat = "".join((ROOT / "tools" / "landing_probe.py").read_text(encoding="utf-8").split())
+    assert "_probe_stamp(datetime.now().astimezone(),_tree_stamps(dst))" in flat, \
         "`measure` ما زال يختم بساعة العدّاء ⇒ الإصلاحُ في دالّةٍ لا تُنادى"
-    assert "_commit(review, dst, stamp_dt)" in src, \
+    assert "_commit(review,dst,stamp_dt)" in flat, \
         "زمنُ الإيداع لا يتبع اللحظةَ المُصلَحة ⇒ الاسمُ والإيداع يفترقان عن الشجرة"
-    assert "_tree_stamps(dst)" in src, "الأرضيّةُ تُقرأ من شجرة المنفّذ لا من الشجرة المقيسة"
+    assert "_tree_stamps(dst)" in flat, "الأرضيّةُ تُقرأ من شجرة المنفّذ لا من الشجرة المقيسة"
+
+
+def test_the_floor_covers_the_witness_scope():
+    """**أرضيّةُ الختم تُغطّي نطاقَ حارس §٢٧ — ونطاقُهما مالكٌ واحد** (مقعدُ البنية · الجولة ٦٥).
+
+    الأرضيّةُ وحدَها ما يُخرج الشاهدَ الاصطناعيَّ من نافذة `(شاهد, جواب]`، فلو وُسّع نطاقُ الحارس
+    (صندوقُ مراسلةٍ ثالث) وبقي نطاقُ الأرضيّة أضيقَ ⇒ شاهدٌ يقع في نافذة جوابٍ حقيقيّ ⇒ `gate_landing`
+    يُعلن «المراجعةُ لم تهبط» على شجرةٍ **سليمة** — وهو صنفُ الفشل الكاذب الذي لاحقته الجولات.
+    والضابطُ: تساوي المجموعتين مع ثوابت الحارس **المستورَدة**، والنطاقُ مُشتقٌّ من مالك التخطيط.
+    """
+    gate = _witness_gate()
+    scope = {gate.BOX.rstrip("/"), gate.WITNESS_ROOT.rstrip("/")}
+    assert set(lp.BOXES) == scope, \
+        f"نطاقُ الأرضيّة {set(lp.BOXES)} ≠ نطاقُ حارس §٢٧ {scope} ⇒ شاهدٌ قد يقع في نافذة جوابٍ حقيقيّ"
+    assert "sorted(SIDES)" in Path(str(lp.__file__)).read_text(encoding="utf-8"), \
+        "النطاقُ مكتوبٌ بيدٍ لا من مالكه (`turn.SIDES`)"
+
+
+def test_the_probe_stamp_chain_under_a_utc_clock_keeps_a_recent_answer_gated(tmp_path):
+    """**السلسلةُ الحقيقيّةُ بساعة عدّاء UTC** (المواصفةُ نصًّا · R65-1): «ضابطٌ يُشغّل المسبارَ بـ`TZ=UTC`
+    على شجرةٍ فيها جوابٌ حديثٌ وشاهدُه، وهي الحالةُ أعلاه بعينها».
+
+    يُبنى **شجرةٌ حقيقيّة** (صندوقا المراسلة بجوابٍ حديث وشاهده) ثم تُشغَّل **سلسلةُ الختم الحقيقيّة**:
+    `_tree_stamps` على الشجرة، و`_probe_stamp` بساعة العملية الحقيقيّة بعد `time.tzset()` على `UTC`،
+    ثم **حارسُ §٢٧ الحقيقيّ** على الاسم الناتج — فلا محاكاةَ للّحظة ولا نسخةَ ثانية للمنطق.
+
+    **وحدُّه مُعلَن:** لا يُشغّل المسبارَ كاملًا (كلفتُه ١٩ ملفَّ CI لكلّ تشغيل) — وهذا يقيسه الـCI نفسُه
+    حيث ساعةُ العدّاء UTC (`gate_landing`)، وقد قِيس حيًّا (`TZ=UTC … ⇒ rc=0` والختمُ ساعةَ الشجرة).
+    """
+    import os
+    import time
+
+    (tmp_path / "handoff" / "sulaiman").mkdir(parents=True)
+    (tmp_path / "handoff" / "claude").mkdir(parents=True)
+    answer = "handoff/sulaiman/20260926-160000-REPORT-to-claude-recent.md"
+    witness = "handoff/claude/20260926-150000-third-eye-review-99-recent.md"
+    (tmp_path / answer).write_text(f"in-reply-to: {witness}\n", encoding="utf-8")
+    (tmp_path / witness).write_text("حُكمٌ حديثٌ.\n", encoding="utf-8")
+
+    saved = os.environ.get("TZ")
+    try:
+        os.environ["TZ"] = "UTC"                      # ساعةُ عدّاء GitHub
+        time.tzset()
+        stamp = lp._probe_stamp(datetime.now().astimezone(), lp._tree_stamps(tmp_path))
+    finally:
+        if saved is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = saved
+        time.tzset()
+
+    key = stamp.strftime("%Y%m%d-%H%M%S")
+    assert stamp.utcoffset() == timedelta(hours=3), f"الختمُ ليس بساعة الشجرة: {stamp}"
+    assert key > "20260926-160000", f"الختمُ لم يتجاوز أحدثَ اسمٍ في الشجرة: {key}"
+    gate = _witness_gate()
+    tree = {answer, witness, f"handoff/claude/{key}-third-eye-review-99-landing-probe.md"}
+    assert gate.ungated_answers({answer: f"in-reply-to: {witness}\n"}, tree) == [], \
+        "جوابٌ حديثٌ صار غيرَ محروسٍ بالشاهد ⇒ الشاهدُ الاصطناعيُّ دخل نافذته (R65-1)"
