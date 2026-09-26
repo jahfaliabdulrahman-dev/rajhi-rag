@@ -60,6 +60,9 @@ ROOT = Path(__file__).resolve().parent.parent
 _AR = "0-9\u0660-\u0669\u06f0-\u06f9"  # western + arabic-indic + persian
 
 LONG_DIGITS_RX = re.compile("[" + _AR + "]{10,}")
+#: معرّفُ كائنٍ في مخزن git — `sha1` (٤٠) أو `sha256` (٦٤). يُستعمل لقراءة صيغة `-z` **بشكلها**:
+#: كلُّ سجلٍّ إمّا معرّفٌ وإمّا `path=<مسار>` يتبعه؛ فسجلٌّ ثالثٌ = الصيغةُ تغيّرت ⇒ لا حكم (جولة ٦٨ب).
+OBJECT_ID_RX = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 LONG_DIGITS_DESC = "سلسلة ارقام طويلة (رقم حساب/بطاقة؟)"
 
 # A long run can be written in uniform groups — the IBAN/card/cheque idiom
@@ -153,25 +156,27 @@ PATH_RULES = [
 SKIP_PATHS = {"tools/publish_guard.py", ".publish-allowlist"}
 
 
-def _run_git(args: tuple[str, ...], z: bool = False) -> str:
+def _run_git(args: tuple[str, ...], z: bool = False, data: bytes | None = None) -> bytes:
     """قراءةٌ واحدةٌ من git — **ورفضُ ما لم يُقرأ** (مراجعة ٦٨ + مقعدا المعايير والبنية · جولة ٦٨).
 
     **العلّةُ المقيسة:** كانت `_git` تُعيد `''` على أمرٍ فاشل، و`_git_z` تُعيد قائمةً فارغة ⇒ فيُقرأ
     «تعذّرُ قراءة» «صفرَ مطابقات» ثم «نظيفًا». وقِيس على الأمر الفاشل نفسِه: `_git` ⇒ `''` بلا استثناء،
     `_git_z` ⇒ `GitReadError` — أي أنّ السياسةَ نُفِّذت في قارئٍ واحدٍ فبقيت أنصافُ المسح الثلاثة
     (الرسائل · `pre-push` · الملفّاتُ المُتتبَّعة) عائدةً «نظيفةً صامتة». فالآن **سياسةٌ واحدة**
-    لكلّ مسارِ قراءة: رمزُ خروجٍ غيرُ صفريّ ⇒ `GitReadError` ⇒ لا حكم.
+    لكلّ مسارِ قراءة: رمزُ خروجٍ غيرُ صفريّ ⇒ `GitReadError` ⇒ لا حكم. **والنواةُ تُعيد بايتات**
+    (لا نصًّا) لأنّ قراءةَ `cat-file --batch` ثنائيّةٌ أصلًا؛ فالترميزُ في `_git` وحدَها.
     """
-    proc = subprocess.run(["git", *args, *(["-z"] if z else [])], cwd=ROOT, capture_output=True)
+    proc = subprocess.run(["git", *args, *(["-z"] if z else [])], cwd=ROOT,
+                          input=data, capture_output=True)
     if proc.returncode != 0:
         raise GitReadError(
             f"`git {' '.join(args)}{' -z' if z else ''}` ⇒ rc={proc.returncode}: "
             f"{proc.stderr.decode('utf-8', 'replace').strip()[:160]}")
-    return proc.stdout.decode("utf-8", "replace")
+    return proc.stdout
 
 
 def _git(*args: str) -> str:
-    return _run_git(args)
+    return _run_git(args).decode("utf-8", "replace")
 
 
 class GitReadError(RuntimeError):
@@ -195,7 +200,7 @@ def _git_z(*args: str) -> list[str]:
     **وفشلٌ مُغلَق (مراجعة ٦٨):** كانت تُعيد المخرَجَ بلا فحصِ رمزِ الخروج ⇒ فأمرٌ فاشلٌ يُقرأ
     «قائمةً فارغةً» = «نظيفًا». والآن تمرّ على `_run_git` (سياسةٌ واحدة مع `_git`) ويرفع الاستثناءَ.
     """
-    return [x for x in _run_git(args, z=True).split("\0") if x]
+    return [x for x in _run_git(args, z=True).decode("utf-8", "replace").split("\0") if x]
 
 
 def _history_pairs() -> list[tuple[str, str]]:
@@ -209,42 +214,49 @@ def _history_pairs() -> list[tuple[str, str]]:
     لا يُعتمد)، ويُخرج الحارسُ «نظيف» وهو لم يقرأ شيئًا (قِيس: `tree: 462 · history: 0 · 0 BLOCK · rc=0`).
     أمّا `ls-tree -r -z` فبُنيَتُه لم تتغيّر (‎`\\t` باقٍ) ⇒ الشجرةُ كانت سليمة، وهو سببُ غياب الأثر.
 
-    **وصفرُ السجلّاتِ الخام فشلٌ مُغلَق — لا صفرُ الأزواج (مقعدُ البنية · جولة ٦٨):** كان الشرطُ على
-    الأزواج **المشتقّة** ⇒ فتاريخٌ مشروعٌ لا يحمل كائنًا مسمًّى يُصنَّف «تعذّرَ قياس» (قِيس: مستودعٌ
-    بالالتزام فارغٍ واحد ⇒ رمز ٢) — وذاك حارسٌ يصرخ دائمًا فيُهمَل. فالفحصُ على ما **قرأته git**
-    (`_git_z` نفسها): صفرُ سجلّاتٍ = لم يُقرأ شيء ⇒ لا حكم؛ وأمّا صفرُ الأزواج مع سجلّاتٍ مقروءةٍ
-    فتاريخٌ بلا كائنٍ مسمّى، وهو مشروع.
+    **ومقياسُ «قُرئ أم لا» على **شكلِ** ما قرأته git — لا على الصفر (مقعدا البنية والمواصفة · ٦٨ب):**
+    صفرُ السجلّاتِ ليس فشلًا بذاته (مستودعٌ بلا التزاماتٍ ⇒ لا تاريخَ يُمسح)، وصفرُ الأزواجِ ليس
+    فشلًا بذاته أيضًا (تاريخٌ بلا كائنٍ مسمّى: التزامٌ فارغ — قِيس `history: 0 · rc=0`) ⇒ فالحكمُ على
+    **شكلِ كلّ سجلّ**: إمّا معرّفُ كائنٍ (`sha1`/`sha256`) وإمّا `path=<مسار>` يتبع معرّفًا. وسجلٌّ لا
+    هذا ولا ذاك ⇒ الصيغةُ تغيّرت أو القارئُ خالفها ⇒ لا حكم. (وهو بعينِه ما فات في R68-1: الأزواجُ
+    صفرٌ والسجلّاتُ مقروءة ⇒ مُرَّ الأمرُ «نظيفًا».)
     """
     records = _git_z("rev-list", "--objects", "--all")
-    if not records:
-        raise GitReadError(
-            "مسحُ التاريخ قرأ **صفرَ سجلّ** من git — ومستودعٌ له تاريخٌ لا يكون صفرًا ⇒ تغيّرت صيغةُ "
-            "`rev-list --objects -z` أو لم يُنفَّذ الأمر (فشلٌ مُغلَق: لا حكمَ على ما لم يُقرأ)")
     pairs: list[tuple[str, str]] = []
     sha = ""
     for rec in records:
-        if rec.startswith("path="):
-            if sha:
-                pairs.append((rec[5:], sha))
-        else:
+        if OBJECT_ID_RX.fullmatch(rec):
             sha = rec
-    if not pairs and any(r.startswith("path=") for r in records):
-        # **ومسارٌ بلا معرّفٍ يسبقه = بنيةٌ لا تُفهَم (جولة ٦٨):** سجلُّ `path=` يُلحَق دائمًا بالمعرّف
-        # الذي قبله؛ فوجودُه بلا سابقٍ يعني أنّ الصيغةَ تغيّرت ⇒ لا تُقرأ «صفرَ أزواج» على أنّها نظافة.
-        # (وصحّةُ القارئ نفسِه محروسةٌ بضابطٍ يزرع تسريبًا في التاريخ — داخل قائمة الـCI.)
-        raise GitReadError(
-            "مسحُ التاريخ قرأ سجلَّ `path=` بلا معرّفٍ يسبقه ⇒ بنيةُ `-z` تغيّرت (فشلٌ مُغلَق)")
+        elif rec.startswith("path="):
+            if not sha:
+                raise GitReadError(
+                    f"مسحُ التاريخ قرأ `path=` بلا معرّفٍ يسبقه ({rec[:60]!r}) ⇒ بنيةُ `-z` تغيّرت")
+            pairs.append((rec[5:], sha))
+        else:
+            raise GitReadError(
+                f"مسحُ التاريخ قرأ سجلًّا لا معرّفَ كائنٍ ولا `path=`: {rec[:60]!r} ⇒ صيغةُ `-z` "
+                f"تغيّرت (فشلٌ مُغلَق: لا حكمَ على ما لم يُقرأ)")
     return pairs
 
 
 def _read_blobs(shas: list[str]) -> dict[str, bytes]:
-    """Batch-read blobs in ONE git process (fast even for history mode)."""
+    """Batch-read blobs in ONE git process (fast even for history mode).
+
+    **وعلى النواة نفسِها (مقعدا المعايير والبنية · الجولة ٦٨ب):** كانت هذه القراءةُ الرابعة — وهي
+    التي تُنزل محتوى الكائنات، أي **موضعُ الحكم نفسه** — تنادي git مباشرةً بلا فحصِ رمز خروج ⇒ فشلٌ
+    متكرّرٌ يُقرأ «صفرَ نصوص» = «نظيفًا»، وهو عينُ الصنف الذي أُغلق في المسارات الثلاثة الأخرى.
+
+    **والكائنُ الغائبُ يُعلَن ولا يُتخطّى (قياسُ المقاعد الثلاثة · ٦٨ب):** `cat-file --batch` يُخرج
+    `… missing` **برمز خروجٍ صفر** ⇒ فحصُ الرمز وحدَه لا يكفي، والمستهلكُ كان يُسقط الغائبَ بصمت
+    (`data is None ⇒ continue`) ⇒ **تسريبٌ مزروعٌ يمرّ**. قِيس بحذف جسم بلوبٍ واحد: قَبلٌ `1 BLOCK`
+    و`rc=1`، وبعدُ `0 BLOCK` و«آمن للدفع» `rc=0`. فالآن: صفرُ بايتٍ أو سجلٌّ غيرُ مفهوم ⇒ `GitReadError`.
+    """
     if not shas:
         return {}
-    proc = subprocess.run(["git", "cat-file", "--batch"],
-                          input="\n".join(shas).encode(),
-                          cwd=ROOT, capture_output=True)
-    out = proc.stdout
+    out = _run_git(("cat-file", "--batch"), data="\n".join(shas).encode())
+    if not out:
+        raise GitReadError(
+            f"`git cat-file --batch` قرأ صفرَ بايت لـ{len(shas)} كائنًا ⇒ الأمرُ لم يُنفَّذ (فشلٌ مُغلَق)")
     result: dict[str, bytes] = {}
     i = 0
     while i < len(out):
@@ -252,12 +264,17 @@ def _read_blobs(shas: list[str]) -> dict[str, bytes]:
         if nl < 0:
             break
         header = out[i:nl].decode("utf-8", "replace").split()
-        if len(header) == 3 and header[1] == "blob":
+        if len(header) == 3 and header[1] in ("blob", "tree", "commit", "tag"):
             size = int(header[2])
-            result[header[0]] = out[nl + 1: nl + 1 + size]
+            if header[1] == "blob":
+                result[header[0]] = out[nl + 1: nl + 1 + size]
             i = nl + 1 + size + 1
-        else:  # missing / unusual object
-            i = nl + 1
+        elif len(header) == 2 and header[1] == "missing":
+            raise GitReadError(
+                f"كائنٌ غائبٌ من مخزن git ({header[0][:12]}) ⇒ لا حكمَ على ما لم يُقرأ (فشلٌ مُغلَق)")
+        else:
+            raise GitReadError(
+                f"سجلُّ `cat-file --batch` غيرُ مفهوم: {header[:3]} ⇒ صيغةُ المخرَج تغيّرت (فشلٌ مُغلَق)")
     return result
 
 
@@ -569,11 +586,12 @@ def _scan_blobs(pairs: list[tuple[str, str]], where: str,
 
 
 def scan_tree(findings, entries, seen) -> int:
+    # **ولا شرطَ صفرٍ هنا (مقعدا البنية والمواصفة · ٦٨ب):** كان الشرطُ على الأزواج **المشتقّة** ⇒
+    # فالتزامٌ بشجرةٍ فارغة (`commit --allow-empty`) يُصنَّف «تعذّرَ قياس» برمز ٢، بينما `--history`
+    # على المستودع نفسِه يقول «آمن» برمز ٠ — حكمان متناقضان لحالتين متماثلتين في مشروعيّتهما، وصرخةٌ
+    # كاذبةٌ في مسار الدفع أيضًا (`scan_pre_push` تنادي هذه الدالّة). والمقياسُ الصادقُ هو **ما قرأته git**:
+    # `ls-tree` تُخرج صفرًا برمز ٠ لشجرةٍ فارغة (قِيس)، والقراءةُ التي لم تقع يرفعها `_run_git` نفسُه.
     pairs = _tree_entries("HEAD")
-    if not pairs:
-        # **صفرُ مدخلٍ من `HEAD` فشلٌ مُغلَق (جولة ٦٨):** مستودعٌ له `HEAD` ليس فارغًا ⇒ فالصفرُ
-        # يعني أنّ القراءةَ لم تقع (أو أنّ `ls-tree` غيّر صيغتَه) — ولا حكمَ على ما لم يُقرأ.
-        raise GitReadError("مسحُ الشجرةِ قرأ صفرَ مدخلٍ من `HEAD` ⇒ تعذّرَ القياس (فشلٌ مُغلَق)")
     _scan_blobs(pairs, "tree", findings, entries, seen)
     return len(pairs)
 
@@ -673,7 +691,21 @@ def scan_pre_push(findings, entries, seen) -> int:
             # مدى الدفع لكامل القائمة الحالية: نطبعها لكل مرجع على حدة.
             revs.update(_git("rev-list", local_sha, "--not", "--remotes").split())
         else:
-            revs.update(_git("rev-list", f"{remote_sha}..{local_sha}").split())
+            try:
+                _run_git(("cat-file", "-e", remote_sha))
+            except GitReadError:
+                # **مرجعٌ على الريموت لم يُجلَب ليس عطبًا يمنع دفعًا مشروعًا (مقعدُ البنية · ٦٨ب):**
+                # حالتان مشروعتان: فرعٌ أُنشئ على الريموت · وتاريخٌ أُعيد كتابتُه فجُلب ناقصًا ⇒
+                # `remote_sha..local_sha` يُسقط git برمز 128 ⇒ فكانت السياسةُ الموحَّدة تُخرج ٢،
+                # والخطّافُ `|| exit 1` **يمنع دفعًا مشروعًا** — وهو ما يمنعه `.githooks/pre-push`
+                # بنصّه («خطّافٌ يمنع دفعًا مشروعًا يُصنع به الحافزُ على --no-verify»). فالعلاجُ في
+                # موضعه لا في السياسة: يُعلَن المرجعُ ويُمسح **كلُّ ما هو موجودٌ محليًّا** (بديلٌ محافظ
+                # كان يعمل قبل التوحيد)، و«لا حكم» تبقى لِما لم يُقرأ فعلًا.
+                print(f"[publish-guard] مرجعٌ على الريموت غيرُ موجودٍ محليًّا ({remote_sha[:12]}) "
+                      f"⇒ يُمسح كلُّ ما هو موجودٌ محليًّا (لا «لا حكم» على دفعٍ مشروع)")
+                revs.update(_git("rev-list", local_sha, "--not", "--remotes").split())
+            else:
+                revs.update(_git("rev-list", f"{remote_sha}..{local_sha}").split())
     # No sampling: a commit that carried PII and was later rewritten is
     # exactly the case this mode exists for, and picking "the first 200 by
     # SHA text" is a random sample dressed up as coverage. Blob dedup (`seen`)
@@ -736,13 +768,11 @@ def _run_report() -> None:
             sys.exit(2)
         # **بلا تقويس (جولة ٦٧):** `git ls-files` وحدَه يقوّس المسارَ العربيَّ فيُفلت ⇒ `_git_z`.
         tracked = _git_z("ls-files")
-        if not tracked:
-            # **وصفرُ ملفٍّ مُتتبَّع فشلٌ مُغلَق (مقعدا المواصفة والبنية · جولة ٦٨):** مستودعٌ يُدفع منه
-            # ليس بلا ملفّاتٍ مُتتبَّعة ⇒ فالصفرُ قراءةٌ لم تقع ⇒ «0 تحت مجلّدات البيانات الحقيقيّة»
-            # لم تكن نظافةً بل جهلًا. (وهذا الفرعُ نفسُه خطوةُ الـCI للبوّابة ٨.)
-            raise GitReadError(
-                "`--tracked-real-data` قرأ صفرَ ملفٍّ مُتتبَّع — ومستودعٌ يُدفع منه ليس فارغًا "
-                "⇒ تعذّرَ القياس (فشلٌ مُغلَق)")
+        # **ولا شرطَ صفرٍ هنا (مقعدا المواصفة والبنية · ٦٨ب — وتصحيحٌ لما أدخلتُه في الطلب نفسِه):**
+        # «مستودعٌ يُدفع منه ليس بلا ملفّاتٍ مُتتبَّعة» مقدّمةٌ **مُكذَّبةٌ بالقياس**: مستودعٌ بلا ملفّاتٍ
+        # مُتتبَّعة حالةٌ مشروعة (‏`git init` قبل أول إضافة)، وعداها كان يُخرج رمزَ ٢ عليها ويُخرِج
+        # «آمن» على تاريخها نفسِه ⇒ تناقضٌ وصرخةٌ كاذبة. والمقياسُ الصادقُ: `ls-files` تُخرج صفرًا
+        # برمز ٠ لحالةٍ فارغةٍ حقيقةً، والقراءةُ التي لم تقع يرفعها `_run_git`.
         bad = [p for p in tracked if real_data_path(p)]
         print(f"[publish-guard] tracked-real-data: {len(tracked)} ملفًّا مُتتبَّعًا — "
               f"{len(bad)} تحت مجلّدات البيانات الحقيقيّة")

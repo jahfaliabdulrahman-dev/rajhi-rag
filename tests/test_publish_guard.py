@@ -20,6 +20,7 @@ Re-verify the invented value against the real cache whenever it exists
 """
 
 import pytest
+import subprocess
 import sys
 from pathlib import Path
 
@@ -420,19 +421,18 @@ def test_a_failed_git_read_is_not_an_empty_read():
         pg._git_z("rev-list", "--definitely-not-a-git-flag-068")
 
 
-def test_an_empty_read_is_a_failure_but_an_empty_named_history_is_not(monkeypatch):
-    """**R68-1 على الخام + مقعدُ البنية (لا صرخةٌ كاذبة · جولة ٦٨):**
+def test_the_history_reader_judges_by_shape_not_by_zero(monkeypatch):
+    """**R68-1 على الخام + مقعدا البنية والمواصفة (جولة ٦٨ب): الحكمُ على **شكل** ما قُرئ.**
 
-    - صفرُ **سجلّاتٍ خام** = لم يُقرأ شيءٌ من git ⇒ استثناءٌ صريح (وإلّا قُرئ «صفرُ مطابقات» نظافةً).
-    - وصفرُ **أزواجٍ** مع سجلّاتٍ مقروءةٍ (تاريخٌ مشروعٌ بلا كائنٍ مسمّى — مستودعٌ بالتزامٍ فارغ) ⇒
-      **مشروعٌ لا استثناء**؛ وإلّا صار الحارسُ يصرخ دائمًا فيُهمَل. (قِيس: مستودعٌ بالتزامٍ فارغٍ
-      واحدٍ ⇒ `history: 0 · rc=0` بعد الإصلاح، وكان `rc=2` قبله.)
+    - سجلّاتٌ فارغة ⇒ **مشروع** (مستودعٌ بلا التزاماتٍ ⇒ لا تاريخَ يُمسح) — لا صرخة.
+    - معرّفاتٌ وحدَها بلا كائنٍ مسمّى ⇒ **مشروع** (تاريخٌ بالتزامٍ فارغ) — لا صرخة.
+    - `path=` **بلا معرّفٍ يسبقه** ⇒ بنيةٌ لا تُفهَم ⇒ استثناء (وهو ما فات في R68-1: أُقرئ الصفرُ نظافةً).
+    - وسجلٌّ لا معرّفَ ولا `path=` ⇒ الصيغةُ تغيّرت ⇒ استثناء (ضابطُه المستقلّ: `…changed_history_format…`).
     """
     import publish_guard as pg
 
     monkeypatch.setattr(pg, "_git_z", lambda *a, **k: [])
-    with pytest.raises(pg.GitReadError):
-        pg._history_pairs()
+    assert pg._history_pairs() == []
 
     monkeypatch.setattr(pg, "_git_z", lambda *a, **k: ["a" * 40, "b" * 40])
     assert pg._history_pairs() == []
@@ -474,8 +474,11 @@ def test_the_tracked_data_step_declares_a_failed_read_like_the_history_step(tmp_
     subprocess.run(["git", "init", "-q", "."], cwd=root, check=True)
     r2 = subprocess.run([sys.executable, "tools/publish_guard.py", "--tracked-real-data"],
                         cwd=root, capture_output=True, text=True)
-    assert r2.returncode == 2, (
-        f"مستودعٌ بلا ملفٍّ مُتتبَّع واحد لا يُقرأ «0 تحت مجلّدات البيانات الحقيقيّة» نظافةً "
+    # **وصفرُ الملفّاتِ المُتتبَّعة حالةٌ مشروعة (تصحيحٌ في الجولة ٦٨ب):** عدتُها كانت تُخرج رمز ٢
+    # عليها بينما تاريخُ المستودع نفسِه «آمن» برمز ٠ ⇒ تناقضٌ وصرخةٌ كاذبة. فالمقياسُ الصادق:
+    # `ls-files` تُخرج صفرًا برمز ٠ لحالةٍ فارغةٍ حقيقةً، والقراءةُ التي لم تقع يرفعها `_run_git`.
+    assert r2.returncode == 0, (
+        f"مستودعٌ بلا ملفٍّ مُتتبَّع واحد: «لا ملفَّ بياناتٍ حقيقيّة» حكمٌ صادقٌ لا «تعذّرُ قياس» "
         f"(rc={r2.returncode})\n{r2.stdout}")
 
 
@@ -515,3 +518,129 @@ def test_a_three_wide_space_grouped_account_is_blocked():
     line = ' "account": "' + " ".join(_run(str(n), 3) for n in range(1, 6)) + '"'
     findings = [r for r in _scan_one(line) if r[1] == "long_digits"]
     assert findings, "حسابٌ بثلاثاتٍ مفصولةٍ بفراغ يجب أن يُحجب (ثغرةٌ كانت مفتوحة)"
+
+
+def test_the_tool_reaches_git_through_one_core_only():
+    """**«قارئٌ واحد» تُقاس بالنصّ لا بالوعد (مقعدا المعايير والبنية · الجولة ٦٨ب).**
+
+    كلُّ قراءةٍ من git في الحارس تمرّ على `_run_git` (التي تفحص رمزَ الخروج وترفع `GitReadError`).
+    فظهورُ نداءٍ ثانٍ مباشر يعني **سياسةً ثانية**: قراءةٌ فاشلةٌ تُقرأ «صفرًا» = «نظيفًا».
+    (والقياسُ الذي أنتج هذا الضابط: `_read_blobs` — وهي التي تُنزل محتوى الكائنات، أي موضعُ الحكم
+    نفسُه — كانت القراءةَ **الرابعة** بلا فحصِ رمز خروج.)
+    """
+    src = Path(pg.__file__).read_text("utf-8")
+    assert src.count('subprocess.run(["git"') == 1, "قراءةُ git خارج النواة `_run_git`"
+    assert src.count("_run_git(") >= 4, "نواةُ القراءة لا يستهلكها كلُّ المسارات"
+
+
+def _tool_repo(tmp_path, name="repo"):
+    """مستودعٌ مؤقّتٌ يحمل **نسخةً من الأداة** ⇒ فـ`ROOT` عندها هو هذا المستودع (لا مستودع المشروع)."""
+    repo = tmp_path / name
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "tools").mkdir(exist_ok=True)
+    (repo / "tools" / "publish_guard.py").write_text(Path(pg.__file__).read_text("utf-8"), "utf-8")
+    return repo
+
+
+def _git_init_commit(repo, files=("ok.txt",), allow_empty=False):
+    subprocess.run(["git", "init", "-q", "."], cwd=repo, check=True)
+    for f in files:
+        (repo / f).write_text("nothing sensitive here\n", "utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    cmd = ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "x"]
+    if allow_empty:
+        cmd.insert(6, "--allow-empty")
+    subprocess.run(cmd, cwd=repo, check=True)
+
+
+def _run_tool(repo, *args):
+    return subprocess.run([sys.executable, "tools/publish_guard.py", *args],
+                          cwd=repo, capture_output=True, text=True)
+
+
+def test_a_missing_blob_object_is_not_silent_cleanliness(tmp_path):
+    """**T1 / P1 / S1 — المقاعدُ الثلاثة تقاربت على هذا (الجولة ٦٨ب).**
+
+    حذفُ جسم كائنٍ من مخزن git يُخرج `cat-file --batch` سطرَ `… missing` **برمز خروجٍ صفر** ⇒ فحصُ
+    الرمز وحدَه لا يكشفه؛ وكان المستهلكُ يُسقط الغائبَ بصمت (`data is None ⇒ continue`) ⇒ فتسريبٌ
+    مزروعٌ يمرّ من حارسِ النشر العامّ. قِيس عند المقاعد: قبل `1 BLOCK · rc=1`، وبعدُ `0 BLOCK` و
+    «آمن للدفع» بـ`rc=0`. المطلوب: **«لا حكم»** — لا نظافة.
+    """
+    repo = _tool_repo(tmp_path)
+    _git_init_commit(repo, files=("leak.txt",))
+    # تسريبٌ يُبنى في زمن التشغيل: **لا مسارَ بيتٍ ولا سلسلةَ أرقامٍ في نصّ هذا الملفّ** (يُفحَص بحارسِه).
+    (repo / "leak.txt").write_text("workdir: /Users/" + "auditor" + "/secret/project\n", "utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "leak"],
+                   cwd=repo, check=True)
+    before = _run_tool(repo, "--tree")
+    assert before.returncode == 1 and "BLOCK" in before.stdout, before.stdout
+    blob = subprocess.run(["git", "rev-parse", "HEAD:leak.txt"], cwd=repo,
+                          capture_output=True, text=True).stdout.strip()
+    (repo / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
+    after = _run_tool(repo, "--tree")
+    assert after.returncode == 2, after.stdout + after.stderr
+    assert "آمن للدفع" not in after.stdout, after.stdout
+    assert "لا حكم" in after.stdout, after.stdout
+
+
+def test_an_empty_tree_commit_is_not_a_measurement_failure(tmp_path):
+    """**T2 / S2 / P4 — صرخةٌ كاذبةٌ أدخلتُها في الطلب نفسِه ثم قاسها المقاعد.***
+
+    التزامٌ بشجرةٍ فارغة حالةٌ مشروعة (`git ls-tree -r HEAD` ⇒ صفرٌ بـ`rc=0`)، وكان شرطُ «صفرِ مدخل»
+    يُخرجه «تعذّرَ قياس» برمز ٢ بينما `--history` على المستودع نفسِه يقول «آمن» برمز ٠ — حكمان
+    متناقضان. والأثقلُ أنّ `scan_pre_push` يعبر `scan_tree` ⇒ فيُمنع دفعٌ مشروع (وهو ما يمنعه الخطّافُ
+    بنصّه). المطلوب: صفرٌ صادق ⇒ `tree: 0` و«آمن للدفع» و`rc=0`.
+    """
+    repo = tmp_path / "empty"
+    repo.mkdir()
+    _git_init_commit(repo, files=(), allow_empty=True)
+    # الأداةُ تُنسخ **بعد** الالتزام ⇒ فشجرةُ `HEAD` تبقى فارغةً فعلًا (‏`ls-tree` ⇒ صفر).
+    (repo / "tools").mkdir()
+    (repo / "tools" / "publish_guard.py").write_text(Path(pg.__file__).read_text("utf-8"), "utf-8")
+    tree = _run_tool(repo, "--tree")
+    assert tree.returncode == 0, tree.stdout + tree.stderr
+    assert "tree: 0" in tree.stdout, tree.stdout
+    assert "آمن للدفع" in tree.stdout, tree.stdout
+    hist = _run_tool(repo, "--history")
+    assert hist.returncode == 0, hist.stdout + hist.stderr
+    tracked = _run_tool(repo, "--tracked-real-data")
+    assert tracked.returncode == 0, tracked.stdout + tracked.stderr
+
+
+def test_a_changed_history_format_is_a_failure_not_zero_pairs(monkeypatch):
+    """**P2 (مقعدُ المواصفة · ٦٨ب) + R68-1 على الخام:** تغييرٌ في صيغة git يُبقي السجلّاتِ غيرَ فارغةٍ
+    ويسقط `path=` ⇒ كان يُقرأ «صفرَ أزواج» ثم «آمن للدفع» (آلافُ الكائنات تُتخطّى بصمت — صنفُ R68-1
+    بعينه). والحكمُ على **شكلِ** كلّ سجلّ: معرّفُ كائنٍ أو `path=<مسار>` يتبعه ⇒ ولا ثالث.
+    ويقيس الضابطُ الاتجاهين: سجلٌّ غريبٌ ⇒ استثناء · وسجلّاتٌ معرّفاتٌ وحدَها (تاريخٌ مشروعٌ بلا كائنٍ
+    مسمّى) ⇒ أزواجٌ صفرٌ بلا استثناء (لا صرخةٌ كاذبة).
+    """
+    import publish_guard as pg
+    monkeypatch.setattr(pg, "_git_z",
+                        lambda *a, **k: ["a" * 40, "src/app.py", "b" * 40, "docs/GATES.md"])
+    with pytest.raises(pg.GitReadError):
+        pg._history_pairs()
+    monkeypatch.setattr(pg, "_git_z", lambda *a, **k: ["a" * 40, "b" * 40])
+    assert pg._history_pairs() == []
+
+
+def test_a_remote_ref_absent_locally_does_not_block_a_push(tmp_path, monkeypatch, capsys):
+    """**T3 (مقعدُ البنية · ٦٨ب):** مرجعٌ على الريموت لم يُجلَب (فرعٌ أُنشئ عليه · تاريخٌ أُعيد كتابتُه
+    وجُلب ناقصًا) كان يُخرج رمزَ ٢ ⇒ والخطّافُ `|| exit 1` **يمنع دفعًا مشروعًا** — وهو ما يمنعه
+    `.githooks/pre-push` بنصّه. المطلوب: يُعلَن المرجعُ ويُمسح ما هو موجودٌ محليًّا (بلا استثناء).
+    """
+    import io
+    import publish_guard as pg
+    repo = tmp_path / "push"
+    repo.mkdir()
+    _git_init_commit(repo)
+    local = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                           capture_output=True, text=True).stdout.strip()
+    monkeypatch.setattr(pg, "ROOT", repo)
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        f"refs/heads/feature {local} refs/heads/feature {'1' * 40}\n"))
+    findings, entries, seen = [], [], set()
+    pg.scan_pre_push(findings, entries, seen)          # لا استثناء ⇒ لا «لا حكم» على دفعٍ مشروع
+    out = capsys.readouterr().out
+    assert "غيرُ موجودٍ محليًّا" in out, out
+    assert not [f for f in findings if f[0] == "BLOCK"], findings
