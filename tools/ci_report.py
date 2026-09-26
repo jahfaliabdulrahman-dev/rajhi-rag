@@ -66,6 +66,25 @@ def _pushed_sha(ref: str) -> str | None:
     return pushed or _local_sha(ref)
 
 
+REMOTE_PREFIXES = ("origin/", "upstream/")
+
+
+def branch_of(ref: str) -> str:
+    """**اسمُ الفرع** من مرجعٍ كما يكتبه git: `origin/main` ⇒ `main` (و`refs/heads/x` ⇒ `x`).
+
+    (قِيس بعد إغلاق ملاحظة الجولة ٦٤: `gh run list --branch origin/main` يُعيد لا شيء ⇒ «بلا تشغيل»
+    ⇒ `BLOCK` **كاذبٌ** على مرجعٍ له تشغيلٌ أخضرُ باسمه الحقيقيّ. والمرجعُ يُقبل بالصيغتين،
+    والتحويلُ إلى اسم الفرع في موضعٍ واحد.)
+    """
+    name = (ref or "").strip()
+    for prefix in REMOTE_PREFIXES:
+        if name.startswith(prefix):
+            return name[len(prefix):]
+    if name.startswith("refs/heads/"):
+        return name[len("refs/heads/"):]
+    return name
+
+
 def _same_commit(a: str, b: str) -> bool:
     n = min(len(a), len(b), 12)
     return n >= 7 and a[:n] == b[:n]
@@ -114,7 +133,8 @@ def verdict(ref: str, *, gh=None, sha_of=None, local_of=None) -> dict:
     gh = gh or _gh
     sha_of = sha_of or _pushed_sha
     local_of = local_of or _local_sha
-    rc, txt = gh(["run", "list", "--branch", ref, "--limit", "1",
+    branch = branch_of(ref)        # **ما يُسأل به `gh` اسمُ الفرع** — والمرجعُ كما كُتب يبقى في البيان
+    rc, txt = gh(["run", "list", "--branch", branch, "--limit", "1",
                   "--json", "conclusion,status,headSha,workflowName"])
     if rc != 0:
         return {"ref": ref, "state": "غيرُ مقروء", "why": f"`gh` لم يُجب: {txt[:100]}"}
@@ -173,7 +193,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="نتيجةُ CI لكلِّ مرجعٍ دُفع — ولا يُقال أخضرُ بلا دليل (R61-1 «ملحقُ الدفع»).")
     ap.add_argument("refs", nargs="*",
-                    help="أسماءُ المراجع كما تعرفها `gh` (مثال: chore/round56-evidence)")
+                    help="أسماءُ المراجع كما تعرفها `gh` (مثال: chore/round56-evidence) — "
+                         "وتُقبل صيغةُ git أيضًا (`origin/main` · `refs/heads/main`) وتُقاس على اسم الفرع")
     ap.add_argument("--json", action="store_true",
                     help="خرجٌ آليٌّ للسجلّ في تقرير الدفع (stdout = JSON وحده · والبيان البشريّ على stderr)")
     ap.add_argument("--remind", action="store_true",
@@ -202,6 +223,8 @@ def main(argv: list[str] | None = None) -> int:
 
     vs = [verdict(r) for r in a.refs]
     lines = [f"{'✓' if v['state'] == 'أخضر' else '·'} {v['state']:<11} {v['ref']} — {v['why']}"
+             + (f" (قِيس على الفرع `{branch_of(v['ref'])}`)"
+                if branch_of(v["ref"]) != v["ref"] else "")
              for v in vs]
     lines.append(LIMIT)
 
