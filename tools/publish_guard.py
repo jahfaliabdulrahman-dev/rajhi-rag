@@ -220,6 +220,13 @@ def _history_pairs() -> list[tuple[str, str]]:
     **شكلِ كلّ سجلّ**: إمّا معرّفُ كائنٍ (`sha1`/`sha256`) وإمّا `path=<مسار>` يتبع معرّفًا. وسجلٌّ لا
     هذا ولا ذاك ⇒ الصيغةُ تغيّرت أو القارئُ خالفها ⇒ لا حكم. (وهو بعينِه ما فات في R68-1: الأزواجُ
     صفرٌ والسجلّاتُ مقروءة ⇒ مُرَّ الأمرُ «نظيفًا».)
+
+    **وحدُّ هذا الحكم مُعلَن (مقعدُ البنية F-4 · ٦٨ج):** يبقى مفتوحًا شكلٌ واحد — **بثُّ معرّفاتٍ
+    خالصةً بلا سجلّ `path=` إطلاقًا**: كلُّ سجلٍّ يجتاز فحصَ الشكل ⇒ `history: 0 · 0 BLOCK · rc=0`
+    («تاريخٌ بلا كائنٍ مسمّى»). قِيس بمُزيِّفٍ يُسقط سجلّات `path=` جملةً (قبل الإصلاح وبعده سواء)،
+    وهو **ليس انحدارًا** (كان يمرّ قبل الإصلاح أيضًا) لكنّه **ليس مُغلقًا** ⇒ ولا يُدَّعى إغلاقُه.
+    والتضييقُ الممكن (فحصُ وجود بلوباتٍ فعلًا في المخزن عند صفرِ الأزواج) لم يُنفَّذ: ثمنُه عمليةُ
+    git إضافيّة على كلّ مسحٍ مقابلِ احتمالٍ **مجهولِ الوقوع** في git مستقبليّ.
     """
     records = _git_z("rev-list", "--objects", "--all")
     pairs: list[tuple[str, str]] = []
@@ -250,6 +257,11 @@ def _read_blobs(shas: list[str]) -> dict[str, bytes]:
     `… missing` **برمز خروجٍ صفر** ⇒ فحصُ الرمز وحدَه لا يكفي، والمستهلكُ كان يُسقط الغائبَ بصمت
     (`data is None ⇒ continue`) ⇒ **تسريبٌ مزروعٌ يمرّ**. قِيس بحذف جسم بلوبٍ واحد: قَبلٌ `1 BLOCK`
     و`rc=1`، وبعدُ `0 BLOCK` و«آمن للدفع» `rc=0`. فالآن: صفرُ بايتٍ أو سجلٌّ غيرُ مفهوم ⇒ `GitReadError`.
+
+    **والمعلَنُ يُقابَل بالمقروء (مقعدُ البنية · ٦٨ج):** الترويسةُ تعلن حجمَ الكائن، فبثٌّ مقطوعٌ كان
+    يُعاد قصيرًا بصمت (`nl < 0 ⇒ break` والشرائحُ بلا فحص طول) ⇒ يُفحَص الآن أنّ المقطعَ بعددِ البايتات
+    المعلَن بالضبط، وإلّا `GitReadError`. **والكائنُ الفارغُ ليس عطبًا** (الترويسةُ تُعلن `size = 0`
+    فيُقرأ صفرُ بايتٍ مقصودًا)، والفرقُ بينهما: `if not out` يفحص **المخرَجَ كلَّه** لا الكائن.
     """
     if not shas:
         return {}
@@ -262,13 +274,20 @@ def _read_blobs(shas: list[str]) -> dict[str, bytes]:
     while i < len(out):
         nl = out.find(b"\n", i)
         if nl < 0:
-            break
+            raise GitReadError(
+                f"بثُّ `cat-file --batch` انتهى بترويسةٍ لم تُغلق ({len(out) - i} بايتًا متبقّية) "
+                f"⇒ مخرَجٌ مقطوع (فشلٌ مُغلَق: لا حكمَ على ما لم يُقرأ)")
         header = out[i:nl].decode("utf-8", "replace").split()
         if len(header) == 3 and header[1] in ("blob", "tree", "commit", "tag"):
             size = int(header[2])
+            end = nl + 1 + size
+            if end > len(out):
+                raise GitReadError(
+                    f"بثُّ `cat-file --batch` مقطوع: الترويسةُ تعلن {size} بايتًا والمقروءُ "
+                    f"{len(out) - nl - 1} ⇒ لا حكمَ على كائنٍ ناقص (فشلٌ مُغلَق)")
             if header[1] == "blob":
-                result[header[0]] = out[nl + 1: nl + 1 + size]
-            i = nl + 1 + size + 1
+                result[header[0]] = out[nl + 1: end]
+            i = end + 1
         elif len(header) == 2 and header[1] == "missing":
             raise GitReadError(
                 f"كائنٌ غائبٌ من مخزن git ({header[0][:12]}) ⇒ لا حكمَ على ما لم يُقرأ (فشلٌ مُغلَق)")
@@ -546,14 +565,27 @@ def _check_path(path: str, where: str, findings, entries) -> None:
 
 
 def _tree_entries(rev: str) -> list[tuple[str, str]]:
-    """[(path, blob_sha)] for a commit tree — **بلا تقويس** (`_git_z`)."""
+    """[(path, blob_sha)] for a commit tree — **بلا تقويس** (`_git_z`).
+
+    **والحكمُ على شكل السجلّ كما في التاريخ (مقعدُ المعايير · ٦٨ج):** كانت السجلَّاتُ غيرُ المفهومة
+    تُسقَط بـ`continue` ⇒ مخرجٌ **برمز خروجٍ صفرٍ** وشكلٍ تغيّر يُقرأ «شجرةً نظيفةً» بصمت — وهو
+    الصنفُ نفسُه الذي حُصّن ضدَّه `_history_pairs`، فصار القارئان على سياسةٍ واحدة: كلُّ سجلٍّ إمّا
+    يُفهَم أو يُوقف الحكم. و`tree`/`commit` في `ls-tree` **مشروعةٌ** (وحدةٌ فرعيّة/submodule) فتُتخطّى
+    صراحةً بلا استثناء — والفرقُ بين «مشروعٌ لا يُمسح» و«غيرُ مفهوم» مقيسٌ في الضابط.
+    """
     pairs = []
     for rec in _git_z("ls-tree", "-r", rev):
         if "\t" not in rec:
-            continue
+            raise GitReadError(
+                f"`ls-tree -r -z` قرأ سجلًّا بلا مسارٍ مفصولٍ بـTAB: {rec[:60]!r} ⇒ صيغةُ المخرَج "
+                f"تغيّرت (فشلٌ مُغلَق: لا حكمَ على ما لم يُقرأ)")
         meta, path = rec.split("\t", 1)
         parts = meta.split()
-        if len(parts) >= 3 and parts[1] == "blob":
+        if not (len(parts) >= 3 and parts[1] in ("blob", "tree", "commit")):
+            raise GitReadError(
+                f"`ls-tree -r -z` قرأ سجلًّا غيرَ مفهوم: {meta[:60]!r} ⇒ لا نوعَ كائنٍ ولا معرّف "
+                f"(فشلٌ مُغلَق)")
+        if parts[1] == "blob":
             pairs.append((path, parts[2]))
     return pairs
 
@@ -678,6 +710,16 @@ def scan_messages(findings, entries, revs: list[str] | None = None) -> int:
     return n
 
 
+def _commits_not_on_remotes(sha: str) -> set[str]:
+    """الالتزاماتُ الموصولةُ بـ`sha` وغيرُ الموجودة على أيّ ريموتٍ معروف.
+
+    **قاعدةٌ واحدةٌ في موضعٍ واحد (مقعدُ البنية · ٦٨ج):** كان هذا التعبيرُ مكتوبًا مرّتين في
+    `scan_pre_push` (فرعُ المرجع الجديد وفرعُ البديل المحافظ) ⇒ استُخرج ليُعلن أنّ المسلكين
+    قاعدةٌ واحدة لا نسختان.
+    """
+    return set(_git("rev-list", sha, "--not", "--remotes").split())
+
+
 def scan_pre_push(findings, entries, seen) -> int:
     refs = [l.split() for l in sys.stdin.read().splitlines() if l.strip()]
     revs: set[str] = set()
@@ -689,7 +731,7 @@ def scan_pre_push(findings, entries, seen) -> int:
             continue  # branch deletion
         if set(remote_sha) <= {"0"}:
             # مدى الدفع لكامل القائمة الحالية: نطبعها لكل مرجع على حدة.
-            revs.update(_git("rev-list", local_sha, "--not", "--remotes").split())
+            revs.update(_commits_not_on_remotes(local_sha))
         else:
             try:
                 _run_git(("cat-file", "-e", remote_sha))
@@ -703,7 +745,7 @@ def scan_pre_push(findings, entries, seen) -> int:
                 # كان يعمل قبل التوحيد)، و«لا حكم» تبقى لِما لم يُقرأ فعلًا.
                 print(f"[publish-guard] مرجعٌ على الريموت غيرُ موجودٍ محليًّا ({remote_sha[:12]}) "
                       f"⇒ يُمسح كلُّ ما هو موجودٌ محليًّا (لا «لا حكم» على دفعٍ مشروع)")
-                revs.update(_git("rev-list", local_sha, "--not", "--remotes").split())
+                revs.update(_commits_not_on_remotes(local_sha))
             else:
                 revs.update(_git("rev-list", f"{remote_sha}..{local_sha}").split())
     # No sampling: a commit that carried PII and was later rewritten is
