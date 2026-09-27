@@ -131,6 +131,7 @@ def app_run(monkeypatch, tmp_path):
     calls: list[tuple[str, str]] = []
     footers: dict[str, FooterReading] = {}
     verdicts: dict[int, str] = {}
+    knobs = {"printed": {}, "footer_cost": 0.0, "footer_fail": False}
 
     def probe(img, stats=None):
         calls.append(("bank", img))
@@ -138,11 +139,17 @@ def app_run(monkeypatch, tmp_path):
 
     def footer(img, stats=None):
         calls.append(("footer", img))
+        if stats is not None:
+            stats["cost"] = knobs["footer_cost"]
+        if knobs["footer_fail"]:
+            raise RuntimeError("VLM network")
         return footers[img]
 
     def rows(img, stats=None, **_):
         calls.append(("rows", img))
         n = len([c for c in calls if c[0] == "rows"])
+        if stats is not None and img in knobs["printed"]:
+            stats["page_no"] = knobs["printed"][img]      # الرقمُ المطبوع — الشاهدُ الثاني
         # التاريخُ ليس في خانته بل في نصّ البيان — تستعيده `fill_missing_dates` من البيان القديم
         return [{"movement": D("1.00"), "balance": D(n), "desc": "حركة ٢٠٢٣٠٢٢٥", "date": None,
                  "raw_movement": "1.00", "raw_balance": str(n)}]
@@ -166,8 +173,11 @@ def app_run(monkeypatch, tmp_path):
     monkeypatch.setattr(app, "_local_checks",
                         lambda pages: (_gate(verdicts), lambda img: "transactions"))
 
-    def run(cumulative: list[tuple[str, str]], rejected=(), skip=False, via_handler=False):
+    def run(cumulative: list[tuple[str, str]], rejected=(), skip=False, via_handler=False,
+            printed=None, footer_cost=0.0, footer_fail=False):
         pages = _images(len(cumulative))
+        knobs.update(printed=dict(zip(pages, printed or [])), footer_cost=footer_cost,
+                     footer_fail=footer_fail)
         for img, (d, c) in zip(pages, cumulative):
             footers[img] = FooterReading(debits=D(d), credits=D(c), balance=None)
         verdicts.clear()
@@ -181,6 +191,7 @@ def app_run(monkeypatch, tmp_path):
         else:
             out = app._process_pdf_locked("upload.pdf", lambda *a, **k: None, skip)
         return out, calls, pages, app.STATE
+    run.calls = calls          # سجلُّ الاستدعاءات يبقى مقروءًا حين يرفع التشغيلُ خطأً
     return run
 
 
@@ -192,13 +203,57 @@ def test_a_blocked_upload_makes_no_paid_call_and_forgets_the_old_file(app_run):
     assert "store" not in state, "الأسئلةُ لا تُجيب عن ملفٍّ سابق"
 
 
-def test_pages_are_read_in_their_true_order_and_each_footer_is_paid_once(app_run):
-    """الملف: ١، ٣، ٢ بإجمالياتها — تُقرأ ١ ثم ٢ ثم ٣ (بمواضعها: ١، ٣، ٢)."""
-    out, calls, pages, _state = app_run([("10", "5"), ("40", "9"), ("25", "7")])
+SWAPPED = [("10", "5"), ("40", "9"), ("25", "7")]     # الملف: ١، ٣، ٢ بإجمالياتها
+
+
+def test_a_witnessed_true_order_is_applied_and_each_footer_is_paid_once(app_run):
+    """الرقمُ المطبوع يشهد للتذييلات ⇒ تُعالَج ١ ثم ٢ ثم ٣ (بمواضعها: ١، ٣، ٢)؛ والقراءةُ بترتيب الملف."""
+    out, calls, pages, state = app_run(SWAPPED, printed=[1, 3, 2])
     footer_calls = [img for kind, img in calls if kind == "footer"]
     assert sorted(footer_calls) == sorted(pages), "كلُّ تذييلٍ مرّةً واحدة لا مرّتين"
-    assert [img for kind, img in calls if kind == "rows"] == [pages[0], pages[2], pages[1]]
-    assert "قُرئت بترتيبها الحقيقي" in out[0]
+    assert [img for kind, img in calls if kind == "rows"] == pages, "القراءةُ بترتيب الملف"
+    assert [r["page"] for r in state["rows"]] == [1, 3, 2], "والمعالجةُ بالترتيب المشهود له"
+    assert "عولجت بترتيبها الحقيقي" in out[0]
+
+
+def test_a_one_digit_footer_misread_keeps_the_file_order(app_run):
+    """R70-1: رقمٌ واحدٌ مقروءٌ خطأً في إجمالي مدين ينقل الصفحةَ بعيدًا — ولا شاهدَ ثانٍ يؤيّده."""
+    true = [("10", "0"), ("20", "0"), ("30", "0"), ("40", "0"), ("50", "0"), ("60", "0")]
+    misread = list(true)
+    misread[2] = ("90", "0")                          # ٣٠ ⇒ ٩٠: خانةٌ واحدة
+    out, _calls, _pages, state = app_run(misread, printed=[1, 2, 3, 4, 5, 6])
+    assert [r["page"] for r in state["rows"]] == [1, 2, 3, 4, 5, 6]
+    assert state["order_held"] and "بلا شاهدٍ ثانٍ" in state["order_held"]
+    assert "عولجت بترتيب الملف" in out[0]
+
+
+def test_an_unwitnessed_move_keeps_the_file_order(app_run):
+    """التذييلاتُ وحدها تقول ١، ٣، ٢ — بلا رقمٍ مطبوع ولا تجاورٍ مُثبت ⇒ ترتيبُ الملف ويُقال."""
+    out, _calls, _pages, state = app_run(SWAPPED)
+    assert [r["page"] for r in state["rows"]] == [1, 2, 3]
+    assert "عولجت بترتيب الملف" in out[0]
+
+
+def test_the_footer_pass_stops_at_the_cost_cap(app_run, monkeypatch):
+    """R70-2: السقفُ قبل كلّ استدعاء — ولا تُقرأ الصفوف بعده."""
+    import gradio as gr
+
+    import app
+    monkeypatch.setattr(app, "MAX_UI_COST_USD", 0.025)
+    with pytest.raises(gr.Error, match="سقف"):
+        app_run([(str(10 * k), "0") for k in range(1, 6)], footer_cost=0.01)
+    assert len([c for c in app_run.calls if c[0] == "footer"]) == 3     # ٠ ⇒ ٠٫٠١ ⇒ ٠٫٠٢ ⇒ قف
+    assert not [c for c in app_run.calls if c[0] == "rows"]
+
+
+def test_the_footer_pass_stops_after_five_consecutive_failures(app_run):
+    """R70-2: انقطاعُ المزوّد لا يُدفع ثمنُه صفحةً صفحة — خمسُ إخفاقاتٍ متتالية وتقف."""
+    import gradio as gr
+
+    with pytest.raises(gr.Error, match="إخفاقات"):
+        app_run([(str(10 * k), "0") for k in range(1, 8)], footer_fail=True)
+    assert len([c for c in app_run.calls if c[0] == "footer"]) == 5
+    assert not [c for c in app_run.calls if c[0] == "rows"]
 
 
 def test_skipped_pages_are_never_read_and_are_named(app_run):
@@ -230,7 +285,7 @@ def test_the_read_button_sends_the_skip_checkbox():
 
 def test_dates_are_settled_from_the_page_reading_before_its_description_is_replaced(app_run):
     """ترتيبٌ مقصود: بيانُ العمود بلا تاريخ، فلو استُبدل البيانُ أوّلًا لضاع التاريخُ المستعاد من نصّه."""
-    out, calls, pages, state = app_run([("10", "5"), ("40", "9"), ("25", "7")])
+    out, calls, pages, state = app_run(SWAPPED, printed=[1, 3, 2])
     assert [img for kind, img in calls if kind == "desc"] == [pages[0], pages[2], pages[1]]
     for r in state["rows"]:
         assert r["desc"].startswith("بيانُ العمود") and r["desc_source"] == "column"

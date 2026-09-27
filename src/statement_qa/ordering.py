@@ -275,12 +275,60 @@ def adjacency(order: list[int], footers: dict[int, tuple], own: dict[int, tuple]
     return out
 
 
-def summarize_footer_order(fo: dict, applied: bool = False) -> str:
+def _second_witness(p: int, order: list[int], printed: dict, pairs: dict) -> bool:
+    """Does a witness OTHER than the footer totals put sheet p where `order` puts it?
+
+    - proven adjacency: p and a neighbour in `order` are consecutive sheets by
+      arithmetic (`adjacency` = adjacent); or
+    - the printed page numbers: p's number sits strictly between its
+      neighbours' known numbers (at least one known).
+    """
+    i = order.index(p)
+    prev = order[i - 1] if i else None
+    nxt = order[i + 1] if i + 1 < len(order) else None
+    if (prev is not None and pairs.get((prev, p)) == "adjacent") or \
+            (nxt is not None and pairs.get((p, nxt)) == "adjacent"):
+        return True
+    n = printed.get(p)
+    before = printed.get(prev) if prev is not None else None
+    after = printed.get(nxt) if nxt is not None else None
+    if not isinstance(n, int) or not any(isinstance(x, int) for x in (before, after)):
+        return False
+    return (not isinstance(before, int) or before < n) and (not isinstance(after, int) or n < after)
+
+
+def decide_order(file_order: list[int], fo: dict, printed: dict,
+                 pairs: dict) -> tuple[list[int], str | None]:
+    """(the order to process in, why the footer order was NOT applied | None).
+
+    The footer order is one witness, and one misread digit is enough to move a
+    sheet far (review 70: on the owner's real footers, one misread digit in a
+    debit total moved a page up to 100 positions and broke up to 3 chain seams;
+    18 of 40 such trials showed as conflicts). So it is applied only when it has
+    no conflicts and no duplicates AND every sheet it moves has a second witness
+    (`_second_witness`, with `printed`/`pairs` measured on the candidate order).
+    Otherwise the file order stands and the reason is said.
+    """
+    file_order = list(file_order)
+    if fo["conflicts"]:
+        return file_order, "تذييلٌ متناقض"
+    if fo["duplicates"]:
+        return file_order, "إجمالياتٌ مكرّرة"
+    if fo["order"] == file_order:
+        return file_order, None
+    lone = [p for p in fo["moved"] if not _second_witness(p, fo["order"], printed, pairs)]
+    if lone:
+        return file_order, ("نقلٌ بلا شاهدٍ ثانٍ — المواقع "
+                            + "، ".join(str(p) for p in lone[:5]) + (" …" if len(lone) > 5 else ""))
+    return list(fo["order"]), None
+
+
+def summarize_footer_order(fo: dict, applied: bool = False, held: str | None = None) -> str:
     """Run-level one-liner: is the file in its true order, and what moved?
 
-    `applied`: the run READ the pages in this true order (the pre-read footers
-    were available) — said explicitly, so «out of place» is never read as
-    «processed out of place».
+    `applied`: the run PROCESSED the pages in this true order. `held`: why it
+    did not (`decide_order`) — said explicitly, so «out of place» is never read
+    as «processed out of place», and a withheld order is never silent.
     """
     total = len(fo["order"])
     ranked = total - len(fo["unplaced"])
@@ -289,13 +337,15 @@ def summarize_footer_order(fo: dict, applied: bool = False) -> str:
                 f"لا حكم")
     if fo["conflicts"]:
         return (f"⚠ الترتيب بالإجماليات التراكمية: تذييلٌ متناقض بين المواقع "
-                f"{fo['conflicts'][0][0]} و{fo['conflicts'][0][1]} — قراءةٌ تُراجَع قبل أي حكم")
+                f"{fo['conflicts'][0][0]} و{fo['conflicts'][0][1]} — قراءةٌ تُراجَع قبل أي حكم"
+                f"{' — عولجت بترتيب الملف' if held else ''}")
     seg = (f"الترتيب بالإجماليات التراكمية: ✓ مطابقٌ لترتيب الملف ({ranked}/{total})"
            if not fo["moved"] else
            f"⚠ الترتيب بالإجماليات التراكمية: صفحاتٌ في غير موضعها — المواقع "
            f"{'، '.join(str(p) for p in fo['moved'][:5])}"
            f"{' …' if len(fo['moved']) > 5 else ''} ({ranked}/{total})"
-           f"{' — قُرئت بترتيبها الحقيقي' if applied else ''}")
+           f"{' — عولجت بترتيبها الحقيقي' if applied else ''}"
+           f"{f' — عولجت بترتيب الملف: {held}' if held and not applied else ''}")
     if fo["duplicates"]:
         seg += " — إجمالياتٌ مكرّرة: " + "، ".join(
             "/".join(str(p) for p in ps) for ps in fo["duplicates"][:3])

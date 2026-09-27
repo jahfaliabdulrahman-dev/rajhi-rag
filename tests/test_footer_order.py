@@ -21,7 +21,7 @@ if str(PROJ / "src") not in sys.path:
     sys.path.insert(0, str(PROJ / "src"))
 
 from statement_qa.ordering import (  # noqa: E402
-    adjacency, footer_order, summarize_footer_order,
+    adjacency, decide_order, footer_order, summarize_footer_order,
 )
 
 # كشفٌ من ستّ أوراق: حركاتُ كلِّ ورقة (مدين، دائن) ⇒ إجمالياتُها التراكمية
@@ -128,3 +128,54 @@ def test_a_missing_total_leaves_the_pair_undecided():
     own = {p: OWN[p] for p in range(1, 7)}
     pairs = adjacency([1, 2, 3, 4, 5, 6], footers, own)
     assert pairs[(2, 3)] == pairs[(3, 4)] == "undecided"
+
+
+
+# ——— R70-1: ترتيبُ التذييلات شاهدٌ واحد — لا يُطبَّق إلا بلا تناقضٍ ولا تكرار وبشاهدٍ ثانٍ ———
+
+def _long_file():
+    """اثنتا عشرة ورقةً بإجمالياتٍ تراكميةٍ متفاوتة الخطى (لا أرقامَ مستديرة)."""
+    steps = [("137.25", "12.40"), ("58.60", "0"), ("311.05", "44.10"), ("9.75", "0"),
+             ("206.35", "71.80"), ("84.20", "0"), ("163.45", "5.55"), ("27.90", "0"),
+             ("412.15", "98.65"), ("66.30", "0"), ("145.85", "31.20"), ("73.40", "0")]
+    out, d, c = {}, D("0"), D("0")
+    for pos, (sd, sc) in enumerate(steps, start=1):
+        d, c = d + D(sd), c + D(sc)
+        out[pos] = (d, c)
+    return out
+
+
+def test_a_planted_one_digit_footer_misread_keeps_the_file_order():
+    """الصنفُ المقيس على تذييلات المالك: خانةٌ واحدة في إجمالي مدين تنقل الصفحةَ عشراتِ المواضع."""
+    footers = _long_file()
+    d, c = footers[4]
+    footers[4] = (d + D("600"), c)                        # خانةُ المئات: ٥١٦ ⇒ ١١١٦
+    fo = footer_order(footers)
+    assert fo["order"] != list(range(1, 13)), "الخطأُ المزروع يحرّك الترتيبَ فعلًا"
+    printed = {p: p for p in range(1, 13)}                # الأرقامُ المطبوعة تتبع الملف
+    order, held = decide_order(list(range(1, 13)), fo, printed, {})
+    assert order == list(range(1, 13)) and held
+    assert "عولجت بترتيب الملف" in summarize_footer_order(fo, held=held)
+
+
+def test_contradicting_or_duplicate_footers_keep_the_file_order():
+    footers = _file([1, 3, 2, 4, 5, 6])
+    footers[5] = (TRUE[5][0], D("1"))                     # دائنٌ يتراجع ⇒ تناقض
+    order, held = decide_order([1, 2, 3, 4, 5, 6], footer_order(footers), {}, {})
+    assert order == [1, 2, 3, 4, 5, 6] and held == "تذييلٌ متناقض"
+    order, held = decide_order([1, 2, 3, 4], footer_order(_file([1, 3, 3, 2])), {}, {})
+    assert order == [1, 2, 3, 4] and held == "إجمالياتٌ مكرّرة"
+
+
+def test_a_move_is_applied_only_with_a_second_witness():
+    sheets = [1, 3, 2, 4, 5, 6]                           # الموضعان ٢ و٣ متبادلان
+    fo = footer_order(_file(sheets))
+    alone, held = decide_order([1, 2, 3, 4, 5, 6], fo, {}, {})
+    assert alone == [1, 2, 3, 4, 5, 6] and "بلا شاهدٍ ثانٍ" in held
+    by_number, held = decide_order([1, 2, 3, 4, 5, 6], fo, dict(zip(range(1, 7), sheets)), {})
+    assert by_number == fo["order"] and held is None
+    own = {pos: OWN[s] for pos, s in enumerate(sheets, start=1)}
+    pairs = adjacency(fo["order"], _file(sheets), own)
+    by_sum, held = decide_order([1, 2, 3, 4, 5, 6], fo, {}, pairs)
+    assert by_sum == fo["order"] and held is None
+    assert "عولجت بترتيبها الحقيقي" in summarize_footer_order(fo, applied=True)

@@ -61,7 +61,7 @@ from statement_qa.verification import (
 )
 from statement_qa.footer_oracle import (
     check_page_footer, delta_checkable, delta_status, page_diverged,
-    read_footer, try_page_reread,
+    page_totals, read_footer, try_page_reread,
 )
 from statement_qa.desc_reader import (
     continuation_for, merge_descriptions, read_page_descriptions,
@@ -73,7 +73,8 @@ from statement_qa.intake import (
 from statement_qa.job_lock import JobBusyError, job_lock
 from statement_qa.row_bands import analyze_page
 from statement_qa.ordering import (
-    adjacency, check_order, check_page_numbers, footer_order, summarize_ar as summarize_order_ar,
+    adjacency, check_order, check_page_numbers, decide_order, footer_order,
+    summarize_ar as summarize_order_ar,
     summarize_footer_order, summarize_page_numbers,
 )
 
@@ -386,6 +387,20 @@ def _local_checks(pages: list[str]):
     return gate_fn, kind_fn
 
 
+def _own_sums(order: list[int], raw_by_pg: dict[int, list]) -> dict[int, tuple]:
+    """حركاتُ كلّ صفحةٍ (مدين، دائن) مشتقّةً بالسلسلة **على هذا الترتيب** — مجّانًا، لقياس التجاور."""
+    own: dict[int, tuple] = {}
+    prev = None
+    for pg in order:
+        if pg not in raw_by_pg:
+            continue
+        t = page_totals(chain_derive(raw_by_pg[pg], prev_balance=prev))
+        own[pg] = (t["debits"], t["credits"])
+        if t["balance"] is not None:
+            prev = t["balance"]
+    return own
+
+
 def _page_descriptions(path: str, next_path: str | None, stats: dict):
     """(بياناتُ صفوف الصفحة من عمود البيان، هل لُصقت تكملة؟) — استدعاءٌ واحد (statement_qa.desc_reader)."""
     img = Image.open(path).convert("RGB")
@@ -510,33 +525,59 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
     page_rereads: list[dict] = []
     fail_streak = 0
     abort_reason = ""
-    # التذييلاتُ أولًا (قصاصةٌ صغيرةٌ لكلّ صفحة): مفتاحُ الترتيب الحقيقي (ordering.footer_order)،
-    # وهي نفسُها تُستعمل في تحكيم الصفحة أدناه — فلا يُدفع التذييلُ مرّتين.
+
+    def over_cap() -> bool:
+        return usage["cost"] > MAX_UI_COST_USD
+
+    # ١) التذييلاتُ أولًا (قصاصةٌ صغيرةٌ لكلّ صفحة): مفتاحُ الترتيب (ordering.footer_order)، وهي
+    # نفسُها تُستعمل في تحكيم الصفحة أدناه — فلا يُدفع التذييلُ مرّتين. **وللمرور حدّاه كالقراءة**
+    # (مراجعة ٧٠ · R70-2): سقفُ الكلفة قبل كلّ استدعاء، ووقفٌ بعد FAIL_STREAK_LIMIT إخفاقاتٍ متتالية —
+    # كان يسبقهما ويبتلع أخطاءه، فانقطاعُ المزوّد يُدفع ثمنُه صفحةً صفحة قبل أن يوقفه شيء.
     footers: dict = {}
+    footer_failed: list[int] = []
+    n_proc = len(decision["process"])
     for i, pg in enumerate(decision["process"]):
-        progress(0.05 * i / len(decision["process"]),
-                 f"قراءة إطار الإجماليات {i + 1}/{len(decision['process'])}…")
+        if over_cap():
+            abort_reason = (f"أُوقف التشغيل قبل قراءة الصفوف عند إطار الصفحة {pg}: تجاوز سقف "
+                            f"الكلفة (${MAX_UI_COST_USD:.2f} لهذا المسار).")
+            break
+        progress(0.05 * i / n_proc, f"قراءة إطار الإجماليات {i + 1}/{n_proc}…")
         fst: dict = {}
         try:
             footers[pg] = read_footer(pages[pg - 1], stats=fst)
+            fail_streak = 0
         except Exception:
             footers[pg] = None
-        _merge_usage(fst)
-    fo = footer_order({pg: (f.debits, f.credits) if f else None
-                       for pg, f in footers.items()})
-    order_now = fo["order"]
-    own_by_pg: dict[int, tuple] = {}
-    for i, pg in enumerate(order_now):
-        img = pages[pg - 1]
-        progress(0.05 + 0.9 * i / len(order_now),
-                 f"قراءة صفحة {pg} ({i + 1}/{len(order_now)})…")
-        if usage["cost"] > MAX_UI_COST_USD:
+            footer_failed.append(pg)
+            fail_streak += 1
+        finally:
+            _merge_usage(fst)
+        if fail_streak >= FAIL_STREAK_LIMIT:
+            abort_reason = (f"أُوقف التشغيل قبل قراءة الصفوف عند إطار الصفحة {pg}: "
+                            f"{fail_streak} إخفاقات متتالية في قراءة الإطارات (انقطاع المزوّد؟).")
+            break
+    if abort_reason:
+        STATE.clear()   # لا تُجيب الأسئلةُ عن ملفٍّ سابق
+        raise gr.Error("⛔ " + abort_reason + " لم يُقرأ صفٌّ واحد.")
+
+    # ٢) الصفوفُ بترتيب الملف — والترتيبُ يُقرَّر بعدها، لأن شاهدَيه الثانيين (الرقمُ المطبوع والتجاورُ
+    # المُثبت حسابًا) لا يوجدان إلا بعد القراءة (مراجعة ٧٠ · R70-1). عددُ الاستدعاءات لا يتغيّر.
+    raw_by_pg: dict[int, list] = {}
+    page_no_by_pg: dict[int, int | None] = {}
+    attempted: list[int] = []
+    fail_streak = 0
+    for i, pg in enumerate(decision["process"]):
+        progress(0.05 + 0.8 * i / n_proc, f"قراءة صفحة {pg} ({i + 1}/{n_proc})…")
+        if over_cap():
             abort_reason = (f"أُوقف التشغيل عند الصفحة {pg}: تجاوز سقف الكلفة "
                             f"(${MAX_UI_COST_USD:.2f} لهذا المسار).")
             break
+        attempted.append(pg)
         st: dict = {}
         try:
-            raw_rows = read_rows_vlm(img, stats=st)
+            raw_by_pg[pg] = read_rows_vlm(pages[pg - 1], stats=st)
+            page_no_by_pg[pg] = st.get("page_no")
+            fail_streak = 0
         except Exception:
             # one flaky page must never kill the whole run (transient VLM /
             # JSON glitches) — record it, keep going, report it honestly.
@@ -544,19 +585,37 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
             # attempts with 10/20/40s backoff ≈ 70s per page, so 629 pages
             # would spin ~12 hours and produce nothing. Five in a row stops it.
             failed_pages.append(pg)
-            cum_broken = True  # cumulative footer chain is now unverifiable
             fail_streak += 1
-            if fail_streak >= FAIL_STREAK_LIMIT:
-                abort_reason = (f"أُوقف التشغيل عند الصفحة {pg}: "
-                                f"{fail_streak} إخفاقات قراءة متتالية "
-                                f"(انقطاع المزوّد؟) — والصفحات المقروءة محفوظة "
-                                f"في هذه النتيجة.")
-                break
+        finally:
+            _merge_usage(st)
+        if fail_streak >= FAIL_STREAK_LIMIT:
+            abort_reason = (f"أُوقف التشغيل عند الصفحة {pg}: "
+                            f"{fail_streak} إخفاقات قراءة متتالية "
+                            f"(انقطاع المزوّد؟) — والصفحات المقروءة محفوظة "
+                            f"في هذه النتيجة.")
+            break
+
+    # ٣) الترتيب: ترتيبُ التذييلات مرشَّح، لا يُطبَّق إلا بلا تناقضٍ ولا تكرار وبشاهدٍ ثانٍ لكلّ صفحةٍ ينقلها
+    # (ordering.decide_order) — والشاهدان يُقاسان على الترتيب المرشَّح نفسه، مجّانًا.
+    footer_tuples = {pg: (f.debits, f.credits) if f else None
+                     for pg, f in footers.items() if pg in attempted}
+    fo = footer_order(footer_tuples)
+    printed_by_pg = {pg: n for pg, n in page_no_by_pg.items() if isinstance(n, int)}
+    cand_pairs = adjacency(fo["order"], footer_tuples, _own_sums(fo["order"], raw_by_pg),
+                           printed_by_pg)
+    order_now, order_held = decide_order(attempted, fo, printed_by_pg, cand_pairs)
+
+    # ٤) الاشتقاقُ والتحكيمُ بالترتيب المقرَّر — والاستدراكاتُ المدفوعة تحترم السقف أيضًا.
+    own_by_pg: dict[int, tuple] = {}
+    for i, pg in enumerate(order_now):
+        img = pages[pg - 1]
+        progress(0.85 + 0.08 * i / max(1, len(order_now)), f"تحقّق الصفحة {pg}…")
+        if pg not in raw_by_pg:
+            cum_broken = True  # cumulative footer chain is now unverifiable
             continue
-        fail_streak = 0
-        _merge_usage(st)
+        raw_rows = raw_by_pg[pg]
         rows = chain_derive(raw_rows, prev_balance=prev_closing)
-        page_no = st.get("page_no")
+        page_no = page_no_by_pg.get(pg)
         page_nos.append((pg, page_no))
         gap_missing: list[int] = []
         if (isinstance(page_no, int) and isinstance(prev_page_no, int)
@@ -566,7 +625,7 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
             gap_missing = list(range(prev_page_no + 1, page_no))
         # مرساة حدّية غير محسومة؟ استدراك مقيد: إعادة قراءة موضعية تُقبل
         # فقط إذا أغلقت السلسلة (ما كشفه ص11 في السلايس).
-        if i > 0 and rows and rows[0].get("boundary") == "anchor":
+        if i > 0 and rows and rows[0].get("boundary") == "anchor" and not over_cap():
             rst: dict = {}
             raw_rows, recovered = recover_anchor(
                 raw_rows, prev_closing, img, pg, rst)
@@ -577,7 +636,7 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
         footer = footers.get(pg)
         # تحكيم الصفحة: انزياح عن الفوتر يُطلق قراءة جديدة واحدة، تُقبل فقط
         # إذا كانت بلا شكوك وتُطابق دلتا الفوتر (معزولة عن أي تلوث سابق).
-        if (not gap_missing
+        if (not gap_missing and not over_cap()
                 and page_diverged(rows, cum, prev_footer, footer, cum_broken)):
             pst: dict = {}
             fresh_raw, accepted, note = try_page_reread(
@@ -586,7 +645,7 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
             if accepted and fresh_raw is not None:
                 raw_rows = fresh_raw
                 rows = chain_derive(raw_rows, prev_balance=prev_closing)
-                if i > 0 and rows and rows[0].get("boundary") == "anchor":
+                if i > 0 and rows and rows[0].get("boundary") == "anchor" and not over_cap():
                     rst2: dict = {}
                     raw_rows, rec = recover_anchor(
                         raw_rows, prev_closing, img, pg, rst2)
@@ -669,6 +728,8 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
     STATE["era"] = era_fp
     STATE["order"] = order
     STATE["footer_order"] = fo
+    STATE["order_held"] = order_held
+    STATE["footer_failed"] = footer_failed
     STATE["desc_pass"] = desc_rep
     STATE["intake"] = {"gate": intake.gate, "kinds": intake.kinds, **decision}
     n_ok = sum(1 for r in all_rows if r["ok"])
@@ -743,13 +804,18 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
             summarize_era_ar(era_fp,
                              format_effects(_verdicts, _suspect_pages)),
             summarize_order_ar(order, boundaries),
-            summarize_footer_order(fo, applied=True),
+            summarize_footer_order(fo, applied=order_held is None and order_now != attempted,
+                                   held=order_held),
             summarize_page_numbers(check_page_numbers(sorted(page_nos))),
             summarize_intake_ar(intake, decision["skipped"]),
             summarize_desc_ar(desc_rep, sum(1 for pg in order_now
                                             if any(r["page"] == pg for r in all_rows)))]
     if abort_reason:
         segs.insert(0, "⛔ " + abort_reason)
+    if footer_failed:
+        segs.append("⚠ تعذّرت قراءةُ إطار الإجماليات (بلا تحكيمٍ لها): "
+                    + "، ".join(f"ص{p}" for p in footer_failed[:8])
+                    + (" …" if len(footer_failed) > 8 else ""))
     if filled_dates:
         segs.append(f"تواريخ مُستكملة: {filled_dates}* "
                     f"(لا تاريخ مطبوع في سطرها — سُدّت من الصف السابق)")
