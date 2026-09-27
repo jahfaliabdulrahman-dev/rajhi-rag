@@ -42,12 +42,18 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from datetime import timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SHARED = "handoff/STATE.md"
 SIDES = {"sulaiman": "المنفّذ", "claude": "المدقّق"}
 OWNER = "المالك"
+#: **منطقةُ تسمية التقارير (+03) — مالكُها واحدٌ بجانب نمط الاسم (ST-4 · R65-1).** كلُّ اسمٍ في `handoff/`
+#: زمنُه على هذه الإزاحة، وعدّاءُ CI بتوقيت **UTC** ⇒ أداةٌ تختم بساعة العدّاء تُنتج شاهدًا **يسبق أسماء
+#: الجولة** فيصير «أحدثَ حُكمٍ قبل الجواب» ويسقط ضابطُ §٢٧ على جوابٍ صحيح (قاسها المدقّق في مراجعة ٦٥:
+#: نافذةُ سقوطٍ من `الشاهد+3h` إلى `الجواب+3h`). فتُستورَد من هنا ولا تُنسَخ في أداةٍ ولا في ضابط.
+NAMING_TZ = timezone(timedelta(hours=3))
 #: زمنُ الاسم: أربعُ خانات (HHMM) أو **ستّ** (HHMMSS) — والصيغةُ الثانيةُ هي الموثَّقة في البروتوكول،
 #: وأسماءُ المدقّق كلُّها بها ⇒ نمطٌ بأربعٍ فقط كان **يُعميه عن صندوقِ الطرف الآخر كاملاً** (R55-1).
 NAME_RE = re.compile(r"^(\d{8})-(\d{4})(\d{2})?-")

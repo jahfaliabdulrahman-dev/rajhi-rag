@@ -16,6 +16,13 @@ permissions:
 jobs:
   guard:
     runs-on: ubuntu-latest
+    # **بيئةُ المهمّة مُعلَنة (R67 · مراجعة ٦٧):** كلُّ خطوةٍ هنا تعمل في هذه المهمّة، وتبعيّاتُها
+    # (`pytest openpyxl PyYAML`) تُجمَع أقلَّ من بيئة المالك. **والعددُ لا يُكتب بيدٍ هنا (مقعدُ
+    # المواصفة F2 · ٦٨ج):** قيمتُه تُقرأ من `docs/claims.json ⇒ tests_by_env.ci-light` كما تفعل خطوةُ
+    # اللقطة — فالصنفُ الذي أُغلق في السطر ٥٢ أُغلق هنا بحذفه لا بحراسته. فالافتراضُ هنا، والاستثناءُ
+    # يُعلَن في خطوته (`off`) — فلا تُضاف خطوةٌ جديدةٌ فتقع في بيئةٍ منسوبةٍ خطأً بالصمت.
+    env:
+      RAJHI_CLAIMS_ENV: ci-light
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
         with:
@@ -42,11 +49,30 @@ jobs:
       # docs/claims.json and asserts the public documents still match it.
       - name: Public claims must match their derived snapshot
         id: gate_claims
-        run: python3 tools/render_claims.py --check
+        # **والخطوةُ **تقيس** — ولا تُسكِت قياسًا مُمكِنًا (مقعدا المعايير والمواصفة · جولة ٦٧):** كان
+        # الإعلانُ `off` هنا يُسكِت قياسًا **مُمكِنًا** (‎`pytest` يُثبَّت في السطر التالي!) ⇒ فصار للخطوة
+        # مفتاحُها المُعلَن `ci-claims` — **وقيمتُه مؤشّرٌ لا نسخة (مقعدُ المعايير · جولة ٦٨):** كانت هنا
+        # قيمةٌ مكتوبةٌ بيدٍ فتقادمت في اللقطة والوثيقة وبقيت هنا ⇒ والآن يُقرأ من
+        # `docs/claims.json` ⇒ `tests_by_env.ci-claims` (وخطوةُ «علّم الرقم» تُظهر أيّ انزياح). ويصير
+        # `off` ملجأً أخيرًا
+        # لا غطاءً. **وحدُّ `off` يبقى مكتوبًا في موضعه:** لا يُستعمل ليُسكِت قياسًا مُمكِنًا.
+        env:
+          RAJHI_CLAIMS_ENV: ci-claims
+        run: |
+          # **وتُثبَّت النسخةُ لا تُترك للتحديث (مقعدُ البنية · جولة ٦٧):** العدُّ دالّةٌ في إصدار
+          # المفسّر و`pytest` معًا (قِيس: فرقٌ ثابتٌ +10 بين مقياسي ومقياس العدّاء) ⇒ فإصدارٌ غيرُ
+          # مثبَّتٍ يجعل قيمةَ `ci-claims` تتحرّك بلا كودٍ ⇒ تضبطها ترقيةٌ صامتة. فالمثبَّت هو الذي يُقاس.
+          python3 -m pip install --quiet "pytest==9.1.1"
+          # **«علّم الرقمَ» (مراجعة ٦٨ · الملاحظةُ الجانبيّة):** القيمةُ تُقاس هنا وتُعرض وتُفشل عند
+          # الانزياح ⇒ فلا يُنقل الرقمُ بالتخمين (كما وقع ثلاثَ مرّاتٍ في جولةٍ واحدة).
+          python3 tools/render_claims.py --write
+          git diff --exit-code -- docs/claims.json || {
+            echo "⛔ اللقطةُ لا تطابق قياسَ بيئة هذه الخطوة (ci-claims) ⇒ خُذ القيمةَ من الفرق أعلاه."; exit 1; }
+          python3 tools/render_claims.py --check
       - name: Lightweight suite (no ML deps — compile, lock, public claims, gate injection)
         id: gate_suite
         run: |
-          python3 -m pip install --quiet pytest openpyxl==3.1.5 PyYAML==6.0.3
+          python3 -m pip install --quiet "pytest==9.1.1" openpyxl==3.1.5 PyYAML==6.0.3
           python3 -m pytest tests/test_compile_all.py \
                            tests/test_requirements_lock.py \
                            tests/test_public_claims.py \
@@ -66,6 +92,14 @@ jobs:
                            tests/test_landing_probe.py \
                            tests/test_eval_pack.py \
                            tests/test_local_reader_probe.py \
+                           tests/test_publish_guard.py \
+          # **«علّم الرقمَ» (مراجعة ٦٨ · الملاحظةُ الجانبيّة):** كلُّ ضابطٍ جديدٍ يُحرّك العدّاد، وكان
+          # تحديثُ قيمة البيئة يتمّ بيدٍ من تخمين (وقع ثلاثَ مرّاتٍ في جولةٍ واحدة). فهذان السطرانِ
+          # **يُنتجان القيمةَ من قياس هذه البيئة** ويعرضان الفرقَ ويفشلان ⇒ فيُنسخ الرقمُ من مخرَج
+          # الـCI نفسِه (وهو في الوقت نفسه برهانٌ حيٌّ أنّ الكاتبَ لا يمحو مفاتيحَ البيئات).
+          python3 tools/render_claims.py --write
+          git diff --exit-code -- docs/claims.json || {
+            echo "⛔ اللقطةُ لا تطابق قياسَ بيئة هذه الخطوة ⇒ خُذ القيمَ من الفرق أعلاه، الصقها في docs/claims.json ثم أعد الدفع."; exit 1; }
       # P-11 (مراجعة ٥٩ · بقرار المالك): **قِس الثابتَ لا العدّادات.** ثلاثةُ إصلاحاتٍ للصنف نفسه
       # (R57-1 حارسُ المكان · R58-1 عدّادُ الكشيدة · R59-1 ضابطُ مواضع النثر) سقط كلٌّ منها في
       # جولة، لأن **نصَّ المدقّق صار مُدخَلاً إلى راتشتٍ يملكه المنفّذ** ⇒ فمجردُ هبوط مراجعةٍ يُحمرّ
@@ -76,14 +110,10 @@ jobs:
         run: python3 tools/landing_probe.py --quiet
       - name: Real-data files must never be tracked
         id: gate_data_untracked
-        run: |
-          bad=$(git ls-files | grep -E '^data/(local_sample|training|eval_pack)/' || true)
-          if [ -n "$bad" ]; then
-            echo "::error::real-data files tracked (local_sample/training/eval_pack):"
-            echo "$bad"
-            exit 1
-          fi
-          echo "no real-data files tracked under local_sample/training/eval_pack — OK"
+        # **مالكٌ واحد للقاعدة (مراجعة ٦٧):** كان هنا نمطٌ جذريٌّ خاصٌّ بالخطوة
+        # (`^data/(local_sample|training|eval_pack)/`) ⇒ نسخةٌ متداخلةٌ (`data/data/local_sample/…`)
+        # تفلت منه، وتفلت من الحارس في الوقت نفسه. فصارت الخطوةُ تستدعي قاعدةَ الحارس نفسَها.
+        run: python3 tools/publish_guard.py --tracked-real-data
 
       - name: Amount-guard — the key/manifest must not be tracked (no secret needed)
         id: gate_amount_key

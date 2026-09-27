@@ -36,3 +36,13 @@
 - **السبب:** كتبتُ الاسمَ بزمنٍ مُقدَّر (١٥:٢٠) قبل القياس، وزمنُ الإيداع الفعليّ **١٣:٣٦** (فسقط حارسُ الأسماء،
   وصحّحتُه بـ`git mv` كما تنصّ القاعدة). ولا شيءَ غيرُ الاسم تغيّر.
 
+## 2026-09-26 — تصحيحُ زمنِ اسمَي ملفَّي تسليم جولة ٦٨د (`84a60b9`)
+
+- `handoff/sulaiman/20260927-0015-PLAN-round68d-closing-the-seats-findings.md`
+  → `handoff/sulaiman/20260926-2345-PLAN-round68d-closing-the-seats-findings.md`
+- `handoff/sulaiman/20260927-0130-SEATS-round68d-the-three-seats-and-the-closure-of-their-findings.md`
+  → `handoff/sulaiman/20260926-2352-SEATS-round68d-the-three-seats-and-the-closure-of-their-findings.md`
+- **السبب:** كتبتُ الزمنين من ساعتي المحلّيّة (بعد منتصف الليل محليًّا) بينما نطاقُ التسمية في المستودع
+  هو `+03:00` بزمن الالتزام ⇒ فوقع الاسمُ في اليوم التالي (٢٧) وزمنُ الهبوط ٢٦-٠٩ ٢٣:٤٥ و٢٣:٥٢.
+  النقلُ بـ`git mv` كما ينصّ حارسُ الأسماء، **ولا شيءَ غيرُ الاسم تغيّر**، والقائمةُ في
+  `NON_ANSWER_FILES_SINCE_RULE` حُدِّثت بالأسماء الجديدة.

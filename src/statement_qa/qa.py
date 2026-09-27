@@ -4,7 +4,7 @@ Contract (plan + owner rules):
 - The model NEVER computes: every number comes from a tool call or a retrieved
   chunk. Answers quote evidence (page/row); missing evidence → refusal string.
 - With `rows` supplied, a LangChain agent runs with tools from qa_tools
-  (sum/count/extremes/page summary/search) — so "كم مجموع السحوبات؟" gets a
+  (sum/count/extremes/page summary/**page rows**/search) — so "كم مجموع السحوبات؟" gets a
   real computed number, not a refusal.
 - The tools record an execution TRACE (which rows each call selected); the
   evidence panel is built from that trace — what BUILT the numbers — not from
@@ -79,6 +79,8 @@ AGENT_SYSTEM_PROMPT = """أنت محاسب مدقق تعمل على كشف حس�
 لديك أدوات حتمية (tools) تجري الحسابات على الجدول المُستخرج المُتحقق منه.
 قواعد صارمة:
 1. أي سؤال عن مجموع/إجمالي/عدد/أعلى/أدنى/آخر رصيد/ملخص صفحة ⇒ استدعِ الأداة المناسبة أولاً.
+   و**أيُّ سؤالٍ عن صفٍّ بعينه داخل صفحة** («أكبر حركةٍ في الصفحة N» · «صفوفُ الصفحة N» · «آخرُ حركةٍ فيها»)
+   ⇒ `page_rows(page=N)` تُسرَد الصفوفَ بأرقامها (على مستوى الكشف لا من ١ داخل الصفحة) ومنها يُقرأ الأكبرُ/الأخير.
 2. انقل الأرقام من مخرجات الأدوات حرفياً — لا تُجرِ أي جمع أو طرح بنفسك أبداً.
 3. للأسئلة الوصفية استعن بالقطع المرفقة في رسالة المستخدم.
 4. إن لم تكفِ الأدوات والقطع قل حرفياً: "غير موجود في الكشف" — لا تخمّن.

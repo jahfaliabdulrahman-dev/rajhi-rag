@@ -1,6 +1,10 @@
 """Publish guard tests — the dedup bug, the digit-table exemption, and the
 four structural holes an external audit opened are regressions; lock them
-here. No git operations.
+here. Mostly no git operations — **إلّا ضوابطُ الذيل، وهي كما تُقاس لا كما تُوصف:** اثنان ينشئان مستودعَ
+git كاملًا داخل `tmp_path` (ثقبُ المسار غير ASCII · تسريبٌ في التاريخ وحدَه) · وواحدٌ ينسخ الأداةَ إلى
+مجلّدٍ **ليس مستودعًا** ثم يُهيّئ فيه مستودعًا فارغًا (تعذّرُ القراءة · صفرُ ملفٍّ مُتتبَّع) · وواحدٌ يقرأ
+نصَّ الـworkflow · وواحدٌ يشغّل `_git`/`_git_z` على عَلَمٍ لا وجودَ له **داخل مستودع المشروع** (قراءةٌ
+فاشلةٌ متوقّعة: لا تلمس الشجرةَ ولا الفهرس ولا `HEAD`).
 
 INVARIANT (enforced below, not promised in prose): this file ships no real
 statement data — every account-shaped value is invented — and every payload
@@ -15,6 +19,8 @@ Re-verify the invented value against the real cache whenever it exists
 `data/local_sample/*/results/pg-*.json` and expect ZERO.
 """
 
+import pytest
+import subprocess
 import sys
 from pathlib import Path
 
@@ -280,6 +286,338 @@ def test_a_four_wide_card_still_blocked_even_with_spaces():
         "بطاقةٌ برُباعياتٍ مفصولةٍ بفراغ تبقى محجوبة"
 
 
+def test_a_nested_real_data_copy_is_never_excused():
+    """**تداخلُ النسخ يُخرج بياناتٍ حقيقيّةً من الحماية (مراجعة ٦٧ · R67-1).**
+
+    قِيس: `cp -R data <نسخةٍ فيها data/>` تُنتج `data/data/` ⇒ **٣٦١٠ ملفًا ومنها المفتاح** خارج
+    `.gitignore` الجذريّ، وقابلةٌ للإيداع بـ`git add .` — والحارسُ كان يقابل **بادئة** المسار وحدَها.
+    فالمقابلةُ على **مقاطع** المسار، والتداخلُ لا يُعفي.
+    """
+    assert pg.real_data_path("data/local_sample/slice_629p/slice_report.json"), "الجذرُ محجوب"
+    assert pg.real_data_path("data/data/local_sample/slice_629p/slice_report.json"), \
+        "المتداخلُ محجوب — وهو موضعُ العلّة نفسُه"
+    assert pg.real_data_path("a/b/data/eval_pack/x.json"), "العمقُ مهما كان لا يُعفي"
+    assert not pg.real_data_path("data/sample/statement_sample.pdf"), \
+        "اللقطةُ المسموحةُ في المستودع تبقى مسموحة (ضبطٌ موجب)"
+    assert not pg.real_data_path("docs/data/local_sample.md"), \
+        "اسمٌ يشبه المجلّدَ في مسارٍ آخر ليس بياناتٍ حقيقيّة (ضبطٌ موجب ثانٍ)"
+
+
+def test_the_ignore_rules_are_depth_agnostic_too():
+    """**خطُّ الدفاع الأول، بالصنف نفسه (مراجعة ٦٧):** كان `.gitignore` جذريًّا، فقِيس أنّ
+    `git check-ignore data/data/local_sample/x.json` ⇒ **`rc=1`** (غيرُ محجوب) بينما الجذريُّ محجوب ⇒
+    فالمتداخلُ يصير مرشَّحًا لـ`git add .` قبل أن يراه الحارس. فالمقابلةُ الآن على أيّ عمقٍ تحت `data/`.
+    """
+    import subprocess
+
+    root = Path(__file__).resolve().parents[1]
+
+    def ignored(rel: str) -> bool:
+        return subprocess.run(["git", "check-ignore", "-q", rel], cwd=root).returncode == 0
+
+    assert ignored("data/local_sample/x.json"), "الجذريُّ محجوب"
+    assert ignored("data/data/local_sample/x.json"), "المتداخلُ محجوب — وهو موضعُ العلّة"
+    assert ignored("data/eval_pack/amount-manifest.json"), "خريطةُ التطهير محجوبة"
+    assert not ignored("data/sample/statement_sample.pdf"), \
+        "اللقطةُ المسموحةُ تبقى غيرَ محجوبة (ضبطٌ موجب)"
+
+
+def test_the_ci_step_and_the_guard_share_one_rule():
+    """**مالكٌ واحد للقاعدة (مراجعة ٦٧):** كانت خطوةُ الـCI تحمل نمطًا جذريًّا خاصًّا بها ⇒ فالنسخةُ
+    المتداخلةُ تفلت من الاثنين معًا. فلا يُعاد النمطُ الثاني، والخطوةُ تستدعي قاعدةَ الحارس.
+
+    **ويُقاس الواقعُ لا النصّ (مقعدُ البنية · جولة ٦٧):** كان الفحصُ يبحث عن الاسم في الملفّ كلِّه
+    ⇒ يمرّ لو صار السطرُ `echo "…"` (سلبيّةٌ كاذبة)، ويسقط لو ذُكر النمطُ القديم في **تعليق**
+    (إيجابيّةٌ كاذبة). فالمقيسُ الآن: **سطرُ `run:` نفسُه** هو الاستدعاء، ولا سطرَ **فاعلًا** يحمل النمط.
+    """
+    root = Path(__file__).resolve().parents[1]
+    wf = (root / ".github" / "workflows" / "publish-guard.yml").read_text(encoding="utf-8")
+    stripped = [ln.strip() for ln in wf.splitlines()]
+    calls = [ln for ln in stripped
+             if ln.startswith("run:") and "publish_guard.py --tracked-real-data" in ln]
+    assert calls == ["run: python3 tools/publish_guard.py --tracked-real-data"], \
+        f"خطوةُ الـCI تستدعي قاعدةَ الحارس نفسَها (وُجد: {calls})"
+    effective = [ln for ln in stripped if not ln.startswith("#")]
+    assert not any("^data/(local_sample" in ln for ln in effective), \
+        "نمطٌ جذريٌّ فاعلٌ آخر — الشرحُ في تعليقٍ لا يُحسب، والتنفيذُ يُحسب"
+
+
+def test_a_non_ascii_path_cannot_hide_from_the_guard(tmp_path):
+    """**ثقبٌ مقيسٌ في إغلاق R67-1 نفسه (مقعدُ المواصفة · جولة ٦٧):** `core.quotePath` يقوّس كلَّ
+    مسارٍ فيه محرفٌ غيرُ ASCII (`"data/training/\\331\\203…"`) ⇒ فمقابلةُ مقاطع المسار تفشل و**يُفلت
+    الملفُّ**: قِيس أنّ `data/training/كشوف/عميل.json` المُتتبَّع أعطى «0 تحت مجلّدات البيانات
+    الحقيقيّة» و`rc=0` — أي أنّ الخطوةَ التي أُضيفت لسدّ R67-1 كانت هي التي تمرّ منه. والعلاجُ `_git_z`
+    (`-z`: بلا تقويسٍ ولا فاصلٍ يمكن أن يظهر في اسم ملفّ).
+
+    **ويُقاس على نسخةٍ حقيقيّةٍ صغيرة** (تُشغَّل الأداةُ فيها) لا بمحاكاةٍ — فالأداةُ تقرأ `ROOT` من
+    موقعها.
+    """
+    import shutil
+    import subprocess
+    import sys as _sys
+
+    root = tmp_path / "repo"
+    (root / "tools").mkdir(parents=True)
+    shutil.copy(Path(__file__).resolve().parents[1] / "tools" / "publish_guard.py", root / "tools")
+    for cmd in (["git", "init", "-q"],
+                ["git", "config", "user.email", "t@t"],
+                ["git", "config", "user.name", "t"]):
+        subprocess.run(cmd, cwd=root, check=True)
+    leak = root / "data" / "training" / "كشوف"
+    leak.mkdir(parents=True)
+    (leak / "عميل-1439.json").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "add", "-f", "data/training/كشوف/عميل-1439.json"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "leak"], cwd=root, check=True)
+
+    r = subprocess.run([_sys.executable, "tools/publish_guard.py", "--tracked-real-data"],
+                       cwd=root, capture_output=True, text=True)
+    assert r.returncode == 1, (
+        f"مسارٌ غيرُ ASCII تحت مجلّد بياناتٍ حقيقيّةٍ لم يُكشَف (rc={r.returncode})\n{r.stdout}")
+    assert "كشوف" in r.stdout, "والرسالةُ تسمّي المسارَ نفسَه (القراءةُ بلا تقويس)"
+
+
+def test_a_leak_that_lives_only_in_history_is_caught(tmp_path):
+    """**مراجعة ٦٨ · R68-1 — الضابطُ الذي كان غائبًا سببَ العطل:** لا اختبارَ كان يفحص مسحَ
+    التاريخ، فمرّ عطلٌ **صامت** أوقف نصفَ الحارس: `rev-list --objects --all -z` يُخرج **سجلّاتٍ**
+    (`<sha>\\0<sha>\\0path=<المسار>\\0`) لا أسطرًا بفراغ ⇒ فقارئٌ يفصل على الفراغ يقرأ **صفرَ كائن**،
+    ويُخرج «نظيف» وهو لم يقرأ شيئًا (قِيس في الشجرة: `history: 0 · 0 BLOCK · rc=0`).
+    **والضابطُ يزرع تسريبًا في التاريخ وحدَه** (مسارُ منزلٍ وهميّ يُضاف ثم يُحذَف في التزامٍ تالٍ).
+    """
+    import shutil
+    import subprocess
+    import sys
+
+    root = tmp_path / "repo"
+    (root / "tools").mkdir(parents=True)
+    shutil.copy(Path(__file__).resolve().parents[1] / "tools" / "publish_guard.py", root / "tools")
+
+    def g(*a):
+        return subprocess.run(["git", *a], cwd=root, capture_output=True, text=True)
+
+    g("init", "-q", ".")
+    g("config", "user.email", "t@example.invalid")
+    g("config", "user.name", "t")
+    note = root / "notes.md"
+    note.write_text("workdir: /Users/" + "auditor" + "/secret/project\n", encoding="utf-8")
+    g("add", "-A")
+    g("commit", "-qm", "add")
+    note.unlink()
+    g("add", "-A")
+    g("commit", "-qm", "remove")
+
+    r = subprocess.run([sys.executable, "tools/publish_guard.py", "--history"],
+                       cwd=root, capture_output=True, text=True)
+    assert "history: 0" not in r.stdout, (
+        "القارئُ لم يقرأ التاريخَ أصلًا — صيغةُ `-z` تغيّرت أو عاد الفصلُ على الفراغ:\n" + r.stdout)
+    assert r.returncode == 1, f"تسريبٌ في التاريخ (وحده) يجب أن يُحجب (rc={r.returncode})\n{r.stdout}"
+    assert "BLOCK" in r.stdout, "ويكون الحكمُ حجبًا لا تحذيرًا:\n" + r.stdout
+
+
+def test_a_failed_git_read_is_not_an_empty_read():
+    """**R68-1:** كانت `_git_z` تُعيد المخرَجَ بلا فحصِ رمزِ الخروج ⇒ فأمرٌ فاشلٌ يُقرأ «قائمةً
+    فارغةً» = «نظيفًا». والآن يرفع `GitReadError` (ورمزُ الخروج ٢: تعذّرُ قياسٍ لا وجودُ محجوب)."""
+    import publish_guard as pg
+    with pytest.raises(pg.GitReadError):
+        pg._git_z("rev-list", "--definitely-not-a-git-flag-068")
+
+
+def test_the_history_reader_judges_by_shape_not_by_zero(monkeypatch):
+    """**R68-1 على الخام + مقعدا البنية والمواصفة (جولة ٦٨ب): الحكمُ على **شكل** ما قُرئ.**
+
+    - سجلّاتٌ فارغة ⇒ **مشروع** (مستودعٌ بلا التزاماتٍ ⇒ لا تاريخَ يُمسح) — لا صرخة.
+    - معرّفاتٌ وحدَها بلا كائنٍ مسمّى ⇒ **مشروع** (تاريخٌ بالتزامٍ فارغ) — لا صرخة.
+    - `path=` **بلا معرّفٍ يسبقه** ⇒ بنيةٌ لا تُفهَم ⇒ استثناء (وهو ما فات في R68-1: أُقرئ الصفرُ نظافةً).
+    - وسجلٌّ لا معرّفَ ولا `path=` ⇒ الصيغةُ تغيّرت ⇒ استثناء (ضابطُه المستقلّ: `…changed_history_format…`).
+    """
+    import publish_guard as pg
+
+    monkeypatch.setattr(pg, "_git_z", lambda *a, **k: [])
+    assert pg._history_pairs() == []
+
+    monkeypatch.setattr(pg, "_git_z", lambda *a, **k: ["a" * 40, "b" * 40])
+    assert pg._history_pairs() == []
+
+    monkeypatch.setattr(pg, "_git_z", lambda *a, **k: ["path=x", "a" * 40])
+    with pytest.raises(pg.GitReadError):
+        pg._history_pairs()
+
+
+def test_every_git_reader_refuses_a_failed_read(monkeypatch):
+    """**قارئٌ واحد للسياسة (مقعدا المعايير والبنية · جولة ٦٨):** كانت `_git` تُعيد `''` على أمرٍ
+    فاشل بينما `_git_z` ترفع ⇒ فبقيت أنصافُ المسح (الرسائل · `pre-push`) تعود «نظيفةً صامتة».
+    و`_git` تحمل قراءةَ الرسائل و`rev-list` في مسار الدفع، أي المسار الذي **يوقف دفعَ المالك**.
+
+    **وتعدادُ القارئَين كان ناقصًا (مقعدُ البنية F-2 · ٦٨ج):** الاسمُ يقول «كلُّ قارئ» والعدُّ اثنان،
+    والقارئُ الثالث (`_read_blobs` — موضعُ الحكم) لم يُضَف ⇒ فعودتُه تبتلع الفشلَ تمرّ خضراء.
+    (وأثبته المقعدُ بطفرةٍ لا تسقط شيئًا.) فيُقاس الآن **سلوكيًّا** بمُخرَجٍ فاشلٍ مُحاكى.
+    """
+    import publish_guard as pg
+    for reader in (pg._git, pg._git_z):
+        with pytest.raises(pg.GitReadError):
+            reader("rev-list", "--definitely-not-a-git-flag-068")
+
+    monkeypatch.setattr(pg, "_run_git", lambda *a, **k: b"")
+    with pytest.raises(pg.GitReadError):
+        pg._read_blobs(["a" * 40])
+
+
+def test_a_changed_ls_tree_format_is_a_failure_not_a_silent_skip(monkeypatch):
+    """**قارئا الشجرة والتاريخ على سياسةٍ واحدة (مقعدُ المعايير S1 · ٦٨ج):** `_tree_entries` كانت
+    تُسقط السجلَّ غيرَ المفهوم بـ`continue` ⇒ مخرجٌ **برمز خروجٍ صفرٍ** وشكلٌ تغيّر يُقرأ «شجرةً
+    نظيفةً» بصمت — وهو عينُ ما حُصّن ضدَّه `_history_pairs` في الدلتا نفسِها.
+
+    والفرقُ الذي يقيسه الضابط: `tree`/`commit` في `ls-tree` **مشروعة** (وحدةٌ فرعيّة) فلا ترفع،
+    والسجلُّ الذي لا يُفهَم (بلا TAB · أو بلا نوعٍ ومعرّف) يُوقف الحكم.
+    """
+    import publish_guard as pg
+
+    blob = "100644 blob " + "a" * 40 + "\tREADME.md"
+    submodule = "160000 commit " + "b" * 40 + "\tvendor/lib"
+    monkeypatch.setattr(pg, "_git_z", lambda *a, **k: [blob, submodule])
+    assert pg._tree_entries("HEAD") == [("README.md", "a" * 40)], (
+        "الوحدةُ الفرعيّة لا تُمسح ولا تُوقف الحكم")
+
+    monkeypatch.setattr(pg, "_git_z", lambda *a, **k: ["100644 blob " + "a" * 40])
+    with pytest.raises(pg.GitReadError):
+        pg._tree_entries("HEAD")
+
+    monkeypatch.setattr(pg, "_git_z", lambda *a, **k: ["100644 nope " + "a" * 40 + "\tx"])
+    with pytest.raises(pg.GitReadError):
+        pg._tree_entries("HEAD")
+
+
+def test_a_truncated_cat_file_stream_is_a_failure_not_a_short_read(monkeypatch):
+    """**المعلَنُ يُقابَل بالمقروء (مقعدُ البنية F-5 · ٦٨ج):** الترويسةُ تعلن الحجم، والبثُّ المقطوع
+    كان يُعاد قصيرًا بصمت (`nl < 0 ⇒ break` والشرائحُ بلا فحص طول) ⇒ يُفحَص ذيلُ الكائن جزئيًّا
+    ويُقرأ الحكمُ «نظيفًا». و**الكائنُ الفارغُ ليس عطبًا:** `size = 0` يُقرأ صفرَ بايتٍ مقصودًا.
+    """
+    import publish_guard as pg
+
+    full = b"deadbeef " + b"blob 11\n" + b"hello world" + b"\n"
+    monkeypatch.setattr(pg, "_run_git", lambda *a, **k: full)
+    assert pg._read_blobs(["deadbeef"]) == {"deadbeef": b"hello world"}
+
+    monkeypatch.setattr(pg, "_run_git", lambda *a, **k: b"deadbeef blob 11\nhello wor")
+    with pytest.raises(pg.GitReadError):
+        pg._read_blobs(["deadbeef"])
+
+    monkeypatch.setattr(pg, "_run_git", lambda *a, **k: b"deadbeef blob 0\n\n")
+    assert pg._read_blobs(["deadbeef"]) == {"deadbeef": b""}, (
+        "ملفٌّ فارغٌ داخل الشجرة كائنٌ مشروعٌ لا عطبُ قراءة")
+
+
+def test_the_tracked_data_step_declares_a_failed_read_like_the_history_step(tmp_path):
+    """**الفرعُ الذي هو خطوةُ CI بنفسه (مقعدُ البنية P1 · مقعدُ المواصفة P2 · جولة ٦٨):**
+    كان `_git_z("ls-files")` **خارج** حدّ الاستثناء ⇒ خطأُ git يُخرج أثرًا (traceback) برمز ١، ورمزُ
+    ٢ المُعلَن في `docs/GATES.md` لا يصله. فالمقيسُ هنا: **رمز ٢ · رسالةٌ معلَنة · بلا أثر.**
+    """
+    import shutil
+    import subprocess
+    import sys
+
+    root = tmp_path / "not-a-repo"
+    (root / "tools").mkdir(parents=True)
+    shutil.copy(Path(__file__).resolve().parents[1] / "tools" / "publish_guard.py", root / "tools")
+    r = subprocess.run([sys.executable, "tools/publish_guard.py", "--tracked-real-data"],
+                       cwd=root, capture_output=True, text=True)
+    assert r.returncode == 2, f"تعذّرُ القراءة ⇒ ٢ (لا حكم) لا ١ ولا أثرًا (rc={r.returncode})"
+    assert "Traceback" not in r.stderr + r.stdout, "ولا يُسرَّب أثرُ الاستثناء:\n" + r.stderr
+    assert "لا حكم" in r.stdout, "والرسالةُ تُعلن أنّها لا تحكم:\n" + r.stdout
+
+    subprocess.run(["git", "init", "-q", "."], cwd=root, check=True)
+    r2 = subprocess.run([sys.executable, "tools/publish_guard.py", "--tracked-real-data"],
+                        cwd=root, capture_output=True, text=True)
+    # **وصفرُ الملفّاتِ المُتتبَّعة حالةٌ مشروعة (تصحيحٌ في الجولة ٦٨ب):** عدتُها كانت تُخرج رمز ٢
+    # عليها بينما تاريخُ المستودع نفسِه «آمن» برمز ٠ ⇒ تناقضٌ وصرخةٌ كاذبة. فالمقياسُ الصادق:
+    # `ls-files` تُخرج صفرًا برمز ٠ لحالةٍ فارغةٍ حقيقةً، والقراءةُ التي لم تقع يرفعها `_run_git`.
+    assert r2.returncode == 0, (
+        f"مستودعٌ بلا ملفٍّ مُتتبَّع واحد: «لا ملفَّ بياناتٍ حقيقيّة» حكمٌ صادقٌ لا «تعذّرُ قياس» "
+        f"(rc={r2.returncode})\n{r2.stdout}")
+
+
+def test_the_count_hint_lives_in_both_ci_steps():
+    """**السنُّ الذي يُفشل خطوةَ اللقطة بلا ضابطٍ كان يُمحى بصمت (مقعدُ المواصفة P3 · جولة ٦٨):**
+    `render_claims --write` ثم `git diff --exit-code` هو ما يكشف انزياحَ قياسِ البيئة **بعد** أن صار
+    `--check` يُقابِل الملفَّ الذي كتبته الخطوةُ نفسُها ⇒ فحذفُ السطرين يُبقي كلَّ شيءٍ أخضرَ ويعود
+    الانزياحُ صامتًا (وهو صنفُ R68-1 نفسه).
+    """
+    wf = (Path(__file__).resolve().parents[1] / ".github" / "workflows"
+          / "publish-guard.yml").read_text(encoding="utf-8")
+    assert wf.count("render_claims.py --write") == 2, (
+        "الخطّافُ في الخطوتين معًا (المجموعة واللقطة) — لا في واحدة")
+    assert wf.count("git diff --exit-code -- docs/claims.json") == 2, (
+        "والفرقُ الفاشلُ في الخطوتين معًا")
+
+    # **والضابطُ لا يُضعِف ما قبله (مقعدُ المواصفة F2 · ٦٨د):** شدُّه إلى الصنف **أسقط** الخاصيّةَ التي
+    # كان يحرسها: «لا نسخةَ بيدٍ من قيمة اللقطة». قِيس: صيغةٌ بلا ألفاظ دعوى («القيمةُ القديمةُ في الـCI:
+    # 738 … 889») مرّت خضراء — **وهي العلّةُ التاريخيّةُ نفسُها** التي أُغلقت في ٦٨/٦٨ج، أي أنّ الشدَّ
+    # استبدل قاعدةً بقاعدةٍ لا أن يضمّها. فالضابطُ الآن **اتّحادُ قاعدتين**:
+    #   (أ) **لا قيمةٌ من قيم اللقطة مكتوبةً بيدٍ** في تعليقات الملفَّين (لاتينيّةً كانت أو هنديّة)؛
+    #   (ب) **ولا عددٌ (٣ خانات فأكثر) قريبٌ من لفظ دعوى** — يستّر الأرقامَ التي لم تصر قيمةَ لقطةٍ بعد.
+    import json
+    import re
+    snap = json.loads((Path(__file__).resolve().parents[1] / "docs" / "claims.json")
+                      .read_text(encoding="utf-8"))
+    snapshot_values = {str(v) for v in [snap["tests"], *snap["tests_by_env"].values()]}
+    AR = "٠١٢٣٤٥٦٧٨٩"          # U+0660–0669
+    AR_EXT = "۰۱۲۳۴۵۶۷۸۹"      # U+06F0–06F9 — هنديّةٌ ممتدّة، قِيس عند مقعد المعايير أنّها كانت تفلت
+    # **وسياقُ الدعوى** (لا ألفاظُها الأربعة وحدَها): كلمةُ «الـCI» في تعليقٍ يحمل ٧٣٨ تجعله دعوى أصناف،
+    # وهي الصيغةُ التي قِيس أنّ الضابطَ السابق مرّ عليها («القيمةُ القديمةُ في الـCI: 738 … 889»).
+    CONTEXT = re.compile(r"الـCI|الCI|\bCI\b|المجموعة|اللقطة|بيئة|خطوة|اختبار|عدد|snapshot|\benv\b",
+                         re.IGNORECASE)
+
+
+    def _latinise(text: str) -> str:
+        return "".join(
+            str(AR.index(c)) if c in AR else str(AR_EXT.index(c)) if c in AR_EXT else c
+            for c in text)
+
+    def hand_written(text: str) -> list[str]:
+        out = []
+        for ln in _latinise(text).splitlines():
+            if not ln.strip().startswith("#"):
+                continue          # غيرُ سطور التعليق خارج الحدّ ⇒ مُعلَن (كتلة `run:` مثلًا)
+            for v in sorted(snapshot_values, key=len, reverse=True):
+                if re.search(rf"(?<![0-9]){v}(?![0-9])", ln):
+                    out.append(f"قيمةُ لقطةٍ مكتوبة بيدٍ: {v}")
+            # **والتواريخُ مستثناةٌ بنصّها** (قِيس: تعليقٌ يحمل `2026-09-18` بجوار كلمة CI أُصطيد خطأً):
+            # تاريخٌ ليس دعوى على عددٍ، ويُزال قبل عدّ الخانات بحدِّه المعلَن (yyyy-mm-dd وحدَه).
+            scan = re.sub(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", "«تاريخ»", ln)
+            for m in re.finditer(r"[0-9]{3,}", scan):
+                if CONTEXT.search(scan[max(0, m.start() - 45): m.end() + 45]):
+                    out.append(f"عددٌ في سياق دعوى: {m.group(0)}")
+        return out
+    # **وحدودُ الضابط مُعلَنة كما هي، لا كما تُتمنّى:**
+    #  - **عددٌ من خانتين** يفلت (٦٦ ⇒ أخضر بالقياس)؛ والعدّاداتُ هنا بالمئات.
+    #  - **السياقُ وحدَه ±٤٥ محرفًا في السطر نفسه:** رقمٌ بلا لفظِ سياقٍ قريبًا يفلت، **وحدُّه مقيسٌ
+    #    بالاتّجاهين (مقعدُ المواصفة · ٦٨هـ):** «القيمةُ القديمة: 738» بلا سياق ⇒ يمرّ (rc=0) · أمّا
+    #    صيغتُه التي شكا منها («القيمةُ القديمةُ في الـCI: 738 · … 889») فتحمل كلمةَ الـCI ⇒ **تسقط
+    #    (rc=1) وقِيسها المقعدُ بنفسه بعد الإغلاق**. (وكان هذا البندُ يقول «لا يُدَّعى إغلاقُه» وهي
+    #    مخالفةٌ أُصلحت: النصُّ كان يصف ضابطًا أضيقَ من المُنفَّذ في موضعٍ يُقرأ مرجعًا لحدوده.)
+    #  - **سطورُ التعليق وحدَها** (رقمٌ في كتلة `run:` يفلت) — و**الملفّان** فقط؛ وثيقةُ `docs/` لا يراها
+    #    هذا الضابطُ ولا دعاوى `render_claims` (لأنّها تقيس وجودَ الصيغة الصحيحة لا غيابَ رقمٍ آخر).
+    #  - **أرقامٌ مفصولةٌ بفراغ** («7 4 0») تفلت — كسرُ الصورة لا الرقم.
+    for rel in (".github/workflows/publish-guard.yml", "tools/render_claims.py"):
+        f = Path(__file__).resolve().parents[1] / rel
+        stuck = hand_written(f.read_text(encoding="utf-8"))
+        assert not stuck, (
+            f"عددُ دعوى مكتوبٌ بيدٍ في تعليقات {rel}: {stuck} ⇒ يُقرأ من اللقطة (مؤشّرًا) لا يُنسَخ")
+
+
+def test_the_guard_and_the_ignore_rules_share_one_list_of_real_data_dirs():
+    """**لا قائمتان تفترقان (مقعدُ البنية · جولة ٦٧):** `.gitignore` يحمل أسماءَ مجلّدات البيانات
+    الحقيقيّة بيده، و`publish_guard` في `REAL_DATA_DIRS` ⇒ فزيادةُ مجلّدٍ في أحدهما لا يتبعها الآخر،
+    ويعود الدرسُ نفسُه (خطّا دفاعٍ يفترقان). فيُقابَلان — وبالصيغة العميقة (`**/`) التي بها التداخلُ
+    لا يُعفي.
+    """
+    import publish_guard as pg
+
+    gi = (Path(__file__).resolve().parents[1] / ".gitignore").read_text(encoding="utf-8")
+    for d in pg.REAL_DATA_DIRS:
+        assert f"**/{d}/" in gi, (
+            f"`{d}` في `REAL_DATA_DIRS` وليس في `.gitignore` بصيغته العميقة ⇒ يفترق خطّا الدفاع")
+
+
 def test_a_three_wide_space_grouped_account_is_blocked():
     """**الثغرة التي فتحها توسيعي ثم أُغلق.** مدقّقٌ خارجي قاس أن حساباً من 15 أو
     18 رقماً مكتوباً بثلاثاتٍ مفصولةٍ بفراغ كان **يمرّ**، لأنني وسّعتُ القاعدة
@@ -288,3 +626,312 @@ def test_a_three_wide_space_grouped_account_is_blocked():
     line = ' "account": "' + " ".join(_run(str(n), 3) for n in range(1, 6)) + '"'
     findings = [r for r in _scan_one(line) if r[1] == "long_digits"]
     assert findings, "حسابٌ بثلاثاتٍ مفصولةٍ بفراغ يجب أن يُحجب (ثغرةٌ كانت مفتوحة)"
+
+
+def test_the_tool_reaches_git_through_one_core_only():
+    """**«قارئٌ واحد» تُقاس بالخاصيّة لا بالنصّ (مقعدا المعايير والبنية · الجولة ٦٨ب/٦٨ج).**
+
+    كلُّ قراءةٍ من git في الحارس تمرّ على `_run_git` (التي تفحص رمزَ الخروج وترفع `GitReadError`).
+    فظهورُ نداءٍ ثانٍ مباشر يعني **سياسةً ثانية**: قراءةٌ فاشلةٌ تُقرأ «صفرًا» = «نظيفًا».
+    (والقياسُ الذي أنتج هذا الضابط: `_read_blobs` — وهي التي تُنزل محتوى الكائنات، أي موضعُ الحكم
+    نفسُه — كانت القراءةَ **الرابعة** بلا فحصِ رمز خروج.)
+
+    **والعدُّ النصّيّ كان أعمى (المقعدان · ٦٨ج):** نداءٌ مباشرٌ **بسطرٍ منكسر** (`subprocess.run(\n    ["git", …]`)
+    يحمل صفرًا في `src.count('subprocess.run(["git"')` — أثبته المقعدان بمقارئٍ خامسٍ مزروع ⇒ فصار
+    الفحصُ على **شجرة AST**: كلُّ نداءٍ للقراءة يُعدّ بعُقده، والمسموحُ واحدٌ وموضعُه داخل `_run_git`.
+
+    **والاسمُ الحرفيّ كان أعمى أيضًا (المقعدان · ٦٨د):** `import subprocess as sp` · `from subprocess
+    import run as _r` · `os.popen("git …")` — كلُّها قراءةٌ خارج النواة وتمرّ أمام مطابقة الاسم ⇒
+    فصار الفحصُ **بتتبّع الربط**: أسماءُ الوحدة/الدوالّ المستوردة من `subprocess` (بأيّ كنية)، وأيّ
+    نداءٍ لـ`popen`/`system`، وضابطٌ نصّيّ احتياطيّ: لا يظهر `subprocess`/`popen` في أيّ سطرٍ خارج
+    `_run_git` (خلا سطر الاستيراد).
+    """
+    import ast
+
+    src = Path(pg.__file__).read_text("utf-8")
+    tree = ast.parse(src)
+
+    # **وتتبّعُ الربط لا يقتصر على الوحدة الواحدة (مقعدُ البنية T1 · ٦٨د):** كان الشرطُ على
+    # `node.module == "subprocess"` حصرًا، فالكنيةُ من `os` (`from os import popen as _p`) تمرّ.
+    # فيُتبَّع كلُّ استيرادٍ من الوحدتين، بالاسم أو بأيّ كنية.
+    EXEC_MODULES = {"subprocess", "os"}
+    EXEC_FUNCS = {"popen", "system"}
+    mod_names, fn_names = set(EXEC_MODULES), set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name in EXEC_MODULES:
+                    mod_names.add(a.asname or a.name)
+        elif isinstance(node, ast.ImportFrom) and node.module in EXEC_MODULES:
+            for a in node.names:
+                if a.name in EXEC_FUNCS:
+                    fn_names.add(a.asname or a.name)
+
+    def is_read_call(n) -> bool:
+        f = n.func
+        if isinstance(f, ast.Attribute):
+            if isinstance(f.value, ast.Name) and f.value.id in mod_names:
+                return True
+            return f.attr in EXEC_FUNCS                  # `os.popen` وشقيقاتُه
+        if isinstance(f, ast.Name):
+            return f.id in fn_names                       # `from subprocess import run as _r`
+        return False
+
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and is_read_call(n)]
+    core = [n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "_run_git"]
+    assert len(core) == 1, "نواةُ القراءة `_run_git` معدودةٌ بالنصّ (AST)"
+    core_ids = {id(c) for c in ast.walk(core[0]) if isinstance(c, ast.Call)}
+    in_core = [c for c in calls if id(c) in core_ids]
+    assert len(in_core) == 1, "النواةُ تنادي القراءة مرّةً واحدة (وإلّا فمسارُ فشلٍ بلا فحص)"
+    outside = [c.lineno for c in calls if id(c) not in core_ids]
+    assert not outside, (
+        f"نداءُ قراءةٍ (subprocess/alias · popen/system) خارج النواة `_run_git` في السطور {outside} "
+        f"⇒ سياسةُ قراءةٍ ثانية (قراءةٌ فاشلةٌ تُقرأ «صفرًا» = «نظيفًا»)")
+
+    core_lines = set(range(core[0].lineno, (core[0].end_lineno or core[0].lineno) + 1))
+    # **والضابطُ النصّيّ الاحتياطيّ كان يقرأ التعليقات والسلاسل (مقعدُ البنية T1 · ٦٨د):**
+    # سطرٌ **يذكر** `subprocess` في تعليقٍ خارج النواة كان يُحمرّه (إيجابيّةٌ كاذبةٌ مقيسة) ⇒
+    # تُستثنى سطورُ التعليق وسطورُ الثوابت النصّيّة، فيبقى الحدُّ على ما يُنفَّذ فعلًا.
+    skip_lines = {i for i, ln in enumerate(src.splitlines(), 1) if ln.lstrip().startswith("#")}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            skip_lines.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+    stray = [i for i, ln in enumerate(src.splitlines(), 1)
+             if ("subprocess" in ln or "popen" in ln)
+             and i not in core_lines and i not in skip_lines
+             and not ln.lstrip().startswith(("import ", "from "))]
+    assert not stray, f"أثرُ قراءةٍ لـgit خارج النواة في السطور {stray} (ضابطٌ نصّيّ احتياطيّ)"
+    # **وحدودُ الإعلان كما هي مُنفَّذةً، لا أوسعَ منها:** المتبعُ هو الكنى **المستوردة** من
+    # `subprocess`/`os` ونداءاتُ `popen`/`system` بالاسم. **وما يفلت مُعلَن:** نداءٌ غيرُ مباشر
+    # (`getattr(sp, "run")(…)` · `_R = sp.run; _R(…)` — استعارةُ سمةٍ في متغيّر)، **ومنفّذٌ ثالثٌ
+    # لا يحمل اسمًا مألوفًا (`pty.spawn([...])`) يفلت من الفحصين معًا** — قِيس عند مقعد البنية: rc=0
+    # (وكان الإعلانُ يقول «تُصطاد بالضابط النصّيّ وحدَه» وهو تكذيبٌ بالقياس) ⇒ المنافذُ الثلاثةُ
+    # **مُعلَنةٌ لا مُغلَقة**، ورفعتُها توسيعُ الضابط النصّيّ بأسماء منفّذين آخرين (`pty.` · `os.exec` · `os.spawn`).
+    assert src.count("_run_git(") >= 4, "نواةُ القراءة لا يستهلكها كلُّ المسارات"
+
+
+def test_an_unknown_cat_file_record_is_a_failure_not_a_skip(monkeypatch):
+    """**الفرعُ الثالثُ في `_read_blobs` بلا ضابط (مقعدا المعايير والبنية · ٦٨د):** سجلٌّ لا نوعَ
+    كائنٍ فيه (صيغةٌ تغيّرت) كان يُدَّعى إغلاقُه بحكم «فشلٌ مُغلَق»، ومقعدٌ أسقطه إلى تخطٍّ صامتٍ فلم
+    يسقط اختبارٌ واحد ⇒ فهو فرعٌ جديدٌ بلا ضابط: يُقاس الآن بمُخرَجٍ مُحاكى (`zzblob`)، وبالشاهد الموجب
+    (سجلٌّ مشروع) في الضابط المقابل.
+    """
+    import publish_guard as pg
+
+    monkeypatch.setattr(pg, "_run_git", lambda *a, **k: b"deadbeef zzblob 5\nhello\n")
+    with pytest.raises(pg.GitReadError):
+        pg._read_blobs(["deadbeef"])
+
+
+def test_the_remote_reachability_rule_lives_in_one_place():
+    """**«قاعدةٌ واحدةٌ في موضعٍ واحد» تُقاس بالنصّ لا بالنيّة (مقعدُ البنية T4 · ٦٨د):** استُخرجت
+    `_commits_not_on_remotes` من فرعَي `scan_pre_push`، وإعادةُ كتابة التعبير يدويًّا في أحدهما كانت
+    تمرّ بلا اعتراض — خلافًا لعُرف المدى (كلُّ دعوى «قاعدةٌ واحدة» لها ضابطٌ باسمها).
+    """
+    src = Path(pg.__file__).read_text("utf-8")
+    lines = src.splitlines()
+    # **والحَدُّ بالأمس كان يربط الحكمَ بعدد النداءات (مقعدُ البنية T4 · ٦٨د):** `== 3` يُحمرّ
+    # لنداءٍ رابعٍ مشروع، **وتكرارٌ بترتيبٍ معكوس** (`("--remotes", "--not")`) يفوت. فيُقاس
+    # **موضعُ التعبير** لا عددُ نداءاته: كلُّ ذكرٍ لأحد العلمين داخل `_commits_not_on_remotes` وحدَها،
+    # ومعها شاهدٌ أنّ التعريفَ قائمٌ (وإلّا فالإسقاطُ الكامل يمرّ).
+    import ast
+    tree = ast.parse(src)
+    owners = [n for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef) and n.name == "_commits_not_on_remotes"]
+    assert len(owners) == 1, "دالّةُ «ما ليس على الريموت» معدودةٌ بالنصّ (AST)"
+    body = set(range(owners[0].lineno, (owners[0].end_lineno or owners[0].lineno) + 1))
+    outside = [i for i, ln in enumerate(lines, 1)
+               if ("--not" in ln or "--remotes" in ln) and i not in body]
+    assert not outside, (
+        f"تعبيرُ «ما ليس على الريموت» مكتوبٌ خارج الدالّة في السطور {outside} ⇒ نسخةٌ ثانيةٌ لا تُقاس")
+    assert any("--not" in lines[i - 1] and "--remotes" in lines[i - 1] for i in body), (
+        "التعبيرُ نفسه غائبٌ عن الدالّة ⇒ الإسقاطُ الكامل يمرّ (شاهدٌ سالب)")
+    assert src.count("_commits_not_on_remotes(") >= 3, (
+        "التعريفُ + موضعا النداء (المرجعُ الجديد والبديلُ المحافظ) — والزيادةُ مشروعة")
+
+
+def _tool_repo(tmp_path, name="repo"):
+    """مستودعٌ مؤقّتٌ يحمل **نسخةً من الأداة** ⇒ فـ`ROOT` عندها هو هذا المستودع (لا مستودع المشروع)."""
+    repo = tmp_path / name
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "tools").mkdir(exist_ok=True)
+    (repo / "tools" / "publish_guard.py").write_text(Path(pg.__file__).read_text("utf-8"), "utf-8")
+    return repo
+
+
+def _git_init_commit(repo, files=("ok.txt",), allow_empty=False):
+    subprocess.run(["git", "init", "-q", "."], cwd=repo, check=True)
+    for f in files:
+        (repo / f).write_text("nothing sensitive here\n", "utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    cmd = ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "x"]
+    if allow_empty:
+        cmd.insert(6, "--allow-empty")
+    subprocess.run(cmd, cwd=repo, check=True)
+
+
+def _run_tool(repo, *args):
+    return subprocess.run([sys.executable, "tools/publish_guard.py", *args],
+                          cwd=repo, capture_output=True, text=True)
+
+
+def test_a_missing_blob_object_is_not_silent_cleanliness(tmp_path):
+    """**T1 / P1 / S1 — المقاعدُ الثلاثة تقاربت على هذا (الجولة ٦٨ب).**
+
+    حذفُ جسم كائنٍ من مخزن git يُخرج `cat-file --batch` سطرَ `… missing` **برمز خروجٍ صفر** ⇒ فحصُ
+    الرمز وحدَه لا يكشفه؛ وكان المستهلكُ يُسقط الغائبَ بصمت (`data is None ⇒ continue`) ⇒ فتسريبٌ
+    مزروعٌ يمرّ من حارسِ النشر العامّ. قِيس عند المقاعد: قبل `1 BLOCK · rc=1`، وبعدُ `0 BLOCK` و
+    «آمن للدفع» بـ`rc=0`. المطلوب: **«لا حكم»** — لا نظافة.
+    """
+    repo = _tool_repo(tmp_path)
+    _git_init_commit(repo, files=("leak.txt",))
+    # تسريبٌ يُبنى في زمن التشغيل: **لا مسارَ بيتٍ ولا سلسلةَ أرقامٍ في نصّ هذا الملفّ** (يُفحَص بحارسِه).
+    (repo / "leak.txt").write_text("workdir: /Users/" + "auditor" + "/secret/project\n", "utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "leak"],
+                   cwd=repo, check=True)
+    before = _run_tool(repo, "--tree")
+    assert before.returncode == 1 and "BLOCK" in before.stdout, before.stdout
+    blob = subprocess.run(["git", "rev-parse", "HEAD:leak.txt"], cwd=repo,
+                          capture_output=True, text=True).stdout.strip()
+    (repo / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
+    after = _run_tool(repo, "--tree")
+    assert after.returncode == 2, after.stdout + after.stderr
+    assert "آمن للدفع" not in after.stdout, after.stdout
+    assert "لا حكم" in after.stdout, after.stdout
+
+
+def test_an_empty_tree_commit_is_not_a_measurement_failure(tmp_path):
+    """**T2 / S2 / P4 — صرخةٌ كاذبةٌ أدخلتُها في الطلب نفسِه ثم قاسها المقاعد.***
+
+    التزامٌ بشجرةٍ فارغة حالةٌ مشروعة (`git ls-tree -r HEAD` ⇒ صفرٌ بـ`rc=0`)، وكان شرطُ «صفرِ مدخل»
+    يُخرجه «تعذّرَ قياس» برمز ٢ بينما `--history` على المستودع نفسِه يقول «آمن» برمز ٠ — حكمان
+    متناقضان. والأثقلُ أنّ `scan_pre_push` يعبر `scan_tree` ⇒ فيُمنع دفعٌ مشروع (وهو ما يمنعه الخطّافُ
+    بنصّه). المطلوب: صفرٌ صادق ⇒ `tree: 0` و«آمن للدفع» و`rc=0`.
+    """
+    repo = tmp_path / "empty"
+    repo.mkdir()
+    _git_init_commit(repo, files=(), allow_empty=True)
+    # الأداةُ تُنسخ **بعد** الالتزام ⇒ فشجرةُ `HEAD` تبقى فارغةً فعلًا (‏`ls-tree` ⇒ صفر).
+    (repo / "tools").mkdir()
+    (repo / "tools" / "publish_guard.py").write_text(Path(pg.__file__).read_text("utf-8"), "utf-8")
+    tree = _run_tool(repo, "--tree")
+    assert tree.returncode == 0, tree.stdout + tree.stderr
+    assert "tree: 0" in tree.stdout, tree.stdout
+    assert "آمن للدفع" in tree.stdout, tree.stdout
+    hist = _run_tool(repo, "--history")
+    assert hist.returncode == 0, hist.stdout + hist.stderr
+    tracked = _run_tool(repo, "--tracked-real-data")
+    assert tracked.returncode == 0, tracked.stdout + tracked.stderr
+
+
+def test_a_changed_history_format_is_a_failure_not_zero_pairs(monkeypatch):
+    """**P2 (مقعدُ المواصفة · ٦٨ب) + R68-1 على الخام:** تغييرٌ في صيغة git يُبقي السجلّاتِ غيرَ فارغةٍ
+    ويسقط `path=` ⇒ كان يُقرأ «صفرَ أزواج» ثم «آمن للدفع» (آلافُ الكائنات تُتخطّى بصمت — صنفُ R68-1
+    بعينه). والحكمُ على **شكلِ** كلّ سجلّ: معرّفُ كائنٍ أو `path=<مسار>` يتبعه ⇒ ولا ثالث.
+    ويقيس الضابطُ الاتجاهين: سجلٌّ غريبٌ ⇒ استثناء · وسجلّاتٌ معرّفاتٌ وحدَها (تاريخٌ مشروعٌ بلا كائنٍ
+    مسمّى) ⇒ أزواجٌ صفرٌ بلا استثناء (لا صرخةٌ كاذبة).
+    """
+    import publish_guard as pg
+    monkeypatch.setattr(pg, "_git_z",
+                        lambda *a, **k: ["a" * 40, "src/app.py", "b" * 40, "docs/GATES.md"])
+    with pytest.raises(pg.GitReadError):
+        pg._history_pairs()
+    monkeypatch.setattr(pg, "_git_z", lambda *a, **k: ["a" * 40, "b" * 40])
+    assert pg._history_pairs() == []
+
+
+def test_a_remote_ref_absent_locally_does_not_block_a_push(tmp_path, monkeypatch, capsys):
+    """**T3 (مقعدُ البنية · ٦٨ب):** مرجعٌ على الريموت لم يُجلَب (فرعٌ أُنشئ عليه · تاريخٌ أُعيد كتابتُه
+    وجُلب ناقصًا) كان يُخرج رمزَ ٢ ⇒ والخطّافُ `|| exit 1` **يمنع دفعًا مشروعًا** — وهو ما يمنعه
+    `.githooks/pre-push` بنصّه. المطلوب: يُعلَن المرجعُ ويُمسح ما هو موجودٌ محليًّا (بلا استثناء).
+    """
+    import io
+    import publish_guard as pg
+    repo = tmp_path / "push"
+    repo.mkdir()
+    _git_init_commit(repo)
+    local = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                           capture_output=True, text=True).stdout.strip()
+    monkeypatch.setattr(pg, "ROOT", repo)
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        f"refs/heads/feature {local} refs/heads/feature {'1' * 40}\n"))
+    findings, entries, seen = [], [], set()
+    pg.scan_pre_push(findings, entries, seen)          # لا استثناء ⇒ لا «لا حكم» على دفعٍ مشروع
+    out = capsys.readouterr().out
+    assert "غيرُ موجودٍ محليًّا" in out, out
+    assert not [f for f in findings if f[0] == "BLOCK"], findings
+
+
+def test_every_published_partition_in_the_checklist_adds_up():
+    """**«صفٌّ لا يجمع» أُغلق بالحالة لا بضابط (مقعدا المعايير والمواصفة · ٦٨د):** الجدولُ «٨٦٩·٢٤·٠ = ٨٩١»
+    وصل من تشغيلٍ أحمرَ سقط منه الحدُّ الفاشل، **ولا شيءَ كان يحسب التقسيم**. فيُحسب الآن كلُّ صفٍّ منشورٍ
+    بهذه الصيغة: تمرّ + تُتخطّى + فاشلة = الجمعُ المعلَن، وأحدُها (صفُّ الشجرة الحيّة) يساوي لقطةَ `full`
+    — فيسقط الضابطُ عند أوّل حركةِ عدّادٍ لا يُحدَّث الصفُّ معها.
+
+    **وحدُّه مُعلَن:** الصفوفُ التي تُصرّح بـ«والجمعُ …» وحدَها (صفوفُ الالتزامات تخلو من التصريح).
+    """
+    import json
+    import re
+    root = Path(__file__).resolve().parents[1]
+    doc = (root / "docs" / "QA_CHECKLIST.md").read_text(encoding="utf-8")
+    snap = json.loads((root / "docs" / "claims.json").read_text(encoding="utf-8"))
+    # **والصفوفُ الثلاثةُ لا الواحد (مقعدُ المواصفة · ٦٨هـ):** كان النمطُ يشترط «**والجمعُ N**» فمرّت
+    # صيغتان أُخريان تُصرّحان بجمعِهما («(جمعُها 891)») — وهي العلّةُ نفسُها على شقيقَي الصفّ المحروس
+    # (قِيس: «832 ⇒ 831» يمرّ خضراء). فيُحكم الآن على **كلّ كتلةِ بندٍ** تحمل ثلاثةً، أينما صُرّح بالجمع.
+    blocks = re.split(r"\n(?=- )", doc)
+    triples, declared_all = [], []
+    for b in blocks:
+        sums = {int(a) + int(c) + int(d) for a, c, d in re.findall(
+            r"(\d+) تمرّ\s*·\s*(\d+) تُتخطّى\s*·\s*(\d+) فاشلة", b)}
+        triples += sorted(sums)
+        # **والجمعُ يُصرَّح به بألفاظٍ متعدّدة في الوثيقة** («والجمعُ» · «جمعُها» · «الجامعُ» ·
+        # «المجموع» · «فالفرقُ» · «= N») — وكلُّها صيغٌ حاكمةٌ تُقاس، فلا يُقبل جمعٌ لا يوافق مجموعَه.
+        declared = {int(v) for v in re.findall(
+            r"(?:جمع|الجامع|المجموع|الفرق)[ُهما]*[^\d]{0,24}?(\d{3,})",   # «والجامعُ في البيئتين ٨٦٤»
+            b)}
+        # وصيغةُ «⇒ 889 · 2 · 0» بلا كلمة «فاشلة» تُقاس بالشكل نفسه
+        for a, c, d in re.findall(r"⇒\s*(\d{3})\s*·\s*(\d+)\s*·\s*(\d+)\b", b):
+            sums.add(int(a) + int(c) + int(d))
+        declared_all += sorted(declared)
+        if sums and declared:
+            mismatched = sorted(sums - declared)      # **صفٌّ متقادمٌ لا يوافق تصريحَه**
+            phantom = sorted(declared - sums)         # **تصريحٌ لا يوافق أيّ تقسيمٍ في كتلته**
+            assert not mismatched and not phantom, (
+                f"كتلةُ بندٍ: تقسيمٌ لا يوافق جمعَه {mismatched} · أو جمعٌ بلا تقسيمٍ يوافقه {phantom}"
+                f" (المجموعُ {sorted(sums)} · المُعلَنُ {sorted(declared)})")
+        # **وحدٌّ مُعلَن:** تقسيمٌ لا يُصرَّح بجمعِه في كتلته لا يُحرَس جمعُه هنا (النثرُ التاريخيُّ
+        # يذكر «٨٥٧ = ٧٩٩+٥٨» بصيغٍ متعدّدة) — لكنّ **صفَّ الشجرة الحيّة محروسٌ** بربطِه بـ`full` أدناه.
+    assert triples, "لا تقسيمَ منشورًا بهذه الصيغ ⇒ الضابطُ يقيس العدم"
+    full = snap["tests_by_env"]["full"]
+    assert full in declared_all, (
+        f"صفُّ الشجرة الحيّة يجب أن يُعلن جمعَ `full` ({full}) — المُعلَن: {sorted(set(declared_all))}")
+
+
+def test_every_declared_environment_has_a_claim_on_the_document():
+    """**دعاوى البيئات بلا ضابطٍ على وجودها (مقعدُ البنية T5 · ٦٨د):** حذفُ كتلةِ الدعاوى من `claims()`
+    لا يُسقط شيئًا — لأنّ الحذفَ يُزيل الدعوى والمقابلةَ معًا، فيمرّ الصنفُ الذي أُغلق أمس. فيُقاس
+    **وجودُ** دعوى لكلّ مفتاحٍ في `tests_by_env` (وبالحذف يسقط هذا الضابط)."""
+    import json
+    import render_claims as rc
+    snap = json.loads((Path(__file__).resolve().parents[1] / "docs" / "claims.json")
+                      .read_text(encoding="utf-8"))
+    labels = " ".join(c[2] for c in rc.claims(snap))
+    missing = [e for e in snap["tests_by_env"] if f"قيمةُ بيئة `{e}` المنشورة" not in labels]
+    assert not missing, f"مفتاحُ بيئةٍ بلا دعوى على الوثيقة: {missing}"
+
+
+def test_the_environment_claims_survive_the_live_report_path():
+    """**إصلاحُ F3 كان بلا ضابطٍ يعضّه (مقعدُ البنية N1 · ٦٨هـ):** إرجاعُ `_env_values` إلى الصيغة
+    السابقة (قراءةُ `d` وحدَه) كان يُبقي المجموعةَ خضراءَ بينما أثرُه مقيس (٣ دعاوى بيئة ⇒ ٠ في مسار
+    `derive()`). فيُقاس المسارُ الحيّ هنا صريحًا: قاموسٌ بشكل `derive()` **بلا** `tests_by_env` يجب
+    أن يُنتج دعوى لكلّ مفتاح بيئة في اللقطة الملتزمة."""
+    import json
+    import render_claims as rc
+    snap = json.loads((Path(__file__).resolve().parents[1] / "docs" / "claims.json")
+                      .read_text(encoding="utf-8"))
+    live_shaped = {k: v for k, v in snap.items() if k != "tests_by_env"}   # شكلُ المخرج الحيّ
+    labels = " ".join(c[2] for c in rc.claims(live_shaped))
+    missing = [e for e in snap["tests_by_env"] if f"قيمةُ بيئة `{e}` المنشورة" not in labels]
+    assert not missing, f"المسارُ الحيّ بلا دعاوى بيئة: {missing} ⇒ إصلاحُ F3 بلا ضابط"

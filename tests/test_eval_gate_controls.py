@@ -16,12 +16,16 @@ import sys
 
 import pytest
 
+from tests._local_evidence import pack_is_present, run_is_ready
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
 RUN = ROOT / "data/local_sample/slice_629p"
-needs_run = pytest.mark.skipif(not (RUN / "results").exists(), reason="بلا أدلّةِ القرص (data/local_sample)")
+needs_run = pytest.mark.skipif(
+    not run_is_ready(RUN) or not pack_is_present(),
+    reason="بلا أدلّةِ القرص (data/local_sample: results/pg-*.json) أو بلا الحزمة المجمَّدة (data/eval_pack)")
 
 
 def _load(name: str, rel: str):
@@ -275,10 +279,15 @@ def test_the_snapshot_gate_actually_fires(monkeypatch, tmp_path):
     (tmp_path / "docs").mkdir(parents=True, exist_ok=True)
     doc = tmp_path / "docs" / "QA_CHECKLIST.md"
     doc.write_text("حالياً 999 اختباراً\n", encoding="utf-8")
-    (tmp_path / "docs" / "claims.json").write_text(_json.dumps({"tests": 606}, ensure_ascii=False),
-                                                   encoding="utf-8")
+    (tmp_path / "docs" / "claims.json").write_text(
+        _json.dumps({"tests": 606, "tests_by_env": {rc.CLAIMS_ENV: 606}}, ensure_ascii=False),
+        encoding="utf-8")
     monkeypatch.setattr(rc, "claims",
                         lambda d: [("docs/QA_CHECKLIST.md", f"حالياً {d['tests']}", "عدد الاختبارات")])
+    # **ويُعلن المشهدُ قياسَه (R67-2 · مراجعة ٦٧):** البوّابةُ صارت تفشل **مُغلَقةً** حين لا يُقاس العدد،
+    # وهذا المشهدُ `PROJ` فيه مجلّدٌ مؤقّتٌ لا شجرةَ اختباراتٍ فيه ⇒ `_test_count()` تُعيد `None` ⇒
+    # الفحصُ يحمرّ لسببٍ لا يخصّ ما يقيسه هذا الضابط. فلا يُرخى الفحص، **بل يُعلَن المدخَلُ الناقص.**
+    monkeypatch.setattr(rc, "_test_count", lambda: 606)
     monkeypatch.setattr(sys, "argv", ["render_claims.py", "--check"])
     with pytest.raises(SystemExit) as e:
         rc.main()
