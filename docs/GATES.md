@@ -72,6 +72,7 @@ tests/test_landing_probe.py
 tests/test_eval_pack.py
 tests/test_local_reader_probe.py
 tests/test_publish_guard.py
+tests/test_footer_order.py
 ```
 
 **ومعرّفُ كلّ خطوةٍ مُسجَّلٌ هنا — تُقابَل بالـworkflow في الاتّجاهين (لا خطوةَ بلا معرّفٍ مُسجَّل، ولا معرّفَ شبح):**

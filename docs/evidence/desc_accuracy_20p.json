@@ -1,0 +1,410 @@
+{
+ "pages": [
+  5,
+  6,
+  7,
+  8,
+  9,
+  200,
+  201,
+  202,
+  203,
+  204,
+  400,
+  401,
+  402,
+  403,
+  404,
+  560,
+  561,
+  562,
+  563,
+  564
+ ],
+ "per_page": {
+  "5": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "big": 1,
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "big": 1,
+    "same": 8,
+    "one_side_extra": 1
+   },
+   "page_read_shift": false
+  },
+  "6": {
+   "rows": 11,
+   "column_rows": 11,
+   "column_vs_reference": {
+    "same": 11
+   },
+   "page_read_vs_reference": {
+    "big": 3,
+    "same": 7,
+    "one_side_extra": 1
+   },
+   "page_read_shift": true,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "7": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 10
+   },
+   "page_read_vs_reference": {
+    "big": 4,
+    "same": 5,
+    "one_side_extra": 1
+   },
+   "page_read_shift": true,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "8": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 8,
+    "small": 2
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 2,
+    "big": 2,
+    "small": 2,
+    "same": 4
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "9": {
+   "rows": 8,
+   "column_rows": 8,
+   "column_vs_reference": {
+    "same": 8
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 1,
+    "same": 7
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "200": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 8,
+    "small": 2
+   },
+   "page_read_vs_reference": {
+    "same": 7,
+    "small": 2,
+    "one_side_extra": 1
+   },
+   "page_read_shift": false
+  },
+  "201": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 10
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 2,
+    "same": 8
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": false,
+    "column_carried_on_previous": false,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "202": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 7,
+    "small": 2
+   },
+   "page_read_vs_reference": {
+    "big": 2,
+    "one_side_extra": 3,
+    "same": 3,
+    "small": 1
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "203": {
+   "rows": 9,
+   "column_rows": 9,
+   "column_vs_reference": {
+    "same": 8,
+    "small": 1
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 2,
+    "same": 6,
+    "small": 1
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": false,
+    "column_carried_on_previous": false,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "204": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 9,
+    "small": 1
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 2,
+    "same": 7,
+    "small": 1
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "400": {
+   "rows": 8,
+   "column_rows": 8,
+   "column_vs_reference": {
+    "same": 8
+   },
+   "page_read_vs_reference": {
+    "same": 7,
+    "one_side_extra": 1
+   },
+   "page_read_shift": false
+  },
+  "401": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 10
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 2,
+    "same": 7,
+    "big": 1
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "402": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 9,
+    "big": 1
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 3,
+    "same": 7
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "403": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 10
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 2,
+    "same": 8
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "404": {
+   "rows": 8,
+   "column_rows": 8,
+   "column_vs_reference": {
+    "same": 7,
+    "small": 1
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 2,
+    "same": 6
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": false,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "560": {
+   "rows": 8,
+   "column_rows": 8,
+   "column_vs_reference": {
+    "same": 8
+   },
+   "page_read_vs_reference": {
+    "big": 2,
+    "same": 5,
+    "one_side_extra": 1
+   },
+   "page_read_shift": false
+  },
+  "561": {
+   "rows": 8,
+   "column_rows": 8,
+   "column_vs_reference": {
+    "same": 8
+   },
+   "page_read_vs_reference": {
+    "same": 8
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": true
+   }
+  },
+  "562": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 10
+   },
+   "page_read_vs_reference": {
+    "same": 10
+   },
+   "page_read_shift": false
+  },
+  "563": {
+   "rows": 9,
+   "column_rows": 9,
+   "column_vs_reference": {
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "same": 8,
+    "one_side_extra": 1
+   },
+   "page_read_shift": false
+  },
+  "564": {
+   "rows": 8,
+   "column_rows": 8,
+   "column_vs_reference": {
+    "small": 2,
+    "same": 6
+   },
+   "page_read_vs_reference": {
+    "big": 1,
+    "one_side_extra": 2,
+    "same": 5
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": false,
+    "page_read_first_row_same_as_reference": false
+   }
+  }
+ },
+ "totals": {
+  "rows_with_reference": 186,
+  "column_vs_reference": {
+   "big": 2,
+   "same": 173,
+   "small": 11
+  },
+  "page_read_vs_reference": {
+   "big": 16,
+   "same": 133,
+   "one_side_extra": 30,
+   "small": 7
+  },
+  "page_read_shift_pages": [
+   6,
+   7
+  ],
+  "after_continuation": {
+   "continuation_isolated": 14,
+   "page_read_pasted_into_first_row": 11,
+   "column_carried_on_previous": 12,
+   "column_first_row_same_as_reference": 13,
+   "page_read_first_row_same_as_reference": 1,
+   "pages": 14
+  }
+ }
+}

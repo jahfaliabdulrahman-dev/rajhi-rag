@@ -1,0 +1,954 @@
+{
+ "pages": [
+  40,
+  41,
+  42,
+  43,
+  44,
+  45,
+  46,
+  47,
+  48,
+  49,
+  150,
+  151,
+  152,
+  153,
+  154,
+  155,
+  156,
+  157,
+  158,
+  159,
+  300,
+  301,
+  302,
+  303,
+  304,
+  305,
+  306,
+  307,
+  308,
+  309,
+  450,
+  451,
+  452,
+  453,
+  454,
+  455,
+  456,
+  457,
+  458,
+  459,
+  590,
+  591,
+  592,
+  593,
+  594,
+  595,
+  596,
+  597,
+  598,
+  599
+ ],
+ "per_page": {
+  "40": {
+   "rows": 9,
+   "column_rows": 9,
+   "column_vs_reference": {
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 2,
+    "same": 7
+   },
+   "page_read_shift": false
+  },
+  "41": {
+   "rows": 9,
+   "column_rows": 9,
+   "column_vs_reference": {
+    "same": 8,
+    "small": 1
+   },
+   "page_read_vs_reference": {
+    "same": 8,
+    "one_side_extra": 1
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": true
+   }
+  },
+  "42": {
+   "rows": 9,
+   "column_rows": 9,
+   "column_vs_reference": {
+    "same": 8,
+    "one_side_extra": 1
+   },
+   "page_read_vs_reference": {
+    "same": 8,
+    "one_side_extra": 1
+   },
+   "page_read_shift": false
+  },
+  "43": {
+   "rows": 9,
+   "column_rows": 9,
+   "column_vs_reference": {
+    "same": 7,
+    "big": 1,
+    "one_side_extra": 1
+   },
+   "page_read_vs_reference": {
+    "same": 6,
+    "big": 1,
+    "small": 1,
+    "one_side_extra": 1
+   },
+   "page_read_shift": false
+  },
+  "44": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "big": 1,
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "big": 1,
+    "same": 8,
+    "one_side_extra": 1
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": false,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "45": {
+   "rows": 9,
+   "column_rows": 9,
+   "column_vs_reference": {
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 2,
+    "same": 7
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "46": {
+   "rows": 9,
+   "column_rows": 9,
+   "column_vs_reference": {
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 1,
+    "same": 8
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "47": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 9,
+    "big": 1
+   },
+   "page_read_vs_reference": {
+    "same": 5,
+    "big": 1,
+    "one_side_extra": 4
+   },
+   "page_read_shift": false
+  },
+  "48": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 9,
+    "one_side_extra": 1
+   },
+   "page_read_vs_reference": {
+    "same": 8,
+    "big": 1,
+    "one_side_extra": 1
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": false,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": true
+   }
+  },
+  "49": {
+   "rows": 8,
+   "column_rows": 8,
+   "column_vs_reference": {
+    "big": 2,
+    "same": 6
+   },
+   "page_read_vs_reference": {
+    "big": 2,
+    "same": 6
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": false,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "150": {
+   "rows": 9,
+   "column_rows": 9,
+   "column_vs_reference": {
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 2,
+    "same": 7
+   },
+   "page_read_shift": false
+  },
+  "151": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 9,
+    "one_side_extra": 1
+   },
+   "page_read_vs_reference": {
+    "big": 2,
+    "same": 4,
+    "one_side_extra": 3,
+    "small": 1
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "152": {
+   "rows": 9,
+   "column_rows": 9,
+   "column_vs_reference": {
+    "same": 8
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 2,
+    "same": 6
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "153": {
+   "rows": 9,
+   "column_rows": 9,
+   "column_vs_reference": {
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "big": 1,
+    "same": 7,
+    "one_side_extra": 1
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "154": {
+   "rows": 9,
+   "column_rows": 9,
+   "column_vs_reference": {
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "same": 9
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": true
+   }
+  },
+  "155": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "same": 9
+   },
+   "page_read_shift": false
+  },
+  "156": {
+   "rows": 11,
+   "column_rows": 11,
+   "column_vs_reference": {
+    "same": 11
+   },
+   "page_read_vs_reference": {
+    "small": 1,
+    "same": 9,
+    "one_side_extra": 1
+   },
+   "page_read_shift": false
+  },
+  "157": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "small": 1,
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "big": 1,
+    "same": 8,
+    "one_side_extra": 1
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": false,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "158": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 10
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 2,
+    "same": 8
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "159": {
+   "rows": 9,
+   "column_rows": 9,
+   "column_vs_reference": {
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 1,
+    "same": 8
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "300": {
+   "rows": 9,
+   "column_rows": 9,
+   "column_vs_reference": {
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 2,
+    "same": 7
+   },
+   "page_read_shift": false
+  },
+  "301": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 9,
+    "small": 1
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 2,
+    "same": 8
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "302": {
+   "rows": 9,
+   "column_rows": 9,
+   "column_vs_reference": {
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "big": 4,
+    "one_side_extra": 2,
+    "same": 3
+   },
+   "page_read_shift": true,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "303": {
+   "rows": 9,
+   "column_rows": 9,
+   "column_vs_reference": {
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "big": 2,
+    "same": 6,
+    "one_side_extra": 1
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": false,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "304": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 10
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 2,
+    "same": 8
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "305": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 10
+   },
+   "page_read_vs_reference": {
+    "same": 4,
+    "one_side_extra": 6
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": true
+   }
+  },
+  "306": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "same": 9
+   },
+   "page_read_shift": false
+  },
+  "307": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 10
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 2,
+    "same": 8
+   },
+   "page_read_shift": false
+  },
+  "308": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "same": 8,
+    "one_side_extra": 1
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": false,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": false,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "309": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 10
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 2,
+    "same": 8
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "450": {
+   "rows": 7,
+   "column_rows": 7,
+   "column_vs_reference": {
+    "same": 6
+   },
+   "page_read_vs_reference": {
+    "same": 6
+   },
+   "page_read_shift": false
+  },
+  "451": {
+   "rows": 11,
+   "column_rows": 11,
+   "column_vs_reference": {
+    "same": 10
+   },
+   "page_read_vs_reference": {
+    "same": 10
+   },
+   "page_read_shift": false
+  },
+  "452": {
+   "rows": 8,
+   "column_rows": 8,
+   "column_vs_reference": {
+    "same": 6,
+    "one_side_extra": 1
+   },
+   "page_read_vs_reference": {
+    "same": 5,
+    "one_side_extra": 2
+   },
+   "page_read_shift": false
+  },
+  "453": {
+   "rows": 8,
+   "column_rows": 8,
+   "column_vs_reference": {
+    "same": 8
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 2,
+    "same": 6
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "454": {
+   "rows": 7,
+   "column_rows": 7,
+   "column_vs_reference": {
+    "same": 7
+   },
+   "page_read_vs_reference": {
+    "big": 1,
+    "same": 5,
+    "one_side_extra": 1
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "455": {
+   "rows": 7,
+   "column_rows": 7,
+   "column_vs_reference": {
+    "same": 7
+   },
+   "page_read_vs_reference": {
+    "big": 2,
+    "one_side_extra": 2,
+    "same": 3
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "456": {
+   "rows": 7,
+   "column_rows": 7,
+   "column_vs_reference": {
+    "same": 6
+   },
+   "page_read_vs_reference": {
+    "big": 3,
+    "one_side_extra": 2,
+    "same": 1
+   },
+   "page_read_shift": true,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "457": {
+   "rows": 7,
+   "column_rows": 7,
+   "column_vs_reference": {
+    "same": 6
+   },
+   "page_read_vs_reference": {
+    "big": 6
+   },
+   "page_read_shift": true,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "458": {
+   "rows": 9,
+   "column_rows": 9,
+   "column_vs_reference": {
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "big": 1,
+    "one_side_extra": 2,
+    "same": 6
+   },
+   "page_read_shift": false
+  },
+  "459": {
+   "rows": 7,
+   "column_rows": 7,
+   "column_vs_reference": {
+    "same": 7
+   },
+   "page_read_vs_reference": {
+    "same": 7
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": false,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": true
+   }
+  },
+  "590": {
+   "rows": 8,
+   "column_rows": 8,
+   "column_vs_reference": {
+    "same": 8
+   },
+   "page_read_vs_reference": {
+    "big": 1,
+    "one_side_extra": 2,
+    "same": 5
+   },
+   "page_read_shift": false
+  },
+  "591": {
+   "rows": 7,
+   "column_rows": 7,
+   "column_vs_reference": {
+    "same": 7
+   },
+   "page_read_vs_reference": {
+    "big": 7
+   },
+   "page_read_shift": true,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "592": {
+   "rows": 8,
+   "column_rows": 8,
+   "column_vs_reference": {
+    "same": 8
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 1,
+    "same": 7
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "593": {
+   "rows": 9,
+   "column_rows": 9,
+   "column_vs_reference": {
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "same": 9
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": false,
+    "page_read_pasted_into_first_row": false,
+    "column_carried_on_previous": false,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": true
+   }
+  },
+  "594": {
+   "rows": 10,
+   "column_rows": 10,
+   "column_vs_reference": {
+    "same": 10
+   },
+   "page_read_vs_reference": {
+    "same": 9,
+    "one_side_extra": 1
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": false,
+    "page_read_pasted_into_first_row": false,
+    "column_carried_on_previous": false,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": true
+   }
+  },
+  "595": {
+   "rows": 8,
+   "column_rows": 8,
+   "column_vs_reference": {
+    "same": 6,
+    "big": 1,
+    "one_side_extra": 1
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 3,
+    "big": 2,
+    "same": 3
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "596": {
+   "rows": 8,
+   "column_rows": 8,
+   "column_vs_reference": {
+    "same": 8
+   },
+   "page_read_vs_reference": {
+    "same": 7,
+    "one_side_extra": 1
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": true
+   }
+  },
+  "597": {
+   "rows": 8,
+   "column_rows": 8,
+   "column_vs_reference": {
+    "same": 8
+   },
+   "page_read_vs_reference": {
+    "same": 7,
+    "one_side_extra": 1
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": false,
+    "page_read_pasted_into_first_row": false,
+    "column_carried_on_previous": false,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": true
+   }
+  },
+  "598": {
+   "rows": 9,
+   "column_rows": 9,
+   "column_vs_reference": {
+    "same": 9
+   },
+   "page_read_vs_reference": {
+    "one_side_extra": 2,
+    "same": 6,
+    "big": 1
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": false
+   }
+  },
+  "599": {
+   "rows": 8,
+   "column_rows": 8,
+   "column_vs_reference": {
+    "same": 8
+   },
+   "page_read_vs_reference": {
+    "same": 6,
+    "one_side_extra": 2
+   },
+   "page_read_shift": false,
+   "after_continuation": {
+    "continuation_isolated": true,
+    "page_read_pasted_into_first_row": true,
+    "column_carried_on_previous": true,
+    "column_first_row_same_as_reference": true,
+    "page_read_first_row_same_as_reference": true
+   }
+  }
+ },
+ "totals": {
+  "rows_with_reference": 437,
+  "column_vs_reference": {
+   "same": 422,
+   "small": 3,
+   "one_side_extra": 6,
+   "big": 6
+  },
+  "page_read_vs_reference": {
+   "one_side_extra": 71,
+   "same": 323,
+   "big": 40,
+   "small": 3
+  },
+  "page_read_shift_pages": [
+   302,
+   456,
+   457,
+   591
+  ],
+  "after_continuation": {
+   "continuation_isolated": 32,
+   "page_read_pasted_into_first_row": 28,
+   "column_carried_on_previous": 32,
+   "column_first_row_same_as_reference": 31,
+   "page_read_first_row_same_as_reference": 10,
+   "pages": 35
+  }
+ }
+}
