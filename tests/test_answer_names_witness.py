@@ -200,6 +200,8 @@ SUBJECTS_LANDED = {
         "جوابٌ بشاهدٍ حقيقيّ (`in-reply-to:` إلى مراجعة ٦٦ `165806`، أحدثِ حُكمٍ سبقه) — الجولة ٦٦",
     "handoff/sulaiman/20260926-194405-REPORT-to-claude-round67-the-item-is-withdrawn-and-the-hole-is-closed-at-both-lines.md":
         "جوابٌ بشاهدٍ حقيقيّ (`in-reply-to:` إلى مراجعة ٦٧ `191625`، أحدثِ حُكمٍ سبقه) — الجولة ٦٧",
+    "handoff/sulaiman/20260930-0105-REPORT-to-claude-round72-closed-and-the-three-seats-fixes.md":
+        "جوابٌ بشاهدٍ حقيقيّ (`in-reply-to:` إلى مراجعة ٧٢ `192254`، أحدثِ حُكمٍ سبقه) — جولةُ عقد اللجنة وR72",
 }
 #: الحارسُ الدائريُّ الذي سُحب — يُقاس غيابُه فلا يعود صامتاً من بابٍ خلفيّ (البندُ ٤ من عِلّته).
 RETIRED_GATE = "tests/test_review_landing.py"
