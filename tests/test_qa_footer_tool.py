@@ -128,3 +128,26 @@ def test_the_printed_footer_reaches_the_tools_through_the_real_call_chain(monkey
                              footers=FOOTERS, llm=object())
     assert FOOTERS[5]["debits"] in res.answer, res.answer
     assert res.ungrounded is False, "استدعاءُ أداة التذييل لا يُوصم بأنّه «بلا أداة»"
+
+
+def test_printed_footers_from_reads_both_shapes_and_declares_what_was_not_read():
+    """**الصيغةُ الواحدة (R77):** يقرأها التطبيقُ (كائناتُ `FooterReading`) والقياسُ (نصوصُ الشريحة).
+
+    وثلاثةُ أحكامٍ تُقاس هنا: نصٌّ يبقى كما هو · و`None` يبقى `None` (يُعلَن لا يُخمَّن) ·
+    ووضعُ الحكم يُقرأ من مفتاحَيه (`status` في التطبيق · `footer` في تقرير الشريحة).
+    """
+    from decimal import Decimal
+
+    from statement_qa.page_footers import printed_footers_from
+
+    class _Reading:                       # كائنٌ كـ`FooterReading`
+        debits, credits, balance = Decimal("12"), None, Decimal("7")
+
+    out = printed_footers_from(
+        {3: {"debits": "1,000", "credits": None, "balance": "9"}, 4: _Reading()},
+        [{"page": 3, "status": "mismatch", "basis": "delta"}, {"page": 4, "footer": "ok"}])
+    assert out[3]["debits"] == "1,000" and out[3]["credits"] is None
+    assert out[3]["verdict"] == "mismatch" and out[3]["basis"] == "delta"
+    assert out[4]["verdict"] == "ok"                     # مفتاحُ الشريحة يُقرأ كذلك
+    assert out[4]["credits"] is None                     # لم يُقرأ ⇒ يُعلَن
+    assert out[4]["balance"] == "7"

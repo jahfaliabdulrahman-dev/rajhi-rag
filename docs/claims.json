@@ -16,10 +16,10 @@
  "rereads": 23,
  "arbitrations": 3,
  "median_page_s": 22.18,
- "tests": 987,
+ "tests": 989,
  "gate3_price_cap_pages": 133,
  "tests_by_env": {
-  "full": 987,
+  "full": 989,
   "ci-light": 963,
   "ci-claims": 740
  }

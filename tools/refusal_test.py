@@ -27,9 +27,17 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from statement_qa.chunking import chunk_rows          # noqa: E402
 from statement_qa.classify import annotate_types      # noqa: E402
+from statement_qa.page_footers import printed_footers_from   # noqa: E402
 from statement_qa.qa import answer_question, build_llm  # noqa: E402
 from statement_qa.retriever import build_index        # noqa: E402
 from statement_qa.vlm_reader import _parse_amount, chain_derive  # noqa: E402
+
+_ARABIC = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+
+def _norm(text: str) -> str:
+    """توحيدُ الأرقام (عربيةٌ-هندية ⇒ لاتينية) وحذفُ الفواصل — لمقابلةِ قيمةٍ بقيمة، بلا لمس المعنى."""
+    return str(text or "").translate(_ARABIC).replace(",", "").replace("٬", "")
 
 REFUSAL = "غير موجود في الكشف"
 
@@ -118,11 +126,35 @@ def build_rows(slice_dir: Path) -> tuple[list[dict], int]:
     return all_rows, len(results)
 
 
+def build_footers(slice_dir: Path) -> dict:
+    """**التذييلاتُ المطبوعةُ من المصدر نفسِه** (R77): تُقرأ من `results/pg-*.json` وأحكامُها من
+    `slice_report.json`، وتُبنى بـ`page_footers.printed_footers_from` — نفسِ الدالّة التي يبنيها
+    التطبيق ⇒ فلا نسخةَ ثانيةَ من الصيغة في مسار القياس.
+    """
+    readings = {}
+    for fp in sorted((slice_dir / "results").glob("pg-*.json")):
+        try:
+            j = json.loads(fp.read_text(encoding="utf-8"))
+        except Exception:      # ملفٌّ معطوبٌ يُعلَن غيابًا ولا يُخمَّن
+            continue
+        pg = j.get("page") or int(fp.stem.split("-")[-1])
+        readings[int(pg)] = j.get("footer")
+    checks = []
+    rep = slice_dir / "slice_report.json"
+    if rep.exists():
+        checks = (json.loads(rep.read_text(encoding="utf-8")).get("per_page") or [])
+    return printed_footers_from(readings, checks)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--slice", default="data/local_sample/slice_629p")
     ap.add_argument("--questions", nargs="*", default=None,
                     help="أسئلة مخصّصة بدل المجموعة الافتراضية")
+    ap.add_argument("--questions-file", default=None,
+                    help="ملفُّ أسئلةٍ (JSON): [{id, q, expect, page, field}] — للعائلات المُشتقّة")
+    ap.add_argument("--with-footers", action="store_true",
+                    help="يُمرّر التذييلاتِ المطبوعةَ إلى الأدوات (R77: أداةُ page_footer)")
     args = ap.parse_args()
 
     slice_dir = Path(args.slice)
@@ -141,9 +173,22 @@ def main() -> int:
     store = build_index(chunks)
     print(f"      {len(chunks)} قطعة | {time.time() - t0:.1f}s")
 
+    footers = None
+    if args.with_footers:
+        footers = build_footers(slice_dir)
+        with_vals = sum(1 for f in footers.values() if any(f.get(k) for k in ("debits", "credits", "balance")))
+        print(f"      [تذييلاتٌ مطبوعة] {len(footers)} صفحة ({with_vals} فيها أرقامٌ مقروءة) "
+              f"· تُمرَّر إلى أداة `page_footer`")
+
     print("[3/3] طرح الأسئلة …\n")
     llm = build_llm()
-    if args.questions:
+    if args.questions_file:
+        raw = json.loads(Path(args.questions_file).read_text(encoding="utf-8"))
+        qs = [{"id": it.get("id") or f"Q{i+1}", "kind": it.get("kind") or "من ملف",
+               "expect": it.get("expect") or "؟", "q": it["q"],
+               "page": it.get("page"), "field": it.get("field")}
+              for i, it in enumerate(raw)]
+    elif args.questions:
         qs = [{"id": f"Q{i+1}", "kind": "مخصّص", "expect": "؟", "q": q}
               for i, q in enumerate(args.questions)]
     else:
@@ -154,7 +199,8 @@ def main() -> int:
         print("=" * 72)
         print(f"[{item['id']}] {item['kind']}")
         print(f"السؤال: {item['q']}")
-        res = answer_question(store, item["q"], rows=rows, chunks=chunks, llm=llm)
+        res = answer_question(store, item["q"], rows=rows, chunks=chunks, llm=llm,
+                              footers=footers)
         ans = (res.answer or "").strip()
         print(f"الجواب: {ans}")
         if res.used_row_nos:
@@ -181,6 +227,17 @@ def main() -> int:
             why = ("منعتها البوابة قبل النموذج ✓" if gated
                    else "لم يخترع مبلغاً ✓" if ok
                    else "أجاب بمبلغ لا سند له في الكشف ✗")
+        elif item["expect"] == "footer":
+            # **الحكمُ من المصدر لا من العين (R77):** القيمةُ الصحيحةُ هي **المطبوعُ** في تذييل تلك
+            # الصفحة، مُشتقّةً من الشريحة نفسِها — ويُقبل **الرفضُ الصريح** بديلًا (لا يُقبل رقمٌ آخر).
+            f = (footers or {}).get(int(item.get("page") or 0)) or {}
+            want = _norm(f.get(item.get("field") or "") or "")
+            good = bool(want) and want in _norm(ans)
+            refusal_ok = (REFUSAL in ans) or ("لا تذييل" in ans) or ("لم يُقرأ" in ans)
+            ok = good or refusal_ok
+            why = ("نُقلت القيمةُ المطبوعةُ نفسُها ✓" if good
+                   else "رفضٌ صريحٌ بدل رقمٍ مخترَع ✓" if refusal_ok
+                   else "لم تُنقل القيمةُ المطبوعة ✗")
         else:
             ok = True
             why = f"{'رفض' if refused else 'أجاب'} (لا حكم قاطع)"

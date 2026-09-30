@@ -62,6 +62,7 @@ from statement_qa.verification import (
     verdicts_from_checks,
 )
 from statement_qa.code_hash import code_hash as _code_hash
+from statement_qa.page_footers import printed_footers_from
 from statement_qa.footer_oracle import (
     check_page_footer, delta_checkable, delta_status, page_diverged,
     page_totals, read_footer, try_page_reread,
@@ -559,11 +560,6 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
     all_rows = []
     failed_pages: list[int] = []
     footer_checks: list[dict] = []
-    # **الأرقامُ المطبوعة في التذييل كما قُرئت** (R77-3b · مراجعة ٧٧): كان التطبيقُ يقرأ كلَّ تذييلٍ
-    # ويحكم عليه، ثمّ يحفظ **المجاميعَ المحسوبة** في `footer_checks` وحدَها ⇒ فيسقط الرقمُ **المطبوع**
-    # (وهو الشاهدُ الخارجيّ الوحيد) من متناول طبقة سؤال وجواب، فيجمع النموذجُ صفوفَ الصفحة ليجيب عن
-    # «إجمالي الصفحة» — **والتذييلُ تراكميٌّ فمجموعُ صفحةٍ واحدةٍ لا يساويه** ⇒ جوابٌ واثقٌ خاطئ.
-    printed_footers: dict = {}
     era_pages: dict[int, list] = {}
     page_dates: dict[int, list] = {}
     boundaries = {"txn": 0, "carry": 0, "anchor": 0}
@@ -754,16 +750,6 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
             cum["debits"] += chk["own"]["debits"]
             cum["credits"] += chk["own"]["credits"]
         footer_checks.append({"page": pg, **chk})
-        # **وسطرُ التذييل المطبوع مع حكمه، بصيغةٍ جاهزةٍ لطبقة الإجابة** — أرقامٌ كما ظهرت في الكشف
-        # (تُعرَض كما هي، ولا تُعاد للجمع ولا تُخمَّن). وسطرٌ بلا تذييلٍ مقروء يُسمّى `بلا تذييل`.
-        printed_footers[pg] = {
-            "page": pg,
-            "debits": None if footer is None or footer.debits is None else _money(footer.debits),
-            "credits": None if footer is None or footer.credits is None else _money(footer.credits),
-            "balance": None if footer is None or footer.balance is None else _money(footer.balance),
-            "verdict": str(chk.get("status") or "unchecked"),
-            "basis": str(chk.get("basis") or chk.get("note") or ""),
-        }
         if chk.get("own"):
             own_by_pg[pg] = (chk["own"]["debits"], chk["own"]["credits"])
         prev_footer = footer
@@ -802,6 +788,10 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
     STATE["chunks"] = chunk_rows(
         [{**r, "row_no": i + 1} for i, r in enumerate(all_rows)])
     STATE["store"] = build_index(STATE["chunks"])
+    # **التذييلاتُ المطبوعةُ بصيغةٍ واحدة (R77):** تُبنى من القراءات والأحكام في موضعٍ واحد —
+    # `statement_qa.page_footers` — فيرثها مسارُ القراءة (هنا) ومسارُ القياس معًا، ولا نسخةَ ثانيةَ
+    # تزيغ بصمت. الأرقامُ كما ظهرت في الورقة، وحكمُها معها.
+    printed_footers = printed_footers_from(footers, footer_checks, money=_money)
     STATE["footer_checks"] = footer_checks
     STATE["footers"] = printed_footers
     # أحكام الصفحة بلغة واحدة تُقرأ في كل سطح: الجدول والتصدير والأسئلة
