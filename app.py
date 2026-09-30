@@ -24,6 +24,8 @@ their exact shape (tools/qa_gate.py depends on them).
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import tempfile
 from decimal import Decimal
@@ -82,6 +84,38 @@ STATE = {}
 
 # قفل «مهمة واحدة» — نافذتان متزامنتان كانتا تخلطان النتائج والسجلات.
 LOCK_PATH = Path(__file__).resolve().parent / "data" / ".rajhi-job.lock"
+
+# ————— بصمةُ الكود (R74-3 · مراجعة ٧٤ · أُوصي بها المدقّق قبل البروفة) —————
+# **العلّةُ التي وُلدت منها:** الفحصُ الشامل يقيس **العمليةَ الجارية** لا الشجرة، وقد قاس فعلًا كودًا
+# عمرُه اثنا عشر يومًا وأعلن نجاحًا (٢٠٢٦-٠٩-٢٦)، ثمّ قاس كودًا مُصلَحًا وأعلن فشلًا — والحكمُ واحد:
+# **رقمٌ على كودٍ مجهول ليس رقمًا.** فتُكتب البصمةُ عند الإقلاع، ويقابلها `tools/qa_gate.py` بـ`HEAD`
+# ويرفض النتيجةَ إن اختلفت (فشلٌ مُغلَق لا تحذير).
+CODE_STAMP_PATH = Path(__file__).resolve().parent / "data" / ".app-code.json"
+
+
+def _write_code_stamp() -> dict:
+    """يُكتب مرّةً عند الإقلاع: `{pid, sha, started}` — وبلا git أو بلا كتابةٍ يُعلَن `unknown` ولا يُخمَّن."""
+    import datetime as _dt
+    import subprocess
+
+    sha = "unknown"
+    try:
+        sha = subprocess.run(
+            ["git", "-C", str(Path(__file__).resolve().parent), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=10, check=True).stdout.strip() or "unknown"
+    except Exception:  # noqa: BLE001 — بصمةٌ غائبةٌ تُعلَن ولا تُسقط التطبيق
+        pass
+    stamp = {"pid": os.getpid(), "sha": sha,
+             "started": _dt.datetime.now().isoformat(timespec="seconds")}
+    try:
+        CODE_STAMP_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CODE_STAMP_PATH.write_text(json.dumps(stamp, ensure_ascii=False), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+    return stamp
+
+
+APP_CODE_STAMP = _write_code_stamp()
 
 # ————— الهوية اللونية —————
 PAPER = "#F7F2E9"
@@ -791,11 +825,27 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
         if f_group:
             seg_f += (" — مُوثّق بالمجموع بين إطارين مقروءين: "
                       + "، ".join(str(p) for p in f_group))
+        _first_in_order = order_now[0] if order_now else None
+
+        def _page_label(c: dict, label: str) -> str:
+            """**والصفحةُ تُسمّى بسببها لا برقمها وحدَه (R76-2 · مراجعة ٧٦):** «غير قابلة للتحقق» تُقرأ
+            فيُستنتج سببُها — وقد استنتجتُه خطأً فعلًا (رجّحتُ تخطّيًا بعد إعادة قراءةٍ لا يقع في الكود).
+            فيُذكر الأساسُ صريحًا: لا مرجعَ سابق (أوّلُ صفحة) · أو لا مكوّنَ قابلَ للمقارنة (الأساسُ
+            الفارق) · أو سلسلةٌ منكسرةٌ بتخطّي (صفحةٌ سابقةٌ لم تُقرأ صفوفُها).
+            """
+            if label != "غير قابلة للتحقق":
+                return str(c["page"])
+            if c.get("basis") == "delta":
+                return f"{c['page']} (لا مكوّنَ قابلَ للمقارنة)"
+            if c["page"] == _first_in_order:
+                return f"{c['page']} (أوّلُ صفحة — لا مرجعَ سابق)"
+            return f"{c['page']} (سلسلةٌ منكسرة/تخطّي)"
+
         for label, group in (("فجوة مسح", f_gap), ("بلا إطار مطبوع", f_absent),
                              ("غير قابلة للتحقق", f_unchecked)):
             if group:
                 seg_f += (f" — {label}: "
-                          + "، ".join(str(c["page"]) for c in group))
+                          + "، ".join(_page_label(c, label) for c in group))
     else:
         seg_f = "تقرير الفوتر: تعذرت قراءة الإطارات — لا حكم على أي صفحة"
     _verdicts = STATE.get("verdicts") or {}

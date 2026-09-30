@@ -63,6 +63,31 @@ def test_the_failure_message_names_the_class_it_saw():
     assert "لا فئةَ مسمّاةٍ في الملخّص" in why2, why2
 
 
+def test_no_verdict_on_unknown_code_and_the_class_carries_its_reason():
+    """**R74-3 (مراجعة ٧٤) وR76-2 (مراجعة ٧٦):**
+
+    ① **لا حكمَ على كودٍ مجهول:** الفحصُ الشامل يقيس العمليةَ الجارية لا الشجرة، وقد أعلن «٥/٥» وهو يقيس
+    كودًا عمرُه اثنا عشر يومًا (٢٠٢٦-٠٩-٢٦) ⇒ فصار التطبيقُ ينشر بصمةَ كوده، والبوّابةُ ترفض المطابقةَ
+    الفاشلة **فشلًا مُغلَقًا** (بصمةٌ غائبة · `unknown` · أو مختلفةٌ ⇒ لا رقمَ من نتيجة).
+    ② **والفئةُ تحمل سببَها كما كتبه التطبيق** («أوّلُ صفحة — لا مرجعَ سابق») فلا يُستنتج سببُها ثانيةً
+    (وهو بعينه ما أوقعني في R74-1: استنتاجُ تخطّيٍ لا يقع في الكود).
+    """
+    from tools.qa_gate import _named_classes, _provenance_verdict
+
+    assert _provenance_verdict({"sha": "abc1234"}, "abc1234") is None
+    _no_stamp = _provenance_verdict(None, "abc1234")
+    assert _no_stamp and "لا حكمَ" in _no_stamp
+    _other = _provenance_verdict({"sha": "abc1234"}, "def5678")
+    assert _other and "أعِد تشغيل" in _other
+    _unknown = _provenance_verdict({"sha": "unknown"}, "abc1234")
+    assert _unknown and "unknown" in _unknown
+
+    s = ("… • تحقق الفوتر: 9/9 مطابق (دقة)، وتغطية 9/10 — غير قابلة للتحقق: "
+         "1 (أوّلُ صفحة — لا مرجعَ سابق) • الكلفة: $0.0100")
+    got = _named_classes({"summary": s})
+    assert "لا مرجعَ سابق" in got, got
+
+
 def test_repeating_suspect_names_a_deterministic_defect():
     """عطبٌ حتميّ: المعرّفُ نفسُه يعود في القراءتين ⇒ أحمر **باسمه**، لا «شكوك»."""
     ok, why = decide_two_runs(_run(clean=103, ids=("10:41", "9:7")),

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import http.client
+import json
 import re
 import os
 import subprocess
@@ -357,7 +358,41 @@ def decide_two_runs(first: dict, second: dict | None = None) -> tuple[bool, str]
                   f"⇒ تُقرأ القيمُ من الثانية، وقياساتُ الأولى مُعلَنةٌ كاملةً في هذا السطر")
 
 
+# ————— بصمةُ الكود (R74-3 · مراجعة ٧٤): **لا حكمَ على كودٍ مجهول** —————
+# **العلّةُ المقيسة:** الفحصُ الشامل يقيس **العمليةَ الجارية** لا الشجرة. في ٢٠٢٦-٠٩-٢٦ أعلن «٥/٥» وهو
+# يقيس كودًا عمرُه اثنا عشر يومًا (التطبيقُ لم يُعَد تشغيلُه بعد التغييرات) ⇒ رقمٌ على كودٍ غيرِ المستودع.
+# فالآن التطبيقُ ينشر بصمةَ كوده عند الإقلاع (`data/.app-code.json`)، وهذه البوّابةُ تقابلها بـ`HEAD`
+# و**ترفض النتيجةَ إن اختلفت** — فشلٌ مُغلَق لا تحذير.
+def _provenance_verdict(stamp: dict | None, head: str) -> str | None:
+    """حكمُ البصمة: `None` = التطبيقُ على كود الشجرة؛ وإلّا فسببُ الرفض. (دالّةٌ خالصةٌ تُقاس بسمّ.)"""
+    if not stamp:
+        return ("التطبيقُ لا ينشر بصمةَ كوده (`data/.app-code.json` غائبةٌ أو غيرُ مقروءة) ⇒ لا حكمَ من "
+                "نتيجةٍ مجهولةِ الكود: أعِد تشغيلَ التطبيق ثمّ أعِد الفحص")
+    sha = str(stamp.get("sha") or "unknown")
+    if sha == "unknown":
+        return "بصمةُ كود التطبيق `unknown` (تعذّر git عند إقلاعه) ⇒ لا حكمَ من نتيجةٍ مجهولةِ الكود"
+    if sha != head:
+        return (f"بصمةُ كود التطبيق `{sha}` ≠ كود الشجرة `{head}` ⇒ الفحصُ يقيس كودًا آخر: "
+                "أعِد تشغيلَ التطبيق على الشجرة الحاليّة ثمّ أعِد الفحص")
+    return None
+
+
+def _app_code_stamp() -> dict | None:
+    try:
+        return json.loads((PROJ / "data" / ".app-code.json").read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 — غيابُ البصمة يُعلن في الحكم لا في الاستثناء
+        return None
+
+
+def _tree_head() -> str:
+    out = subprocess.run(["git", "-C", str(PROJ), "rev-parse", "--short", "HEAD"],
+                         capture_output=True, text=True, timeout=10)
+    return (out.stdout or "").strip() or "unknown"
+
+
 def g_end_to_end() -> str:
+    _refusal = _provenance_verdict(_app_code_stamp(), _tree_head())
+    assert _refusal is None, f"الفحصُ الشامل: {_refusal}"
     pdf = PROJ / "data/local_sample/sample_10p.pdf"
     assert pdf.exists(), f"missing {pdf}"
     first = _e2e_measure(pdf)
