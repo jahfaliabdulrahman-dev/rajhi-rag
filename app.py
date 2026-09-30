@@ -502,6 +502,25 @@ def process_pdf(pdf_path: str, skip_rejected: bool = False, progress=gr.Progress
                        "انتظر انتهاءه ثم أعد المحاولة.")
 
 
+def _footer_delta_nonzero(now, prev) -> bool:
+    """**هل يُظهر تذييلُ الصفحة حركاتٍ لها؟** الفرقُ بين إجمالياتها المتراكمة وإجمالياتِ سابقتها.
+
+    تُستعمل لتمييز «قراءةٍ فاشلةٍ أرجعت مصفوفةً فارغة» من «صفحةٍ فارغةٍ حقًّا» (الصفحةُ الختامية مثلًا:
+    سطورُها في مربّع الملخّص ولا حركةَ لها). والمقارنةُ على `FooterReading` أو `None`:
+    تذييلٌ غيرُ مقروء ⇒ **لا حكم** (تُترك الصفحةُ بلا وسم، ولا يُخمَّن لها عطب).
+    """
+    if now is None:
+        return False
+    for f in ("debits", "credits"):
+        a = getattr(now, f, None)
+        b = getattr(prev, f, None) if prev is not None else Decimal("0")
+        if a is None or b is None:
+            continue
+        if a != b:
+            return True
+    return False
+
+
 def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
     pages = _pages_to_pngs(pdf_path)
 
@@ -599,6 +618,7 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
     raw_by_pg: dict[int, list] = {}
     page_no_by_pg: dict[int, int | None] = {}
     attempted: list[int] = []
+    pages_without_rows: list[int] = []
     fail_streak = 0
     for i, pg in enumerate(decision["process"]):
         progress(0.05 + 0.8 * i / n_proc, f"قراءة صفحة {pg} ({i + 1}/{n_proc})…")
@@ -612,6 +632,14 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
             raw_by_pg[pg] = read_rows_vlm(pages[pg - 1], stats=st)
             page_no_by_pg[pg] = st.get("page_no")
             fail_streak = 0
+            # **وصفحةٌ بلا صفوفٍ ليست صفحةً فارغةً بالضرورة (قاسه قياسُ البروفة ٢٠٢٦-٠٩-٣٠):**
+            # إجابةٌ صحيحةُ الشكل لكنها مصفوفةٌ فارغة تمرّ بلا استثناء ⇒ كانت صفحةٌ كاملةٌ تُفقد
+            # صامتةً (الجدولُ ٩٤ صفًّا بدل ١٠٤، وإعادةُ قراءة الصفحة نفسِها أعادت صفوفَها العشرة).
+            # فما دام تذييلُ الصفحة يُظهر حركاتٍ لها (دلتا الإجماليات المتراكمة عن السابقة) ⇒ تُسمّى.
+            _prev_pg = decision["process"][i - 1] if i else None
+            if not (raw_by_pg.get(pg) or []) and _footer_delta_nonzero(
+                    footers.get(pg), footers.get(_prev_pg) if _prev_pg else None):
+                pages_without_rows.append(pg)
         except Exception:
             # one flaky page must never kill the whole run (transient VLM /
             # JSON glitches) — record it, keep going, report it honestly.
@@ -881,6 +909,9 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
     if page_rereads:
         segs.append("أُعيدت قراءة صفحة (مُتحقق): "
                     + "، ".join(f"ص{r['page']}" for r in page_rereads))
+    if pages_without_rows:
+        segs.append("⚠ صفحةٌ بلا صفوفٍ وتذييلُها يُظهر حركات (قراءةٌ فاشلة لا صفحةٌ فارغة): "
+                    + "، ".join(f"ص{p}" for p in pages_without_rows))
     summary = " • ".join(segs)
     return (summary, rows_view,
             _kpi_html(len(all_rows), n_ok, n_susp, last_bal), pages, "")

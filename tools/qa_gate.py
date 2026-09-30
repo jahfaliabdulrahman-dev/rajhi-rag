@@ -263,17 +263,22 @@ def _e2e_measure(pdf) -> dict:
     assert mf, f"footer oracle line missing from summary: {str(summary)[:220]}"
     seg = str(summary).split("تحقق الفوتر")[1].split("•")[0]
     cv = re.search(r"وتغطية (\d+)/(\d+)", str(summary))
+    # **وصفحةٌ كاملةٌ قد تُفقد صامتة (قاسه قياسُ البروفة ٢٠٢٦-٠٩-٣٠):** إجابةُ النموذج صحيحةُ الشكل
+    # لكنها مصفوفةٌ فارغة ⇒ لا استثناءَ يُعاد، فتُسقط صفحةً كاملةً من الجدول (٩٤ صفًّا بدل ١٠٤)،
+    # والبابُ الأوّلُ للفحص (عتبةُ الصفوف) هو ما يمسكها عرضًا. فيُقرأ الوسمُ الذي يكتبه التطبيقُ
+    # لدقّة الصفحة، ويُدخل في «النظافة» ⇒ قراءةٌ فيها صفحةٌ منقوصةٌ ليست نظيفةً ولا تُبرّأ بالتكرار.
+    rows_flag = "بلا صفوفٍ وتذييلُها يُظهر حركات" in str(summary)
     return {"summary": str(summary), "data": data, "idx": idx, "total": total,
             "clean": clean, "susp": susp, "ids": ids, "n_rows": len(data),
             "footer_pair": (int(mf.group(1)), int(mf.group(2))),
-            "footer_seg": seg, "footer_flag": "⚠" in seg,
+            "footer_seg": seg, "footer_flag": "⚠" in seg, "rows_flag": rows_flag,
             "coverage_pair": (int(cv.group(1)), int(cv.group(2))) if cv else None}
 
 
 #: **عقدُ القياس**: المفاتيحُ التي تُنتجها `_e2e_measure` وتستهلكها السياسة — موضعٌ واحد يُقابَل في
 #: `tests/test_gate_flake_policy.py` بالقياس (فلا يفترق العقدُ صامتًا بين منتجٍ ومستهلك).
 RUN_FIELDS = ("summary", "data", "idx", "total", "clean", "susp", "ids", "n_rows",
-              "footer_pair", "footer_seg", "footer_flag", "coverage_pair")
+              "footer_pair", "footer_seg", "footer_flag", "rows_flag", "coverage_pair")
 
 
 def _is_clean(run: dict) -> bool:
@@ -294,7 +299,7 @@ def _is_clean(run: dict) -> bool:
     f_ok, f_possible = run["footer_pair"]
     cov = run["coverage_pair"]
     return (run["susp"] == 0 and run["clean"] == run["total"]
-            and not run["footer_flag"] and f_ok == f_possible
+            and not run["footer_flag"] and not run["rows_flag"] and f_ok == f_possible
             and bool(cov) and f_possible == cov[1])
 
 
@@ -313,16 +318,21 @@ def _is_clean(run: dict) -> bool:
 #:      (فشلٌ مغلقٌ مُعلَن) ولا يُعاد — فالانقطاعُ عطبُ بيئةٍ لا لاحتميّةُ قراءة.
 #:   ٤. والإعادةُ تُضاعف الزمنَ والكلفةَ في أسوأ الحالات (قراءتان لا أكثر — لا حلقة).
 _NAMED_CLASS_RX = re.compile(r"—\s*(فجوة مسح|بلا إطار مطبوع|غير قابلة للتحقق):\s*([^•·]+)")
+_ROWS_FLAG_RX = re.compile(r"صفحةٌ بلا صفوفٍ وتذييلُها يُظهر حركات[^:]*:\s*([^•·]+)")
 
 
 def _named_classes(run: dict) -> str:
     """**الفئاتُ المسمّاةُ في ملخّص التشغيلة (R74-2 · مراجعة ٧٤):** الملخّصُ يسمّي الصفحاتِ التي لا حكمَ
-    لها («فجوة مسح» · «بلا إطار مطبوع» · «غير قابلة للتحقق»)، وكانت رسالةُ الفشل تُسقط الأسماءَ فيبقى
+    لها («فجوة مسح» · «بلا إطار مطبوع» · «غير قابلة للتحقق») **والصفحاتِ التي أرجعت مصفوفةً فارغة**
+    وتذييلُها يُظهر حركات (قراءةٌ فاشلة لا صفحةٌ فارغة)، وكانت رسالةُ الفشل تُسقط الأسماءَ فيبقى
     المشخِّصُ (والمدقّق) يستنتج. الآن تُمرَّر كما هي — والفشلُ يُسمّي نفسَه بدل أن يُوصَف.
     """
-    found = _NAMED_CLASS_RX.findall(run.get("summary") or "")
-    return ("، ".join(f"{name}: {pgs.strip()}" for name, pgs in found)
-            if found else "لا فئةَ مسمّاةٍ في الملخّص")
+    summary = run.get("summary") or ""
+    parts = [f"{name}: {pgs.strip()}" for name, pgs in _NAMED_CLASS_RX.findall(summary)]
+    rows_flag = _ROWS_FLAG_RX.search(summary)
+    if rows_flag:
+        parts.append(f"صفحةٌ بلا صفوف: {rows_flag.group(1).strip()}")
+    return "، ".join(parts) if parts else "لا فئةَ مسمّاةٍ في الملخّص"
 
 
 def decide_two_runs(first: dict, second: dict | None = None) -> tuple[bool, str]:

@@ -25,7 +25,7 @@ def _run(n_rows: int = 104, total: int = 104, clean: int = 104, ids: tuple[str, 
     return {"summary": "s", "data": [], "idx": {}, "total": total, "clean": clean,
             "susp": len(ids), "ids": list(ids), "n_rows": n_rows,
             "footer_pair": footer, "footer_seg": ("⚠ " if flag else "") + "seg",
-            "footer_flag": flag, "coverage_pair": cov}
+            "footer_flag": flag, "rows_flag": False, "coverage_pair": cov}
 
 
 def test_the_run_contract_is_declared_in_one_place():
@@ -86,6 +86,18 @@ def test_no_verdict_on_unknown_code_and_the_class_carries_its_reason():
          "1 (أوّلُ صفحة — لا مرجعَ سابق) • الكلفة: $0.0100")
     got = _named_classes({"summary": s})
     assert "لا مرجعَ سابق" in got, got
+
+    # **وصفحةٌ أرجعت مصفوفةً فارغةٌ تُسمّى ويُرفض معها الحكم (قاسه قياسُ البروفة ٢٠٢٦-٠٩-٣٠):**
+    # إجابةٌ صحيحةُ الشكل لكنها فارغة ⇒ صفحةٌ كاملةٌ تُفقد بلا استثناء (٩٤ صفًّا بدل ١٠٤) ⇒ فليست
+    # «نظيفة» ولا تُبرّأ بإعادةٍ ثانية.
+    from tools.qa_gate import _is_clean
+    rows_sum = ("… • تحقق الفوتر: 10/10 مطابق (دقة)، وتغطية 10/10 • ⚠ صفحةٌ بلا صفوفٍ وتذييلُها "
+                "يُظهر حركات (قراءةٌ فاشلة لا صفحةٌ فارغة): ص5")
+    empty_page = dict(_run(), summary=rows_sum, rows_flag=True)
+    assert not _is_clean(empty_page), "قراءةٌ فيها صفحةٌ بلا صفوفٍ قُرئت نظيفة"
+    assert "صفحةٌ بلا صفوف: ص5" in _named_classes(empty_page), _named_classes(empty_page)
+    assert _is_clean(dict(_run(), summary=rows_sum, rows_flag=False)), \
+        "الوسمُ وحدَه يحكم — لا نصُّ الملخّص (لو حكم النصُّ لمرّ عطبٌ في صياغته)"
 
 
 def test_repeating_suspect_names_a_deterministic_defect():
