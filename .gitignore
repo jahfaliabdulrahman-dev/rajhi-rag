@@ -17,6 +17,13 @@ vectorstore/
 # Single-job lock (transient)
 **/data/.rajhi-job.lock
 
+# **وتُختَم بصمةُ الكود (R74-3):** يكتبها التطبيقُ عند كلّ إقلاع (pid · sha · وقت) ⇒ **حالةُ تشغيلٍ
+# عابرة** كالقفل تمامًا، ولا تُلتزم أبدًا. وكانت غيرَ مُهمَلةٍ فدخلت الالتزام `76fe65c` بـ`git add -A`
+# من شجرةٍ فيها `data/` ⇒ فصارت **تُوسِّخ الشجرةَ عند كلّ إقلاع** (وقوّضت `switch` على شجرة البيانات)
+# وأرقامُها الآليّةُ كانت تُحتسب مصدرًا في حارس المبالغ. والقاعدةُ: كلُّ ملفٍّ يكتبه التطبيقُ نفسُه
+# في `data/` يُهمَل ويُسمّى هنا.
+**/data/.app-code.json
+
 # PDFs are generated locally; only the synthetic sample is published
 *.pdf
 !data/sample/*.pdf
