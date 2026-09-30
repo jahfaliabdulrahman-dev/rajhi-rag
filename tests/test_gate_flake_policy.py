@@ -46,6 +46,23 @@ def test_a_lone_dirty_read_is_never_a_pass_by_itself():
     assert "بلا محاولةٍ ثانية" in why, why
 
 
+def test_the_failure_message_names_the_class_it_saw():
+    """**R74-2 (مراجعة ٧٤):** رسالةُ «لا قراءةَ نظيفة» كانت تُسقط أسماءَ الصفحاتِ بلا حكم وتبقى وصفاً
+    عامّاً («٩/٩» و«٩/١٠») ⇒ المشخِّصُ يستنتج — وهو ما وقع فعلًا: رجّحتُ سبباً لا يمكن أن يقع في الكود.
+    الآن تُمرَّر الفئةُ باسمها وصفحاتها **من ملخّص التشغيلة نفسِه** (فلا وصفَ ثانٍ يخالف الأصل).
+    """
+    s = ("… • تحقق الفوتر: 9/9 مطابق (دقة)، وتغطية 9/10 — غير قابلة للتحقق: 1 • الكلفة: $0.0100")
+    dirty = dict(_run(clean=103, footer=(9, 9), cov=(9, 10)), summary=s)
+    ok, why = decide_two_runs(dict(dirty), dict(dirty))
+    assert not ok, why
+    assert "غير قابلة للتحقق: 1" in why, why
+    assert "الفئاتُ المسمّاة" in why, why
+    # وبلا فئاتٍ مسمّاة: يُقال ذلك صراحةً بدل الفراغ (فراغُ التقاطع ليس نظافة)
+    clean_summary = dict(dirty, summary="… • تحقق الفوتر: 9/9 …")
+    _ok2, why2 = decide_two_runs(dict(clean_summary), dict(clean_summary))
+    assert "لا فئةَ مسمّاةٍ في الملخّص" in why2, why2
+
+
 def test_repeating_suspect_names_a_deterministic_defect():
     """عطبٌ حتميّ: المعرّفُ نفسُه يعود في القراءتين ⇒ أحمر **باسمه**، لا «شكوك»."""
     ok, why = decide_two_runs(_run(clean=103, ids=("10:41", "9:7")),

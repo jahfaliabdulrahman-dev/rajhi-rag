@@ -800,7 +800,12 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
         seg_f = "تقرير الفوتر: تعذرت قراءة الإطارات — لا حكم على أي صفحة"
     _verdicts = STATE.get("verdicts") or {}
     _suspect_pages = sorted({r["page"] for r in all_rows if not r.get("ok")})
-    segs = [base, seg_f,
+    # **الكلفةُ في الملخّص (R74-4 · مراجعة ٧٤):** كانت تُحسب في `usage` ولا تُعرَض في أيّ مكان ⇒ تعذّر
+    # تسجيل كلفة تشغيلٍ مدفوع (ووقع فعلًا في بروفة ٢٠٢٦-٠٩-٣٠). وتُوضع **قبل** سطر الفوتر كي لا تدخل
+    # النافذةَ التي تقرؤها البوّابة (`تحقق الفوتر` ← أوّل `•`)، فلا تُشوّش حكمَ الفوتر.
+    _cost_seg = (f"الكلفة: ${usage['cost']:.4f} · نداءات {usage['calls']}"
+                 if usage.get("calls") else "الكلفة: بلا نداءاتٍ مُسجَّلة")
+    segs = [base, _cost_seg, seg_f,
             summarize_era_ar(era_fp,
                              format_effects(_verdicts, _suspect_pages)),
             summarize_order_ar(order, boundaries),

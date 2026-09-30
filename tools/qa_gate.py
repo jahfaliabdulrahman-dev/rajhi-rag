@@ -311,6 +311,19 @@ def _is_clean(run: dict) -> bool:
 #:   ٣. الإعادةُ لا تُغطّي **انقطاعَ النقل**: استثناءٌ في القراءة الأولى يُسقط البوّابةَ باسمه
 #:      (فشلٌ مغلقٌ مُعلَن) ولا يُعاد — فالانقطاعُ عطبُ بيئةٍ لا لاحتميّةُ قراءة.
 #:   ٤. والإعادةُ تُضاعف الزمنَ والكلفةَ في أسوأ الحالات (قراءتان لا أكثر — لا حلقة).
+_NAMED_CLASS_RX = re.compile(r"—\s*(فجوة مسح|بلا إطار مطبوع|غير قابلة للتحقق):\s*([^•·]+)")
+
+
+def _named_classes(run: dict) -> str:
+    """**الفئاتُ المسمّاةُ في ملخّص التشغيلة (R74-2 · مراجعة ٧٤):** الملخّصُ يسمّي الصفحاتِ التي لا حكمَ
+    لها («فجوة مسح» · «بلا إطار مطبوع» · «غير قابلة للتحقق»)، وكانت رسالةُ الفشل تُسقط الأسماءَ فيبقى
+    المشخِّصُ (والمدقّق) يستنتج. الآن تُمرَّر كما هي — والفشلُ يُسمّي نفسَه بدل أن يُوصَف.
+    """
+    found = _NAMED_CLASS_RX.findall(run.get("summary") or "")
+    return ("، ".join(f"{name}: {pgs.strip()}" for name, pgs in found)
+            if found else "لا فئةَ مسمّاةٍ في الملخّص")
+
+
 def decide_two_runs(first: dict, second: dict | None = None) -> tuple[bool, str]:
     if _is_clean(first):
         return True, f"قراءةٌ نظيفةٌ من المحاولة الأولى ({first['total']} صفًّا)"
@@ -326,7 +339,9 @@ def decide_two_runs(first: dict, second: dict | None = None) -> tuple[bool, str]
                        f"(فوتر {first['footer_pair'][0]}/{first['footer_pair'][1]})، والثانية "
                        f"{second['susp']} مشتبهًا و{second['n_rows']} صفًّا "
                        f"(فوتر {second['footer_pair'][0]}/{second['footer_pair'][1]}) "
-                       f"⇒ تقاطعٌ فارغٌ لا يُثبت براءة")
+                       f"⇒ تقاطعٌ فارغٌ لا يُثبت براءة"
+                       f" · **والفئاتُ المسمّاة:** الأولى {_named_classes(first)} | "
+                       f"الثانية {_named_classes(second)}")
     if second["n_rows"] < first["n_rows"] or second["total"] < first["total"]:
         # عِلّةٌ اصطادها مقعدا المعايير والمواصفة: قراءةٌ ثانيةٌ **أنحفُ** تُقرأ نظيفةً وهي أقربُ إلى
         # فقدِ صفٍّ (و`MIN_ROWS` وحدَه يسمح بفقدِ صفوفٍ حتّى العتبة) ⇒ تُرفض بسببها المُسمّى.
