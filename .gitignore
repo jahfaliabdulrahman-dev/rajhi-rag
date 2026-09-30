@@ -41,3 +41,11 @@ handoff/*.bak
 # مراجعُ الانكشاف المُوسَمة (معرّفاتُ التزاماتِ ما قبل التنقية) — لا تُنشر:
 # كانت في `tools/refs_exposure_probe.py` (مُتتبَّع) ⇒ صارت رابطاً موسوماً إلى ما لم يُطهَّر (مراجعة ٥٣).
 **/data/security/
+
+# Local-only project state: carries real statement amounts, so the amounts guard
+# keeps it out of tracked text by design. Read via AGENTS.md; never commit.
+docs/rajhi-rag-state.md
+docs/rajhi-rag-landing-work.md
+docs/rajhi-rag-gate-engineering.md
+docs/rajhi-rag-history.md
+docs/rajhi-rag-product-decisions.md
