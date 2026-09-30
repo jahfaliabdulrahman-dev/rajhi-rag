@@ -20,7 +20,7 @@
  "gate3_price_cap_pages": 133,
  "tests_by_env": {
   "full": 989,
-  "ci-light": 963,
+  "ci-light": 965,
   "ci-claims": 742
  }
 }
