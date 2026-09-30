@@ -74,12 +74,20 @@ def test_no_verdict_on_unknown_code_and_the_class_carries_its_reason():
     """
     from tools.qa_gate import _named_classes, _provenance_verdict
 
-    assert _provenance_verdict({"sha": "abc1234"}, "abc1234") is None
-    _no_stamp = _provenance_verdict(None, "abc1234")
+    # **المقارنةُ على بصمة الكود لا على الالتزام (R77-4):** تطابقُ `code_hash` يكفي — ولو اختلف
+    # `sha` (تصحيحُ وثيقةٍ لا يمسّ الكود لا يُلزم بإعادة تشغيل ✓ وهذا هو المكسبُ المقصود).
+    assert _provenance_verdict(
+        {"sha": "abc1234", "code_hash": "h1"}, "abc1234", "h1") is None
+    assert _provenance_verdict(
+        {"sha": "abc1234", "code_hash": "h1"}, "def5678", "h1") is None
+    _no_stamp = _provenance_verdict(None, "abc1234", "h1")
     assert _no_stamp and "لا حكمَ" in _no_stamp
-    _other = _provenance_verdict({"sha": "abc1234"}, "def5678")
+    _other = _provenance_verdict({"sha": "abc1234", "code_hash": "h1"}, "abc1234", "h9")
     assert _other and "أعِد تشغيل" in _other
-    _unknown = _provenance_verdict({"sha": "unknown"}, "abc1234")
+    # **وتطبيقٌ أقدمُ لا ينشر `code_hash` يُرفض** ولا يُفترض فيه أنّه على الكود (فشلٌ مُغلَق).
+    _old = _provenance_verdict({"sha": "abc1234"}, "abc1234", "h1")
+    assert _old and "unknown" in _old
+    _unknown = _provenance_verdict({"sha": "abc1234", "code_hash": "unknown"}, "abc1234", "h1")
     assert _unknown and "unknown" in _unknown
 
     s = ("… • تحقق الفوتر: 9/9 مطابق (دقة)، وتغطية 9/10 — غير قابلة للتحقق: "

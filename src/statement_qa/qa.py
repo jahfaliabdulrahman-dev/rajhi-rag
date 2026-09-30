@@ -79,6 +79,10 @@ AGENT_SYSTEM_PROMPT = """أنت محاسب مدقق تعمل على كشف حس�
 لديك أدوات حتمية (tools) تجري الحسابات على الجدول المُستخرج المُتحقق منه.
 قواعد صارمة:
 1. أي سؤال عن مجموع/إجمالي/عدد/أعلى/أدنى/آخر رصيد/ملخص صفحة ⇒ استدعِ الأداة المناسبة أولاً.
+   **وأيُّ سؤالٍ عن رقمٍ مطبوعٍ في صفحةٍ بعينها** («إجمالي الصفحة ٥» · «المدين في الصفحة ١٢»)
+   ⇒ `page_footer(page=N)` تقرأ **تذييلَ الورقة المطبوع** وحكمَه — **ولا تجمع صفوفَ الصفحة لتجيب عنه**:
+   التذييلُ **تراكميّ من أوّل الكشف**، فمجموعُ صفوفِ صفحةٍ واحدةٍ لا يساويه إلا في الأولى. وإن جاء الحكمُ
+   **غير مطابق** فاذكره، وإن كان **بلا تذييل** فقل ذلك ولا تخمّن.
    و**أيُّ سؤالٍ عن صفٍّ بعينه داخل صفحة** («أكبر حركةٍ في الصفحة N» · «صفوفُ الصفحة N» · «آخرُ حركةٍ فيها»)
    ⇒ `page_rows(page=N)` تُسرَد الصفوفَ بأرقامها (على مستوى الكشف لا من ١ داخل الصفحة) ومنها يُقرأ الأكبرُ/الأخير.
 2. انقل الأرقام من مخرجات الأدوات حرفياً — لا تُجرِ أي جمع أو طرح بنفسك أبداً.
@@ -144,14 +148,19 @@ def _run_agent(llm, tools, system_prompt: str, user_content: str) -> str:
 
 
 def _answer_with_tools(llm, rows, context: str,
-                       question: str) -> tuple[str, list[dict]]:
+                       question: str, footers=None) -> tuple[str, list[dict]]:
     from statement_qa.qa_tools import make_qa_tools
 
     trace: list[dict] = []
-    tools = make_qa_tools(rows, trace=trace)
+    tools = make_qa_tools(rows, trace=trace, footers=footers)
     user = (f"القطع المرفقة:\n{context}\n\n"
             f"إن احتجت حساب أي رقم فاستخدم الأدوات.\n\nالسؤال: {question}")
     return _run_agent(llm, tools, AGENT_SYSTEM_PROMPT, user), trace
+
+
+def _tool_was_used(trace: list[dict]) -> bool:
+    """هل استُدعيت أداةٌ فعلًا (ولو بلا صفوف)؟ — شاهدُ الفوتر المطبوع ليس صفًّا (R77)."""
+    return any(c.get("tool") for c in (trace or []))
 
 
 def _answer_plain(llm, context: str, question: str) -> str:
@@ -249,11 +258,13 @@ def _data_facts(rows) -> tuple[set, int | None, frozenset]:
 
 
 def answer_question(store, question: str, rows=None, chunks=None,
-                    llm=None, k: int = 4) -> QAResult:
+                    llm=None, k: int = 4, footers=None) -> QAResult:
     """Agent-with-tools answer when rows exist; strict RAG fallback otherwise.
 
     `chunks` (optional): the run's chunks — used ONLY to boost the last page
-    for closing-balance questions (see boost_last_page)."""
+    for closing-balance questions (see boost_last_page).
+    `footers` (optional): the page's **printed** footer totals + verdict — the
+    external referee, made answerable (R77). Absent ⇒ the tool says so."""
     # THE GATE RUNS BEFORE THE MODEL. Three measured defects (Gate 4) came from
     # handing a model with tools a question whose premise sits outside the
     # document: it refused once and answered the same question the next time.
@@ -276,7 +287,7 @@ def answer_question(store, question: str, rows=None, chunks=None,
     # grounded — on its own.
     parts = split_compound(question)
     if len(parts) > 1:
-        results = [_answer_one(store, part, rows, chunks, llm, k)
+        results = [_answer_one(store, part, rows, chunks, llm, k, footers)
                    for part in parts]
         merged_used = [n for r in results for n in (r.used_row_nos or [])]
         hits = boost_last_page(retrieve(store, question, k=k), chunks, question)
@@ -289,11 +300,14 @@ def answer_question(store, question: str, rows=None, chunks=None,
             tools_failed=all(r.tools_failed for r in results),
             ungrounded=any(r.ungrounded for r in results))
 
-    return _answer_one(store, question, rows, chunks, llm, k)
+    return _answer_one(store, question, rows, chunks, llm, k, footers)
 
 
-def _answer_one(store, question: str, rows, chunks, llm, k: int) -> QAResult:
-    """One question, one answer, with its own tool trace and its own honesty."""
+def _answer_one(store, question: str, rows, chunks, llm, k: int,
+                footers=None) -> QAResult:
+    """One question, one answer, with its own tool trace and its own honesty.
+
+    `footers` (R77): التذييلاتُ المطبوعةُ لكلّ صفحة — تُمرَّر إلى الأدوات فيُجيب `page_footer` عنها."""
     hits = boost_last_page(retrieve(store, question, k=k), chunks, question)
     context = format_hits(hits)
     answer = ""
@@ -302,20 +316,23 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int) -> QAResult:
     ungrounded = False
     if rows:
         try:
-            answer, trace = _answer_with_tools(llm, rows, context, question)
+            answer, trace = _answer_with_tools(llm, rows, context, question,
+                                               footers=footers)
             from statement_qa.qa_tools import used_rows_from_trace
 
             used = used_rows_from_trace(trace)
-            if not used and needs_tools(question):
+            if (not used and not _tool_was_used(trace)
+                    and needs_tools(question)):
                 # One nudge, aimed: «use a tool» is a directive the agent
                 # follows far more often than the softer wording above — and if
                 # it still does not, the answer is labelled rather than trusted.
                 answer2, trace2 = _answer_with_tools(
                     llm, rows, context,
                     question + "\n\n(استخدم أداة حسابية واحدة على الأقل قبل "
-                               "الجواب، ولا تحسب بنفسك.)")
+                               "الجواب، ولا تحسب بنفسك.)",
+                    footers=footers)
                 used2 = used_rows_from_trace(trace2)
-                if used2:
+                if used2 or _tool_was_used(trace2):
                     answer, used = answer2, used2
                 else:
                     # «رفض لا وسم» (المدقّق، جوابه ١): رقم لم يُحسَب لا يُعرض

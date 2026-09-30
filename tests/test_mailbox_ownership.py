@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import pathlib
+import re
 import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -24,6 +25,18 @@ DECLARED_INTRUDERS = {
         "**لا تُحذف** (القاعدةُ الحديديّة ١: لا يُمسّ ما في صندوق الطرف — والحذفُ نفسه كسرٌ للقاعدة التي "
         "وُلد هذا الضابطُ منها). مُعلَنةٌ لتُقرأ وتُقاس، ونسخةُ المنفّذ القائمةُ في `handoff/sulaiman/` هي المرجع.",
 }
+
+#: **ونمطُ المدقّق نفسِه ليس تقريرَ منفّذ (R77 · مراجعة ٧٧).** المطابقةُ الساذجةُ على وجود كلمة `REPORT`
+#: في الاسم أوقعت **حكمَ المدقّق** على اسمه: `20260930-220048-third-eye-review-77-the-report-halves-its-cost.md`
+#: — كلمةُ `report` في **عنوان حكمه** لا في صنفه. والاسمُ الدالُّ على حكمٍ يحمل `-third-eye-review-` أو
+#: `-audit-review-` بعده رقم (وتقاريرُ المنفّذ في صدر الاسم بعد الزمن: `…-REPORT-…`)، فالتضييقُ قراءةُ
+#: صنفٍ لا توسيعُ إعفاء. ويُقاس الاتّجاهان: ملفُّ المدقّق **لا** يُلتقط، واسمُ تقرير منفّذٍ **يُلتقط**.
+_AUDITOR_OWN = re.compile(r"-(?:third-eye|audit)-review-\d", re.I)
+
+
+def _is_intruder(name: str) -> bool:
+    """تقريرُ منفّذٍ في صندوق المدقّق = كلمة `REPORT` في الاسم وليس حكمَ المدقّق نفسَه."""
+    return "REPORT" in name.upper() and not _AUDITOR_OWN.search(name)
 
 
 def _git(*args: str) -> tuple[int, str]:
@@ -41,13 +54,25 @@ def test_no_implementer_report_lives_in_the_auditors_box_unless_declared():
     """
     if not CLAUDE_BOX.exists():
         return
-    found = sorted(p.name for p in CLAUDE_BOX.iterdir() if p.is_file() and "REPORT" in p.name.upper())
+    found = sorted(p.name for p in CLAUDE_BOX.iterdir()
+                   if p.is_file() and _is_intruder(p.name))
     undeclared = [n for n in found if n not in DECLARED_INTRUDERS]
     assert not undeclared, (
         f"تقاريرُ المنفّذ في صندوق المدقّق (القاعدةُ الحديديّة ١): {undeclared[:6]}\n"
         f"   الصندوقُ الصحيح: `handoff/sulaiman/` — والنقلُ يُعلَن في `handoff/RENAMES.md`")
     stale = [n for n in DECLARED_INTRUDERS if n not in found]
     assert not stale, f"استثناءٌ متقادم (الملفُّ لم يبقَ) ⇒ يُزال من `DECLARED_INTRUDERS`: {stale}"
+
+
+def test_the_auditor_own_review_is_not_an_intruder_but_a_report_is():
+    """**الاتّجاهان معًا (R77):** تضييقُ النمط يُقاس — وإلّا صار إعفاءً صامتًا يُخفي صنفًا.
+
+    ① حكمُ المدقّق نفسِه (كلمةُ `report` في عنوانه) **لا** يُلتقط.
+    ② واسمُ تقريرِ منفّذٍ حقيقيٍّ **يُلتقط** (فالتضييقُ لم يُفتح بابًا) — والاسمُ الثاني مأخوذٌ من `git log`.
+    """
+    assert _is_intruder("20260930-220048-third-eye-review-77-the-report-halves-its-cost.md") is False
+    assert _is_intruder("20260924-0155-REPORT-to-claude-review-48-closure.md") is True
+    assert _is_intruder("20260930-2130-REPORT-final-rehearsal-five-of-five.md") is True
 
 
 def _moves() -> set[str]:

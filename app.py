@@ -61,6 +61,7 @@ from statement_qa.verification import (
     format_effects,
     verdicts_from_checks,
 )
+from statement_qa.code_hash import code_hash as _code_hash
 from statement_qa.footer_oracle import (
     check_page_footer, delta_checkable, delta_status, page_diverged,
     page_totals, read_footer, try_page_reread,
@@ -94,7 +95,11 @@ CODE_STAMP_PATH = Path(__file__).resolve().parent / "data" / ".app-code.json"
 
 
 def _write_code_stamp() -> dict:
-    """يُكتب مرّةً عند الإقلاع: `{pid, sha, started}` — وبلا git أو بلا كتابةٍ يُعلَن `unknown` ولا يُخمَّن."""
+    """يُكتب مرّةً عند الإقلاع: `{pid, sha, code_hash, started}` — وبلا git أو بلا كتابةٍ يُعلَن `unknown` ولا يُخمَّن.
+
+    **`code_hash` هو ما يحكم (R77-4):** بصمةُ محتوى `app.py` + `src/**` — فوثيقةٌ تهبط وحدَها لا تُبطل
+    الختمَ ولا تُلزم بإعادة تشغيل. و`sha` يبقى **للعلم**.
+    """
     import datetime as _dt
     import subprocess
 
@@ -105,7 +110,11 @@ def _write_code_stamp() -> dict:
             capture_output=True, text=True, timeout=10, check=True).stdout.strip() or "unknown"
     except Exception:  # noqa: BLE001 — بصمةٌ غائبةٌ تُعلَن ولا تُسقط التطبيق
         pass
-    stamp = {"pid": os.getpid(), "sha": sha,
+    try:
+        code_hash = _code_hash()
+    except Exception:  # noqa: BLE001 — قراءةُ ملفّاتٍ تعذّرت ⇒ `unknown` تُعلَن
+        code_hash = "unknown"
+    stamp = {"pid": os.getpid(), "sha": sha, "code_hash": code_hash,
              "started": _dt.datetime.now().isoformat(timespec="seconds")}
     try:
         CODE_STAMP_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -550,6 +559,11 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
     all_rows = []
     failed_pages: list[int] = []
     footer_checks: list[dict] = []
+    # **الأرقامُ المطبوعة في التذييل كما قُرئت** (R77-3b · مراجعة ٧٧): كان التطبيقُ يقرأ كلَّ تذييلٍ
+    # ويحكم عليه، ثمّ يحفظ **المجاميعَ المحسوبة** في `footer_checks` وحدَها ⇒ فيسقط الرقمُ **المطبوع**
+    # (وهو الشاهدُ الخارجيّ الوحيد) من متناول طبقة سؤال وجواب، فيجمع النموذجُ صفوفَ الصفحة ليجيب عن
+    # «إجمالي الصفحة» — **والتذييلُ تراكميٌّ فمجموعُ صفحةٍ واحدةٍ لا يساويه** ⇒ جوابٌ واثقٌ خاطئ.
+    printed_footers: dict = {}
     era_pages: dict[int, list] = {}
     page_dates: dict[int, list] = {}
     boundaries = {"txn": 0, "carry": 0, "anchor": 0}
@@ -740,6 +754,16 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
             cum["debits"] += chk["own"]["debits"]
             cum["credits"] += chk["own"]["credits"]
         footer_checks.append({"page": pg, **chk})
+        # **وسطرُ التذييل المطبوع مع حكمه، بصيغةٍ جاهزةٍ لطبقة الإجابة** — أرقامٌ كما ظهرت في الكشف
+        # (تُعرَض كما هي، ولا تُعاد للجمع ولا تُخمَّن). وسطرٌ بلا تذييلٍ مقروء يُسمّى `بلا تذييل`.
+        printed_footers[pg] = {
+            "page": pg,
+            "debits": None if footer is None or footer.debits is None else _money(footer.debits),
+            "credits": None if footer is None or footer.credits is None else _money(footer.credits),
+            "balance": None if footer is None or footer.balance is None else _money(footer.balance),
+            "verdict": str(chk.get("status") or "unchecked"),
+            "basis": str(chk.get("basis") or chk.get("note") or ""),
+        }
         if chk.get("own"):
             own_by_pg[pg] = (chk["own"]["debits"], chk["own"]["credits"])
         prev_footer = footer
@@ -779,6 +803,7 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
         [{**r, "row_no": i + 1} for i, r in enumerate(all_rows)])
     STATE["store"] = build_index(STATE["chunks"])
     STATE["footer_checks"] = footer_checks
+    STATE["footers"] = printed_footers
     # أحكام الصفحة بلغة واحدة تُقرأ في كل سطح: الجدول والتصدير والأسئلة
     STATE["verdicts"] = verdicts_from_checks(footer_checks)
     STATE["usage"] = usage
@@ -1025,7 +1050,7 @@ def ask_followup(history):
     from statement_qa.qa import answer_question
 
     res = answer_question(STATE["store"], q, rows=STATE.get("rows"),
-                          chunks=STATE.get("chunks"))
+                          chunks=STATE.get("chunks"), footers=STATE.get("footers"))
     rows_now = STATE.get("rows") or []
     page_of = {i + 1: r.get("page") for i, r in enumerate(rows_now)}
     verdicts = STATE.get("verdicts") or {}

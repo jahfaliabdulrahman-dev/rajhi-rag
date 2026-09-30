@@ -77,12 +77,27 @@ def used_rows_from_trace(trace: list[dict]) -> list[int]:
     return sorted({no for call in trace for no in call.get("row_nos", [])})
 
 
-def make_qa_tools(rows: list[dict], trace: list[dict] | None = None):
+_FOOTER_AR = {
+    "ok": "مطابق",
+    "mismatch": "غيرُ مطابق — صفوفُ الصفحة لا تُغلق الرقمَ المطبوع",
+    "unchecked": "غيرُ مُتحقَّق — تعذّر الحكم عليها (لا مقارنةَ ممكنة)",
+    "absent": "لا سطرَ تذييلٍ مطبوعٍ في هذه الصفحة",
+    "gap": "فجوةُ مسح — أوراقٌ ناقصة قبلها فالمقارنةُ التراكميّةُ غيرُ ممكنة",
+}
+
+
+def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
+                  footers: dict | None = None):
     """Bind the verified rows to LangChain tools (import kept lazy).
 
     When `trace` is a list, every successful non-empty call appends
     {"tool": name, "row_nos": [...]} — the raw material for the evidence
     panel. Pure bookkeeping: it never changes any tool's return text.
+
+    `footers` (optional): per-page **printed** footer totals as read from the
+    page itself, with their match verdict — the external referee made
+    answerable (R77 · مراجعة ٧٧). Its absence is declared by the tool, not
+    guessed around.
     """
     from langchain_core.tools import tool
 
@@ -259,6 +274,35 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None):
                 f" | عدد الصفوف = {len(rows_on_page)}" + note)
 
     @tool
+    def page_footer(page: int) -> str:
+        """أرقامُ **التذييل المطبوع في الكشف نفسه** لصفحةٍ واحدة — إجمالي مدين تراكميّ · إجمالي دائن
+        تراكميّ · رصيدُ الصفحة — **مع حكمِ مطابقتها**، وكلُّها كما ظهرت في الورقة لا محسوبةً من هنا.
+
+        **استعملها لكلّ سؤالٍ عن رقمٍ مطبوع في صفحة** («إجمالي الصفحة ٥» · «المدين في الصفحة ١٢» ·
+        «مجموع الصفحة ٧ كما هو مكتوب») — **ولا تجمع صفوفَ الصفحة لتجيب عنه**: التذييلُ **تراكميٌّ من
+        أوّل الكشف**، فمجموعُ صفوفِ صفحةٍ واحدةٍ لا يساويه إلا في الصفحة الأولى.
+        وإن كان الحكمُ **غير مطابق** فاذكره في جوابك ولا تُخفِه، وإن كان **بلا تذييل** فقل ذلك ولا تخمّن.
+        مثال: page_footer(page=5)."""
+        pg = int(page)
+        f = (footers or {}).get(pg)
+        # **أثرُ الاستدعاء:** شاهدُ الفوتر **ليس صفًّا** (هو سطرُ التذييل المطبوع) ⇒ يُسجَّل الاستدعاءُ
+        # بلا أرقام صفوف، ويُقرأ في `qa.py` دليلًا على أنّ أداةً استُدعيت فعلًا — فلا يُوصَم جوابُ
+        # الفوتر بأنّه «بلا أداة» (R77 · مراجعة ٧٧).
+        if trace is not None:
+            trace.append({"tool": "page_footer", "row_nos": [], "page": pg})
+        if not f:
+            return (f"الصفحة {pg}: لا تذييلَ مطبوعًا مقروءًا لها في هذا الكشف "
+                    f"(تُسمّى ولا تُخمَّن).")
+        def _v(key: str) -> str:
+            val = f.get(key)
+            return "لم يُقرأ" if val is None else str(val)
+        basis = f" ({f['basis']})" if f.get("basis") else ""
+        return (f"صفحة {pg} — التذييلُ المطبوع كما في الورقة: إجمالي مدين = {_v('debits')}"
+                f" | إجمالي دائن = {_v('credits')} | رصيدُ الصفحة = {_v('balance')}"
+                f" | حكمُ المطابقة = {_FOOTER_AR.get(str(f.get('verdict') or ''), f.get('verdict'))}"
+                f"{basis}")
+
+    @tool
     def page_rows(page: int, limit: int = 40) -> str:
         """اعرض **سطور صفحةٍ بعينها** بأرقامها: رقمُ الصفّ ومبلغُه واتجاهُه ورصيدُه ووصفُه.
 
@@ -303,4 +347,4 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None):
         return f"{len(sel)} حركة مطابقة{more}:\n" + "\n".join(lines)
 
     return [sum_movements, count_movements, balance_extremes,
-            closing_balance, page_summary, page_rows, search_rows]
+            closing_balance, page_summary, page_footer, page_rows, search_rows]

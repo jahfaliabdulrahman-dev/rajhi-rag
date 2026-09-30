@@ -371,19 +371,28 @@ def decide_two_runs(first: dict, second: dict | None = None) -> tuple[bool, str]
 # ————— بصمةُ الكود (R74-3 · مراجعة ٧٤): **لا حكمَ على كودٍ مجهول** —————
 # **العلّةُ المقيسة:** الفحصُ الشامل يقيس **العمليةَ الجارية** لا الشجرة. في ٢٠٢٦-٠٩-٢٦ أعلن «٥/٥» وهو
 # يقيس كودًا عمرُه اثنا عشر يومًا (التطبيقُ لم يُعَد تشغيلُه بعد التغييرات) ⇒ رقمٌ على كودٍ غيرِ المستودع.
-# فالآن التطبيقُ ينشر بصمةَ كوده عند الإقلاع (`data/.app-code.json`)، وهذه البوّابةُ تقابلها بـ`HEAD`
-# و**ترفض النتيجةَ إن اختلفت** — فشلٌ مُغلَق لا تحذير.
-def _provenance_verdict(stamp: dict | None, head: str) -> str | None:
-    """حكمُ البصمة: `None` = التطبيقُ على كود الشجرة؛ وإلّا فسببُ الرفض. (دالّةٌ خالصةٌ تُقاس بسمّ.)"""
+# فالآن التطبيقُ ينشر بصمةَ كوده عند الإقلاع (`data/.app-code.json`)، وهذه البوّابةُ تقابلها ببصمة
+# **كود الشجرة** (`app.py` + `src/**` — R77-4) و**ترفض النتيجةَ إن اختلفت** — فشلٌ مُغلَق لا تحذير.
+def _provenance_verdict(stamp: dict | None, head: str, code_hash_now: str) -> str | None:
+    """حكمُ البصمة: `None` = التطبيقُ على **كود الشجرة** نفسِه؛ وإلّا فسببُ الرفض. (دالّةٌ خالصةٌ تُقاس بسمّ.)
+
+    **والمقارنةُ على بصمة الكود لا على الالتزام (R77-4 · مراجعة ٧٧):** كانت `HEAD` كلَّه يُبطل الختمَ
+    ⇒ يهبط تصحيحُ وثيقةٍ فيُلزَم بإعادة تشغيل التطبيق لسببٍ لا يمسّ الكود. والضمانُ المطلوبُ أضيقُ من
+    ذلك ولا يُرخى: **ألّا يُحكم على نتيجةٍ أنتجها كودٌ مخالفٌ لكود الشجرة.** و`sha` يبقى في الرسالة
+    **للعلم لا للحكم**.
+    """
     if not stamp:
         return ("التطبيقُ لا ينشر بصمةَ كوده (`data/.app-code.json` غائبةٌ أو غيرُ مقروءة) ⇒ لا حكمَ من "
                 "نتيجةٍ مجهولةِ الكود: أعِد تشغيلَ التطبيق ثمّ أعِد الفحص")
-    sha = str(stamp.get("sha") or "unknown")
-    if sha == "unknown":
-        return "بصمةُ كود التطبيق `unknown` (تعذّر git عند إقلاعه) ⇒ لا حكمَ من نتيجةٍ مجهولةِ الكود"
-    if sha != head:
-        return (f"بصمةُ كود التطبيق `{sha}` ≠ كود الشجرة `{head}` ⇒ الفحصُ يقيس كودًا آخر: "
-                "أعِد تشغيلَ التطبيق على الشجرة الحاليّة ثمّ أعِد الفحص")
+    got = str(stamp.get("code_hash") or "unknown")
+    if got == "unknown":
+        return ("بصمةُ كود التطبيق `unknown` — إمّا تطبيقٌ أقدمُ من هذه الحماية (لا ينشر `code_hash`) "
+                "وإمّا تعذّرت قراءةُ ملفّات الكود ⇒ لا حكمَ من نتيجةٍ مجهولةِ الكود: "
+                "أعِد تشغيلَ التطبيق ثمّ أعِد الفحص")
+    if got != code_hash_now:
+        return (f"بصمةُ كود التطبيق `{got}` ≠ كود الشجرة `{code_hash_now}` "
+                f"(الالتزامُ في التطبيق `{stamp.get('sha')}` وفي الشجرة `{head}`) ⇒ الفحصُ يقيس كودًا "
+                "آخر: أعِد تشغيلَ التطبيق على الشجرة الحاليّة ثمّ أعِد الفحص")
     return None
 
 
@@ -400,8 +409,18 @@ def _tree_head() -> str:
     return (out.stdout or "").strip() or "unknown"
 
 
+def _tree_code_hash() -> str:
+    """بصمةُ **كود الشجرة** (`app.py` + `src/**`) — نفسُ الدالّة التي ينشرها التطبيق في ختمه."""
+    try:
+        from statement_qa.code_hash import code_hash
+
+        return code_hash(PROJ)
+    except Exception:  # noqa: BLE001 — تعذّرُ الحساب يُعلَن فيُرفض الحكم، ولا يُخمَّن
+        return "unknown"
+
+
 def g_end_to_end() -> str:
-    _refusal = _provenance_verdict(_app_code_stamp(), _tree_head())
+    _refusal = _provenance_verdict(_app_code_stamp(), _tree_head(), _tree_code_hash())
     assert _refusal is None, f"الفحصُ الشامل: {_refusal}"
     pdf = PROJ / "data/local_sample/sample_10p.pdf"
     assert pdf.exists(), f"missing {pdf}"
