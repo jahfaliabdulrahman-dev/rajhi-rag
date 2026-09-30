@@ -28,11 +28,36 @@ from tools.probe_digital_path import non_witnesses  # noqa: E402
 
 # ── FM-1: ختم القارئ ──────────────────────────────────────────────────────
 def test_the_default_stamp_names_the_prompt_the_code_actually_uses():
-    """الختم يوافق الكود: الافتراضي v2 — والتلقينة v1 تُسمّى باسمها."""
-    assert reader_stamp()["prompt_version"] == "v2"
-    assert reader_stamp(FRONTIER_PROMPT_V2)["prompt_version"] == "v2"
-    assert reader_stamp(FRONTIER_PROMPT)["prompt_version"] == "v1"
-    assert reader_stamp(PROMPTS["v2"])["prompt_version"] == "v2"
+    """الختم يوافق الكود — **ومن نصّ التعليمات لا من اسمٍ ثابت (R74-5).**
+
+    الصنفُ الذي كان صامتًا: تعليمةٌ «مجمّدة» عُدِّلت 2026-09-19 (أُضيف إقصاءُ الرصيد الافتتاحي) وبقي
+    ختمُها الاسمَ `v2` ⇒ الكوربوسُ المقروءُ بالتعليمتين حمل ختمًا واحدًا، والاستئنافُ مرّ على قراءةٍ
+    بتعليمةٍ أخرى. الآن الختمُ بصمةُ النصّ: تعديلُ حرفٍ ⇒ ختمٌ آخر.
+    """
+    import hashlib
+
+    v2 = reader_stamp()["prompt_version"]
+    assert v2 == reader_stamp(FRONTIER_PROMPT_V2)["prompt_version"] == \
+        reader_stamp(PROMPTS["v2"])["prompt_version"], "الافتراضي و`PROMPTS['v2']` ختمٌ واحد"
+    assert v2.startswith("v2:"), f"الختمُ يسمّي العائلة ثم بصمةَ نصّها: {v2!r}"
+    assert v2.split(":", 1)[1] == hashlib.sha256(
+        FRONTIER_PROMPT_V2.encode("utf-8")).hexdigest()[:8], "البصمةُ ليست بصمةَ النصّ المستعمل"
+    assert reader_stamp(FRONTIER_PROMPT)["prompt_version"].startswith("v1:")
+    assert reader_stamp(FRONTIER_PROMPT_V2 + ".")["prompt_version"] != v2, \
+        "تعليمةٌ معدّلةٌ بنقطةٍ واحدة حملت الختمَ نفسه ⇒ تعديلُ «المجمّد» يمرّ صامتًا (R74-5)"
+
+
+def test_the_opening_balance_is_a_row_not_a_summary_line():
+    """R74-1: الرصيدُ الافتتاحي **يحمل رصيداً مطبوعاً** ⇒ يُدرَج في rows (مرساةُ سلسلة الصفحة الأولى).
+
+    إقصاؤه (تعليمةُ 2026-09-19) أخرجته من القراءة ⇒ الصفحةُ ١ بلا رصيدٍ تبدأ منه ⇒ مجموعُها لا يطابق
+    تذييلَها ⇒ «غير قابلة للتحقق» (ولا تذييلَ قبلها لتُقارَن به) ⇒ تغطيةُ الفوتر ٩ من ١٠ ⇒ البوّابةُ تسقط.
+    """
+    # قائمةُ الإقصاء المسمّاة (بين «مثل» و«؛») لا تحمل الرصيدَ الافتتاحي
+    excluded = FRONTIER_PROMPT_V2.split("مثل", 1)[1].split("؛", 1)[0]
+    assert "الرصيد الافتتاحي" not in excluded, "الرصيدُ الافتتاحي عاد إلى قائمة الإقصاء (R74-1)"
+    # والاستثناءُ مكتوبٌ صريحًا لا مفهومًا
+    assert "يُدرَج في rows" in FRONTIER_PROMPT_V2, "لا سطرَ صريحًا يُدرج الرصيدَ الافتتاحي في rows"
 
 
 def test_an_unknown_prompt_is_stamped_by_its_fingerprint_not_by_a_guess():

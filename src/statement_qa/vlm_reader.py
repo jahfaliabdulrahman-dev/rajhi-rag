@@ -58,11 +58,15 @@ def reader_stamp(prompt: str | None = None, *, reader: str = "vlm",
     if reader == "text":
         return {"model": "deterministic", "prompt_version": version or "text-v1"}
     if prompt is None or prompt is FRONTIER_PROMPT_V2:
-        version = "v2"
+        name, text = "v2", FRONTIER_PROMPT_V2
     elif prompt is FRONTIER_PROMPT:
-        version = "v1"
+        name, text = "v1", FRONTIER_PROMPT
     else:
-        version = "custom:" + hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:8]
+        name, text = "custom", prompt
+    # **والختمُ من نصّ التعليمات لا من اسمٍ ثابت (R74-5 · قاسه المدقّق):** تعليمةٌ «مجمّدة» عُدِّلت في
+    # 2026-09-19 وبقي ختمُها «v2» اسمًا ثابتًا ⇒ لم يكشف التعديلَ شيء، ولا الاستئنافُ رفض المقروءَ بها.
+    # الآن حرفٌ واحدٌ يتغيّر ⇒ يتغيّر الختمُ ⇒ يُبطل الاستئنافَ ويُعلن نفسَه.
+    version = f"{name}:{hashlib.sha256(text.encode('utf-8')).hexdigest()[:8]}"
     return {"model": MODEL, "prompt_version": version}
 
 
