@@ -178,6 +178,8 @@ NON_ANSWER_FILES_SINCE_RULE = {
         "تقريرٌ للمالك (إصلاحا R70 والهبوطُ في `34fe838`) — إيداعٌ متأخّرٌ مُعلَن (R69-2)",
     "handoff/sulaiman/20260930-0058-DECISION-owner-postpone-the-spaces-trial-and-carry-the-round.md":
         "قرارُ مالكٍ منقولٌ بنصّه (تأجيلُ Spaces · والأمرُ بتنفيذ الباقي) — لا يُجيب حُكماً، وهو `مرجّح` لا `مُثبت`",
+    "handoff/sulaiman/20260930-1512-DECISION-owner-outputs-live-demo-no-react-and-r63-2-cancelled.md":
+        "قراراتُ مالكٍ منقولةٌ بنصّها (المخرَجات · React اقتراحٌ لا شرط · إلغاءُ R63-2 · توحيدُ شجرة البيانات) — لا تُجيب حُكماً",
 }
 #: وأصنافُها مذكورةٌ **في القاموس نفسِه** (`NON_ANSWER_FILES_SINCE_RULE` — البند ٦) لا في تعليقٍ ثانٍ.
 #: **ومُخاطَبٌ واحدٌ هبط بالقاعدة، وهو صنفٌ مُعلَنٌ بالاسم:** `20260925-0723-REPORT-to-claude-r13-…`
