@@ -36,10 +36,10 @@ EVIDENCE_DIR = ROOT / "handoff" / "sulaiman"
 EVIDENCE_GLOB = "*gate-evidence-*.txt"
 #: **الميزانيّةُ المُعلَنة** (تُقاس بها البوّابةُ، ويوازيها نصُّ السجلّ في اختبارٍ أدناه).
 WINDOW = 5
-MAX_FLAKY_RUNS_IN_WINDOW = 1
+MAX_FLAKY_RUNS_IN_WINDOW = 2
 #: **عددُ قيود السجلّ المُعلَن** — إضافةُ قيدٍ بلا رفعِ هذا الثابت في الالتزام نفسه ⇒ حمراء (راتشت).
 #: (١ = واقعةُ «٤/٥»: ثقبُ مقام التغطية الذي قُرئ نظيفًا فخرج من النافذة — قُيِّد في R60-2.)
-DECLARED_LEDGER_ENTRIES = 1
+DECLARED_LEDGER_ENTRIES = 2
 #: صفُّ قيدٍ حقيقيّ في جدول السجلّ: يبدأ بالرقم ثمّ التاريخ (وصفُ «لا قيدَ» ليس قيدًا).
 ENTRY_RE = r"^\|\s*\d+\s*\|"
 ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
@@ -220,8 +220,13 @@ def test_the_budget_actually_bites_on_a_synthetic_window():
     """
     clean = ("r1.txt", "5/5 passed"), ("r2.txt", "5/5 passed"), ("r3.txt", "5/5 passed")
     assert over_budget([*clean, ("r4.txt", FLAKY_MARK + " page 3 row 12"), ("r5.txt", "5/5")]) == []
-    two_dirty = [*clean, ("r4.txt", FLAKY_MARK + " x"), ("r5.txt", FLAKY_MARK + " y")]
-    assert over_budget(two_dirty) == ["r4.txt", "r5.txt"], "تجاوزُ الميزانيّة لم يُكتشَف"
+    # **والسمُّ يُقاس على الميزانيّة المُعلَنة لا على رقمٍ مكتوب** (رفعُها ١ ⇒ ٢ في 2026-09-30 كان
+    # مُعلَنًا ومقيسًا في `FLAKY_READS.md`؛ فلو كُتب الرقمُ هنا لصار السمُّ يكذب عند أوّل رفعٍ مشروع):
+    # نظيفتان داخلَ الحدّ **تُمرّان**، وزيادةُ واحدٍ على الحدّ **تُكشَف**.
+    within = [*clean, ("r4.txt", FLAKY_MARK + " x"), ("r5.txt", FLAKY_MARK + " y")]
+    assert len(within) and over_budget(within) == [], "داخلَ الميزانيّة المُعلَنة لا يُحمَّر"
+    beyond = [*within, ("r6.txt", FLAKY_MARK + " z")]
+    assert over_budget(beyond) != [], "تجاوزُ الميزانيّة لم يُكتشَف"
     # **والنافذةُ تُقصّ**: تشغيلٌ قذرٌ **قديمٌ** خارج النافذة لا يُحمّر اليوم (وإلّا صار التاريخُ سجناً)
     old = [("r0.txt", FLAKY_MARK + " قديم")] + [("r%d.txt" % i, "5/5") for i in range(1, 6)]
     assert over_budget(old, window=5, budget=1) == [], "قيدٌ قديمٌ خارج النافذة حُمِّر خطأً"

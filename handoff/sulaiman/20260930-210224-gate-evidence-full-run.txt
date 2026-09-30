@@ -1,0 +1,11 @@
+# qa_gate --full — 2026-09-30T21:02:24
+# rc=1 · GATES: 3/5 passed · المفسّر=.venv/bin/python
+# كُتب هذا الملفُّ **بالأداة** لا بيد الكاتب (R60-2) ⇒ تشغيلٌ بلا دليلٍ = تشغيلٌ خارج النافذة.
+
+[FAIL] unit suite                         pytest failed: 4 failed, 972 passed, 2 skipped, 5 warnings in 54.39s
+[PASS] parser goldens                     6 golden tokens + nulls
+[PASS] service health                     app :7860 -> 200
+[PASS] surface redirect                   :7867 -> 302 http://127.0.0.1:7860
+[FAIL] end-to-end sample (values locked)  table carries 94 rows
+
+GATES: 3/5 passed
