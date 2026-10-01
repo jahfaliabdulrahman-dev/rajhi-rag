@@ -97,6 +97,7 @@ jobs:
                            tests/test_answer_names_witness.py \
                            tests/test_gate_goldens.py \
                            tests/test_gate_flake_policy.py \
+                           tests/test_rederive_footer_verdicts.py \
                            tests/test_flake_ledger.py \
                            tests/test_landing_probe.py \
                            tests/test_eval_pack.py \
