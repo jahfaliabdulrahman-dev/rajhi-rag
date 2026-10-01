@@ -128,10 +128,36 @@ def test_importing_app_does_not_sign_the_stamp_that_judges_it():
     وقبل الإصلاح كان الاستيرادُ يُعيد كتابةَ الختم بمعرّف العملية المستورِدة ⇒ يسقط هذا الاختبار —
     وهو بعينه السببُ الذي كان يجعل البوّابةَ تقابل كودَ الشجرة بكودِ الشجرة فلا ترفض قديمًا.
     """
+    import ast
+    import importlib.util
     import json as _json
     import subprocess
 
+    import pytest
+
     proj = Path(__file__).resolve().parents[1]
+    # **والشقُّ الساكنُ يعمل في كلّ بيئة (مراجعة ٧٩ · R79-2):** خطوةُ الـCI الخفيفة بلا `gradio`، فاستيرادُ
+    # `app` يسقط هناك قبل أن يُقاس شيء. فيُقرأ `app.py` شجرةَ نحوٍ بلا استيراد: نداءُ `_write_code_stamp()`
+    # في مستوى الوحدة (كما كان قبل الإصلاح) يُسقط الضابط، والموضعُ الوحيدُ المقبول كتلةُ `__main__`.
+    module = ast.parse((proj / "app.py").read_text(encoding="utf-8"))
+    under_main = at_module = 0
+    for node in module.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        is_main = (isinstance(node, ast.If) and isinstance(node.test, ast.Compare)
+                   and getattr(node.test.left, "id", "") == "__name__")
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Call) and getattr(sub.func, "id", "") == "_write_code_stamp":
+                if is_main:
+                    under_main += 1
+                else:
+                    at_module += 1
+    assert at_module == 0 and under_main == 1, (
+        f"`_write_code_stamp()` يُنادى في مستوى الوحدة {at_module} مرّة وتحت `__main__` {under_main} "
+        "— والمقبولُ صفرٌ وواحدة: الاستيرادُ لا يكتب البصمة (R78-1)")
+    if importlib.util.find_spec("gradio") is None:
+        pytest.skip("الشقُّ الساكنُ مرّ؛ والحيُّ يحتاج حزمةَ التطبيق (`gradio`) غيرَ المثبّتة هنا (CI خفيف)")
+
     stamp = proj / "data" / ".app-code.json"
     before = stamp.read_bytes() if stamp.exists() else None
     implant = {"pid": 999999, "sha": "deadbee", "code_hash": "stale-sentinel",
