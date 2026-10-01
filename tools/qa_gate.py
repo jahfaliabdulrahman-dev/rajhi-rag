@@ -373,13 +373,21 @@ def decide_two_runs(first: dict, second: dict | None = None) -> tuple[bool, str]
 # يقيس كودًا عمرُه اثنا عشر يومًا (التطبيقُ لم يُعَد تشغيلُه بعد التغييرات) ⇒ رقمٌ على كودٍ غيرِ المستودع.
 # فالآن التطبيقُ ينشر بصمةَ كوده عند الإقلاع (`data/.app-code.json`)، وهذه البوّابةُ تقابلها ببصمة
 # **كود الشجرة** (`app.py` + `src/**` — R77-4) و**ترفض النتيجةَ إن اختلفت** — فشلٌ مُغلَق لا تحذير.
-def _provenance_verdict(stamp: dict | None, head: str, code_hash_now: str) -> str | None:
+def _provenance_verdict(stamp: dict | None, head: str, code_hash_now: str,
+                        listener_pid: int | None = None) -> str | None:
     """حكمُ البصمة: `None` = التطبيقُ على **كود الشجرة** نفسِه؛ وإلّا فسببُ الرفض. (دالّةٌ خالصةٌ تُقاس بسمّ.)
 
     **والمقارنةُ على بصمة الكود لا على الالتزام (R77-4 · مراجعة ٧٧):** كانت `HEAD` كلَّه يُبطل الختمَ
     ⇒ يهبط تصحيحُ وثيقةٍ فيُلزَم بإعادة تشغيل التطبيق لسببٍ لا يمسّ الكود. والضمانُ المطلوبُ أضيقُ من
     ذلك ولا يُرخى: **ألّا يُحكم على نتيجةٍ أنتجها كودٌ مخالفٌ لكود الشجرة.** و`sha` يبقى في الرسالة
     **للعلم لا للحكم**.
+
+    **وبصمةُ مَن؟ (R78-1 · مراجعة ٧٨):** كانت مقابلةُ كود البصمة بكود الشجرة **لا تكفي**، لأنّ البصمةَ
+    كانت تُكتب عند **الاستيراد** ⇒ يكتبها أيُّ مستورِدٍ لـ`app` — وخطوةُ الوحدة في `qa_gate --full`
+    تستورد `app` **قبل** فحص النهاية-إلى-النهاية ⇒ الفحصُ يقابل كودَ الشجرة بنفسه فيمرّ، **ولا رفضَ
+    لكودٍ قديم أبدًا**. فالشرطُ الآن شرطان: الكودُ مطابق، **والبصمةُ كُتبت من العملية التي تُجيب فعلًا**
+    (`stamp["pid"]` = مستمعُ ٧٨٦٠). و`listener_pid = None` (لا مستمع · أو تعذّر السؤال) **رفضٌ مسمّى**
+    لا تمرير: غيابُ القياس ليس نظافة.
     """
     if not stamp:
         return ("التطبيقُ لا ينشر بصمةَ كوده (`data/.app-code.json` غائبةٌ أو غيرُ مقروءة) ⇒ لا حكمَ من "
@@ -393,6 +401,15 @@ def _provenance_verdict(stamp: dict | None, head: str, code_hash_now: str) -> st
         return (f"بصمةُ كود التطبيق `{got}` ≠ كود الشجرة `{code_hash_now}` "
                 f"(الالتزامُ في التطبيق `{stamp.get('sha')}` وفي الشجرة `{head}`) ⇒ الفحصُ يقيس كودًا "
                 "آخر: أعِد تشغيلَ التطبيق على الشجرة الحاليّة ثمّ أعِد الفحص")
+    # ————— مَن كتب البصمة؟ (R78-1) —————
+    if listener_pid is None:
+        return ("لا مستمعَ على المنفذ ٧٨٦٠ (أو تعذّر سؤالُ نظام التشغيل) ⇒ لا نعرف أيَّ عمليةٍ تُجيب، "
+                "والبصمةُ قد تكون من عمليةٍ أخرى (خطوةُ وحدةٍ · تشغيلٌ سابق) ⇒ لا حكمَ من نتيجةٍ "
+                "مجهولةِ المُصدِّق: أعِد تشغيلَ التطبيق ثمّ أعِد الفحص")
+    if stamp.get("pid") != listener_pid:
+        return (f"بصمةُ الكود كُتبت من العملية `{stamp.get('pid')}` والمستمعُ على ٧٨٦٠ العملية "
+                f"`{listener_pid}` ⇒ البصمةُ ليست بصمةَ مَن يُجيب، وهي العطبُ الذي ينشأ عن كتابتها عند "
+                f"الاستيراد (R78-1) ⇒ لا حكمَ من نتيجةٍ مجهولةِ المُصدِّق: أعِد تشغيلَ التطبيق ثمّ أعِد الفحص")
     return None
 
 
@@ -401,6 +418,25 @@ def _app_code_stamp() -> dict | None:
         return json.loads((PROJ / "data" / ".app-code.json").read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001 — غيابُ البصمة يُعلن في الحكم لا في الاستثناء
         return None
+
+
+def _listener_pid(port: int = 7860) -> int | None:
+    """`pid` العمليةِ **المستمعة** على المنفذ — أو `None` إن لم يكن مستمعٌ أو تعذّر السؤال (R78-1).
+
+    **ولماذا `lsof` ولا يكفي «التطبيقُ يعمل»:** السؤالُ ليس وجودَ تطبيقٍ بل **مَن يُجيب على الطلب**؛
+    والبصمةُ تصدق على **عمليةٍ بعينها**، فتُقرأ من نظام التشغيل لا من اسمِ برنامجٍ (اسمٌ واحدٌ تسكنه
+    عدّةُ عمليات — وهي بعينها الحالةُ التي يخلقها استيرادُ `app` في خطوة الوحدة). وتعذّرُ السؤال
+    يُعيد `None` ⇒ **رفضٌ مسمّى** في الحكم، لا تمرير: غيابُ القياس ليس نظافة.
+    """
+    try:
+        r = subprocess.run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+                           capture_output=True, text=True, timeout=10)
+    except Exception:  # noqa: BLE001 — `lsof` غائبٌ أو تعذّر تنفيذُه ⇒ `None` تُعلَن
+        return None
+    for token in (r.stdout or "").split():
+        if token.strip().isdigit():
+            return int(token.strip())
+    return None
 
 
 def _tree_head() -> str:
@@ -420,7 +456,8 @@ def _tree_code_hash() -> str:
 
 
 def g_end_to_end() -> str:
-    _refusal = _provenance_verdict(_app_code_stamp(), _tree_head(), _tree_code_hash())
+    _refusal = _provenance_verdict(_app_code_stamp(), _tree_head(), _tree_code_hash(),
+                                   _listener_pid())
     assert _refusal is None, f"الفحصُ الشامل: {_refusal}"
     pdf = PROJ / "data/local_sample/sample_10p.pdf"
     assert pdf.exists(), f"missing {pdf}"

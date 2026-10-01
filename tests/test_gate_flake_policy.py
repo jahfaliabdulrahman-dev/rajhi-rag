@@ -76,19 +76,31 @@ def test_no_verdict_on_unknown_code_and_the_class_carries_its_reason():
 
     # **المقارنةُ على بصمة الكود لا على الالتزام (R77-4):** تطابقُ `code_hash` يكفي — ولو اختلف
     # `sha` (تصحيحُ وثيقةٍ لا يمسّ الكود لا يُلزم بإعادة تشغيل ✓ وهذا هو المكسبُ المقصود).
-    assert _provenance_verdict(
-        {"sha": "abc1234", "code_hash": "h1"}, "abc1234", "h1") is None
-    assert _provenance_verdict(
-        {"sha": "abc1234", "code_hash": "h1"}, "def5678", "h1") is None
-    _no_stamp = _provenance_verdict(None, "abc1234", "h1")
+    # و`4242` = معرّفُ العملية **المستمعة** في هذا التمرين (المعاملُ الرابع — R78-1).
+    _live = {"pid": 4242, "sha": "abc1234", "code_hash": "h1"}
+    assert _provenance_verdict(_live, "abc1234", "h1", 4242) is None
+    assert _provenance_verdict({**_live, "sha": "def5678"}, "def5678", "h1", 4242) is None
+    _no_stamp = _provenance_verdict(None, "abc1234", "h1", 4242)
     assert _no_stamp and "لا حكمَ" in _no_stamp
-    _other = _provenance_verdict({"sha": "abc1234", "code_hash": "h1"}, "abc1234", "h9")
+    _other = _provenance_verdict(_live, "abc1234", "h9", 4242)
     assert _other and "أعِد تشغيل" in _other
     # **وتطبيقٌ أقدمُ لا ينشر `code_hash` يُرفض** ولا يُفترض فيه أنّه على الكود (فشلٌ مُغلَق).
-    _old = _provenance_verdict({"sha": "abc1234"}, "abc1234", "h1")
+    _old = _provenance_verdict({"pid": 4242, "sha": "abc1234"}, "abc1234", "h1", 4242)
     assert _old and "unknown" in _old
-    _unknown = _provenance_verdict({"sha": "abc1234", "code_hash": "unknown"}, "abc1234", "h1")
+    _unknown = _provenance_verdict({**_live, "code_hash": "unknown"}, "abc1234", "h1", 4242)
     assert _unknown and "unknown" in _unknown
+
+    # ————— R78-1 (مراجعة ٧٨): كودٌ مطابقٌ **لا يكفي** — البصمةُ ليست بصمةَ مَن يُجيب —————
+    # العطبُ المقيس: البصمةُ كانت تُكتب عند **الاستيراد**، وخطوةُ الوحدة في `qa_gate --full` تستورد
+    # `app` قبل فحص النهاية-إلى-النهاية ⇒ تُكتب من كود الشجرة ⇒ يمرّ الفحصُ على كودٍ قديم.
+    _not_listener = _provenance_verdict({**_live, "pid": 999999}, "abc1234", "h1", 4242)
+    assert _not_listener and "999999" in _not_listener and "4242" in _not_listener
+    # بصمةٌ بلا `pid` (تطبيقٌ أقدمُ من هذه الحماية) لا تُقبل بمُصدِّقٍ مجهول
+    _no_pid = _provenance_verdict({"sha": "abc1234", "code_hash": "h1"}, "abc1234", "h1", 4242)
+    assert _no_pid and "4242" in _no_pid
+    # ولا مستمعَ ⇒ رفضٌ مسمّى لا تمرير (غيابُ القياس ليس نظافة)
+    _no_listener = _provenance_verdict(_live, "abc1234", "h1", None)
+    assert _no_listener and "لا مستمعَ" in _no_listener
 
     s = ("… • تحقق الفوتر: 9/9 مطابق (دقة)، وتغطية 9/10 — غير قابلة للتحقق: "
          "1 (أوّلُ صفحة — لا مرجعَ سابق) • الكلفة: $0.0100")
@@ -106,6 +118,41 @@ def test_no_verdict_on_unknown_code_and_the_class_carries_its_reason():
     assert "صفحةٌ بلا صفوف: ص5" in _named_classes(empty_page), _named_classes(empty_page)
     assert _is_clean(dict(_run(), summary=rows_sum, rows_flag=False)), \
         "الوسمُ وحدَه يحكم — لا نصُّ الملخّص (لو حكم النصُّ لمرّ عطبٌ في صياغته)"
+
+
+def test_importing_app_does_not_sign_the_stamp_that_judges_it():
+    """**R78-1 — البرهانُ بالعطب نفسِه لا بوصفه:** يُزارع في `data/.app-code.json` ختمٌ «من عمليةٍ
+    أخرى»، ثمّ **يُستورَد `app` من عمليةٍ جديدة** — وهو بعينه ما تفعله خطوةُ الوحدة في `qa_gate --full`
+    قبل فحص النهاية-إلى-النهاية — ويجب أن يبقى الملفُّ **بايتًا ببايت**.
+
+    وقبل الإصلاح كان الاستيرادُ يُعيد كتابةَ الختم بمعرّف العملية المستورِدة ⇒ يسقط هذا الاختبار —
+    وهو بعينه السببُ الذي كان يجعل البوّابةَ تقابل كودَ الشجرة بكودِ الشجرة فلا ترفض قديمًا.
+    """
+    import json as _json
+    import subprocess
+
+    proj = Path(__file__).resolve().parents[1]
+    stamp = proj / "data" / ".app-code.json"
+    before = stamp.read_bytes() if stamp.exists() else None
+    implant = {"pid": 999999, "sha": "deadbee", "code_hash": "stale-sentinel",
+               "started": "2020-01-01T00:00:00"}
+    text = _json.dumps(implant, ensure_ascii=False)
+    try:
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(text, encoding="utf-8")
+        r = subprocess.run(
+            [sys.executable, "-c", "import app; assert app.APP_CODE_STAMP is None"],
+            cwd=str(proj), capture_output=True, text=True, timeout=600)
+        assert r.returncode == 0, (
+            f"استيرادُ `app` سقط أو نشر ختمًا (R78-1):\n{r.stdout[-700:]}\n{r.stderr[-700:]}")
+        assert stamp.read_text(encoding="utf-8") == text, (
+            "استيرادُ `app` أعاد كتابةَ البصمة — وهو العطبُ الذي يجعل الفحصَ الشامل يقابل كودَ "
+            "الشجرة بنفسه فلا يرفض كودًا قديمًا (R78-1)")
+    finally:
+        if before is None:
+            stamp.unlink(missing_ok=True)
+        else:
+            stamp.write_bytes(before)
 
 
 def test_repeating_suspect_names_a_deterministic_defect():
