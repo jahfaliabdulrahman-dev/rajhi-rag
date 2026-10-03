@@ -29,14 +29,20 @@ def test_public_documents_match_the_measured_report():
             pytest.skip("لا تقرير ولا لقطة مشتقّة — لا شيء يُحرَس")
         derived = json.loads(snapshot.read_text(encoding="utf-8"))
         assert rc.check(derived) == [], "الوثيقة تخالف لقطتها المشتقّة"
-        # **والقسمةُ لا تُفقَد بحذف مفتاحها (مقعدا المعايير والبنية · P2 · ثقبٌ مُثبت):** كانت
-        # دعوتا القسمة مشروطتين بوجود المفتاحين، فحذفُهما من اللقطة يُسقط الحارسَ بصمتٍ ويمرّ
-        # `check` أخضرَ. فلقطةٌ تُعلن كوربوسًا مختلطًا (نصُّ الإعلان موجود) **يجب** أن تحمل قسمته:
-        # فإمّا مفتاحٌ مشتقٌّ أو رفضٌ صريح، لا غيابٌ صامت.
-        if derived.get("corpus_declaration"):
-            missing = [k for k in ("split_unstamped", "split_stamped") if not derived.get(k)]
-            assert not missing, \
-                f"لقطةٌ تُعلن كوربوسًا مختلطًا بلا قسمةٍ مشتقّة: {missing} ⇒ الحارسُ يسقط بصمت"
+        # **والقسمةُ لا تُفقَد بحذف مفتاحها (مقعدا الجولة الثالثة · P2 · ثقبٌ مُثبت):** دعوتا
+        # القسمة مشروطتان بوجود المفتاح، فحذفُهما من اللقطة يُسقط الحارسَ بصمتٍ ويمرّ `check`
+        # أخضرَ. والحارسُ اسمٌ في الأداة (`snapshot_split_missing`) فيُقاس هنا على اللقطة الملتزمة
+        # وعلى الحالات المشروعة معًا:
+        assert rc.snapshot_split_missing(derived) == [], "لقطةٌ تُعلن حكمًا بلا قسمةٍ مشتقّة ⇒ حارسٌ ساقط"
+        # **ولا يُحمرّ على طرفٍ لا مجتمعَ له** — وهو ما أخطأتُه أوّلًا (شرطٌ طلب الطرفين معًا:
+        # كوربوسٌ نظيفٌ · `legacy` وحدَه · تعارضٌ وحدَه · تقرير `v1` بطرفٍ واحد — كلُّها مشروعة):
+        assert rc.snapshot_split_missing({**derived, "split_unstamped": None}) == [], \
+            "طرفٌ واحدٌ مشتقٌّ يكفي (لا يُطالَب طرفٌ لا مجتمعَ له)"
+        assert rc.snapshot_split_missing({**derived, "corpus_declaration": None}) == [], \
+            "بلا حكمٍ لا دعوى قسمة أصلًا ⇒ لا مطالبة"
+        # **وإذا سقط الطرفان معًا فالحارسُ يعضّ** (وهو ما يمنع الحذفَ الصامت).
+        assert rc.snapshot_split_missing({**derived, "split_unstamped": None, "split_stamped": None}), \
+            "لقطةٌ بحكمٍ وبلا أيّ طرفٍ مشتقّ يجب أن تُحمرّ"
         return
     derived = rc.derive()
     assert derived is not None

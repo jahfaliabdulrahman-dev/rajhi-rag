@@ -133,11 +133,13 @@ def reader_declaration(rep: dict) -> str:
     # **والحكمُ من المُنتِج، والعدّانِ بديلٌ احتياطيٌّ لا مسند** (لا يُستعملان إلّا حيث يغيب الحكم —
     # تقريرٌ مصنوعٌ بلا `declaration`): فسببٌ ثالثٌ في المُنتِج يُقرأ مختلطًا هنا بلا تعديلٍ هنا.
     decl = prov.get("declaration")
-    mixed = (decl != CLEAN_DECLARATION) if isinstance(decl, str) \
-        else (legacy > 0 or conflicts > 0)
+    # **والتطبيعُ قبل المقابلة** (مقعدُ الجولة الثالثة P3): مسافةٌ أو تشكيلٌ عارضٌ في نصّ الحكم
+    # كان يُقرأ مختلطًا خطأً ⇒ فجملةٌ نظيفةٌ بصياغةٍ مختلفة قليلًا تُنتج دعوى اختلاطٍ معدوم.
+    decl_s = decl.strip() if isinstance(decl, str) else None
+    mixed = (decl_s != CLEAN_DECLARATION.strip()) if decl_s else (legacy > 0 or conflicts > 0)
     if not mixed:
         return label
-    declared = decl if isinstance(decl, str) else "يُعلن ولا يُجمَع تحت رقمٍ واحد"
+    declared = decl_s or "يُعلن ولا يُجمَع تحت رقمٍ واحد"
     # **ووجودُ الختم من قيمته لا من نوعها** (مقعدُ البنية P3): ختمٌ بصيغة سلسلةٍ — وهي صيغةٌ
     # تدعمها `_stamp_label` صراحةً — كان يُنشر «غيرُ مُعلَن» عن ختمٍ مُعلَنٍ نصًّا ⇒ نصٌّ يناقض الواقع.
     has_stamp = label != "غير مختم"
@@ -252,6 +254,25 @@ def _env_values(d: dict) -> dict:
         except (OSError, ValueError):
             tb = None
     return tb or {}
+
+
+def snapshot_split_missing(d: dict) -> list[str]:
+    """**هل في اللقطة قسمةٌ مشتقّةٌ تُدخل الدعوةَ على الوثيقة؟** — حارسُ الثقبِ الصامت.
+
+    **العِلّةُ المقيسة (مقعدا الجولة الثالثة · اثنان استقلًّا):** دعوتا القسمة في `claims()` مشروطتان
+    بوجود المفتاح، فحذفُهما من اللقطة **يُسقط الحارسَ بصمت** و`check` يمرّ أخضر — وسبيلٌ حقيقيٌّ
+    يُنتجه: تقريرٌ موجودٌ وسجلاتُ صفحاته غيرُ مقروءة (وقد صار الرفضُ يُغلق هذا الآن: `derive` تخرج ٢).
+
+    **والحدُّ الذي ضُبط أخيرًا:** المطلوب **طرفٌ واحدٌ مشتقٌّ على الأقل**، لا الطرفان. فالشرطُ الأوّل
+    («يُعلن كوربوسًا مختلطًا ⇒ المفتاحان معًا») كان يُحمرّ زورًا على كوربوسٍ **نظيف** (طرفُه غيرُ المختوم
+    لا مجتمعَ له ⇒ `None`) وعلى أحاديّ الطرف (`legacy` وحدَه · تعارضٌ وحدَه · تقرير `v1`: `('621/629', None)`)
+    — قِيس على الأربعة، وكلُّها مشروعة. والطرفُ القائمُ وحدَه يكفي لدخول الوثيقة في الحرس.
+    """
+    if not d.get("corpus_declaration"):
+        return []
+    if d.get("split_unstamped") or d.get("split_stamped"):
+        return []
+    return ["split_unstamped|split_stamped"]
 
 
 def claims(d: dict) -> list[tuple[str, str, str]]:
