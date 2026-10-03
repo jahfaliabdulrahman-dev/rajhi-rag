@@ -106,23 +106,70 @@ def reader_declaration(rep: dict) -> str:
     كأنّها من قارئٍ واحد — وهو بعينه ما منعته FM-1 («يُعلن ولا يُجمَع تحت رقمٍ واحد»)، ويكذب معه
     ختمُ الرقم المنشور: يقول تلقينةً لم تُقرأ بها ٦٢٤ صفحة.
 
-    **والقاعدة:** أعلن التقريرُ صفحاتٍ غيرَ مختومة (`corpus_provenance.legacy_unstamped_pages > 0`)
-    ⇒ يُنشر **الإعلانُ المختلطُ بعدده**؛ وإلّا يُنشر الختمُ وحدَه (فلا إعلانَ بلا مقتضى، ولا
-    يُضاف نصٌّ ثابتٌ إلى كوربوسٍ نظيف). والقسمةُ (كم مختومة) تُشتقّ من فرق عدد الصفحات لا تُكتب بيد.
+    **ومسندُ «الاختلاط» واحدٌ في المُنتِج والقارئ (مقعدُ المعايير):** التقريرُ يُعلن مختلطًا إذا
+    وُجدت صفحاتٌ غيرُ مختومة **أو** تعارضَ ختمٌ (`tools/scale_slice.py`: الشرطان معًا) — وكانت
+    الدالّةُ تنظر في الشرط الأوّل وحدَه ⇒ تقريرٌ اختلاطُه من التعارض يُنشر منه ختمٌ واحدٌ بينما
+    `corpus_declaration` المنقولُ حرفيًّا يقول «مختلط» ⇒ حقلان يتناقضان في اللقطة.
+
+    **والقسمةُ تُشتقّ من فرق عدد الصفحات لا تُكتب بيد**، **ولا يُقال «مختومة» بلا ختمٍ معلَن:**
+    تقريرٌ بلا `reader_stamp` (وُجد فعلًا في أرشيف v1) كان يُنتج «٥ مختومة، بختم غير مختم» — نصٌّ
+    يناقض نفسَه (سجلُّ backfill يسمّي هذه الحال). فحين يغيب الختمُ يُقال ذلك صريحًا.
 
     **والضابط:** `tests/test_public_claims.py::test_a_mixed_corpus_is_not_published_under_one_stamp`.
     """
-    stamp = _stamp_label(rep.get("reader_stamp"))
     prov = rep.get("corpus_provenance") or {}
     legacy = int(prov.get("legacy_unstamped_pages") or 0)
-    if legacy <= 0:
-        return stamp
-    pages = (rep.get("slice") or {}).get("pages_done")
-    stamped = (pages - legacy) if isinstance(pages, int) else None
-    piece = f"{legacy} صفحةً غيرَ مختومة (قُرئت قبل تسجيل الهوية)"
-    if stamped is not None and stamped > 0:
-        piece += f" + {stamped} مختومة"
-    return f"مختلط — {piece}، بختم {stamp}"
+    conflicts = int(prov.get("stamp_conflict_pages") or 0)
+    raw = rep.get("reader_stamp")
+    label = _stamp_label(raw)
+    if legacy <= 0 and conflicts <= 0:
+        return label
+    declared = prov.get("declaration") or "يُعلن ولا يُجمَع تحت رقمٍ واحد"
+    pieces: list[str] = []
+    if legacy > 0:
+        pieces.append(f"{legacy} صفحةً غيرَ مختومة (قُرئت قبل تسجيل الهوية)")
+        pages = (rep.get("slice") or {}).get("pages_done")
+        if isinstance(raw, dict) and isinstance(pages, int) and pages - legacy > 0:
+            pieces.append(f"{pages - legacy} مختومة")
+    else:
+        pieces.append(f"{conflicts} صفحةً أُعيد قراءتها لتعارض ختم")
+    text = " + ".join(pieces)
+    if isinstance(raw, dict):
+        tail = f"بختم {label}"
+        if conflicts > 0 and legacy > 0:
+            tail += f" (ومن المختومة {conflicts} أُعيد قراءتها لتعارض ختم)"
+    else:
+        tail = "وختمُ القارئ غيرُ مُعلَنٍ في هذا التقرير"
+    return f"{declared}: {text}، {tail}"
+
+
+def _split_by_stamp(rep: dict, results: Path) -> tuple[str | None, str | None]:
+    """قسمةُ أحكام التذييل بالختم — **(غيرُ المختومة، المختومة)** بصيغةِ «مطابق/المجموع».
+
+    ولماذا في الأداة لا في الوثيقة (صدرُ الملفّ: «Keep public numbers DERIVED, never remembered»):
+    القسمةُ صارت جزءًا من الرقم المنشور (البند ٧ · FM-1)، وكانت تُكتب بيدٍ في الوثائق ⇒ انزياحُها
+    يفترق صامتًا (`claims()` لا يشترطها). فتُشتقّ من **مصدرَيها الحيّين**: حكمُ كلّ صفحةٍ من التقرير،
+    وختمُها من سجلّها في الكاش. والقيمةُ `None` حين ينقص أحدُ الطرفين ⇒ لا دعوى على مقامٍ معدوم.
+    """
+    per = {p.get("page"): (p.get("footer") or "") for p in (rep.get("per_page") or [])}
+    if not per or not results.exists():
+        return None, None
+    un_n = un_ok = st_n = st_ok = 0
+    for f in sorted(results.glob("pg-*.json")):
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:                                     # noqa: BLE001 — سجلٌّ غيرُ مقروء لا يُسقط الاشتقاق
+            continue
+        verdict = per.get(d.get("pg"))
+        if verdict is None:
+            continue
+        if d.get("model") or d.get("prompt_version"):
+            st_n += 1
+            st_ok += verdict == "ok"
+        else:
+            un_n += 1
+            un_ok += verdict == "ok"
+    return (f"{un_ok}/{un_n}" if un_n else None, f"{st_ok}/{st_n}" if st_n else None)
 
 
 def derive() -> dict | None:
@@ -136,11 +183,15 @@ def derive() -> dict | None:
 
         facts = scale_slice._cache_facts(RESULTS)
     f = rep["footer"]
+    split_un, split_st = _split_by_stamp(rep, RESULTS)
     return {
         # كل رقم معلن مربوطٌ بالزوج الذي أنتجه (FMEA FM-1.4): نموذجٌ وتلقينة — **والكوربوسُ المختلطُ
         # يُنشر بإعلانه وقسمته** لا بختمٍ واحد (`reader_declaration`).
         "reader_stamp": reader_declaration(rep),
         "corpus_declaration": (rep.get("corpus_provenance") or {}).get("declaration"),
+        # **وقسمةُ القراءتين جزءٌ من المنشور** (البند ٧): تُشتقّ هنا وتُقابَل في `claims()`.
+        "split_unstamped": split_un,
+        "split_stamped": split_st,
         "pages": rep["slice"]["pages_done"],
         "rows": rep["totals"]["rows"],
         "clean": rep["totals"]["clean"],
@@ -179,6 +230,14 @@ def claims(d: dict) -> list[tuple[str, str, str]]:
         ("README.md", d["documented_ratio"], "نسبة الصفحات الموثّقة"),
         ("README.md", d["clean_ratio"], "نظافة السلسلة"),
         ("README.md", d["clean_pct"], "نسبة النظافة المئوية"),
+        # **وقسمةُ القراءتين تُقابَل أيضًا (البند ٧ · FM-1 · مقعدا المعايير والبنية):** كانت
+        # القسمةُ تُكتب بيدٍ في الوثائق ولا يشترطها شيء ⇒ انزياحُها يفترق صامتًا، وهو صنفُ «نسختين
+        # من الحقيقة». والدعوى **مشروطةٌ بحضور الطرفين** (`_split_by_stamp` تُعيد `None` بلا كاش)
+        # ⇒ فلا تُعلن دعوى على مقامٍ لا وجودَ له، ولقطةٌ قديمة أو مثالٌ اصطناعيٌّ بلا المفتاح يمرّ
+        # كما كان (ولهذا لا تنكسر `test_claims_lists_every_metric_it_promises`).
+        *([("README.md", d["split_unstamped"], "قسمةُ القراءتين — غيرُ المختومة (FM-1)"),
+           ("README.md", d["split_stamped"], "قسمةُ القراءتين — المختومة (FM-1)")]
+          if d.get("split_unstamped") and d.get("split_stamped") else []),
         ("PLAN.md", d["documented_ratio"], "نسبة الصفحات الموثّقة"),
         ("PLAN.md", d["clean_ratio"], "نظافة السلسلة"),
         ("PLAN.md", f"{d['recoveries']} مرساة", "عدد المراسي المُستدركة"),

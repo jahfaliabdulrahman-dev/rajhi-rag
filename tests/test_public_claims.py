@@ -183,3 +183,23 @@ def test_a_mixed_corpus_is_not_published_under_one_stamp():
                                    "declaration": "كوربوسٌ بنسبٍ واحد"}}
     assert rc.reader_declaration(clean) == "google/gemini-3.7-flash:v2:fa91de52", \
         "كوربوسٌ مختمٌ كلُّه يُنشر بختمه وحدَه (لا إعلانَ بلا مقتضى)"
+
+    # **ومسندُ «الاختلاط» واحدٌ في المُنتِج والقارئ (مقعدُ المعايير · سقوطٌ مُثبت):** تقريرٌ
+    # اختلاطُه من **تعارض ختم** وحدَه (`legacy_unstamped_pages == 0`) كان يُنشر منه **ختمٌ واحد**
+    # بينما `corpus_declaration` المنقولُ من التقرير يقول «مختلط» ⇒ حقلان يتناقضان في اللقطة.
+    conflict_only = {**mixed,
+                     "corpus_provenance": {"legacy_unstamped_pages": 0, "stamp_conflict_pages": 3,
+                                           "declaration": "مختلط/غير مختم — يُعلن ولا يُجمَع تحت رقمٍ واحد"}}
+    out2 = rc.reader_declaration(conflict_only)
+    assert out2 != rc._stamp_label(single), "اختلاطُ التعارض رجع ختمًا واحدًا (مخالفًا لإعلان التقرير)"
+    assert "3" in out2 and "تعارض" in out2, out2
+
+    # **وغيابُ الختم لا يُركَّب نصًّا يناقض نفسَه:** «٥ مختومة، بختم غير مختم» — كان يُنتج بلا شرط.
+    no_stamp = {**mixed, "reader_stamp": None}
+    out3 = rc.reader_declaration(no_stamp)
+    assert "غيرُ مُعلَن" in out3 and "بختم" not in out3, out3
+
+    # **ولا دعوى على مقامٍ معدوم:** بلا سجلاتِ صفحات (= بيئةُ الـCI) تُعيد القسمة `None` ⇒ فلا
+    # يُشترط رقمُ القسمة في الوثيقة، ولا تُقابَل قيمةٌ بمقامٍ لا وجودَ له.
+    assert rc._split_by_stamp({"per_page": [], "slice": {"pages_done": 629}},
+                              Path("/nonexistent-results")) == (None, None)
