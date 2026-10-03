@@ -269,6 +269,10 @@ def main() -> None:
         page_pngs.append(png)
 
     # ————— 2. per-page read (checkpointed) —————
+    # **السقفُ يقيس ما صرفته هذه الجلسة لا ما صرفه الكوربوس (فخُّ ص١٨٧ · قِيس):**
+    # كان الفحصُ يقابل `usage_total` — وهو يجمع كلفةَ الصفحاتِ المُستأنَفةِ المحفوظةَ أيضاً
+    # (~$10.2 للكوربوس) — بسقفِ الجلسة ⇒ فيتوقّف تشغيلٌ مجّانيٌّ عند ص١٨٧ بلا طلبٍ واحد.
+    live_cost = 0.0
     usage_total = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0,
                    "cost": 0.0}
     stop_reason = None
@@ -430,7 +434,7 @@ def main() -> None:
             # (`at_or_over` تحت) ⇒ فقِيس أنّ `--max-cost 0` **قرأ صفحةً كاملةً** (~١٫٧ سنتًا على نسخةٍ
             # من v2) ثمّ توقّف. فيُسأل هنا أوّلًا: بالسقف الصفريّ لا يُرسَل طلبٌ واحد، وبأيّ سقفٍ لا
             # تُصرف صفحةٌ فوقه. والدالّةُ نفسُها (`>=` بالسنوات المعلَنة) حتى لا تختلف دلالةُ الحارس.
-            if at_or_over(usage_total.get("cost", 0.0), args.max_cost):
+            if at_or_over(live_cost, args.max_cost):
                 stop_reason = (f"سقفُ الميزانية ${args.max_cost} — لا قراءةَ تُصرف فوقه")
                 break
             t0 = time.time()
@@ -475,6 +479,7 @@ def main() -> None:
             usage = _sum_dicts({"calls": 1}, st_r)
             usage = _sum_dicts(usage, st_f or {})
             usage_total = _sum_dicts(usage_total, usage)
+            live_cost += usage.get("cost") or 0.0
             page_no = st_r.get("page_no")
             _write_json_atomic(cache, {
                 # ختم القارئ مع كل نقطة فحص: بكوربوسٍ واحد قارئان = رقمٌ واحد
@@ -508,6 +513,7 @@ def main() -> None:
             if rst:
                 usage_total = _sum_dicts(
                     usage_total, _sum_dicts({"calls": 1}, rst))
+                live_cost += rst.get("cost") or 0.0
                 _bump_usage(cache, _sum_dicts({"calls": 1}, rst))
             cdata = _read_cache(cache) or {}
             if recovered is not None:
@@ -558,6 +564,7 @@ def main() -> None:
             fresh_raw, accepted, note = try_page_reread(
                 str(png), cum, prev_footer, footer, prev_closing, pst)
             usage_total = _sum_dicts(usage_total, _sum_dicts({"calls": 1}, pst))
+            live_cost += pst.get("cost") or 0.0
             _bump_usage(cache, _sum_dicts({"calls": 1}, pst))
             if clash and accepted and fresh_raw is not None:
                 fresh_clash = desc_direction_clash(
@@ -577,6 +584,7 @@ def main() -> None:
                     if rst2:
                         usage_total = _sum_dicts(
                             usage_total, _sum_dicts({"calls": 1}, rst2))
+                        live_cost += rst2.get("cost") or 0.0
                         _bump_usage(cache, _sum_dicts({"calls": 1}, rst2))
                     if rec2 is not None:
                         raw_rows = patched2
@@ -684,7 +692,7 @@ def main() -> None:
                 stop_reason = (f"نسبة الشكوك في آخر {args.stop_window} صفحات "
                                f"{ratio:.0%} > {args.stop_suspect_ratio:.0%}")
                 break
-        if at_or_over(usage_total.get("cost", 0.0), args.max_cost):
+        if at_or_over(live_cost, args.max_cost):
             stop_reason = f"تجاوز سقف الميزانية ${args.max_cost}"
             break
 
