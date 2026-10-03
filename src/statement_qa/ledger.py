@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from decimal import Decimal
 from pathlib import Path
 
 #: مسارُ الدفتر: **مُهمَلٌ ولا يُتتبَّع أبدًا** (قرارُ المالك) — **والدعوى صارت واقعةً يُقاس بها**
@@ -48,6 +49,13 @@ UNSUPPORTED = "unsupported"
 #: تدعم» — بل **مسارٌ أو إذن** (مجلّدٌ أُعطي كقاعدةٍ، أو ملفٌّ بلا إذن قراءة): قِيس أنّ الحالتين كانتا
 #: تُسمّيان `unsupported` ⇒ **علاجٌ خاطئ** (بناءُ البيئة بدل تصحيح المسار). فلكلٍّ اسمُه.
 UNREADABLE = "unreadable"
+#: **والترقيم (أ-٣ · البندُ الرابع):** الدفترُ **بياناتٌ مُشتقّة** — فمسارُ ترقيته ليس هجرةً صامتةً
+#: تُخمّن، بل: قاعدةٌ أقدمُ من الكود ⇒ `outdated` (أعدْ بناءَها من المصدر، وهو رخيصٌ ومُتاح)، وقاعدةٌ
+#: أحدثُ من الكود ⇒ `newer` (لا يُقرأ بمخطَّطٍ لا يعرفه الكاتب). وما بينهما لا يُخمَّن أبدًا.
+OUTDATED = "outdated"
+NEWER = "newer"
+#: نسخةُ المخطَّط الحاليّة. **تُرفع مع كلّ تغييرٍ بنيويّ،** ويُقيَّد الترقيمُ في `PRAGMA user_version`.
+SCHEMA_VERSION = 1
 
 
 class LedgerUnavailable(RuntimeError):
@@ -64,6 +72,8 @@ class LedgerUnavailable(RuntimeError):
             CORRUPT: "قاعدةُ البيانات غيرُ قابلةٍ للقراءة (تالفة)",
             UNSUPPORTED: "قاعدةُ البيانات غيرُ مدعومةٍ في هذه البيئة",
             UNREADABLE: "قاعدةُ البيانات غيرُ قابلةٍ للفتح (مسارٌ أو إذن)",
+            OUTDATED: "قاعدةُ البيانات أقدمُ من الكود (أعِدْ بناءَها من المصدر)",
+            NEWER: "قاعدةُ البيانات أحدثُ من الكود (حدّث الكود أو أعِد البناء)",
         }.get(state, "قاعدةُ البيانات غيرُ متاحة")
         super().__init__(f"{why}: {path.name}" + (f" — {detail}" if detail else ""))
 
@@ -225,6 +235,34 @@ COLUMNS = (
 INS_COLUMNS = COLUMNS
 
 
+#: **سياسةُ الأنواع — مُقاسةٌ على 5809 صفًّا من مصدرك، لا مُفترَضة** (مقعدُ التثبيت P2 · مُثبت):
+#:  · `BOOL` (`opening` · `chain_ok`): الرندرُ يحملها `bool`، وSQLite بلا نوعٍ منطقيّ ⇒ تُخزَّن `0/1`
+#:    وتُقرأ `bool` — وإلا فـ`chain_suspect` (يشترط `is False`) **لا يصدُق على `0`**، وبناءُ الاشتقاق يسقط.
+#:  · `INT` (`page` · `row_no` · `printed_page` · `year` · `counted`): تُقرأ أعدادًا — وإلا اختلفت الخليّةُ
+#:    (نصٌّ `'1'` مقابل عددٍ `1`) في 11881 خليّةً (قِيس).
+#:  · `DEC` (`derived_movement`): الرندرُ يحملها `Decimal` ⇒ تُخزَّن `TEXT` (دقّةٌ لا تفقد) وتُقرأ `Decimal`.
+#:  · **والمالُ `str` في الرندر نفسِه** (قِيس: 5792 نصًّا) ⇒ `TEXT` مطابقٌ له لا مخالف.
+#: والقاعدة: عمودٌ يقرؤه المستهلك بغير نوعه = **مصدرٌ ناقص**، ولو تساوت قيمتُه.
+BOOL_COLUMNS = ("opening", "chain_ok")
+INT_COLUMNS = ("page", "row_no", "printed_page", "year", "counted")
+DEC_COLUMNS = ("derived_movement",)
+
+
+def _typed(col: str, v):
+    """يُعيد قيمةَ العمود بنوعه المُعلَن — و`None`/الفراغ يبقيان `None` (17 صفًّا بلا رصيدٍ في مصدرك)."""
+    if v is None:
+        return None
+    if v == "" and col in (*BOOL_COLUMNS, *INT_COLUMNS, *DEC_COLUMNS):
+        return None          # فراغٌ في عمودٍ مُقيَّمٍ = لا قيمة؛ وأمّا النصُّ فالفراغُ فيه قيمةٌ (قِيس)
+    if col in BOOL_COLUMNS:
+        return v if isinstance(v, bool) else bool(int(v))
+    if col in INT_COLUMNS:
+        return int(v)
+    if col in DEC_COLUMNS:
+        return Decimal(v)
+    return v
+
+
 def _row_values(r: dict) -> tuple:
     """صفُّ الرندر ⇒ أعمدةُ الإدراج — **والتحويلُ والترجمةُ في موضعٍ واحد**.
 
@@ -262,6 +300,11 @@ def ledger_path(root: Path, statement: str) -> Path:
     return root.joinpath(*LEDGER_SUBDIR, f"{safe}.sqlite")
 
 
+def _has_tables(conn: sqlite3.Connection) -> bool:
+    return any(conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"))
+
+
 def _db_file(conn: sqlite3.Connection) -> Path:
     """مسارُ قاعدة المتّصل — **من المحرّك نفسِه لا من خريطةٍ عالميّة** (مقعدُ التثبيت P3 · مُثبت).
 
@@ -284,7 +327,8 @@ def open_ledger(path: Path, *, create: bool = True) -> sqlite3.Connection:
     لأنّ علاجَهما مختلف: الأوّل يعيد المستخدمُ التشغيلَ، والثاني يعني ملفًّا أُفسِد.
     """
     path = Path(path)
-    if not path.exists():
+    fresh = not path.exists()
+    if fresh:
         if not create:
             raise LedgerUnavailable(MISSING, path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -294,7 +338,17 @@ def open_ledger(path: Path, *, create: bool = True) -> sqlite3.Connection:
         # **ودالّةُ التطبيع تُسجَّل قبل المخطَّط**: العمودُ المُشتقُّ `desc_norm` يعتمد عليها،
         # و`deterministic=True` شرطٌ في أعمدة SQLite المُولَّدة (وبلا الشرط يرفضها المحرّك).
         conn.create_function("norm_ar", 1, lambda s: norm_ar(s), deterministic=True)
+        # **الترقيمُ قبل البناء** (وإلا فقاعدةٌ أحدثُ تُقرأ بمخطَّطٍ لا يعرفه هذا الكود):
+        have = int(conn.execute("PRAGMA user_version").fetchone()[0])
+        if have not in (0, SCHEMA_VERSION):
+            state = OUTDATED if have < SCHEMA_VERSION else NEWER
+            raise LedgerUnavailable(state, path, f"user_version={have} والكودُ {SCHEMA_VERSION}")
+        if have == 0 and not fresh and _has_tables(conn):
+            # قاعدةٌ سبقت الترقيم: مخطَّطُها مجهولٌ بالنصّ ⇒ لا يُخمَّن، والدفترُ مُشتقٌّ فإعادتُه رخيصة.
+            raise LedgerUnavailable(OUTDATED, path, "قاعدةٌ بلا ترقيم — أعدْ بناءَها من المصدر")
         conn.executescript(SCHEMA)
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        conn.commit()
         return conn
     except sqlite3.DatabaseError as e:
         # **والتفريقُ بين «ليست قاعدةَ بيانات» و«البيئةُ لا تدعمها» (مقعدُ البنية P3 · مُثبت):** ملفٌّ
@@ -372,7 +426,7 @@ def read_rows(conn: sqlite3.Connection, pg: int | None = None) -> list[dict]:
         sql += " WHERE pg = ?"
         args = (pg,)
     sql += " ORDER BY pg, row_no"
-    return [dict(row) for row in conn.execute(sql, args)]
+    return [{c: _typed(c, row[c]) for c in COLUMNS} for row in conn.execute(sql, args)]
 
 
 def search(conn: sqlite3.Connection, query: str, limit: int = 20) -> list[dict]:
@@ -420,3 +474,59 @@ def record_qa(conn: sqlite3.Connection, asked_at: str, question: str, answer: st
                          [(qid, int(i)) for i in row_ids if i is not None])
     return qid
 
+#: **الأقصدُ الثابتة (البندُ الثاني · «النموذجُ لا يكتب SQL»).** وهذا هو الفرقُ العمليّ بين **وكيلٍ يقرأ
+#: قاعدة** و**وكيلٍ يُنفّذ استعلاماتٍ مُخترَعة**: هنا تُعدَّد الأسئلةُ المسموحُ بها، ويُقبَل **معاملٌ بقيمةٍ
+#: فقط** (`pg=`/`q=`) — فالوكيلُ يختار قصدًا ويُمرّي قيمةً، ولا يبني نصَّ SQL أبدًا. وما لا قصدَ له لا يُجاب.
+INTENTS: tuple[str, ...] = ("coverage", "unproven", "totals", "search", "pages", "qa")
+
+
+def _dec_sum(values) -> str:
+    """جمعُ المال **بالعشريّ لا بالعائم** — ولو كان المجموعُ عمودًا نصّيًّا في SQLite.
+
+    **العِلّة:** `SUM()` على عمودٍ نصّيٍّ في SQLite يُحوّل إلى `REAL` ⇒ كسرٌ ثنائيٌّ في المال، وهو
+    أوّلُ ما يُسقِط التدقيق. فالجمعُ يُقرأ نصًّا ويُجمَع `Decimal`، والقيمةُ تُعاد نصًّا بلا فاصلةٍ زائدة.
+    """
+    total = sum((Decimal(v) for v in values if v not in (None, "")), Decimal("0"))
+    return format(total, "f")
+
+
+def answer(conn: sqlite3.Connection, intent: str, *, pg: int | None = None,
+           q: str | None = None, limit: int = 20) -> dict:
+    """يُجيب عن **قصدٍ من `INTENTS`** — ويُرفض ما ليس منها بالاسم (لا استعلامٌ حرّ).
+
+    والقيمُ المعادة تشمل **الوسمَ** (`intent`) و**البيئةَ** (عدُّ ما قُرئ) ليقترن كلُّ رقمٍ بسياقه.
+    """
+    if intent not in INTENTS:
+        raise ValueError(f"قصدٌ غيرُ مُعدَّد: {intent!r} — المسموح: {', '.join(INTENTS)}")
+    if intent == "coverage":
+        rows = conn.execute("SELECT COUNT(*) FROM rows_verified").fetchone()[0]
+        pages = conn.execute("SELECT COUNT(*) FROM pages").fetchone()[0]
+        unproven_n = conn.execute("SELECT COUNT(*) FROM unproven").fetchone()[0]
+        verdicts = {v: n for v, n in conn.execute(
+            "SELECT COALESCE(verdict,'-'), COUNT(*) FROM pages GROUP BY 1 ORDER BY 2 DESC")}
+        return {"intent": intent, "rows": rows, "pages": pages,
+                "unproven": unproven_n, "page_verdicts": verdicts}
+    if intent == "unproven":
+        got = unproven(conn)
+        return {"intent": intent, "count": len(got), "rows": got[:limit]}
+    if intent == "totals":
+        rows = read_rows(conn)
+        debit = [r["movement"] for r in rows if r["side"] == "debit"]
+        credit = [r["movement"] for r in rows if r["side"] == "credit"]
+        return {"intent": intent, "rows_counted": len(rows),
+                "debit": _dec_sum(debit), "credit": _dec_sum(credit),
+                "debit_rows": len(debit), "credit_rows": len(credit)}
+    if intent == "search":
+        return {"intent": intent, "query": q, "rows": search(conn, q or "", limit=limit)}
+    if intent == "pages":
+        sql = "SELECT pg, printed_page, verdict, rows_count, cost_usd FROM pages"
+        args: tuple = ()
+        if pg is not None:
+            sql += " WHERE pg = ?"
+            args = (pg,)
+        return {"intent": intent, "pages": [dict(r) for r in conn.execute(sql + " ORDER BY pg", args)]}
+    got = conn.execute(
+        "SELECT q.id, q.asked_at, q.question, q.answer, q.refused, COUNT(e.row_id) AS evidence "
+        "FROM qa q LEFT JOIN qa_evidence e ON e.qa_id = q.id GROUP BY q.id ORDER BY q.id DESC LIMIT ?",
+        (limit,)).fetchall()
+    return {"intent": intent, "qa": [dict(r) for r in got]}

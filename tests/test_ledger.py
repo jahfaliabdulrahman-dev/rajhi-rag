@@ -24,13 +24,13 @@ def _rows(n: int = 3) -> list[dict]:
     out = []
     for i in range(1, n + 1):
         out.append({
-            "page": 1, "row_no": i, "printed_page": "١",
+            "page": 1, "row_no": i, "printed_page": 1,   # قِيس في الرندر الحقيقيّ: int (5801) أو None (8)
             "date": "2026-01-0%d" % i, "date_iso": "2026-01-0%d" % i, "date_status": "ok",
             "date_source": "من خانة الورق", "year": 2026,
             "desc": "حوالة صادرة رقم %d" % i,
             "printed_movement": "10.00", "printed_balance": "15.00",
             "movement": "10.00", "balance": "15.00", "derived_movement": "10.00",
-            "side": "debit", "opening": "105.00", "chain_ok": 1,
+            "side": "debit", "opening": (i == 1), "chain_ok": 1,   # بوول في الرندر (قِيس: 5809 بوولًا)
             "row_state": "حركة", "source": "من خانة الورق", "shift": "",
             "footer": "ok", "counted": 1,
         })
@@ -263,18 +263,6 @@ def test_the_column_contract_is_equal_in_both_directions():
         f"المخطَّطُ والثابتُ افترقا: {sorted(set(sql_cols) ^ {'id', *L.COLUMNS, 'desc_norm'})}"
 
 
-@pytest.mark.xfail(strict=True, reason="""
-البوّابةُ الحاسمة **مفتوحةٌ بإعلان** (لا مُخفاة): الرندرُ من الدفتر يخالف الملفَّ في **مجاميع مدين/دائن**
-(قِيس: «ص2: debits عندنا 0 وعند المحكَّم 464.00» + 1109 فرقًا).
-
-**والعلّةُ مُنعزَلةٌ بالقياس وقد صُحّحت بعد طعن مقعد التثبيت (P2 · مُثبت):** ليست `opening` وحدَه —
-بل **أربعةُ أعمدةٍ تفقد نوعَها** عبر SQLite، ولا نوعَ منطقيًّا/عشريًّا فيها:
-`opening` (`True`↔`'1'`) · `chain_ok` (`True`↔`1` — و`chain_suspect` يشترط `is False` فلا يصدُق على `0`) ·
-`printed_page` (`int`↔`'1'`) · `derived_movement` (`Decimal`↔`'300.00'`).
-وقِيس أنّ إصلاحَ `opening` وحدَه يُمرّ الاشتقاقَ ويُبقي **11,881 خليّةً مختلفة** ⇒ **و`strict=True` لا
-تصيح على إصلاحٍ جزئيّ** (يبقى xfail). فالمطلوبُ **سياسةُ نوعٍ مُعلَنة للأربعة** (`bool` بصورة `0/1`،
-`int`، و`Decimal` من نصّ) — قِيس أنّها تُصفّر الفروقَ — ثمّ يُنزع الوسمُ.
-""")
 def test_the_workbook_rendered_from_the_ledger_equals_the_current_file(tmp_path):
     """**البوّابةُ الحاسمة (الخارطة أ-٣ · مقعدا المواصفة والبنية P1):** «الإكسل المُرندَر **من الدفتر**
     = الملف الحالي **صفًّا بصفّ** — فرقٌ واحد = توقّف».
@@ -282,6 +270,12 @@ def test_the_workbook_rendered_from_the_ledger_equals_the_current_file(tmp_path)
     **وهنا تُقابَل الخلايا ورقةً بورقة** (لا الصفوفُ وحدها)، لأنّ نصَّ البوّابةِ الورقةَ: أيُّ فرقٍ في
     خليّة — عمودٌ مُشتقٌّ أو تنسيقُ قيمة — يُسقِط المقابلة. وكان قبل هذا المسارِ قياسٌ طوطولوجيّ يقابل
     الدفترَ بمصدره (قاسه المقعدان)، والآن يمرّ الرندرُ فعليًّا من القاعدة عبر `to_xlsx --from-ledger`.
+
+    **وقد كانت مفتوحةً بإعلانٍ صادق** (`xfail strict`) لأنّ الرندرَ من الدفتر كان يُصفّر مدين/دائن؛
+    وطعنَ مقعدُ التثبيت إعلاني: ليست `opening` وحدَه بل **أربعةُ أعمدةٍ تفقد نوعَها** (قِيس: إصلاحُ واحدٍ
+    يُبقي 11881 خليّةً مختلفة، و`strict` لا تصيح على إصلاحٍ جزئيّ). فصُنعت سياسةُ الأنواع المُعلَنة في
+    الوحدة (`BOOL_COLUMNS`/`INT_COLUMNS`/`DEC_COLUMNS`) ⇒ ** XPASS فأسقط المجموعةَ حتى نُزع الوسمُ**،
+    وهذا هو الحرسُ ذاتيُّ التنظيف يعمل: البوّابةُ الآن بوّابةٌ لا إعلان.
     """
     run = ROOT / "data" / "local_sample" / "slice_629p_v2"
     if not (run / "results").exists():
@@ -373,3 +367,66 @@ def test_the_ledger_rows_are_the_render_rows_field_by_field(tmp_path):
             assert _same(_want(want, col), have[col]), \
                 f"صفحة {want.get('page')} صفّ {want.get('row_no')} عمود {col}: {_want(want, col)!r} ≠ {have[col]!r}"
     conn.close()
+
+
+def test_the_intents_are_a_closed_list_and_nothing_else_is_answerable(tmp_path):
+    """**البندُ الثاني («النموذجُ لا يكتب SQL») · مُثبت:** الواجهةُ **مغلقةٌ** — قصدٌ من ستّة، ومعاملٌ
+    بقيمة. و«لا يكتب SQL» دعوى لا تصحّ بنصٍّ في وثيقة، بل بواجهةٍ لا يملك فيها النداءُ إلا اختيارَ قصد.
+    """
+    conn, _ = _fresh(tmp_path)
+    L.ingest(conn, _rows(2), _pages())
+    for intent in L.INTENTS:
+        got = L.answer(conn, intent)
+        assert got["intent"] == intent, intent
+    assert tuple(L.INTENTS) == ("coverage", "unproven", "totals", "search", "pages", "qa")
+    with pytest.raises(ValueError, match="قصدٌ غيرُ مُعدَّد"):
+        L.answer(conn, "SELECT * FROM rows_verified")
+    conn.close()
+    # **ونهايةً إلى نهاية:** الأداةُ ترفض غير المُعدَّد بالرمز ٢ (لا بانهيار) — قِيس بـsubprocess.
+    db = tmp_path / "cli.sqlite"
+    c = L.open_ledger(db); L.ingest(c, _rows(2), _pages()); c.close()
+    for bad in ("SELECT * FROM rows_verified", "drop"):
+        out = subprocess.run([sys.executable, str(ROOT / "tools" / "ledger.py"),
+                              "ask", "--db", str(db), bad],
+                             capture_output=True, text=True, cwd=ROOT)
+        assert out.returncode == 2, (bad, out.returncode, out.stderr[-200:])
+
+
+def test_the_money_totals_come_back_exact(tmp_path):
+    """**قصدُ `totals` · مُثبت:** المجموعُ نصٌّ عشريٌّ لا عائم — لأنّ `SUM()` على عمودٍ نصّيٍّ في SQLite
+    يُحوّل إلى `REAL`، والمالُ أوّلُ ما يُسقِط العائمُ تدقيقه.
+    """
+    src = _rows(3)
+    conn, _ = _fresh(tmp_path)
+    L.ingest(conn, src, _pages())
+    out = L.answer(conn, "totals")
+    # **والتوقّعُ يُشتقّ من المصدر نفسِه** (لا رقمٌ مكتوبٌ بيد): مجموعُ مدين الصفوف المصدرية بعشريّة.
+    from decimal import Decimal as D                    # noqa: PLC0415
+    want = sum((D(r["movement"]) for r in src if r["side"] == "debit" and r["movement"]), D("0"))
+    assert isinstance(out["debit"], str) and "." in out["debit"], out
+    assert D(out["debit"]) == want, (out["debit"], str(want))
+    assert out["rows_counted"] == 3
+    conn.close()
+
+
+def test_the_schema_version_is_stamped_and_foreign_versions_are_refused(tmp_path):
+    """**البندُ الرابع (الترقيم) · مُثبت:** الدفترُ **مُشتقٌّ** — فقاعدةٌ أقدمُ من الكود تُعاد (رخيصةٌ
+    ومُتاحة)، وقاعدةٌ أحدثُ **لا تُقرأ** بمخطَّطٍ لا يعرفه الكاتب، وما بينهما **لا يُخمَّن**.
+    """
+    fresh = tmp_path / "fresh.sqlite"
+    conn = L.open_ledger(fresh)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == L.SCHEMA_VERSION
+    conn.close()
+
+    newer = tmp_path / "newer.sqlite"
+    c = sqlite3.connect(newer); c.execute("PRAGMA user_version = 99")
+    c.execute("CREATE TABLE x(a)"); c.commit(); c.close()
+    with pytest.raises(L.LedgerUnavailable) as ei:
+        L.read_ledger(newer)
+    assert ei.value.state == L.NEWER, ei.value.state
+
+    old = tmp_path / "old.sqlite"
+    c = sqlite3.connect(old); c.execute("CREATE TABLE rows_verified(a)"); c.commit(); c.close()
+    with pytest.raises(L.LedgerUnavailable) as ei:
+        L.read_ledger(old)                       # user_version = 0 مع جداول ⇒ مخطَّطٌ مجهولٌ بالنصّ
+    assert ei.value.state == L.OUTDATED, ei.value.state
