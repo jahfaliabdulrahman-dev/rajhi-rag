@@ -1066,6 +1066,15 @@ def ask_followup(history):
         return (history, sources_md, pd.DataFrame(),
                 _note_update("⛔ لا أدلة: تعذّرت الأدوات — هذا الجواب لم "
                              "يُحسَب من الكشف (أُفرغت اللوحة عمداً)."))
+    if mode == "typed":
+        # **الاستشهادُ المُصرَّح به من النوع (أ-٤)** — يُعرض هو، وكلُّ استشهادٍ لا شاهدَ له في
+        # الأثرِ **يُسمّى في اللوحة** بدل أن يُمرَّر كأنّه مُثبت.
+        df, note = _evidence_from_numbers(res.cited_row_ids)
+        if getattr(res, "unsupported_citations", None):
+            note = ((note + " · ") if note else "") + (
+                "⚠ استشهادٌ بلا شاهدِ أثر: "
+                + ", ".join(f"صف {n}" for n in res.unsupported_citations))
+        return history, sources_md, df, _note_update(note)
     if mode == "tools":
         df, note = _evidence_from_numbers(res.used_row_nos)
         return history, sources_md, df, _note_update(note)

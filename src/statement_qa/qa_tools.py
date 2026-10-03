@@ -77,6 +77,25 @@ def used_rows_from_trace(trace: list[dict]) -> list[int]:
     return sorted({no for call in trace for no in call.get("row_nos", [])})
 
 
+def citation_truth(cited, trace) -> dict:
+    """**الاستشهادُ المُصرَّح به يُقابَل بالأثر — ولا يُصدَّق بلفظه** (بوّابةُ أ-٤).
+
+    «الأثرُ» هو الصفوفُ التي **أخذتها الأدواتُ فعلًا** (`used_rows_from_trace`) ⇒ فما استشهد به
+    النموذجُ ولم يشهد به الأثرُ **يُسمّى باسمه** (`unsupported`) ولا يُحذف ولا يُمرَّر صامتًا.
+    وهذا نصفُ البوّابة الثاني: «**النوعُ يُصلح الاستخراج · والأثرُ يُصلح الصدق**».
+    """
+    witness = set(used_rows_from_trace(trace or []))
+    got: list[int] = []
+    for x in (cited or []):
+        try:
+            got.append(int(str(x).strip()))
+        except (TypeError, ValueError):
+            continue          # مُدخلٌ ليس رقمًا لا يُخترع له صفّ (ولا يُسقَط صامتًا: لا يدخل العدّ)
+    cited_sorted = sorted(set(got))
+    return {"cited": cited_sorted, "witnessed": sorted(witness),
+            "unsupported": [n for n in cited_sorted if n not in witness]}
+
+
 _FOOTER_AR = {
     "ok": "مطابق",
     "mismatch": "غيرُ مطابق — صفوفُ الصفحة لا تُغلق الرقمَ المطبوع",

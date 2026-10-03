@@ -16,7 +16,24 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+# **والاستيرادُ متسامحٌ عن قصد (قِيس):** كان `from pydantic import …` في الرأس ⇒ فصارت الوحدةُ
+# تحتاج pydantic **لتُستورَد**، فسقط جمعُ خمسةَ عشرَ ضابطًا في البيئة الخفيفة (بلا langchain/pydantic)
+# ⇒ نقصَ العدُّ بلا رسالة. والآن تُستورَد الوحدةُ دائمًا، وتعمل النوعيّةُ حيث يوجد pydantic،
+# **ويسقط النوعُ مُعلَنًا** حيث لا يوجد (و`tests/test_answer_type.py` يتخطّى هناك).
+try:                                    # pragma: no cover - depends on installed stack
+    from pydantic import BaseModel, Field
+    _PYDANTIC = True
+except ImportError:                     # pragma: no cover
+    _PYDANTIC = False
+
+    class BaseModel:                    # بديلٌ صامتٌ لا يُتحقَّق منه شيء: يكفي ليُستورَد الملفّ
+        def __init__(self, **kw):
+            self.__dict__.update(kw)
+
+    def Field(default=None, **_kw):     # noqa: N802 — اسمٌ من pydantic يُحاكى عند غيابه
+        return default
 from decimal import Decimal
 
 from statement_qa.retriever import retrieve
@@ -130,32 +147,67 @@ def _text(content) -> str:
     return str(content)
 
 
-def _run_agent(llm, tools, system_prompt: str, user_content: str) -> str:
-    """create_agent (langchain 1.x) with a create_react_agent fallback."""
+class Answer(BaseModel):
+    """**جوابٌ مُقيَّدٌ نوعًا (بوّابةُ أ-٤):** الاستشهادُ يُسلَّم هنا — لا يُقصّ من النثر.
+
+    **والعِلّة:** كان الجوابُ نصًّا ثمّ تُستخرَج أرقامُ الصفوف منه بتعبيرٍ نمطيّ ⇒ فالاستشهادُ
+    **مُستنتَجٌ** من نصٍّ حرّ، ولا شيءَ يمنع نموذجًا من كتابة رقمٍ بلا شاهد. والنوعُ يقلب الاتّجاه:
+    `cited_row_ids` يُطلب صراحةً، **ويُقابَل بالأثر** (`citation_truth`) ⇒ فما لا شاهدَ له يُسمّى.
+    """
+    answer: str = Field(description="الجوابُ بالعربية، بأرقامٍ حقيقيةٍ من الكشف")
+    cited_row_ids: list[int] = Field(
+        default_factory=list, description="أرقامُ الصفوف العامة التي استُشهد بها (وما لا شاهدَ له يُعلَن)")
+    refused: bool = Field(default=False, description="True إن امتنع: لا شاهدَ يحمل الجواب")
+
+
+def _run_agent(llm, tools, system_prompt: str, user_content: str,
+               response_format=None) -> tuple[str, object | None, str]:
+    """create_agent (langchain 1.x) مع نوعٍ مُقيَّد، و**وضعٌ يُعلَن**: `typed` أو `prose`.
+
+    **ولا انحدارَ صامت:** نسخةٌ لا تعرف الوسيط ترفع `TypeError` ⇒ يُبنى بلا نوعٍ **ويُعلَن**
+    أنّ الجواب نصّيّ (`prose`)، فلا يُقرأ لاحقًا كأنّ استشهادَه مُصرَّحٌ به. وكذلك مسارُ
+    `create_react_agent` الاحتياطيّ ⇒ `prose`. **ولا نداءَ نموذجٍ هنا في الاختبار** (يُقاس ببديل).
+    """
+    typed = response_format is not None
     try:
         from langchain.agents import create_agent
-
-        agent = create_agent(model=llm, tools=tools, system_prompt=system_prompt)
     except ImportError:  # pragma: no cover - depends on installed stack
         from langgraph.prebuilt import create_react_agent
 
         agent = create_react_agent(llm, tools, prompt=system_prompt)
+        typed = False
+    else:
+        kw = {"model": llm, "tools": tools, "system_prompt": system_prompt}
+        if typed:
+            kw["response_format"] = response_format
+        try:
+            agent = create_agent(**kw)
+        except TypeError:      # نسخةٌ لا تعرف `response_format` ⇒ بلا نوع، ويُعلَن ذلك
+            agent = create_agent(model=llm, tools=tools, system_prompt=system_prompt)
+            typed = False
     res = agent.invoke({"messages": [{"role": "user", "content": user_content}]})
+    parsed = res.get("structured_response") if isinstance(res, dict) else None
+    if typed and parsed is not None and getattr(parsed, "answer", None):
+        return str(parsed.answer).strip(), parsed, "typed"
     msgs = res.get("messages", []) if isinstance(res, dict) else []
     if not msgs:
-        return ""
-    return _text(msgs[-1].content).strip()
+        return "", None, "prose"
+    # **والوضعُ يوصف ما سُلِّم لا ما طُلب** (أمسكه ضابطُ النوع): إن مرّرنا الوسيطَ ولم يعد كائنٌ
+    # مُقيَّد، فالجوابُ **نثرٌ** ⇒ يُعلَن كذلك، وإلّا قُرئ استشهادُه لاحقًا كأنّه مُصرَّحٌ به وهو مُقتطع.
+    return _text(msgs[-1].content).strip(), None, "prose"
 
 
-def _answer_with_tools(llm, rows, context: str,
-                       question: str, footers=None) -> tuple[str, list[dict]]:
+def _answer_with_tools(llm, rows, context: str, question: str,
+                       footers=None) -> tuple[str, list[dict], object | None, str]:
     from statement_qa.qa_tools import make_qa_tools
 
     trace: list[dict] = []
     tools = make_qa_tools(rows, trace=trace, footers=footers)
     user = (f"القطع المرفقة:\n{context}\n\n"
             f"إن احتجت حساب أي رقم فاستخدم الأدوات.\n\nالسؤال: {question}")
-    return _run_agent(llm, tools, AGENT_SYSTEM_PROMPT, user), trace
+    text, parsed, mode = _run_agent(llm, tools, AGENT_SYSTEM_PROMPT, user,
+                                    response_format=Answer)
+    return text, trace, parsed, mode
 
 
 def _tool_was_used(trace: list[dict]) -> bool:
@@ -184,6 +236,10 @@ class QAResult:
     # A NUMERIC question answered without a single tool call. Not a failure —
     # a recollection, and it must be labelled as one (Gate 4, case F).
     ungrounded: bool = False
+    # **الاستشهادُ المُصرَّح به (أ-٤):** من النوعِ لا من النثر — ومقابَلٌ بالأثر.
+    cited_row_ids: list[int] = field(default_factory=list)
+    citation_mode: str = "prose"          # typed | prose — يُعلَن ولا يُخمَّن
+    unsupported_citations: list[int] = field(default_factory=list)
 
     def __str__(self) -> str:
         src = "; ".join(f"صفحة {s['page']} ص{s['row_start']}–{s['row_end']}"
@@ -314,10 +370,13 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
     used: list[int] = []
     tools_failed = False
     ungrounded = False
+    parsed = None
+    mode = "prose"
+    refused = False
     if rows:
         try:
-            answer, trace = _answer_with_tools(llm, rows, context, question,
-                                               footers=footers)
+            answer, trace, parsed, mode = _answer_with_tools(llm, rows, context, question,
+                                                             footers=footers)
             from statement_qa.qa_tools import used_rows_from_trace
 
             used = used_rows_from_trace(trace)
@@ -326,7 +385,7 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
                 # One nudge, aimed: «use a tool» is a directive the agent
                 # follows far more often than the softer wording above — and if
                 # it still does not, the answer is labelled rather than trusted.
-                answer2, trace2 = _answer_with_tools(
+                answer2, trace2, parsed2, mode2 = _answer_with_tools(
                     llm, rows, context,
                     question + "\n\n(استخدم أداة حسابية واحدة على الأقل قبل "
                                "الجواب، ولا تحسب بنفسك.)",
@@ -334,6 +393,7 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
                 used2 = used_rows_from_trace(trace2)
                 if used2 or _tool_was_used(trace2):
                     answer, used = answer2, used2
+                    trace, parsed, mode = trace2, parsed2, mode2   # الوضعُ يتبع الجوابَ المُعتمَد
                 else:
                     # «رفض لا وسم» (المدقّق، جوابه ١): رقم لم يُحسَب لا يُعرض
                     # كجواب أصلاً — الوسم يضيع في ملف يُمرَّر كـPDF.
@@ -352,7 +412,18 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
     if not answer:
         answer = _answer_plain(llm, context, question)
         used = []
+    # **والاستشهادُ من النوع يُقابَل بالأثر** (بوّابةُ أ-٤): كلُّ استشهادٍ بلا شاهدٍ يُسمّى باسمه
+    from statement_qa.qa_tools import citation_truth
+
+    cited = list(getattr(parsed, "cited_row_ids", []) or []) if parsed is not None else []
+    truth = citation_truth(cited, trace if rows and not tools_failed else [])
+    if parsed is not None and getattr(parsed, "refused", False):
+        refused = True
     return QAResult(answer=answer,
+                    cited_row_ids=truth["cited"],
+                    citation_mode=mode,
+                    unsupported_citations=truth["unsupported"],
+                    refused=refused,
                     sources=[{k2: h[k2] for k2 in
                               ("chunk_id", "page", "row_start", "row_end")}
                              for h in hits],

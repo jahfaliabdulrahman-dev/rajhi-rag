@@ -139,11 +139,15 @@ def evidence_mode(res) -> str:
     'none'     — the tools failed: the panel is emptied on purpose, because
                  evidence assembled from the model's own citations is evidence
                  for a claim that was never computed (audit P2-10);
+    'typed'    — **الاستشهادُ من النوع (أ-٤)**: أرقامُ الصفوف جاءت في كائنٍ مُقيَّد لا من نثرٍ
+                 يُقتطع بتعبيرٍ نمطيّ ⇒ فهي تُعرض هي، وكلُّ استشهادٍ بلا شاهدِ أثرٍ يُعلَن؛
     'tools'    — rows a tool actually touched (the strong case);
     'fallback' — a descriptive answer: citations, else retrieval pages.
     """
     if getattr(res, "tools_failed", False) or getattr(res, "ungrounded", False):
         return "none"      # no computed evidence exists to show
+    if getattr(res, "citation_mode", "prose") == "typed" and getattr(res, "cited_row_ids", None):
+        return "typed"     # النوعُ مقدَّمٌ على القصّ: هو الذي يُصرّح، والأثرُ هو الذي يشهد
     if getattr(res, "used_row_nos", None):
         return "tools"
     return "fallback"
