@@ -1,0 +1,351 @@
+"""دفترُ الكشف — SQLite محلّيّة، مصدراً للجدول المُتحقَّق منه (أ-٣).
+
+**قرارُ المالك (2026-10-02 · `docs/COURSE_REQUIREMENTS.md:29,57`):** «قاعدةُ SQLite محلّيّة لكلّ كشف»
+⇒ **ملفٌّ واحدٌ لكلّ كشفٍ على جهاز المستخدم، تحت مسارٍ مُهمَلٍ لا يُتتبَّع أبدًا**، يقرؤه الوكيلُ
+باستعلاماتٍ ثابتةٍ في الكود. **والنموذجُ لا يكتب SQL**: عقدُ «النموذجُ لا يحسب» قائم.
+
+**ولماذا دفترٌ لا ملفّات JSON** (`results/pg-*.json`): الملفّاتُ تصلح للتشغيل الواحد ولا تصلح لما
+يُسأل عنه لاحقًا — «ما الذي لم يُثبت؟» يُجاب بمرورٍ على ٦٢٩ ملفًّا في كلّ سؤال، ولا سلسلةَ استعلاماتٍ
+ولا فهرسَ نصّيّ. والدفترُ يجعل السؤالَ استعلامًا واحدًا **ومحصورًا في الكود** (لا يُولّده نموذج).
+
+**وثلاثةُ قيودٍ تُبنى في المخطَّط لا في النيّة** (الخارطة أ-٣):
+1. **المبالغُ `TEXT` لا `REAL`**: `CHECK(typeof(...))` ⇒ فلا يدخل رقمٌ عشريٌّ عائم ويُطبَع برقمٍ عائمٍ طويلٍ لا يُقرأ.
+   والقيدُ **يعضّ** على الإدخال نفسه، لا يُنبَّه عليه في التوثيق.
+2. **الفهرسُ لا ينطفئ صامتًا**: triggers على `INSERT/UPDATE/DELETE` تُبقي `row_fts` تابعًا؛ وبلاها
+   يُدرَج صفٌّ فلا يُوجَد بالبحث أبدًا — عطبٌ صامتٌ لا شاهدَ له (الخارطةُ تنصّ عليه بالاسم).
+3. **«ما لم يُثبت» يُشتقّ**: المنظارُ `unproven` هو مصدرُه الوحيد؛ فلا تُكتب القائمةُ بيدٍ في تقرير.
+
+**والخطأُ مسمّى** (بندُ الإرشادات): قاعدةٌ غائبةٌ أو تالفة ⇒ `LedgerUnavailable` برسالةٍ تسمّي السبب،
+**بلا انهيار** — لأنّ المستخدمَ النهائيّ إنسانٌ ينظر، لا مطوّرٌ يقرأ traceback.
+
+**والاختبارُ الحاسم** (`tests/test_ledger.py`): ما يُكتب يُقرأ **صفًّا بصفّ** — قيدٌ واحدٌ يُخالف ⇒ أحمر.
+"""
+from __future__ import annotations
+
+import json
+import re
+import sqlite3
+from pathlib import Path
+
+#: مسارُ الدفتر: **مُهمَلٌ ولا يُتتبَّع أبدًا** (قرارُ المالك). ويقع تحت `data/` ليشمله
+#: **حارسا النشر والمبالغ معًا**: الحارسُ يمنع امتداد `.sqlite` تحت `data/` عند الدفع
+#: (`tools/publish_guard.py` EXT_BLOCK) و`tools/amount_guard.py` يعدّ `data/` من مجلّدات
+#: الأدلّة الثنائيّة ⇒ فالملفُّ محروسٌ من الطريقين، ولذلك **ضابطٌ يقيسهما لا نيّةٌ**.
+LEDGER_SUBDIR = ("data", "ledgers")
+
+#: **حالةُ الدفتر** — القيمةُ الوحيدةُ التي تُنشر عن توفّره هي ما تقوله هذه الدالّة.
+MISSING = "missing"
+CORRUPT = "corrupt"
+
+
+class LedgerUnavailable(RuntimeError):
+    """**خطأٌ مسمّى** لقاعدةٍ غائبةٍ أو تالفة — يُعرَض للمستخدم بلفظه، لا يُسقِط التطبيق.
+
+    **العِلّة:** بندُ الإرشادات يطلب «قاعدةٌ غيرُ متاحة ⇒ خطأٌ مسمّى»؛ و`sqlite3.OperationalError`
+    الخام يقول «unable to open database file» — وهي رسالةٌ لمطوّرٍ لا لمستخدمِ كشفِ حساب.
+    """
+
+    def __init__(self, state: str, path: Path, detail: str = "") -> None:
+        self.state, self.path, self.detail = state, path, detail
+        why = {
+            MISSING: "قاعدةُ البيانات غيرُ موجودة",
+            CORRUPT: "قاعدةُ البيانات غيرُ قابلةٍ للقراءة (تالفة)",
+        }.get(state, "قاعدةُ البيانات غيرُ متاحة")
+        super().__init__(f"{why}: {path.name}" + (f" — {detail}" if detail else ""))
+
+
+#: **التطبيعُ العربيّ**: ما يفترق في الورق ويتّحد في المعنى. و`remove_diacritics 2` في FTS5
+#: يكفي للتشكيل وحده؛ وهذه الدالّة تُكمله بما لا يفعله: الهمزاتُ بأشكالها · التاءُ المربوطة ·
+#: التطويل · الألفُ المقصورة · الأرقامُ العربيّةُ الهنديّة (تُقرأ في الورق وتُكتب في السؤال).
+_AR_MAP = str.maketrans({
+    "أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ى": "ي", "ئ": "ي", "ؤ": "و",
+    "ة": "ه", "ـ": "", "٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4",
+    "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9",
+})
+_DIACRITICS = re.compile(r"[\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06dc\u06df-\u06e8\u06ea-\u06ed]")
+
+
+def norm_ar(text: str | None) -> str:
+    """الصورةُ المُطبَّعة: تُقابَل بها نصوصُ الصفوف وبها يُطبَّع السؤالُ قبل البحث.
+
+    والقاعدةُ: **البحثُ لا يعتمد على ما كتبه المُدخِل** — «اجمالي الايداعات» و«إجماليّ الإيداعات»
+    و«اجمالى الايداعات» صفٌّ واحدٌ في العين، فليكن صفًّا واحدًا في الفهرس أيضًا.
+    """
+    if not text:
+        return ""
+    return _DIACRITICS.sub("", str(text)).translate(_AR_MAP).strip()
+
+
+#: **المخطَّط.** كلُّ قيدٍ فيه يحمل علّته بجانبه، لأنّ قيدًا بلا علّةٍ يُحذَف عند أوّل ضيق.
+SCHEMA = """
+PRAGMA journal_mode=WAL;
+PRAGMA foreign_keys=ON;
+
+-- صفحاتُ الكشف: حكمُ التذييل لكلّ صفحة (قرارُ المالك: «أحكامَ التذييل لكلّ صفحة»).
+CREATE TABLE IF NOT EXISTS pages (
+    pg            INTEGER PRIMARY KEY,
+    printed_page  TEXT,
+    verdict       TEXT NOT NULL CHECK (verdict IN
+                      ('ok','gap','mismatch','absent','unchecked','other')),
+    rows_count    INTEGER NOT NULL DEFAULT 0,
+    cost_usd      TEXT,                       -- كلفةُ الصفحة: TEXT لا REAL (المالُ لا يُطبَع عائمًا)
+    CHECK (cost_usd IS NULL OR typeof(cost_usd) = 'text')
+);
+
+-- الجدولُ المُتحقَّق منه: أعمدةُ الرندر العشرون نفسُها (فيُقابَل صفًّا بصفّ).
+CREATE TABLE IF NOT EXISTS rows_verified (
+    id               INTEGER PRIMARY KEY,
+    pg               INTEGER NOT NULL REFERENCES pages(pg) ON DELETE CASCADE,
+    row_no           INTEGER NOT NULL,
+    printed_page     TEXT,
+    date             TEXT,
+    date_iso         TEXT,
+    date_status      TEXT,
+    date_source      TEXT,
+    year             INTEGER,
+    desc             TEXT,
+    -- **العمودُ المُطبَّع مُشتقٌّ في القاعدة نفسِها** (`GENERATED ... STORED` بدالّة `norm_ar` المُسجَّلة
+    -- في `open_ledger`): فلا يُكتب بيدٍ ولا يفترق عن `desc` بتحديثٍ مباشر. وكان يمكن أن يُكتب ويُنسى
+    -- ⇒ يصير الفهرسُ يحمل نصًّا قديمًا **صامتًا** (قِيس: تحديثُ `desc` وحدَه ثمّ بحثٌ عن الجديد ⇒ صفر).
+    desc_norm        TEXT GENERATED ALWAYS AS (norm_ar(desc)) STORED,
+    printed_movement TEXT,
+    printed_balance  TEXT,
+    movement         TEXT,
+    balance          TEXT,
+    derived_movement TEXT,
+    side             TEXT,
+    opening          TEXT,
+    chain_ok         INTEGER,
+    row_state        TEXT,
+    source           TEXT,
+    shift            TEXT,
+    footer           TEXT,
+    counted          INTEGER,
+    -- **قيدُ المبلغ**: TEXT أو غيابٌ — ولا ثالث (فلا يُطبَع مبلغٌ برقمٍ عائمٍ طويلٍ في كشفٍ قانونيّ).
+    CHECK (movement         IS NULL OR typeof(movement)         = 'text'),
+    CHECK (printed_movement IS NULL OR typeof(printed_movement) = 'text'),
+    CHECK (printed_balance  IS NULL OR typeof(printed_balance)  = 'text'),
+    CHECK (balance          IS NULL OR typeof(balance)          = 'text'),
+    CHECK (derived_movement IS NULL OR typeof(derived_movement) = 'text'),
+    -- **قيدُ المرساة (أ-٣: «CHECK للمرساة + proof_source»)**: صفٌّ وُسم مرساةً **يجب** أن يعلن
+    -- مصدرَ إثباته؛ وإلّا فهو ادّعاءٌ بلا شاهد — وهو بعينه ما تمنعه قاعدةُ «ما لم يُثبت».
+    CHECK (row_state IS NULL OR row_state NOT LIKE '%مرساة%'
+           OR (source IS NOT NULL AND source <> '')),
+    UNIQUE (pg, row_no)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rows_page  ON rows_verified(pg, row_no);
+CREATE INDEX IF NOT EXISTS idx_rows_date  ON rows_verified(date_iso);
+CREATE INDEX IF NOT EXISTS idx_rows_state ON rows_verified(row_state);
+
+-- سجلُّ الأسئلة والأجوبة مع صفوف الدليل (قرارُ المالك: «سجلَّ الأسئلة والأجوبة مع صفوف الدليل»).
+CREATE TABLE IF NOT EXISTS qa (
+    id         INTEGER PRIMARY KEY,
+    asked_at   TEXT NOT NULL,
+    question   TEXT NOT NULL,
+    answer     TEXT,
+    refused    INTEGER NOT NULL DEFAULT 0,   -- الامتناعُ نتيجةٌ مُعلَنة لا فراغ
+    CHECK (refused IN (0, 1))
+);
+
+CREATE TABLE IF NOT EXISTS qa_evidence (
+    qa_id  INTEGER NOT NULL REFERENCES qa(id) ON DELETE CASCADE,
+    row_id INTEGER NOT NULL REFERENCES rows_verified(id) ON DELETE CASCADE,
+    PRIMARY KEY (qa_id, row_id)
+);
+
+-- **الفهرسُ النصّيّ.** `remove_diacritics 2` يُسقط التشكيلَ من الطرفين، والعمودُ `desc_norm`
+-- يحمل تطبيعَ الهمزات/التاء/التطويل الذي لا يفعله المُقطِّع.
+CREATE VIRTUAL TABLE IF NOT EXISTS row_fts USING fts5(
+    desc_norm, printed_movement, movement,
+    content='rows_verified', content_rowid='id',
+    tokenize="unicode61 remove_diacritics 2"
+);
+
+-- **والتبعُ إجباريّ**: بلا هذه الثلاثة ينطفئ الفهرسُ صامتًا (يُدرَج صفٌّ فلا يوجد أبدًا).
+CREATE TRIGGER IF NOT EXISTS rows_ai AFTER INSERT ON rows_verified BEGIN
+    INSERT INTO row_fts(rowid, desc_norm, printed_movement, movement)
+    VALUES (new.id, new.desc_norm, new.printed_movement, new.movement);
+END;
+CREATE TRIGGER IF NOT EXISTS rows_ad AFTER DELETE ON rows_verified BEGIN
+    INSERT INTO row_fts(row_fts, rowid, desc_norm, printed_movement, movement)
+    VALUES ('delete', old.id, old.desc_norm, old.printed_movement, old.movement);
+END;
+CREATE TRIGGER IF NOT EXISTS rows_au AFTER UPDATE ON rows_verified BEGIN
+    INSERT INTO row_fts(row_fts, rowid, desc_norm, printed_movement, movement)
+    VALUES ('delete', old.id, old.desc_norm, old.printed_movement, old.movement);
+    INSERT INTO row_fts(rowid, desc_norm, printed_movement, movement)
+    VALUES (new.id, new.desc_norm, new.printed_movement, new.movement);
+END;
+
+-- **المنظاران المشتقّان** — «ما لم يُثبت» لا يُكتب بيدٍ في تقرير، بل يُقرأ من هنا.
+CREATE VIEW IF NOT EXISTS coverage AS
+    SELECT p.pg, p.printed_page, p.verdict, p.rows_count,
+           (SELECT COUNT(*) FROM rows_verified r WHERE r.pg = p.pg)      AS rows_stored,
+           (SELECT COUNT(*) FROM rows_verified r WHERE r.pg = p.pg
+              AND r.counted = 1)                                          AS rows_counted,
+           (SELECT COUNT(*) FROM rows_verified r WHERE r.pg = p.pg
+              AND r.chain_ok = 0)                                         AS rows_broken_chain
+      FROM pages p;
+
+CREATE VIEW IF NOT EXISTS unproven AS
+    SELECT r.id, r.pg, r.row_no, r.printed_page, r.desc,
+           COALESCE(r.balance, r.printed_balance) AS amount,
+           r.row_state, r.source
+      FROM rows_verified r
+     WHERE (r.source IS NULL OR r.source = '')
+       AND COALESCE(r.row_state, '') NOT LIKE '%ملخّص%';
+"""
+
+#: أعمدةُ الصفّ كما تُقرأ — **أسماءُ الرندر نفسُها** (فتُقابَل صفًّا بصفّ بلا ترجمة).
+COLUMNS = (
+    "pg", "row_no", "printed_page", "date", "date_iso", "date_status",
+    "date_source", "year", "desc", "printed_movement", "printed_balance", "movement",
+    "balance", "derived_movement", "side", "opening", "chain_ok", "row_state",
+    "source", "shift", "footer", "counted",
+)
+
+#: أعمدةُ الإدراج = أعمدةُ القراءة (و`desc_norm` عمودٌ مُشتقٌّ في القاعدة ⇒ لا يُدرَج).
+INS_COLUMNS = COLUMNS
+
+
+def _row_values(r: dict) -> tuple:
+    """صفُّ الرندر ⇒ أعمدةُ الإدراج — **والتحويلُ في موضعٍ واحد**.
+
+    **العِلّةُ المقيسة (أمسكتها بوّابةُ المقابلة صفًّا بصفّ على بيانات المالك):** صفوفُ الرندر تحمل
+    `decimal.Decimal` للمبالغ، و`sqlite3` **لا يُسندها**: `ProgrammingError: Error binding parameter 14`.
+    وكان الإدراجُ يمرّ في الاختبار الاصطناعيّ (صفوفٌ نصّيّةٌ بيد) ويسقط على المصدر الحقيقيّ — وهو بعينه
+    ما تنصّ البوّابةُ عليه: تُقاس على المصدر لا على نموذجٍ منه.
+
+    **والقاعدة:** المالُ نصٌّ (`str`) كما في عقد أ-٣ · والأعلامُ المنطقيّةُ `0/1` (لا `True/False`
+    فتتفرّق القراءة) · والأعدادُ الصحيحةُ كما هي. **وما لا يُعرف نوعُه يُنصَّص** ولا يُمرَّر خامًّا.
+    """
+    out: list = []
+    for c in COLUMNS:
+        v = r.get("page") if c == "pg" else r.get(c)
+        if isinstance(v, bool):
+            v = int(v)
+        elif v is not None and not isinstance(v, (int, str, bytes)):
+            v = str(v)
+        out.append(v)
+    return tuple(out)
+
+
+def ledger_path(root: Path, statement: str) -> Path:
+    """مسارُ دفترِ كشفٍ واحد: `<root>/data/ledgers/<statement>.sqlite` (مُهمَلٌ ✗ يُتتبَّع)."""
+    safe = re.sub(r"[^0-9A-Za-z_.\-]", "-", statement) or "statement"
+    return root.joinpath(*LEDGER_SUBDIR, f"{safe}.sqlite")
+
+
+def open_ledger(path: Path, *, create: bool = True) -> sqlite3.Connection:
+    """يفتح الدفترَ أو يُنشئه، **ويُسمّي العطب** بدل أن يرفع خطأً خامًّا.
+
+    والتفريقُ مقصود: `missing` (لا ملفّ) و`corrupt` (ملفٌّ ليس قاعدةً أو بنيتُه مكسورة) —
+    لأنّ علاجَهما مختلف: الأوّل يعيد المستخدمُ التشغيلَ، والثاني يعني ملفًّا أُفسِد.
+    """
+    path = Path(path)
+    if not path.exists():
+        if not create:
+            raise LedgerUnavailable(MISSING, path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        conn = sqlite3.connect(str(path))
+        conn.row_factory = sqlite3.Row
+        # **ودالّةُ التطبيع تُسجَّل قبل المخطَّط**: العمودُ المُشتقُّ `desc_norm` يعتمد عليها،
+        # و`deterministic=True` شرطٌ في أعمدة SQLite المُولَّدة (وبلا الشرط يرفضها المحرّك).
+        conn.create_function("norm_ar", 1, lambda s: norm_ar(s), deterministic=True)
+        conn.executescript(SCHEMA)
+        return conn
+    except sqlite3.DatabaseError as e:
+        raise LedgerUnavailable(CORRUPT, path, type(e).__name__) from e
+
+
+def _text(value) -> str | None:
+    """**كلُّ مبلغٍ نصٌّ** — يمرّ من هنا وحدَه، فلا يُنسى قيدُ `TEXT` في موضع."""
+    return None if value is None else str(value)
+
+
+def ingest(conn: sqlite3.Connection, rows: list[dict], pages: dict[int, dict],
+           report: dict | None = None) -> dict:
+    """يكتب الجدولَ المُتحقَّق منه وأحكامَ الصفحات في معاملةٍ واحدة.
+
+    **والمصدرُ هو مخرَجُ `tools/to_xlsx.load` نفسُه** لا نسخةً ثانيةً منه: نسخةٌ ثانيةٌ من بناء
+    الصفوف تعني حكمين يُفترقان صامتين، والبوّابةُ («يُقرأ صفًّا بصفّ») تُقابِل مصدرًا بمصدر.
+    """
+    written = 0
+    with conn:
+        for pg, entry in sorted(pages.items()):
+            verdict = (entry.get("footer") or "other")
+            if verdict not in {"ok", "gap", "mismatch", "absent", "unchecked"}:
+                verdict = "other"
+            cost = (entry.get("usage") or {}).get("cost") if isinstance(entry.get("usage"), dict) else None
+            conn.execute(
+                "INSERT INTO pages(pg, printed_page, verdict, rows_count, cost_usd) "
+                "VALUES(?,?,?,?,?) ON CONFLICT(pg) DO UPDATE SET "
+                "printed_page=excluded.printed_page, verdict=excluded.verdict, "
+                "rows_count=excluded.rows_count, cost_usd=excluded.cost_usd",
+                (pg, str(entry.get("page_no")) if entry.get("page_no") else None, verdict,
+                 int(entry.get("rows") or 0), _text(cost)),
+            )
+        for r in rows:
+            conn.execute(
+                f"INSERT OR REPLACE INTO rows_verified({', '.join(INS_COLUMNS)}) "
+                f"VALUES({', '.join('?' for _ in INS_COLUMNS)})",
+                _row_values(r),
+            )
+            written += 1
+    return {"pages": len(pages), "rows": written}
+
+
+def read_rows(conn: sqlite3.Connection, pg: int | None = None) -> list[dict]:
+    """يُعيد الصفوفَ بأسماء الرندر نفسها — **لتُقابَل صفًّا بصفّ** (البوّابةُ الحاسمة)."""
+    sql = f"SELECT {', '.join(COLUMNS)} FROM rows_verified"
+    args: tuple = ()
+    if pg is not None:
+        sql += " WHERE pg = ?"
+        args = (pg,)
+    sql += " ORDER BY pg, row_no"
+    return [dict(row) for row in conn.execute(sql, args)]
+
+
+def search(conn: sqlite3.Connection, query: str, limit: int = 20) -> list[dict]:
+    """بحثٌ نصّيّ **باستعلامٍ ثابتٍ في الكود** — النموذجُ يمرّر نصًّا ولا يكتب SQL."""
+    needle = norm_ar(query)
+    if not needle:
+        return []
+    rows = conn.execute(
+        "SELECT r.id, r.pg, r.row_no, r.desc, r.printed_movement, r.movement "
+        "FROM row_fts f JOIN rows_verified r ON r.id = f.rowid "
+        "WHERE row_fts MATCH ? ORDER BY rank LIMIT ?",
+        (" OR ".join(f'"{tok}"' for tok in needle.split() if tok), limit),
+    )
+    return [dict(r) for r in rows]
+
+
+def unproven(conn: sqlite3.Connection) -> list[dict]:
+    """«ما لم يُثبت» — **من المنظار، لا من قائمةٍ مكتوبةٍ في تقرير**."""
+    return [dict(r) for r in conn.execute(
+        "SELECT id, pg, row_no, printed_page, desc, amount, row_state, source FROM unproven")]
+
+
+def record_qa(conn: sqlite3.Connection, asked_at: str, question: str, answer: str | None,
+              row_ids: list[int], refused: bool = False) -> int:
+    """يسجّل سؤالًا وجوابَه **وصفوفَ دليله** — فالجوابُ يُقابَل بأثره لا يُصدَّق بلفظه."""
+    with conn:
+        cur = conn.execute(
+            "INSERT INTO qa(asked_at, question, answer, refused) VALUES(?,?,?,?)",
+            (asked_at, question, answer, 1 if refused else 0))
+        qid = int(cur.lastrowid)
+        conn.executemany("INSERT OR IGNORE INTO qa_evidence(qa_id, row_id) VALUES(?,?)",
+                         [(qid, int(i)) for i in row_ids if i is not None])
+    return qid
+
+
+def load_json_pages(run: Path) -> dict[int, dict]:
+    """أحكامُ الصفحات من الكاش (بلا polars ولا نموذج) — للاختبار والتهيئة السريعة."""
+    out: dict[int, dict] = {}
+    for f in sorted((run / "results").glob("pg-*.json")):
+        data = json.loads(f.read_text(encoding="utf-8"))
+        if isinstance(data.get("pg"), int):
+            out[int(data["pg"])] = data
+    return out
