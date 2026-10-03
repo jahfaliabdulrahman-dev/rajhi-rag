@@ -1,4 +1,4 @@
-"""بوّاباتُ دفتر الكشف (أ-٣) — اثنتا عشرةَ بوّابة، كلُّ واحدةٍ تقيس ما تنصّ عليه الخارطة بالاسم.
+"""بوّاباتُ دفتر الكشف (أ-٣) — ثلاثَ عشرةَ بوّابةً، كلُّ واحدةٍ تقيس ما تنصّ عليه الخارطة بالاسم.
 
 **والقاعدةُ الحاكمة:** البوّابةُ الحاسمةُ الأولى — **ما كُتب يُقرأ صفًّا بصفّ**. فكلُّ قيدٍ آخر
 (المبالغُ TEXT · الفهرسُ لا ينطفئ · التطبيع · الخطأُ المسمّى) يُقاس لأنّه يحمي هذه القراءة.
@@ -264,12 +264,16 @@ def test_the_column_contract_is_equal_in_both_directions():
 
 
 @pytest.mark.xfail(strict=True, reason="""
-البوّابةُ الحاسمة **مفتوحةٌ بإعلان** (لا مُخفاة): الرندرُ من الدفتر يخالف الملفَّ في **مجاميع
-مدين/دائن** (قِيس: «ص2: debits عندنا 0 وعند المحكَّم 464.00» +1109 فرقًا). والسببُ مُنعزَلٌ بالقياس:
-الفرقُ الوحيدُ في الصفوف هو `opening` — الرندرُ يحمله `True` (bool) والدفترُ نصًّا `'1'` (لا نوعَ
-منطقيًّا في SQLite) — والملخَّصُ يقرؤه **نوعًا** لا قيمةً فتخرج المجاميعُ صفرًا. ⇒ يلزم **سياسةُ نوعٍ
-مُعلَنة** للعمود (`bool` بصورة `0/1` + ترجمةٌ في القارئ) قبل أن يُسمّى الدفترُ «مصدرَ الرندر».
-وstrict=True مقصودة: يومَ يُصلَح العمودُ يصير XPASS فيُسقط المجموعةَ حتى يُنزع الوسمُ (لا يُترك حرسٌ ساقط).
+البوّابةُ الحاسمة **مفتوحةٌ بإعلان** (لا مُخفاة): الرندرُ من الدفتر يخالف الملفَّ في **مجاميع مدين/دائن**
+(قِيس: «ص2: debits عندنا 0 وعند المحكَّم 464.00» + 1109 فرقًا).
+
+**والعلّةُ مُنعزَلةٌ بالقياس وقد صُحّحت بعد طعن مقعد التثبيت (P2 · مُثبت):** ليست `opening` وحدَه —
+بل **أربعةُ أعمدةٍ تفقد نوعَها** عبر SQLite، ولا نوعَ منطقيًّا/عشريًّا فيها:
+`opening` (`True`↔`'1'`) · `chain_ok` (`True`↔`1` — و`chain_suspect` يشترط `is False` فلا يصدُق على `0`) ·
+`printed_page` (`int`↔`'1'`) · `derived_movement` (`Decimal`↔`'300.00'`).
+وقِيس أنّ إصلاحَ `opening` وحدَه يُمرّ الاشتقاقَ ويُبقي **11,881 خليّةً مختلفة** ⇒ **و`strict=True` لا
+تصيح على إصلاحٍ جزئيّ** (يبقى xfail). فالمطلوبُ **سياسةُ نوعٍ مُعلَنة للأربعة** (`bool` بصورة `0/1`،
+`int`، و`Decimal` من نصّ) — قِيس أنّها تُصفّر الفروقَ — ثمّ يُنزع الوسمُ.
 """)
 def test_the_workbook_rendered_from_the_ledger_equals_the_current_file(tmp_path):
     """**البوّابةُ الحاسمة (الخارطة أ-٣ · مقعدا المواصفة والبنية P1):** «الإكسل المُرندَر **من الدفتر**
@@ -307,6 +311,31 @@ def test_the_workbook_rendered_from_the_ledger_equals_the_current_file(tmp_path)
                     diffs.append((name, r, c, va, vb))
     assert not diffs, (f"الرندرُ من الدفتر خالف الملفَّ: {len(diffs)} فرقًا · "
                        f"أوّلُها {diffs[0]}")
+
+
+def test_each_state_is_named_by_its_own_cause(tmp_path):
+    """**مقعدُ التثبيت P3 · مُثبت:** `unable to open database file` كانت تُسمّى `unsupported` («البيئةُ لا
+    تدعم») وهي في الحقيقة **مسارٌ أو إذن** ⇒ علاجٌ خاطئ (بناءُ البيئة بدل تصحيح المسار). والآن لكلٍّ اسمُه،
+    وتُقاس الحالاتُ الثلاثُ بالفعل لا بالوصف: مجلّدٌ كقاعدة، وملفٌّ بلا إذن قراءة، ونصٌّ ليس قاعدةً.
+    """
+    d = tmp_path / "a_directory"
+    d.mkdir()
+    no_perm = tmp_path / "no_perm.sqlite"
+    no_perm.write_bytes(sqlite3.connect(":memory:").serialize() if hasattr(sqlite3.Connection, "serialize") else b"")
+    no_perm.chmod(0o000)
+    text = tmp_path / "not_a_db.sqlite"
+    text.write_text("هذا نصٌّ لا قاعدة", encoding="utf-8")
+
+    cases = [(d, L.UNREADABLE), (no_perm, L.UNREADABLE), (text, L.CORRUPT),
+             (tmp_path / "ghost.sqlite", L.MISSING)]
+    seen = {}
+    for path, want in cases:
+        with pytest.raises(L.LedgerUnavailable) as ei:
+            L.read_ledger(path)
+        seen[str(path.name)] = ei.value.state
+        assert ei.value.state == want, f"{path.name}: {ei.value.state} ≠ {want}"
+    no_perm.chmod(0o600)          # نظافةُ tmp
+    assert L.UNSUPPORTED not in seen.values(), "ما زال عطبُ المسار/الإذن يُسمّى «بيئة»"
 
 
 def test_the_ingest_consumes_the_real_builder_when_the_data_is_here():

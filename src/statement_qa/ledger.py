@@ -44,6 +44,10 @@ CORRUPT = "corrupt"
 #: ⇒ **علاجٌ خاطئ** (يُعيد الملفَّ والصوابُ بناءُ البيئة). فالعطبُ الذي ليس «ليست قاعدةَ بيانات»
 #: يُسمّى باسمه: `unsupported`.
 UNSUPPORTED = "unsupported"
+#: **وحالةٌ رابعةٌ بالقياس (مقعدُ التثبيت P3 · مُثبت):** `unable to open database file` ليست «البيئةُ لا
+#: تدعم» — بل **مسارٌ أو إذن** (مجلّدٌ أُعطي كقاعدةٍ، أو ملفٌّ بلا إذن قراءة): قِيس أنّ الحالتين كانتا
+#: تُسمّيان `unsupported` ⇒ **علاجٌ خاطئ** (بناءُ البيئة بدل تصحيح المسار). فلكلٍّ اسمُه.
+UNREADABLE = "unreadable"
 
 
 class LedgerUnavailable(RuntimeError):
@@ -59,6 +63,7 @@ class LedgerUnavailable(RuntimeError):
             MISSING: "قاعدةُ البيانات غيرُ موجودة",
             CORRUPT: "قاعدةُ البيانات غيرُ قابلةٍ للقراءة (تالفة)",
             UNSUPPORTED: "قاعدةُ البيانات غيرُ مدعومةٍ في هذه البيئة",
+            UNREADABLE: "قاعدةُ البيانات غيرُ قابلةٍ للفتح (مسارٌ أو إذن)",
         }.get(state, "قاعدةُ البيانات غيرُ متاحة")
         super().__init__(f"{why}: {path.name}" + (f" — {detail}" if detail else ""))
 
@@ -257,7 +262,19 @@ def ledger_path(root: Path, statement: str) -> Path:
     return root.joinpath(*LEDGER_SUBDIR, f"{safe}.sqlite")
 
 
-_PATHS: dict[int, Path] = {}
+def _db_file(conn: sqlite3.Connection) -> Path:
+    """مسارُ قاعدة المتّصل — **من المحرّك نفسِه لا من خريطةٍ عالميّة** (مقعدُ التثبيت P3 · مُثبت).
+
+    **العِلّة:** كانت خريطةٌ عالميّة `{id(conn): path}` تنمو بلا تنظيف، و`id()` يُعاد استخدامُه بعد
+    تحرير المتّصل ⇒ اسمُ ملفٍّ خاطئ في رسالة الخطأ. و`PRAGMA database_list` مصدرٌ لا يتسرّب ولا يخطئ.
+    """
+    try:
+        for _seq, name, f in conn.execute("PRAGMA database_list"):
+            if name == "main" and f:
+                return Path(f)
+    except sqlite3.Error:
+        pass
+    return Path(":memory:")
 
 
 def open_ledger(path: Path, *, create: bool = True) -> sqlite3.Connection:
@@ -274,7 +291,6 @@ def open_ledger(path: Path, *, create: bool = True) -> sqlite3.Connection:
     try:
         conn = sqlite3.connect(str(path))
         conn.row_factory = sqlite3.Row
-        _PATHS[id(conn)] = path
         # **ودالّةُ التطبيع تُسجَّل قبل المخطَّط**: العمودُ المُشتقُّ `desc_norm` يعتمد عليها،
         # و`deterministic=True` شرطٌ في أعمدة SQLite المُولَّدة (وبلا الشرط يرفضها المحرّك).
         conn.create_function("norm_ar", 1, lambda s: norm_ar(s), deterministic=True)
@@ -286,7 +302,13 @@ def open_ledger(path: Path, *, create: bool = True) -> sqlite3.Connection:
         # إمكانٍ يرفع غيرَه — وعلاجُهما مختلف: الأوّلُ يُعاد الملفُّ، والثاني يُبنى في البيئة. فكان
         # كلُّ عطبٍ يُسمّى «تالفة» ⇒ علاجٌ خاطئ.
         msg = str(e)
-        state = UNSUPPORTED if ("no such module" in msg or "unable to open" in msg) else CORRUPT
+        low = msg.lower()
+        if "no such module" in low or "not authorized" in low:
+            state = UNSUPPORTED          # البيئةُ لا تدعم وحدةً (fts5) ⇒ يُبنى في البيئة
+        elif "unable to open" in low:
+            state = UNREADABLE           # مسارٌ أو إذن (مجلّدٌ كقاعدة) ⇒ يُصحَّح المسار، لا البيئة
+        else:
+            state = CORRUPT              # «ليست قاعدةَ بيانات» أو بنيةٌ مكسورة
         raise LedgerUnavailable(state, path, f"{type(e).__name__}: {msg}") from e
 
 
@@ -376,7 +398,7 @@ def search(conn: sqlite3.Connection, query: str, limit: int = 20) -> list[dict]:
         )
         return [dict(r) for r in rows]
     except sqlite3.DatabaseError as e:      # صيغةٌ رفضها المحرّك بعد التنقية ⇒ خطأٌ مسمّى لا انهيار
-        raise LedgerUnavailable(UNSUPPORTED, _PATHS.get(id(conn), Path(".")),
+        raise LedgerUnavailable(UNSUPPORTED, _db_file(conn),
                                 f"{type(e).__name__}: {e}") from e
 
 
