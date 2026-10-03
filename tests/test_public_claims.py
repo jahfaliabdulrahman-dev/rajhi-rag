@@ -157,3 +157,29 @@ def test_the_withdrawn_gate3_license_is_not_restated_in_public_docs():
     # **و`docs/EVAL_PACK.md` خارجَ القائمة عن قصد**: هو الموضعُ الوحيد الذي **يشرح** الرخصةَ المسحوبة
     # بتاريخها (والمذيَّلُ «التصحيحُ الحاكم») ⇒ فيه اسمُ المفتاح اقتباسًا لا تعليمًا. والحكمُ عليه محروسٌ
     # من جهة الشيفرة (`tests/test_eval_pack.py`: المفتاحُ ممنوعٌ في `GATE3_DECISION` نفسِه).
+
+
+def test_a_mixed_corpus_is_not_published_under_one_stamp():
+    """**البند ٧ (R89-7 · FM-1 «يُعلن ولا يُجمَع تحت رقمٍ واحد»):** تقريرٌ يحمل صفحاتٍ غيرَ مختومة
+    لا يُنشر بختمٍ واحد — فالختمُ الواحدُ ينسب الكوربوسَ كلَّه إلى قارئٍ لم تُقرأ به تلك الصفحات.
+
+    والاتّجاهان مقيسان: مختلطٌ ⇒ الإعلانُ بعدده وقسمته (والقسمةُ تُشتقّ من فرق عدد الصفحات لا تُكتب
+    بيد)، ومختمٌ كلُّه ⇒ الختمُ وحدَه (فلا نصٌّ ثابتٌ يُضاف بلا مقتضى).
+    """
+    import render_claims as rc
+
+    single = {"model": "google/gemini-3.7-flash", "prompt_version": "v2:fa91de52"}
+    mixed = {"reader_stamp": single, "slice": {"pages_done": 629},
+             "corpus_provenance": {"legacy_unstamped_pages": 624, "stamp_conflict_pages": 3,
+                                   "declaration": "مختلط/غير مختم — يُعلن ولا يُجمَع تحت رقمٍ واحد"}}
+    out = rc.reader_declaration(mixed)
+    assert "624" in out and "v2:fa91de52" in out, out
+    assert "5 مختومة" in out, f"قسمةُ الصفحات تُشتقّ من الفرق (629 − 624): {out}"
+    # **والشكلُ الذي كان يُنشر (الختمُ وحدَه) يُرفض صريحًا** — وهو نصُّ العلّة بعينه.
+    assert out != rc._stamp_label(single), "الإعلانُ رجع ختمًا واحدًا لكوربوسٍ بنسبين"
+
+    clean = {**mixed,
+             "corpus_provenance": {"legacy_unstamped_pages": 0, "stamp_conflict_pages": 0,
+                                   "declaration": "كوربوسٌ بنسبٍ واحد"}}
+    assert rc.reader_declaration(clean) == "google/gemini-3.7-flash:v2:fa91de52", \
+        "كوربوسٌ مختمٌ كلُّه يُنشر بختمه وحدَه (لا إعلانَ بلا مقتضى)"

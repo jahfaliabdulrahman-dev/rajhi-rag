@@ -27,8 +27,12 @@ import sys
 from pathlib import Path
 
 PROJ = Path(__file__).resolve().parent.parent
-REPORT = PROJ / "data" / "local_sample" / "slice_629p" / "slice_report.json"
-RESULTS = PROJ / "data" / "local_sample" / "slice_629p" / "results"
+# **والرقمُ المنشور = الجولةُ الثانية (قرارُ المالك 2026-10-03 · بعد مراجعة ٨٩):** الكوربوسُ المنشورُ
+# قبلها (`slice_629p` · تلقينة v1) لم يعد هو ما يقرأ به التطبيق: `read_rows_vlm` بلا تلقينة ⇒ v2 ⇒ كان
+# الرقمُ المنشورُ يوصف تلقينةً لا يستعملها التطبيق. فصارت الأرقامُ العامّةُ تُشتقّ من `slice_629p_v2`،
+# **ومعها قسمتُها بالختم** (لا مجموعٌ واحد لكوربوسٍ بنسبين · FM-1 · `reader_declaration` أدناه).
+REPORT = PROJ / "data" / "local_sample" / "slice_629p_v2" / "slice_report.json"
+RESULTS = PROJ / "data" / "local_sample" / "slice_629p_v2" / "results"
 # The CI-visible snapshot. It MUST have a writer: a snapshot nobody regenerates
 # drifts silently, and then CI compares a fresh document against a stale copy
 # and calls the fresh document the drift (this happened with the test count).
@@ -86,6 +90,41 @@ def _gate3_price_cap() -> int | None:
     return int(GATE3_DECISION["price_cap_pages"])
 
 
+def _stamp_label(stamp) -> str:
+    """ختمُ القارئ نصًّا يُقرأ: الزوجُ (نموذج · تلقينة) لا قاموسٌ خام ولا اسمٌ عامّ."""
+    if isinstance(stamp, dict):
+        parts = [str(stamp.get(k)) for k in ("model", "prompt_version") if stamp.get(k)]
+        return ":".join(parts) or "غير مختم"
+    return str(stamp or "غير مختم")
+
+
+def reader_declaration(rep: dict) -> str:
+    """**ما يُنشر عن هوية القارئ — ولا يُجمَع كوربوسٌ بنسبين تحت ختمٍ واحد** (FM-1 · البند ٧).
+
+    **العلّةُ المقيسة:** كان يُنشر `rep["reader_stamp"]` وحدَه، وهو ختمُ **آخر** قراءةٍ لا ختمُ
+    الكوربوس. فصفحةٌ تحمل ٦٢٤ سجلًّا قُرئت في سبتمبر **بلا ختم** وخمسةَ سجلاتٍ خُتمت اليوم تُقرأ
+    كأنّها من قارئٍ واحد — وهو بعينه ما منعته FM-1 («يُعلن ولا يُجمَع تحت رقمٍ واحد»)، ويكذب معه
+    ختمُ الرقم المنشور: يقول تلقينةً لم تُقرأ بها ٦٢٤ صفحة.
+
+    **والقاعدة:** أعلن التقريرُ صفحاتٍ غيرَ مختومة (`corpus_provenance.legacy_unstamped_pages > 0`)
+    ⇒ يُنشر **الإعلانُ المختلطُ بعدده**؛ وإلّا يُنشر الختمُ وحدَه (فلا إعلانَ بلا مقتضى، ولا
+    يُضاف نصٌّ ثابتٌ إلى كوربوسٍ نظيف). والقسمةُ (كم مختومة) تُشتقّ من فرق عدد الصفحات لا تُكتب بيد.
+
+    **والضابط:** `tests/test_public_claims.py::test_a_mixed_corpus_is_not_published_under_one_stamp`.
+    """
+    stamp = _stamp_label(rep.get("reader_stamp"))
+    prov = rep.get("corpus_provenance") or {}
+    legacy = int(prov.get("legacy_unstamped_pages") or 0)
+    if legacy <= 0:
+        return stamp
+    pages = (rep.get("slice") or {}).get("pages_done")
+    stamped = (pages - legacy) if isinstance(pages, int) else None
+    piece = f"{legacy} صفحةً غيرَ مختومة (قُرئت قبل تسجيل الهوية)"
+    if stamped is not None and stamped > 0:
+        piece += f" + {stamped} مختومة"
+    return f"مختلط — {piece}، بختم {stamp}"
+
+
 def derive() -> dict | None:
     if not REPORT.exists():
         return None
@@ -98,9 +137,9 @@ def derive() -> dict | None:
         facts = scale_slice._cache_facts(RESULTS)
     f = rep["footer"]
     return {
-        # كل رقم معلن مربوطٌ بالزوج الذي أنتجه (FMEA FM-1.4): نموذجٌ وتلقينة.
-        # فحين يُعاد القياس بقارئٍ آخر، يُعرف الرقم القديم بمن قُرئ.
-        "reader_stamp": rep.get("reader_stamp") or "غير مختم",
+        # كل رقم معلن مربوطٌ بالزوج الذي أنتجه (FMEA FM-1.4): نموذجٌ وتلقينة — **والكوربوسُ المختلطُ
+        # يُنشر بإعلانه وقسمته** لا بختمٍ واحد (`reader_declaration`).
+        "reader_stamp": reader_declaration(rep),
         "corpus_declaration": (rep.get("corpus_provenance") or {}).get("declaration"),
         "pages": rep["slice"]["pages_done"],
         "rows": rep["totals"]["rows"],
