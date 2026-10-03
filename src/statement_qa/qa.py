@@ -19,9 +19,12 @@ import re
 from dataclasses import dataclass, field
 
 # **والاستيرادُ متسامحٌ عن قصد (قِيس):** كان `from pydantic import …` في الرأس ⇒ فصارت الوحدةُ
-# تحتاج pydantic **لتُستورَد**، فسقط جمعُ خمسةَ عشرَ ضابطًا في البيئة الخفيفة (بلا langchain/pydantic)
-# ⇒ نقصَ العدُّ بلا رسالة. والآن تُستورَد الوحدةُ دائمًا، وتعمل النوعيّةُ حيث يوجد pydantic،
-# **ويسقط النوعُ مُعلَنًا** حيث لا يوجد (و`tests/test_answer_type.py` يتخطّى هناك).
+# تحتاج pydantic **لتُستورَد**، فنقص جمعُ البيئة الخفيفة (بلا langchain/pydantic) بلا رسالة.
+# **والرقمُ المقيسُ بدقّة (مقعدُ أ-٤ · مُثبت):** صافي الفرق **٢١ ضابطًا** = ١٥ من ملفّ الإفصاح
+# (`test_disclosure_and_provenance.py`) + ٦ من ملفّ أ-٤ الجديد. **والأصلُ لا يحمل الاستيرادَ بعد**
+# ⇒ فالرقمُ أُعيد إنتاجُه **بمحاكاة رأسٍ صارم** في نسخةٍ منفصلة (1007 ⇒ 1028)، لا من التاريخ.
+# والآن تُستورَد الوحدةُ دائمًا، وتعمل النوعيّةُ حيث يوجد pydantic، **وتُتخطّى ضوابطُ النوع
+# صراحةً** حيث لا يوجد (`pytestmark` في `tests/test_answer_type.py`) — حارسٌ يُطلَق فعلًا.
 try:                                    # pragma: no cover - depends on installed stack
     from pydantic import BaseModel, Field
     _PYDANTIC = True
@@ -348,13 +351,23 @@ def answer_question(store, question: str, rows=None, chunks=None,
         merged_used = [n for r in results for n in (r.used_row_nos or [])]
         hits = boost_last_page(retrieve(store, question, k=k), chunks, question)
         body = "\n\n".join(f"• {r.answer}" for r in results)
+        # **والنوعُ يُدمَج مع الأجزاء (مقعدُ أ-٤ P2 · مُثبت):** كان ينبني بلا `cited_row_ids`
+        # ولا `citation_mode` ⇒ فسؤالٌ مركّبٌ جزءُه مُقيَّدٌ يعود `prose` باستشهادٍ فارغ،
+        # **فلا تُطبَّق البوّابةُ على المركّب** — وهو نصفُ الأسئلة الحقيقيّة.
+        merged_cited = sorted({n for r in results for n in (r.cited_row_ids or [])})
+        merged_unsup = sorted({n for r in results for n in (r.unsupported_citations or [])})
+        merged_mode = ("typed" if any(r.citation_mode == "typed" for r in results)
+                       else "prose")
         return QAResult(
             answer=body,
             sources=[{k2: h[k2] for k2 in
                       ("chunk_id", "page", "row_start", "row_end")} for h in hits],
             used_row_nos=merged_used or None,
             tools_failed=all(r.tools_failed for r in results),
-            ungrounded=any(r.ungrounded for r in results))
+            ungrounded=any(r.ungrounded for r in results),
+            cited_row_ids=merged_cited,
+            citation_mode=merged_mode,
+            unsupported_citations=merged_unsup)
 
     return _answer_one(store, question, rows, chunks, llm, k, footers)
 
@@ -398,6 +411,10 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
                     # «رفض لا وسم» (المدقّق، جوابه ١): رقم لم يُحسَب لا يُعرض
                     # كجواب أصلاً — الوسم يضيع في ملف يُمرَّر كـPDF.
                     ungrounded = True
+                    # **ولا استشهادَ مع امتناع (مقعدُ أ-٤ P3 · مُثبت):** كان الكائنُ يحمل
+                    # `citation_mode="typed"` واستشهاداتٍ وهو يقول «لم أستطع» ⇒ تناقضٌ داخليّ
+                    # (والواجهةُ آمنةٌ لأنّ `none` تسبق — لكنّ الكائنَ يُقرأ في غير الواجهة أيضًا).
+                    parsed, mode = None, "prose"
                     answer = ("لم أستطع حساب هذا الرقم من الكشف: لا استدعاء "
                               "لأي أداة حسابية. ولن أعرض رقماً لم يُحسَب — "
                               "أعد صياغة السؤال بصيغةٍ تُسمّي ما تريده.")

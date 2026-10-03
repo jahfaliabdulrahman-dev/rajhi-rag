@@ -14,11 +14,19 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-try:                                              # البيئةُ الخفيفةُ في الـCI لا تحمل pydantic/langchain
-    import statement_qa.qa as q                   # noqa: E402
-except ImportError as _e:                         # noqa: BLE001
-    pytest.skip(f"طبقةُ الوكيل غيرُ مركّبةٍ هنا ({_e}) — تُقاس في البيئة الكاملة",
-                allow_module_level=True)
+import statement_qa.qa as q                       # noqa: E402
+
+# **والحارسُ على التبعيّات لا على الاستيراد** (مقعدُ أ-٤ P1 · مُثبت): كان `try: import … except
+# ImportError: skip` — وقد **أعدمه** الاستيرادُ المتسامحُ في الوحدة نفسِها (الاستيرادُ ينجح دائمًا)
+# ⇒ فمجموعةٌ تدّعي التخطّي و**تسقط ٤ من ٦** في البيئة الخفيفة. فيُحرس الآن على ما يلزم فعلًا.
+_DEPS = []
+for _mod in ("pydantic", "langchain"):
+    try:
+        __import__(_mod)
+    except ImportError:                           # noqa: PERF203
+        _DEPS.append(_mod)
+pytestmark = pytest.mark.skipif(
+    bool(_DEPS), reason=f"طبقةُ الوكيل تحتاج {'، '.join(_DEPS)} — تُقاس في البيئة الكاملة")
 from statement_qa.qa_tools import citation_truth   # noqa: E402
 from statement_qa.render import evidence_mode      # noqa: E402
 
@@ -129,12 +137,11 @@ def test_the_whole_answer_carries_the_typed_citations(monkeypatch):
     # الأدواتُ تُبنى من الصفوف نفسِها ⇒ فالشاهدُ يأتي من أثرٍ حقيقيّ حين تُستدعى
     res = q._answer_one(store=_Store(), question="كم مجموع السحوبات؟", rows=rows, chunks=None,
                         llm=object(), k=2, footers=None)
-    assert res.citation_mode == "typed", res.citation_mode
-    assert res.cited_row_ids == [1, 4]
-    # وبلا أثرٍ (لم تُستدع أداة) ⇒ كلُّ استشهادٍ بلا شاهدٍ يُسمّى
-    assert res.unsupported_citations == [1, 4], res.unsupported_citations
     # **وهنا المسارُ الصادقُ الآخر:** سؤالٌ رقميٌّ ولم تُستدع أداة ⇒ **رفضٌ لا وسم** (لا رقمَ بلا حساب)
     assert res.ungrounded is True and res.answer.startswith("لم أستطع"), res.answer[:60]
+    # **وامتناعٌ لا يحمل استشهادًا** (مقعدُ أ-٤ P3): كان الكائنُ يقول «لم أستطع» ومعه نوعٌ واستشهادات
+    assert res.citation_mode == "prose" and res.cited_row_ids == [], (
+        res.citation_mode, res.cited_row_ids)
 
     # وبسؤالٍ وصفيٍّ (لا يحتاج أداة) يصل الجوابُ المُقيَّد باستشهاداته
     res2 = q._answer_one(store=_Store(), question="بيّن الصفوف التي فيها رسوم حوالة", rows=rows,

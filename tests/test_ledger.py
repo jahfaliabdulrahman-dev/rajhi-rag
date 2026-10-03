@@ -315,7 +315,12 @@ def test_each_state_is_named_by_its_own_cause(tmp_path):
     d = tmp_path / "a_directory"
     d.mkdir()
     no_perm = tmp_path / "no_perm.sqlite"
-    no_perm.write_bytes(sqlite3.connect(":memory:").serialize() if hasattr(sqlite3.Connection, "serialize") else b"")
+    # **ولا `serialize()` هنا (عطبٌ قِيس بعد الهبوط · مُثبت):** كانت تُنتج بايتاتِ قاعدةٍ في الذاكرة،
+    # وهي **تسقط في بايثون ٣.١٢** (`sqlite3.OperationalError: unable to serialize 'main'`) وتمرّ في ٣.١١
+    # ⇒ **فبوّابةٌ خضراءُ في بيئة المالك حمراءُ في بيئة الـCI**. والغرضُ بايتاتٌ فقط: فحالُ الإذن
+    # يُرفع **قبل** قراءة المحتوى، فالمحتوى لا يُهمّ — والدرس: **الضابطُ الجديدُ يُشغَّل في مفسِّرَي
+    # الـCI معًا (٣.١١ و٣.١٢)، لا في مفسّرِ المالك وحدَه.**
+    no_perm.write_bytes(b"x")
     no_perm.chmod(0o000)
     text = tmp_path / "not_a_db.sqlite"
     text.write_text("هذا نصٌّ لا قاعدة", encoding="utf-8")

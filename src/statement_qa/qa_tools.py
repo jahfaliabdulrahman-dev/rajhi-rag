@@ -86,14 +86,21 @@ def citation_truth(cited, trace) -> dict:
     """
     witness = set(used_rows_from_trace(trace or []))
     got: list[int] = []
+    unparsed: list = []
     for x in (cited or []):
         try:
-            got.append(int(str(x).strip()))
+            n = int(str(x).strip())
         except (TypeError, ValueError):
-            continue          # مُدخلٌ ليس رقمًا لا يُخترع له صفّ (ولا يُسقَط صامتًا: لا يدخل العدّ)
+            unparsed.append(x)      # **يُسمّى ولا يُسقَط صامتًا** (مقعدُ أ-٤ P3 · مُثبت)
+            continue
+        if n < 1:
+            unparsed.append(x)      # **صفٌّ برقمٍ سالبٍ أو صفر غيرُ موجود** — لا يُعدّ استشهادًا
+            continue
+        got.append(n)
     cited_sorted = sorted(set(got))
     return {"cited": cited_sorted, "witnessed": sorted(witness),
-            "unsupported": [n for n in cited_sorted if n not in witness]}
+            "unsupported": [n for n in cited_sorted if n not in witness],
+            "unparsed": unparsed}
 
 
 _FOOTER_AR = {
