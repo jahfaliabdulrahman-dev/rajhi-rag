@@ -10,11 +10,15 @@
 """
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from pathlib import Path
 
 from . import ledger as L
 
-#: **التسميةُ العربية ⇄ القصدُ الثابت.** والواجهةُ تقبل هذه المفاتيحَ وحدَها ⇒ فلا اسمَ حرٌّ يدخل،
+#: **التسميةُ العربية ⇄ القصدُ الثابت** — والتطابقُ **مجموعةً** لا ترتيبًا (لفظُ «بالضبط» صُحّح:
+#: مقعدُ الواجهة قاس أنّ `totals…` يخالف ترتيبَ `INTENTS`، والوظيفةُ لا تتأثّر — والأدقُّ يُقال). والواجهةُ تقبل هذه المفاتيحَ وحدَها ⇒ فلا اسمَ حرٌّ يدخل،
 #: ولا استعلامَ يُبنى من نصّ المستخدم (وهو معنى «النموذجُ لا يكتب SQL» في الشاشة كما في الطرفيّة).
 INTENT_LABELS: dict[str, str] = {
     "المجاميع (مدين/دائن)": "totals",
@@ -42,20 +46,36 @@ def ledger_dir(root: Path) -> Path:
     return Path(root) / Path(*L.LEDGER_SUBDIR)
 
 
-def ledger_file(root: Path, n_pages: int) -> Path:
-    """ملفُّ دفترِ الكشف المحمَّل: باسم عددِ صفحاته — فيميّز كشفين مختلفين بلا تصادم."""
-    return ledger_dir(root) / f"ui_{int(n_pages)}p.sqlite"
+def statement_key(era: dict | None, n_pages: int) -> str:
+    """مفتاحُ الكشف: **تجزئةُ بصمته** (لا عددُ صفحاته).
+
+    **العِلّة (مقعدُ الواجهة P3 · مُثبت):** كان الاسمُ `ui_<عدد الصفحات>p.sqlite` ⇒ (١) كشفان
+    بـ629 صفحة **يتصادمان**، و(٢) `pages_of(rows)=626` كان يُسمّي الملفَّ `ui_626p` وهو يخزّن 629
+    صفحةً. فالمفتاحُ يُشتقّ من **بصمة المحتوى** (`STATE["era"]`) ⇒ الكشفُ نفسُه يُعطي المفتاحَ نفسَه،
+    وكشفٌ آخرُ لا يُصادمه. وبلا بصمةٍ يُنسب إلى عدد الصفحات **مع إعلان النقص** في الاسم (`nop-`).
+    """
+    if era:
+        raw = json.dumps(era, sort_keys=True, ensure_ascii=False, default=str)
+        return "ui_" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
+    return f"ui_nop-{int(n_pages)}p"
 
 
-def status_text(root: Path, n_pages: int | None, rows_count: int) -> str:
+def ledger_file(root: Path, key: str) -> Path:
+    """ملفُّ دفترِ الكشف — بمفتاحٍ من بصمة الكشف نفسِه (لا عددِ صفحاتٍ قد يتصادم)."""
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", str(key))[:64] or "ui_unknown"
+    return ledger_dir(root) / f"{safe}.sqlite"
+
+
+def status_text(root: Path, key: str | None, rows_count: int, dropped: int = 0) -> str:
     """نصُّ الحالة المعروضُ فوق الأزرار: **غائبٌ يُعلن غيابَه، وخطأٌ يُسمّى باسمه**، ومقروءٌ يُعدّ أرقامَه.
 
     وثلاثُ حالاتٍ لا رابعة: (١) لا كشفَ محمَّلًا، (٢) الدفترُ غيرُ مبنيّ بعد، (٣) مبنيٌّ ⇒ **يُقرأ
     فعلًا** (`coverage`) فتُعرَض أرقامُه — فلا يُدّعى «جاهز» بنصٍّ لم يُقابل بقاعدة.
     """
     if not rows_count:
-        return "### دفترُ الكشف\n**لا كشفَ محمَّلًا بعد** — اقرأ كشفًا في التبويب ١ ثمّ عُد."
-    path = ledger_file(root, n_pages or 0)
+        return ("### دفترُ الكشف\n**لا كشفَ محمَّلًا بعد** — اقرأ كشفًا في التبويب ١ ثمّ عُد."
+                + _dropped_note(dropped))
+    path = ledger_file(root, key or "ui_unknown")
     try:
         conn = L.read_ledger(path)
     except L.LedgerUnavailable as e:
@@ -70,10 +90,22 @@ def status_text(root: Path, n_pages: int | None, rows_count: int) -> str:
     return (f"### دفترُ الكشف — مبنيٌّ وجاهز ✅\n"
             f"**{cov['rows']}** صفًّا · **{cov['pages']}** صفحة · **{cov['unproven']}** بلا إثبات · "
             f"نسخةُ المخطَّط `{ver}` · الملفّ `{path.name}`\n\n"
-            f"أحكامُ الصفحات: " + " · ".join(f"{k}: {v}" for k, v in cov["page_verdicts"].items()))
+            f"أحكامُ الصفحات: " + " · ".join(f"{k}: {v}" for k, v in cov["page_verdicts"].items())
+            + _dropped_note(dropped))
 
 
-def build(root: Path, rows: list[dict], footers: dict | None, n_pages: int) -> str:
+def _dropped_note(dropped: int) -> str:
+    """إعلانُ الصفوف بلا صفحة **في نصّ الحالة لا في البناء وحدَه** (مقعدُ الواجهة P3 · مُثبت):
+    كان الإعلانُ في مسار البناء، وهو مسارٌ كان ينهار على صفٍّ بلا صفحة ⇒ فلا إعلانَ عمليًّا.
+    وصفرٌ هو الصوابُ في مصدرك (قِيس)، فالسطرُ لا يظهر إلّا متى وُجد فعلًا.
+    """
+    if not dropped:
+        return ""
+    return (f"\n\n> **{dropped} صفًّا بلا حقل صفحةٍ في المصدر** — لم تُدخَل إلى الدفتر (المخطَّطُ يمنع "
+            f"صفًّا بلا صفحة) **وليس إسقاطًا صامتًا**: العددُ مُعلَنٌ هنا.")
+
+
+def build(root: Path, rows: list[dict], footers: dict | None, key: str | None = None) -> str:
     """يبني الدفترَ من **حالة القراءة الحالية** ويكتب ملخّصًا — بلا نموذجٍ وبلا شبكة.
 
     **والمصدرُ يُعلَن مع الرقم:** الصفوفُ من قراءة التطبيق، وأحكامُ الصفحات من حالة التطبيق، و**كلفةُ
@@ -82,16 +114,18 @@ def build(root: Path, rows: list[dict], footers: dict | None, n_pages: int) -> s
     if not rows:
         return "**لا صفوفَ لبناء دفترٍ منها** — اقرأ كشفًا أولًا."
     pages = L.pages_from_state(rows, footers)
-    path = ledger_file(root, n_pages)
+    path = ledger_file(root, key or "ui_unknown")
     conn = L.open_ledger(path)
     try:
         got = L.ingest(conn, rows, pages)
         cov = L.answer(conn, "coverage")
     finally:
         conn.close()
-    orphan = L.rows_without_page(rows)
-    note = (f"\n> **{orphan} صفًّا بلا حقل صفحةٍ في المصدر** — لم تُنسَب إلى صفحة (ولا تُخترع لها صفحة): "
-            f"تُبقى صفوفًا في الدفتر، وتُعدّ هنا صريحًا." if orphan else "")
+    # **والصفُّ بلا صفحة يُستبعَد ويُعدّ** — لا يُبقى (المخطَّطُ يمنعه) ولا يُسقَط صامتًا:
+    # نصُّ «تُبقى صفوفًا» السابق كان **دعوى يستحيل تنفيذُها** (مقعدُ الواجهة P1 · مُثبت).
+    orphan = got.get("dropped_no_page") or 0
+    note = (f"\n> **{orphan} صفًّا بلا حقل صفحةٍ في المصدر** — لم تُدخَل (المخطَّطُ يمنع صفًّا بلا "
+            f"صفحة: `pg` مفتاحٌ أساسيّ) وليس إسقاطًا صامتًا: العددُ مُعلَنٌ هنا." if orphan else "")
     return (f"**بُني الدفترُ** ✅ — {got['rows']} صفًّا · {got['pages']} صفحة · "
             f"{cov['unproven']} بلا إثبات · الملفّ `{path.name}`{note}\n\n"
             f"وكلفةُ الصفحة **تُترك فارغةً في المسارين**: حالةُ التطبيق تحمل كلفةً كلّيّةً لا لكلّ صفحة، "
@@ -99,7 +133,7 @@ def build(root: Path, rows: list[dict], footers: dict | None, n_pages: int) -> s
             f"يُوزَّع رقمٌ بالتخمين. ومتى حمل التشغيلُ كلفةَ صفحةٍ كُتبت من مسار الأداة.")
 
 
-def ask(root: Path, n_pages: int, label: str, value: str = "") -> str:
+def ask(root: Path, key: str | None, label: str, value: str = "") -> str:
     """جوابُ قصدٍ من القائمة المغلقة — يُعاد نصًّا (Markdown) للشاشة، **من SQL وحدَه**.
 
     ويرفض بلا استثناء: قصدًا بغير المفاتيح المُعلَنة، وقيمةً غائبةً لقصدٍ يحتاجها، ودفترًا غيرَ مقروء
@@ -116,7 +150,7 @@ def ask(root: Path, n_pages: int, label: str, value: str = "") -> str:
         pg = parse_page(value)
         if pg is None:
             return f"**«{value}» ليس رقمَ صفحة** — اكتب رقمًا (عربيًّا أو لاتينيًّا)."
-    path = ledger_file(root, n_pages)
+    path = ledger_file(root, key or "ui_unknown")
     try:
         conn = L.read_ledger(path)
     except L.LedgerUnavailable as e:

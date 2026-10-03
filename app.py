@@ -75,6 +75,7 @@ from statement_qa.intake import (
     blocked_message_ar, inspect_locally, plan, summary_ar as summarize_intake_ar,
 )
 from statement_qa.job_lock import JobBusyError, job_lock
+from statement_qa import ledger as _ledger
 from statement_qa import ledger_ui as _ledger_ui
 from statement_qa.row_bands import analyze_page
 from statement_qa.ordering import (
@@ -1102,19 +1103,25 @@ def _ledger_rows() -> list:
     return STATE.get("rows") or []
 
 
+def _ledger_key() -> str:
+    """مفتاحُ الدفتر: من **بصمة الكشف** (STATE["era"]) ⇒ الكشفُ نفسُه يُعطي المفتاحَ نفسَه."""
+    return _ledger_ui.statement_key(STATE.get("era"), _ledger_ui.pages_of(_ledger_rows()))
+
+
 def _ledger_refresh_click() -> str:
-    return _ledger_ui.status_text(_APP_ROOT, _ledger_ui.pages_of(_ledger_rows()), len(_ledger_rows()))
+    rows = _ledger_rows()
+    return _ledger_ui.status_text(_APP_ROOT, _ledger_key(), len(rows),
+                                  _ledger.rows_without_page(rows))
 
 
 def _ledger_build_click():
     rows = _ledger_rows()
-    msg = _ledger_ui.build(_APP_ROOT, rows, STATE.get("footers") or {},
-                           _ledger_ui.pages_of(rows))
+    msg = _ledger_ui.build(_APP_ROOT, rows, STATE.get("footers") or {}, _ledger_key())
     return msg, _ledger_refresh_click()
 
 
 def _ledger_ask_click(label: str, value: str) -> str:
-    return _ledger_ui.ask(_APP_ROOT, _ledger_ui.pages_of(_ledger_rows()), label, value)
+    return _ledger_ui.ask(_APP_ROOT, _ledger_key(), label, value)
 
 
 with gr.Blocks(title="مُدقّق كشوف الراجحي") as demo:

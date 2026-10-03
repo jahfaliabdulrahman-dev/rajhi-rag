@@ -39,11 +39,11 @@ def _rows() -> list[dict]:
     ]
 
 
-def _built(tmp_path: Path, rows=None, footers=None) -> Path:
+def _built(tmp_path: Path, rows=None, footers=None, key: str | None = None) -> Path:
     """دفترٌ مبنيٌّ كما تبنيه الشاشةُ: من حالة التطبيق لا من `to_xlsx`."""
     rows = rows if rows is not None else _rows()
     footers = footers if footers is not None else {1: {"verdict": "ok"}, 2: {"verdict": "gap"}}
-    db = U.ledger_file(tmp_path, L.pages_of(rows))
+    db = U.ledger_file(tmp_path, key or U.statement_key({"t": 1}, L.pages_of(rows)))
     conn = L.open_ledger(db)
     L.ingest(conn, rows, L.pages_from_state(rows, footers))
     conn.close()
@@ -57,109 +57,148 @@ def test_every_label_maps_to_a_declared_intent():
     assert set(U.NEEDS_VALUE) <= set(L.INTENTS)
 
 
-def test_the_screen_build_agrees_with_the_tool_build(tmp_path):
-    """**مسرَبان لبناء الدفتر ⇒ ضابطٌ يقابل بينهما** (وإلّا افترقا صامتين):
+def test_the_state_source_agrees_with_the_run_source(tmp_path):
+    """**مقابلةُ المصدرَين — لا استدعاءَين لنفس الدالّة** (طعنَ فيه مقعدُ الواجهة وكان محقًّا · مُثبت):
 
-    (أ) من `tools/to_xlsx.load` + `per_page` — مسارُ الأداة. (ب) من **حالة التطبيق** (صفوفٌ + أحكامُ
-    صفحات) عبر `pages_from_state`. والقياس: نفسُ الصفوف، ونفسُ أحكام الصفحات وعددِ صفوفها.
-    **وحدٌّ يُعلَن:** كلفةُ الصفحة تُملأ في (أ) ولا تُملأ في (ب) — حالةُ التطبيق كلفتُها كلّيّةٌ لا
-    لكلّ صفحة، ولا يُوزَّع رقمٌ بالتخمين؛ فالضابطُ يقابل على ما يُقابَل، ويُعلن ما لا يُقابَل.
+    النسخةُ الأولى قابَلت مسارَين **كلاهما يستدعي `L.ingest` نفسَه**، وقد صار يشتقّ العدّ من الصفوف ⇒
+    `ca == cb` دائمًا ⇒ **بوّابةٌ لا تستطيع السقوط**. فالصوابُ مقابلةُ **المصدرين**:
+    `pages_from_state` (اشتقاقُنا من الصفوف) مقابل `to_xlsx.load`'s `per_page` (عدّادُ التشغيل) —
+    والعلاقةُ المُعلَنة: **يختلفان حيث حكمُ الصفحة ليس `ok`** (قِيس: `per_page[629] = {rows: 0,
+    footer: 'absent}` مقابل 17 صفًّا تحمل `page=629`) ⇒ فكلُّ خلافٍ **يُفسَّره حكمُ الصفحة**، وما لا
+    يفسّره يسقط الضابط.
     """
-    db_a, db_b = tmp_path / "a.sqlite", tmp_path / "b.sqlite"   # مساران مختلفان للمقابلة
-    if (RUN / "results").exists():
-        import to_xlsx                              # noqa: PLC0415
-
-        rows, _report, per_page, _flags = to_xlsx.load(RUN)
-        conn = L.open_ledger(db_a)
-        L.ingest(conn, rows, per_page)
-        conn.close()
-        footers = {int(pg): {"verdict": (e or {}).get("footer")} for pg, e in per_page.items()}
-        conn = L.open_ledger(db_b)
-        L.ingest(conn, rows, L.pages_from_state(rows, footers))
-        conn.close()
-    else:                                           # بلا بيانات: القياسُ على الصفوف الاصطناعيّة
+    if not (RUN / "results").exists():
+        # **والحدُّ مُعلَن:** بلا بيانات المالك يُقاس الشكلُ فقط (صفوفٌ اصطناعيّة)، ويُقال ذلك في الاسم.
         rows = _rows()
-        conn = L.open_ledger(db_a)
-        L.ingest(conn, rows, L.pages_from_state(rows, {1: {"verdict": "ok"}, 2: {"verdict": "gap"}}))
-        conn.close()
-        conn = L.open_ledger(db_b)
-        L.ingest(conn, rows, L.pages_from_state(rows, {1: {"verdict": "ok"}, 2: {"verdict": "gap"}}))
-        conn.close()
+        got = L.pages_from_state(rows, {1: {"verdict": "ok"}, 2: {"verdict": "gap"}})
+        assert got[1]["rows"] == 2 and got[2]["rows"] == 1 and got[1]["page_no"] == 1
+        return
+    import to_xlsx                                  # noqa: PLC0415
 
-    a, b = L.read_ledger(db_a), L.read_ledger(db_b)
-    try:
-        assert L.read_rows(a) == L.read_rows(b), "الصفوفُ افترقت بين المسارين"
-        ca = {r["pg"]: (r["verdict"], r["rows_count"]) for r in
-              a.execute("SELECT pg, verdict, rows_count FROM pages")}
-        cb = {r["pg"]: (r["verdict"], r["rows_count"]) for r in
-              b.execute("SELECT pg, verdict, rows_count FROM pages")}
-        # **الأحكامُ تتطابق، والفرقُ في العدّ يُفسَّر بالمعادلة لا بالتسامح** (قاسه الضابط أوّلًا:
-        # 17 صفًّا بلا حقل صفحةٍ في المصدر — فالمسارُ (ب) لا ينسبها ولا يخترع لها صفحة).
-        assert {k: v[0] for k, v in ca.items()} == {k: v[0] for k, v in cb.items()}, "الأحكامُ افترقت"
-        deficit = sum(ca[k][1] - cb.get(k, ("", 0))[1] for k in ca)
-        assert deficit == L.rows_without_page(rows), (
-            f"فرقُ العدّ ({deficit}) لا يفسّره عددُ الصفوف بلا صفحة ({L.rows_without_page(rows)})")
-        cost_a = [r[0] for r in a.execute("SELECT cost_usd FROM pages WHERE cost_usd IS NOT NULL")]
-        cost_b = [r[0] for r in b.execute("SELECT cost_usd FROM pages WHERE cost_usd IS NOT NULL")]
-        assert cost_b == [], "كلفةُ الصفحة مُلئت من حالة التطبيق ⇒ رقمٌ مُوزَّعٌ بالتخمين"
-        assert L.pages_of(rows) <= len(ca)
-        print(f"  [المساران] صفحات: {len(ca)} · صفوف: {len(L.read_rows(a))} · "
-              f"كلفةٌ في مسار الأداة: {len(cost_a)}")
-    finally:
-        a.close()
-        b.close()
+    rows, _report, per_page, _flags = to_xlsx.load(RUN)
+    state = L.pages_from_state(rows, {int(pg): {"verdict": (e or {}).get("footer")}
+                                      for pg, e in per_page.items()})
+    # (أ) اشتقاقُنا يُطابق العدَّ الفعليَّ للصفوف — يقابل مصدرًا مستقلًّا (الصفوف نفسُها)
+    for pg, e in state.items():
+        assert e["rows"] == sum(1 for r in rows if r.get("page") == pg), pg
+    # (ب) وكلُّ خلافٍ مع عدّاد التشغيل يُفسّره حكمُ الصفحة (وإلّا فهو عطبٌ غيرُ مفسَّر)
+    unexplained = []
+    for pg, run_entry in per_page.items():
+        pg = int(pg)
+        run_rows = int((run_entry or {}).get("rows") or 0)
+        here = state.get(pg, {}).get("rows", 0)
+        verdict = str((run_entry or {}).get("footer") or "unchecked")
+        if run_rows != here and verdict == "ok":
+            unexplained.append((pg, run_rows, here, verdict))
+    assert not unexplained, f"خلافٌ في العدّ بلا حكمٍ يفسّره: {unexplained[:5]}"
+    # (ج) والصفوفُ بلا صفحة **صفرٌ في المصدر** — فالدعوى السابقة كانت زائفة، ويُقاس الآن
+    assert L.rows_without_page(rows) == 0, "ظهرت صفوفٌ بلا صفحة ⇒ يُعلَن عددُها في الشاشة"
+    print(f"  [المصدران] صفحات الحالة: {len(state)} · صفحاتُ التشغيل: {len(per_page)} · "
+          f"صفوفٌ: {len(rows)} · خلافاتٌ مُفسَّرةٌ بالأحكام: "
+          f"{sum(1 for pg, e in per_page.items() if int((e or {}).get('rows') or 0) != state.get(int(pg), {}).get('rows', 0))}")
 
 
 def test_the_ledger_answers_with_the_network_booby_trapped(tmp_path, monkeypatch):
-    """**«بلا نموذج وبلا كلفة» تُقاس بفخّ شبكة** — لا بنصٍّ في الشاشة.
+    """**«بلا نموذج وبلا كلفة» تُقاس بفخّ شبكةٍ مُسلَّح — ويُثبَت أنّه يمسك** (مقعدُ الواجهة P2 · مُثبت):
 
-    يُمنع الاتصالُ الصادرُ من جذره (`socket.create_connection`) ⇒ فإن مرّت الأقصدُ الستّة، فالمسارُ
-    SQL وحدَه بالبرهان؛ وإن جرى نداءُ نموذجٍ واحد، يسقط الضابطُ بـ`RuntimeError` من الفخّ نفسه.
+    النسخةُ الأولى اعترضت `socket.create_connection` وحدَه: قِيس أنّ `requests.get` **يمرّ بلا**
+    اعتراض (urllib3 يبني اتصالَه بنفسه). فالفخُّ الآن على أربعة منافذ (`create_connection` ·
+    `socket.connect` · `connect_ex` · `getaddrinfo`)، ويُمرَّر من **مداخل الأزرار** (`U.ask` ·
+    `U.build` · `U.status_text`) لا من `L.answer` وحدَه. **وحدُّه يُعلَن:** يثبت غيابَ DNS/Socket في
+    هذا المسار، ولا يثبت غيابَ نقلٍ لا يمرّ بها (كتابةٌ على واصفٍ مفتوحٍ سابقًا).
     """
     def _refuse(*a, **k):
-        raise AssertionError("محاولةُ اتصالٍ شبكيّ من مسار الدفتر — وهو يُعلن أنّه بلا كلفة")
+        raise AssertionError("اتصالٌ شبكيّ من مسار الدفتر — وهو يُعلن أنّه بلا كلفة")
 
-    monkeypatch.setattr(socket, "create_connection", _refuse)
-    db = _built(tmp_path)
-    conn = L.read_ledger(db)
-    try:
-        for intent in L.INTENTS:
-            got = L.answer(conn, intent, q="حوالة" if intent == "search" else None,
-                           pg=1 if intent == "pages" else None)
-            assert got["intent"] == intent
-    finally:
-        conn.close()
+    for name in ("create_connection", "getaddrinfo"):
+        monkeypatch.setattr(socket, name, _refuse)
+    for name in ("connect", "connect_ex"):
+        monkeypatch.setattr(socket.socket, name, _refuse)
+
+    # (أ) **الفخُّ مُسلَّح**: محاولةٌ مُتعمَّدة تُلتقَط — وإلّا فالضابطُ يُثبت لا شيء
+    import pytest as _pytest                         # noqa: PLC0415
+    with _pytest.raises(AssertionError):
+        socket.getaddrinfo("example.com", 443)
+    with _pytest.raises(AssertionError):
+        socket.socket().connect(("example.com", 443))
+
+    # (ب) والمداخلُ كلُّها تمرّ: بناءٌ من حالةٍ ثمّ أسئلةٌ من الشاشة
+    rows = _rows()
+    msg = U.build(tmp_path, rows, {1: {"verdict": "ok"}, 2: {"verdict": "gap"}},
+                  U.statement_key({"x": 1}, 2))
+    assert "بُني الدفترُ" in msg, msg
+    assert "تعذّر" not in U.status_text(tmp_path, U.statement_key({"x": 1}, 2), len(rows))
+    for label in U.INTENT_LABELS:
+        got = U.ask(tmp_path, U.statement_key({"x": 1}, 2), label,
+                    "1" if "أحكام" in label else "حوالة")
+        assert got.strip() and "Traceback" not in got, (label, got[:120])
 
 
 def test_a_missing_or_unreadable_ledger_shows_a_named_message(tmp_path):
     """**الشاشةُ لا تعرض traceback**: غائبٌ ⇒ رسالةُ بناءٍ مسمّاة؛ وقصدٌ بغير القائمة ⇒ رفضٌ بالاسم؛
     وقيمةٌ ناقصةٌ لقصدٍ يحتاجها ⇒ طلبٌ صريح. (وهذا هو عقدُ الوحدة نفسُه، مُقاسًا من باب الشاشة.)
     """
-    ghost = U.ask(tmp_path, 10, "المجاميع (مدين/دائن)")
+    key = U.statement_key({"t": 1}, 10)
+    ghost = U.ask(tmp_path, key, "المجاميع (مدين/دائن)")
     assert "تعذّر فتحُ الدفتر" in ghost and "ابنِ دفترَ الكشف" in ghost
-    _built(tmp_path)                                     # باسم الملفّ الذي تطلبه الشاشة
-    status = U.status_text(tmp_path, 2, 3)
+    _built(tmp_path, key=key)                             # باسم الملفّ الذي تطلبه الشاشة
+    status = U.status_text(tmp_path, key, 3)
     assert "مبنيٌّ وجاهز" in status and "تعذّر" not in status, status
-    out = U.ask(tmp_path, 2, "قصدٌ مُخترَع")
+    out = U.ask(tmp_path, key, "قصدٌ مُخترَع")
     assert "قصدٌ غيرُ مُعدَّد" in out and "المجاميع" in out
-    assert "يحتاج رقمَ الصفحة" in U.ask(tmp_path, 2, "أحكامُ الصفحات")
-    assert "يحتاج نصَّ البحث" in U.ask(tmp_path, 2, "بحثٌ في البيان", "   ")
-    assert "ليس رقمَ صفحة" in U.ask(tmp_path, 2, "أحكامُ الصفحات", "كذا")
-    # والمسارُ: داخل مجلّدٍ مُهمَلٍ تحت data/ وباسمٍ يميّز الكشف
-    f = U.ledger_file(tmp_path, 2)
-    assert f.name == "ui_2p.sqlite" and str(f.parent).endswith("data/ledgers"), f
+    assert "يحتاج رقمَ الصفحة" in U.ask(tmp_path, key, "أحكامُ الصفحات")
+    assert "يحتاج نصَّ البحث" in U.ask(tmp_path, key, "بحثٌ في البيان", "   ")
+    assert "ليس رقمَ صفحة" in U.ask(tmp_path, key, "أحكامُ الصفحات", "كذا")
+    # والمسارُ: داخل مجلّدٍ مُهمَلٍ تحت data/ وباسمٍ من بصمة الكشف لا بعدد صفحاته
+    f = U.ledger_file(tmp_path, key)
+    assert f.name.startswith("ui_") and str(f.parent).endswith("data/ledgers"), f
 
 
 def test_the_answers_render_as_arabic_marks(tmp_path):
     """الجوابُ يُصاغ **جدولًا يُقرأ في ثوانٍ**، وكلُّ رقمٍ مع عدّاده — لا نصًّا سائلًا."""
-    db = _built(tmp_path)
+    db = _built(tmp_path, key=U.statement_key({"t": 9}, 2))
     assert db.exists()
+    key = U.statement_key({"t": 9}, 2)
     for label, needle in (("المجاميع (مدين/دائن)", "| المجموع المدين |"),
                           ("تغطيةُ الكشف (صفوف · صفحات · بلا إثبات)", "صفًّا"),
                           ("الصفوفُ بلا إثبات", "بلا إثبات"),
                           ("أحكامُ الصفحات", "| صفحة | مطبوع |"),
                           ("بحثٌ في البيان", "حوالة")):
-        got = U.ask(tmp_path, 2, label, "2" if "أحكام" in label else "حوالة")
+        got = U.ask(tmp_path, key, label, "2" if "أحكام" in label else "حوالة")
         assert needle in got, (label, got[:200])
-    assert U.ask(tmp_path, 2, "أحكامُ الصفحات", "٢")        # أرقامٌ عربية تُقبل
-    assert "لا صفحةَ بهذا الرقم" in U.ask(tmp_path, 2, "أحكامُ الصفحات", "99")
+    assert U.ask(tmp_path, key, "أحكامُ الصفحات", "٢")        # أرقامٌ عربية تُقبل
+    assert "لا صفحةَ بهذا الرقم" in U.ask(tmp_path, key, "أحكامُ الصفحات", "99")
+
+
+def test_the_ledger_key_identifies_the_statement_not_its_page_count(tmp_path):
+    """**مقعدُ الواجهة P3 · مُثبت:** كان الاسمُ بعدد الصفحات ⇒ كشفان بـ629 صفحة **يتصادمان**،
+    و`pages_of(rows)=626` كان يُسمّي الملفَّ `ui_626p` وهو يخزّن 629 صفحةً. والمفتاحُ الآن من
+    بصمة المحتوى ⇒ الكشفُ نفسُه مفتاحُه نفسُه، وكشفٌ آخرُ لا يُصادمه؛ وبلا بصمةٍ يُعلَن النقصُ في الاسم.
+    """
+    a = U.statement_key({"pages": 629, "tokens": "س"}, 629)
+    b = U.statement_key({"pages": 629, "tokens": "ص"}, 629)
+    assert a != b, "كشفان مختلفان بمفتاحٍ واحد ⇒ تصادم"
+    assert U.statement_key({"pages": 629, "tokens": "س"}, 629) == a, "الكشفُ نفسُه تغيّر مفتاحُه"
+    assert U.statement_key(None, 626) == "ui_nop-626p", "بلا بصمةٍ يُعلَن النقصُ في الاسم"
+    # والصفحاتُ المُسمَّاة من عدّ الصفوف (626) لا تُسمّي الملفَّ حين توجد بصمة (629)
+    assert "626" not in U.ledger_file(tmp_path, a).name
+
+
+def test_a_row_without_a_page_is_dropped_and_declared(tmp_path):
+    """**مقعدُ الواجهة P1 · مُثبت:** نصُّ «تُبقى صفوفًا في الدفتر» كان **يستحيل** (`pg INTEGER
+    PRIMARY KEY`) ⇒ ينهار قبل أن يُعلن. فالصواب: تُستبعَد وتُعدّ وتُعلَن — والعددُ يُقاس هنا.
+    """
+    rows = [*_rows(), {"page": None, "row_no": 9, "desc": "بلا صفحة", "movement": None,
+                       "side": "debit", "balance": None, "printed_balance": None,
+                       "printed_movement": None, "printed_page": None, "opening": False,
+                       "chain_ok": True, "counted": 1}]
+    assert L.rows_without_page(rows) == 1
+    db = tmp_path / "drop.sqlite"
+    conn = L.open_ledger(db)
+    got = L.ingest(conn, rows, L.pages_from_state(rows, {1: {"verdict": "ok"}, 2: {"verdict": "gap"}}))
+    n = conn.execute("SELECT COUNT(*) FROM rows_verified").fetchone()[0]
+    conn.close()
+    assert got["dropped_no_page"] == 1, got
+    assert n == len(rows) - 1, f"الصفُّ بلا صفحة دخل الدفترَ ({n} مقابل {len(rows) - 1})"
+    assert "بلا حقل صفحةٍ في المصدر" in U.build(tmp_path, rows, {1: {"verdict": "ok"}},
+                                                U.statement_key({"x": 2}, 2))
