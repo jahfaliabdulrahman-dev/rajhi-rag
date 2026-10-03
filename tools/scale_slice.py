@@ -433,7 +433,7 @@ def main() -> None:
             # **وحدُ الكلفة يُسأل قبل القراءة لا بعدها (R86-2 · P3):** كان الفحصُ عند نهاية الدورة
             # (`at_or_over` تحت) ⇒ فقِيس أنّ `--max-cost 0` **قرأ صفحةً كاملةً** (~١٫٧ سنتًا على نسخةٍ
             # من v2) ثمّ توقّف. فيُسأل هنا أوّلًا: بالسقف الصفريّ لا يُرسَل طلبٌ واحد، وبأيّ سقفٍ لا
-            # تُصرف صفحةٌ فوقه. والدالّةُ نفسُها (`>=` بالسنوات المعلَنة) حتى لا تختلف دلالةُ الحارس.
+            # تُصرف صفحةٌ فوقه. والدالّةُ نفسُها (`>=` بالسنتات المعلَنة) حتى لا تختلف دلالةُ الحارس.
             if at_or_over(live_cost, args.max_cost):
                 stop_reason = (f"سقفُ الميزانية ${args.max_cost} — لا قراءةَ تُصرف فوقه")
                 break
@@ -601,10 +601,18 @@ def main() -> None:
                         # التذييل** المكتوبةَ في القراءة الحيّة (لم يُعَد قراءتُه) ⇒ فيُضاف ما قرأته الإعادةُ
                         # **إلى ما هو مكتوب**، لا استبدالًا له. (و`st_f` لا يُقرأ هنا: غيرُ معرَّفٍ في
                         # مسار الاستئناف — عقدٌ ساكن، وهو نفسُ سببِ ما جرى في المرساة.)
-                        _m4 = reasoning_mark(pst, None, rst2)
+                        # **R87-1: الإعادةُ تُعيد الحسابَ من قراءتها هي، ولا تُلحق بعلامةٍ قديمة.** كان
+                        # الإلحاقُ (علاجُ R86-3) يُبقي علامةَ صفوفٍ **استُبدلت** صفوفُها بالإعادة ⇒ فمقلوبُ
+                        # R83-2 («تضعها أو تحذفها»). والصواب: علامةُ التذييل **تُحمَل** (التذييلُ لم يُعَد
+                        # قراءتُه)، وما عداها يُشتقّ من الإعادة وحدَها — وإن لم تُسقَف الإعادةُ ولا حُمِل
+                        # شيءٌ ⇒ **تُحذف** العلامةُ (`pop`) كما ينصّ القانون.
+                        _carried = ({"reasoning": 1}
+                                    if "footer" in (cdata.get("reasoning") or "") else None)
+                        _m4 = reasoning_mark(pst, _carried, rst2)
                         if _m4:
-                            cdata["reasoning"] = (f"{cdata['reasoning']} + {_m4}"
-                                                  if cdata.get("reasoning") else _m4)
+                            cdata["reasoning"] = _m4
+                        else:
+                            cdata.pop("reasoning", None)
                     else:
                         cdata["reread_rejected"] = note
                     _write_json_atomic(cache, cdata)
@@ -814,7 +822,7 @@ def main() -> None:
     print(f"\nSLICE DONE: {len(per_page)} pages | clean {n_ok}/{n_rows} "
           f"({clean_ratio:.1%}) | footer {f_ok} ok/{f_bad} bad"
           + (f"/{f_gap} gap" if f_gap else "") + " | "
-          f"session ${usage_total.get('cost', 0):.4f} | "
+          f"live ${live_cost:.4f} | "
           f"ledger ${ledger.get('cost', 0):.4f} | {elapsed}s"
           + (f" | الترقيم: {summarize_page_numbers(pn_report)}"
              if (pn_report["gaps"] or pn_report["duplicates"]
