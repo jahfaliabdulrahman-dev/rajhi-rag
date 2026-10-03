@@ -184,7 +184,12 @@ class _FakeResp:
 
 def test_empty_provider_content_is_a_named_retryable_error(monkeypatch):
     """A provider can return empty content; that must not surface as a TypeError
-    from deep inside the parser (measured: 2 of 10 pages in a calibration)."""
+    from deep inside the parser (measured: 2 of 10 pages in a calibration).
+
+    **Changed by the owner's decision (2026-10-02, item 2 · review 82 R82-4):** an EMPTY answer now
+    takes the cut-off path — ONE capped retry, then a NAMED stop — instead of being retried
+    unconditionally. Same law for a cut-off and for an empty answer, and both stay named.
+    """
     import pytest
 
     from statement_qa import vlm_reader
@@ -193,7 +198,8 @@ def test_empty_provider_content_is_a_named_retryable_error(monkeypatch):
     monkeypatch.setattr(vlm_reader.urllib.request, "urlopen",
                         lambda *a, **k: _FakeResp(body))
     monkeypatch.setattr(vlm_reader.time, "sleep", lambda *_: None)
-    with pytest.raises(RuntimeError, match="empty content|retries exhausted"):
+    with pytest.raises(RuntimeError,
+                       match="empty content|retries exhausted|الجوابُ غيرُ صالح"):
         vlm_reader.chat_vlm_image("Zm9v", "prompt")
 
 

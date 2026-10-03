@@ -1,0 +1,31 @@
+{
+  "delegation_id": "deleg_fd2b183d",
+  "started": "2026-10-02 23:10:25",
+  "task_count": 3,
+  "model": "deepseek-flash",
+  "provider": "deepseek",
+  "tasks": [
+    {
+      "index": 0,
+      "goal": "مقعدُ المعايير (Standards) في مراجعة كود: هل بُني التغيير **بطريقة صحيحة** وفق معايير المستودع نفسها؟\n\nالتغييرُ يُراجَع: `~/Projects/wt-r81-reader-cap` — المدى المُثبَّت: `git diff 53639e7...1b44314` (أربعةُ التزامات: قارئُ الكشوف يحدّ تفكير النموذج بعد جوابٍ مقطوع).\n\nاقرأ معاييرَ المستودع من ملفاتها ولا تسترجعها من الذاكرة: `AGENTS.md` · `docs/GATES.md` · `docs/QA_CHECKLIST.md` · `docs/DELIVERY_REPORT.md`. ثم قِس التغييرَ على خطّ الأساس الثابت (12 مَشَمًّا هيكليًّا: دالّ",
+      "log": "~/.hermes/cache/delegation/live/deleg_fd2b183d/task-0.log",
+      "status": "completed",
+      "exit_reason": "completed"
+    },
+    {
+      "index": 1,
+      "goal": "مقعدُ المواصفة (Spec) في مراجعة كود: هل التغييرُ **الشيءُ الصحيح**؟\n\nالتغييرُ يُراجَع في `~/Projects/wt-r81-reader-cap` — المدى: `git diff 53639e7...1b44314`.\n\n**المواصفةُ هي ملفّا القرار، وهما المصدرُ الوحيدُ للحُكم** (لا تخترع متطلّباتٍ من الكود):\n1. `handoff/claude/20261002-003537-decision-cap-the-readers-reasoning-then-read-313-477.md` (موجودٌ في الفرع).\n2. نصُّ المراجعة ٨٢ التي يُنفَّذ حكمُها: `git show 805c60a:handoff/claude/20261002-013604-third-eye-review-82-unmar",
+      "log": "~/.hermes/cache/delegation/live/deleg_fd2b183d/task-1.log",
+      "status": "completed",
+      "exit_reason": "completed"
+    },
+    {
+      "index": 2,
+      "goal": "مقعدُ الهيكل (Structure) في مراجعة كود: هل خرج **التصميمُ أفضلَ ممّا كان**؟\n\nالمكان: `~/Projects/wt-r81-reader-cap` — المدى: `git diff 53639e7...1b44314`. اقرأ **الملفّات كاملة** لا المقاطع وحدها: `src/statement_qa/vlm_reader.py` · `tools/scale_slice.py` (موضعُ `_sum_dicts` وسجلّ الصفحة) · `tests/test_reader_reasoning_retry.py`.\n\nابحث عن **حركة الجودو**: إعادةُ ترتيبٍ تُبقي السلوكَ وتُذيب فروعًا أو دالّاتٍ أو حالات.\n- **احذف التعقيدَ لا تُنقله**: عُدَّ المفاهيمَ التي يحمل",
+      "log": "~/.hermes/cache/delegation/live/deleg_fd2b183d/task-2.log",
+      "status": "completed",
+      "exit_reason": "completed"
+    }
+  ],
+  "completed": "2026-10-02 23:16:22"
+}

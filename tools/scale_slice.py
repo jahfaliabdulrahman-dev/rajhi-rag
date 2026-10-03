@@ -36,7 +36,6 @@ PROJ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJ))
 sys.path.insert(0, str(PROJ / "src"))
 from tools.spend import at_or_over  # noqa: E402 — **السقفُ بالسنتات** (مراجعة ٥٢ · R52-4 · F7)
-
 from statement_qa.era import fingerprint_pages, summarize_ar as era_ar  # noqa: E402
 from statement_qa.footer_oracle import (  # noqa: E402
     FooterReading, check_page_footer, delta_checkable, delta_status,
@@ -51,7 +50,7 @@ from statement_qa.ordering import (  # noqa: E402
     summarize_page_numbers,
 )
 from statement_qa.vlm_reader import (  # noqa: E402
-    chain_derive, read_rows_vlm, reader_stamp, recover_anchor, stamp_conflict,
+    chain_derive, read_rows_vlm, reader_stamp, reasoning_mark, recover_anchor, stamp_conflict,
 )
 
 DEFAULT_SOURCE = None  # resolved at startup: --source, else a LOCAL pointer file
@@ -427,6 +426,13 @@ def main() -> None:
                     print(f"[p{pg}] GATE-SKIP ({','.join(_reasons) or 'reject'}) "
                           f"— بلا استدعاء", flush=True)
                     continue
+            # **وحدُ الكلفة يُسأل قبل القراءة لا بعدها (R86-2 · P3):** كان الفحصُ عند نهاية الدورة
+            # (`at_or_over` تحت) ⇒ فقِيس أنّ `--max-cost 0` **قرأ صفحةً كاملةً** (~١٫٧ سنتًا على نسخةٍ
+            # من v2) ثمّ توقّف. فيُسأل هنا أوّلًا: بالسقف الصفريّ لا يُرسَل طلبٌ واحد، وبأيّ سقفٍ لا
+            # تُصرف صفحةٌ فوقه. والدالّةُ نفسُها (`>=` بالسنوات المعلَنة) حتى لا تختلف دلالةُ الحارس.
+            if at_or_over(usage_total.get("cost", 0.0), args.max_cost):
+                stop_reason = (f"سقفُ الميزانية ${args.max_cost} — لا قراءةَ تُصرف فوقه")
+                break
             t0 = time.time()
             try:
                 raw_rows = read_rows_vlm(str(png), stats=st_r)
@@ -435,6 +441,10 @@ def main() -> None:
                 _write_json_atomic(cache, {
                     **read_stamp,
                     "pg": pg, "error": f"{type(e).__name__}: {e}",
+                    # **وكتابةُ الخطأ تحمل العلامة أيضًا (مراجعة ٨٢ · البند ٣/البند ٥ من مقعد المواصفة):**
+                    # كانت العلامةُ في كتابة النجاح وحدَها ⇒ والصفحةُ الحتميّةُ القطعِ (٣١٣) مسارُها
+                    # المرجَّح `AnswerTruncated`، أي كتابةُ خطأ ⇒ سجلٌّ بلا علامة. فالقاعدةُ في الموضعين.
+                    **({"reasoning": _r2} if (_r2 := st_r.get("reasoning")) else {}),
                     "usage": _sum_dicts(prev_usage,
                                         _sum_dicts({"calls": 1}, st_r))})
                 print(f"[p{pg}] READ FAILED: {e}", flush=True)
@@ -478,6 +488,13 @@ def main() -> None:
                             "balance": str(footer.balance) if footer.balance is not None else None,
                             "raw": footer.raw} if footer else None),
                 "usage": usage,
+                # **العلامةُ تُكتَب حقلًا مستقلًّا — **وحين وُجدت وحدَها** (مراجعة ٨٢ · البنود ١ و٣ و٤):**
+                # كانت في `usage`، و`_sum_dicts` **تُرشِّح** مفاتيحه إلى مفردات الدفتر (`_USAGE_KEYS`)
+                # ⇒ تموت عند الحفظ. ثمّ نُقلت هنا **دائمًا** فصار كلُّ سجلٍّ افتراضيّ يحمل
+                # `"reasoning": null`، والمواصفةُ (R81-3) تقول «حين وُجد وحدَه» وسجلُّ القراءة
+                # الافتراضيّة **يبقى كما هو اليوم**. فالكتابةُ الآن مشروطةٌ بحضوره، فلا يُمسّ سجلُّ
+                # قراءةٍ افتراضيّة ولا يُضاف مفتاحٌ لا معنى له.
+                **({"reasoning": _m} if (_m := reasoning_mark(st_r, st_f)) else {}),
             })
             origin = "live"
 
@@ -500,11 +517,23 @@ def main() -> None:
                 if cache.exists() and not cdata.get("error"):
                     cdata["raw_rows"] = [row_to_json(r) for r in raw_rows]
                     cdata["recovered"] = str(recovered)
+                    # **وقراءةُ الاستدراك تُختم أيضًا (R83-2 · شقُّه الثاني):** هذه قراءةٌ ثالثةٌ قد
+                    # تُقَصَّر وحدها. **ولا يُقرأ هنا `st_r`/`st_f`** لأنهما غيرُ معرَّفَين في مسار
+                    # الاستئناف (تحذيرٌ ساكنٌ = عقد: كان يُسقط `NameError`)، والسجلُّ المحفوظ يحمل
+                    # علامةَ القراءتين الحيّتين أصلًا ⇒ فالاستدراكُ يُضاف إلى ما هو مكتوب.
+                    _m2 = reasoning_mark({}, {}, rst)
+                    if _m2:
+                        cdata["reasoning"] = (f"{cdata['reasoning']} + {_m2}"
+                                              if cdata.get("reasoning") else _m2)
                     _write_json_atomic(cache, cdata)
             elif rst and cache.exists() and not cdata.get("error"):
                 # attempted and REFUSED: without this, EVERY replay of the
                 # slice pays for the same two calls again (audit P2-2).
                 cdata["anchor_rejected"] = True
+                _m3 = reasoning_mark({}, {}, rst)          # العلامةُ في باب الرفض أيضًا (R83-2)
+                if _m3:
+                    cdata["reasoning"] = (f"{cdata['reasoning']} + {_m3}"
+                                          if cdata.get("reasoning") else _m3)
                 _write_json_atomic(cache, cdata)
         page_nos.append((pg, page_no))
         gap_missing: list[int] = []
@@ -525,6 +554,7 @@ def main() -> None:
                 and (page_diverged(rows, cum, prev_footer, footer, cum_broken)
                      or clash)):
             pst: dict = {}
+            rst2: dict | None = None   # يُعرَّف قبل فرعه ليُقرأ في كتلة الكتابة أدناه بلا شكٍّ ساكن
             fresh_raw, accepted, note = try_page_reread(
                 str(png), cum, prev_footer, footer, prev_closing, pst)
             usage_total = _sum_dicts(usage_total, _sum_dicts({"calls": 1}, pst))
@@ -541,7 +571,7 @@ def main() -> None:
                 rows = chain_derive(raw_rows, prev_balance=prev_closing)
                 if (pg > args.first and rows
                         and rows[0].get("boundary") == "anchor"):
-                    rst2: dict = {}
+                    rst2 = {}
                     patched2, rec2 = recover_anchor(
                         raw_rows, prev_closing, str(png), pg, rst2)
                     if rst2:
@@ -559,6 +589,14 @@ def main() -> None:
                     if accepted and fresh_raw is not None:
                         cdata["raw_rows"] = [row_to_json(r) for r in raw_rows]
                         cdata["reread"] = note
+                        # **والعلامةُ السابقةُ تبقى (R86-3):** إعادةُ القراءة تمحو بتّها كان يمحو **علامةَ
+                        # التذييل** المكتوبةَ في القراءة الحيّة (لم يُعَد قراءتُه) ⇒ فيُضاف ما قرأته الإعادةُ
+                        # **إلى ما هو مكتوب**، لا استبدالًا له. (و`st_f` لا يُقرأ هنا: غيرُ معرَّفٍ في
+                        # مسار الاستئناف — عقدٌ ساكن، وهو نفسُ سببِ ما جرى في المرساة.)
+                        _m4 = reasoning_mark(pst, None, rst2)
+                        if _m4:
+                            cdata["reasoning"] = (f"{cdata['reasoning']} + {_m4}"
+                                                  if cdata.get("reasoning") else _m4)
                     else:
                         cdata["reread_rejected"] = note
                     _write_json_atomic(cache, cdata)

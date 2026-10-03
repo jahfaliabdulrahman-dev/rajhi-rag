@@ -81,6 +81,8 @@ tests/test_intake.py
 tests/test_desc_pass.py
 tests/test_desc_reader.py
 tests/test_row_bands.py
+tests/test_reader_reasoning_retry.py
+tests/test_saved_record_mark.py
 ```
 
 **وحدُ الإدراج مُعلَنٌ بالقياس (R72-1 · مراجعة ٧٢ · شقّاها معًا):** حرّاسُ جولة البيان الخمسة صاروا في

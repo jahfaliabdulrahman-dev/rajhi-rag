@@ -133,6 +133,53 @@ def _extract_json(content: str):
         return json.loads(repaired)
 
 
+class AnswerTruncated(RuntimeError):
+    """جوابٌ قطعَه المزوّد عند حدّ الرموز — **ولا يُعاد المحاولة**.
+
+    **ولماذا لا يُعاد (توجيهُ المالك 2026-10-02 · الخيار الأول):** كان `finish_reason: "length"` يُصنَّف
+    عارضًا فيُعاد النداء، **وقِيس أنّه حتميٌّ على صفحاتٍ بعينها**: الصفحة ٣١٣ استهلكت **٣٩٩٦ من ٤٠٠٠**
+    عند حدّ ٤٠٠٠، و**٧٩٩٦ من ٨٠٠٠** عند حدّ ٨٠٠٠ ⇒ فرفعُ الحدّ لا يُصلح، **وكلُّ إعادةٍ تدفع ثمنَ
+    الفشل نفسِه** (محاولةٌ سابقة على ٣١٣ = أربعةُ نداءاتٍ بـ$0.0165 لكلٍّ منها).
+    ولا يُلتقط في `except (json.JSONDecodeError, ValueError)`: الإرثُ من `RuntimeError` يُخرجه من
+    حلقة الإعادة، ويسمّيه للمالك بدل أن يُخفيَه في «تعذّرت المحاولات».
+    """
+
+
+# ————— سقفُ التفكير — **عند الحاجة وحدها** (قرارُ المالك في مراجعة ٨١ · الطريقُ (ب)) —————
+# **وصُحِّح قتبسٌ خاطئ كان هنا (R81-1 · P1):** كتبتُ أنّ `effort` يُضبط «مع الميزانية، فلا يكفي
+# أحدُهما» — **والوثيقةُ نفسُها تمنع الجمع**: معاملاتُ `reasoning` تقول نصًّا: **«One of the following
+# (not both)»**. وتقول أيضًا: «OpenRouter maps the `reasoning.effort` parameter directly to Google's
+# `thinkingLevel` values» ⇒ فـ`effort` وحدَه هو الضابطُ الموثَّق لمستويات تفكير Gemini 3، **ولا
+# `max_tokens` معه**. وشرطُ «`max_tokens` يجب أن يبقى أعلى من ميزانية التفكير» يخصّ `reasoning.max_tokens`
+# — ولا محلَّ له هنا ما دام `effort` هو المُرسَل.
+# **ونطاقُ الحدّ بقرار المالك:** القراءةُ الأولى لكلّ صفحة تبقى **بالتفكير الافتراضيّ** — فلا يُمسّ ما
+# شُهد له (البوّابة ٥/٥ · الفوتر ١٠/١٠) ولا تعود خليّةُ التأهيل إلى «قيد إعادة التأهيل» — **والحدُّ
+# **والقانونُ المقيسُ صار: «جوابٌ مسقوفٌ واحد» لا «إرسالٌ واحد» (R83-1 · R84-2):** الإرسالُ
+# يتكرّر إن لم يُجَب الطلبُ المسقوف (خطأُ شبكةٍ أو 429)، **والاستحقاقُ لا يُستهلك إلا بجواب**. فالوصفُ
+# «في محاولةٍ ثانيةٍ واحدة» كان يخالف الكود بعد إصلاح R83-1 — والمقيس: يُرسَل حتى ثلاثِ مرّات.**
+REASONING_RETRY_EFFORT = "low"    # يُسجَّل مع القراءة (R81-3) — **والقانون: جوابٌ مسقوفٌ واحد** (R83-1 · R84-2)
+
+
+def reasoning_mark(*stats: dict | None) -> str | None:
+    """ما استُعمل من إعداد التفكير في قراءاتٍ هذه الصفحة — **بصيغةٍ واحدة** (§R81-3 · R83-2).
+
+    كان سجلُّ الصفحة يُختم من **قراءة الصفوف وحدها**، وفي السجلّ نفسِه قراءاتٌ أخرى قد تُسقَف
+    فتُترك بلا ختم: **قراءةُ التذييل** (تُقرأ مرّتين على الصفحتين لأوّل مرّة) وإعادةُ القراءة/المرساة.
+    فصار المصدرُ دالّةً واحدة: تُسمّى القراءاتُ المسقوفةُ باسمها بعد الإعداد، **وغيابُ الختم يعني أنّ
+    قراءةً ما في هذا السجلّ لم تُسقَف** — فلا يُضاف مفتاحٌ لسجلّ قراءةٍ افتراضيّة.
+
+    `rows` فقط ⇒ `effort:low` (كما كانت، فلا يتغيّر سجلُّ اليوم) · ومعها غيرُها ⇒ `effort:low (footer)`
+    · وخانةُ إعادة القراءة/المرساة اسمها **`anchor`** لا `reread` (R83-2: هي مرساةٌ حدّيةٌ تُقرأ ثانيةً).
+    """
+    named = tuple(zip(("rows", "footer", "anchor"), stats))
+    capped = [name for name, st in named if (st or {}).get("reasoning")]
+    if not capped:
+        return None
+    if capped == ["rows"]:
+        return f"effort:{REASONING_RETRY_EFFORT}"
+    return f"effort:{REASONING_RETRY_EFFORT} ({','.join(capped)})"
+
+
 def chat_vlm_image(image_b64: str | list[str], prompt: str,
                    max_tokens: int = 4000, stats: dict | None = None,
                    parse=None):
@@ -151,7 +198,7 @@ def chat_vlm_image(image_b64: str | list[str], prompt: str,
     into it — the measured cost/time evidence for scale slices.
     """
     images = [image_b64] if isinstance(image_b64, str) else list(image_b64)
-    payload = {
+    base_payload = {
         "model": MODEL,
         "temperature": 0,
         "max_tokens": max_tokens,
@@ -161,33 +208,83 @@ def chat_vlm_image(image_b64: str | list[str], prompt: str,
                         "image_url": {"url": f"data:image/png;base64,{b}"}}
                        for b in images]}],
     }
-    req = urllib.request.Request(
-        "https://openrouter.ai/api/v1/chat/completions",
-        data=json.dumps(payload).encode(),
-        headers={"Authorization": f"Bearer {_api_key()}",
-                 "Content-Type": "application/json"})
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {_api_key()}", "Content-Type": "application/json"}
     delay = 10
     last_error: Exception | None = None
+    # **نطاقُ الحدّ — قرارُ المالك (ب) في مراجعة ٨١:** القراءةُ الأولى **بالتفكير الافتراضيّ كما هي
+    # اليوم** (فلا يُمسّ ما شُهد له)، **والسقفُ يُرسَل بعد قطعٍ أو فراغ، ولا يُستهلك إلا بجوابٍ مسقوف**
+    # (R83-1) — فقد يُرسَل أكثرَ من مرّة، **والقانونُ: جوابٌ مسقوفٌ واحد** (R84-2).
+    #
+    # **ودرسُ مقعد الهيكل (مراجعة ٨٢ · الحاجز ١) مُذابٌ هنا:** كان فرعُ القطع يُعيد تنفيذَ بروتوكول
+    # الإعادة يدويًّا (نومٌ وتراجعٌ و`continue`) ⇒ **نسخةً خامسةً** له، **وثلاثةَ حقولِ حالةٍ لمفهومٍ
+    # واحد**، **ووعدًا في `last_error` لا يقع** (يُكتب في المحاولة الأخيرة ثمّ لا محاولةَ بعده). فصار:
+    # القطعُ والفارغُ **يُرمَيان استثناءً قابلًا للإعادة** فيلتقطه المعالجُ القائم ⇒ **مسارٌ واحد**،
+    # **وحقلان صريحان** (`cap_owed` / `cap_answered`) لا ثلاثةٌ ضمنيّة، والنصُّ يصف ما وقع لا ما سيقع.
+    # **والسقفُ «مستحقٌّ» حتى يُجيب نداءٌ يحمله (مراجعة ٨٣ · R83-1):** كان يُعدّ مُرسَلًا بمجرّد إرساله،
+    # فإن انقطع الاتّصالُ أو ردّ المزوّد بـ429 بعد الطلب المسقوف، ذهبت المحاولةُ التالية **بلا سقف**
+    # ⇒ صفوفٌ من قراءةٍ كاملة وسجلٌّ مكتوبٌ عليه `effort:low`، وحكمٌ على سقفٍ **لم يُجَب** («لم يُجدِ»
+    # وهو لم يُقَرأ أصلًا) — وعلى ٣١٣ يعني شراءَ فشلٍ معروف. فصار الاستحقاقُ لا يسقط إلا بنداءٍ مسقوفٍ
+    # **أجاب**، والختمُ يُكتب عند الجواب لا عند الإرسال.
+    cap_owed = False           # يجب إرسالُ السقف في المحاولة القادمة
+    cap_answered = False       # أُجيب نداءٌ بالسقف ⇒ استُهلك الاستحقاقُ وصار الختمُ صادقًا
     for attempt in range(_ATTEMPTS):
+        payload = dict(base_payload)
+        capped_now = cap_owed and not cap_answered
+        if capped_now:
+            # `effort` **وحدَه** — والوثيقةُ تقول «One of the following (not both)» (R81-1)
+            payload["reasoning"] = {"effort": REASONING_RETRY_EFFORT}
+        req = urllib.request.Request(url, data=json.dumps(payload).encode(),
+                                     headers=headers)
         if stats is not None:
             # Every attempt IS one HTTP request. The ledger's `calls` counts
             # pages (one read), so it under-reported the real request count by
             # ~2x — and that wrong number reached a handoff message (audit P2-2).
             stats["request_calls"] = int(stats.get("request_calls") or 0) + 1
+            # **R81-3 + R83-1:** الختمُ يُكتب **عند الجواب** لا عند الإرسال — فنداءٌ مسقوفٌ أخفق
+            # (شبكةٌ أو 429) لا يُختم سجلُّه، والختمُ يقع في الفرع الذي يستقبل الردَّ أدناه.
         try:
             out = json.loads(urllib.request.urlopen(req, timeout=180).read().decode())
             if stats is not None and isinstance(out.get("usage"), dict):
-                stats.update(out["usage"])
-            # A provider can answer with EMPTY content (a length cap, or a
-            # model that emitted only reasoning). That surfaced as
-            # «TypeError: expected string or bytes-like object, got NoneType»
-            # from deep inside the parser — opaque AND not retried, whereas it
-            # is exactly the transient blip the retry loop exists for.
-            # Measured: 2 of 10 pages in a calibration run returned empty.
-            choices = out.get("choices") or [{}]
-            content = (choices[0].get("message") or {}).get("content")
-            if not content or not str(content).strip():
-                raise ValueError("VLM empty content (المزوّد أعاد محتوى فارغاً)")
+                # **كلفةُ كلّ محاولةٍ تُجمَع (مراجعة ٨٢ · البند ٢):** كان `stats.update(...)` **يستبدل**
+                # كتلةَ الاستهلاك بكتلة **آخر ردّ** ⇒ ثمنُ كلّ محاولةٍ سابقة يُهدَر. وقِيس في المحاكاة
+                # قبل الإصلاح: `cost` = الأخيرة وحدها. فيُجمَع كلُّ مفتاحٍ رقميّ هنا؛ **وترشيحُها إلى
+                # دفتر الكلفة يبقى في موضعه الواحد** (`tools/scale_slice.py::_sum_dicts`) — ويُنبَّه:
+                # مفتاحٌ يُجمَع هنا ثمّ يُرشَّح هناك صامتًا هو عطبُ «ختمٍ يموت عند الحفظ» (مقعدُ المعايير ٣).
+                for _k, _v in out["usage"].items():
+                    # **والعدُّ يبقى عددًا صحيحًا إن كان كذلك (مراجعة ٨٣ · R83-6):** الجمعُ بـ`float`
+                    # جعل كلَّ سجلٍّ جديد يكتب الرموزَ `2468.0` بينما الأصلُ `2468` ⇒ تغييرٌ في صيغة
+                    # سجلٍّ حيٌّ بلا سبب. فيُحفظ النوعُ، والكسرُ يُقرَّب عند الكسور وحدها.
+                    if isinstance(_v, (int, float)) and not isinstance(_v, bool):
+                        _sum = float(stats.get(_k) or 0) + _v
+                        stats[_k] = int(_sum) if _sum.is_integer() else round(_sum, 6)
+            choice = (out.get("choices") or [{}])[0] or {}
+            content = (choice.get("message") or {}).get("content")
+            # **أُجيبَ النداءُ (ولو بجوابٍ غيرِ صالح) ⇒ استحقاقُ السقف يُستهلَك والختمُ يصير صادقًا**
+            # (R83-1): فيُعلَن هنا، في موضع استقبال الردّ — لا عند الإرسال.
+            if capped_now:
+                cap_answered = True
+                if stats is not None:
+                    stats["reasoning"] = f"effort:{REASONING_RETRY_EFFORT}"
+            # **ما يُنهي القراءة: قطعٌ أو فارغ** (قرارُ المالك ٢ · R82-4). والقطعُ **حتميٌّ** على صفحاتٍ
+            # بعينها (قِيس: ٣٩٩٦ من ٤٠٠٠ ثمّ ٧٩٩٦ من ٨٠٠٠) ⇒ فلا يُعاد شراءُ الفشل نفسِه: إن كان السقفُ
+            # قد أُرسل فعلًا، خرج الخطأُ المسمّى **فورًا وبلا انتظار**؛ وإن لم يُرسَل، أُشعِل للأتى ثمّ
+            # رُمي **قابلًا للإعادة** فيلتقطه المعالجُ القائم (نفسُ التصنيف ونفسُ التراجع، مسارٌ واحد).
+            finish = choice.get("finish_reason")
+            if finish == "length" or not str(content or "").strip():
+                why = "بلغ حدَّ الرموز" if finish == "length" else "أعاد محتوى فارغًا"
+                if cap_answered or attempt == _ATTEMPTS - 1:
+                    # سقفٌ **أُجيب** ولم يُجدِ، أو **آخرُ محاولة** ⇒ الخطأُ باسمه **فورًا** (R83-5):
+                    # `AnswerTruncated` لا `VLM JSON`، وبلا انتظارٍ وبلا إعادة.
+                    detail = (f" — وقد أُرسل السقفُ (`reasoning.effort={REASONING_RETRY_EFFORT}`) "
+                              "وأُجيب، ولم يُجدِ ⇒ **لا ثالثة**"
+                              if cap_answered else
+                              " في **آخر محاولة** — فلا محاولةَ تُرسَل بعدها")
+                    raise AnswerTruncated(
+                        f"الجوابُ غيرُ صالح: المزوّدُ {why}{detail}: كلُّ إعادةٍ تدفع ثمنَ الفشل "
+                        "نفسِه. يُخفض المطلوبُ من الصفحة أو تُقسَّم القراءةُ، ويُعرض على المالك باسمه")
+                cap_owed = True
+                raise ValueError(f"VLM unusable answer: المزوّدُ {why}")
             return parse(content) if parse else content
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < _ATTEMPTS - 1:
@@ -201,7 +298,14 @@ def chat_vlm_image(image_b64: str | list[str], prompt: str,
                 continue
             raise RuntimeError(f"VLM network: {e}") from e
         except (json.JSONDecodeError, ValueError) as e:
-            last_error = e      # empty content lands here too: it is retryable
+            # الجوابُ الفارغُ والقطعُ يمرّان من هنا **قبل** إرسال السقف، فيُعادان **مرّةً واحدة**؛
+            # وبعد إرسال السقف يخرج `AnswerTruncated` من الفرع أعلاه (وهو `RuntimeError` فلا يمرّ من هنا).
+            last_error = e
+            # **وما يعود به الجوابُ المسقوفُ يُنهي القراءة (R82-2 · ومقعدُ المواصفة ٧):** إن كان
+            # المزوّدُ قد أُرسل إليه السقفُ فعاد بجوابٍ **تالف** (لا مقطوعًا ولا فارغًا — فهذان خرجا من
+            # الفرع أعلاه)، فلا محاولةَ ثالثة: خطأٌ مسمًّى بسببٍ من نوعه، **بلا انتظار**.
+            if cap_answered:
+                raise RuntimeError(f"VLM JSON: {e}") from e
             if attempt < _ATTEMPTS - 1:
                 time.sleep(delay); delay *= 2
                 continue
@@ -209,7 +313,10 @@ def chat_vlm_image(image_b64: str | list[str], prompt: str,
     # The cause is named, not swallowed: «retries exhausted» alone told nobody
     # whether the provider was down, the JSON was malformed, or the answer came
     # back empty (each needs a different response).
-    raise RuntimeError(f"VLM retries exhausted — آخر سبب: {last_error}")
+    raise RuntimeError(
+        f"VLM retries exhausted — استُنفدت الإعاداتُ ({_ATTEMPTS}) دون جوابٍ صالح؛ "
+        f"آخرُ سبب: {last_error}. ولا إعادةَ بعدها: تُعرض على المالك باسمها")
+
 
 
 def _rows_from_content(content: str) -> list[dict]:
