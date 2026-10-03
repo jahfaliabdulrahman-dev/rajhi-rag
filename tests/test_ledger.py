@@ -430,3 +430,28 @@ def test_the_schema_version_is_stamped_and_foreign_versions_are_refused(tmp_path
     with pytest.raises(L.LedgerUnavailable) as ei:
         L.read_ledger(old)                       # user_version = 0 مع جداول ⇒ مخطَّطٌ مجهولٌ بالنصّ
     assert ei.value.state == L.OUTDATED, ei.value.state
+
+
+def test_every_intent_renders_on_the_human_path_too(tmp_path):
+    """**البوّابةُ التي كان يجب أن تمسك `tools/ledger.py:84`** (مقعدُ الترتيب P1 · مُثبت: `ask pages`
+    بلا `--json` ⇒ `KeyError: 'row_count'`):
+
+    كانت ضوابطي تُشغّل الـCLI بـ**مسار `--json` وحدَه**، فمرّ عطبُ سطرِ العرض. والقاعدةُ المستفادة:
+    **واجهةٌ تُقاس على مسارٍ واحدٍ تُخفي النصفَ الآخر** — فكلُّ قصدٍ يُقاس هنا على **مسارَيه معًا**
+    (إنسانيّ + JSON)، ومعها حالُ فشلٍ معروف (قاعدةٌ غائبة ⇒ خروجٌ مسمًّى بالرمز ٢ لا traceback).
+    """
+    db = tmp_path / "cli.sqlite"
+    c = L.open_ledger(db); L.ingest(c, _rows(3), _pages()); c.close()
+    for intent in L.INTENTS:
+        for extra in ([], ["--json"]):
+            out = subprocess.run([sys.executable, str(ROOT / "tools" / "ledger.py"), "ask",
+                                  "--db", str(db), intent, *extra],
+                                 capture_output=True, text=True, cwd=ROOT)
+            assert out.returncode == 0, (intent, extra, out.returncode, out.stderr[-300:])
+            assert "Traceback" not in out.stderr, (intent, extra, out.stderr[-300:])
+        assert out.stdout.strip(), f"القصدُ {intent} لم يُخرج شيئًا"
+    miss = subprocess.run([sys.executable, str(ROOT / "tools" / "ledger.py"), "ask",
+                           "--db", str(tmp_path / "ghost.sqlite"), "coverage"],
+                          capture_output=True, text=True, cwd=ROOT)
+    assert miss.returncode == 2, (miss.returncode, miss.stderr[-200:])
+    assert "Traceback" not in miss.stderr and "غيرُ موجودة" in miss.stderr, miss.stderr[-200:]

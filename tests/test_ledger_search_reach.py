@@ -18,6 +18,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "tools"))   # ثمّ `import to_xlsx` يعمل وحدَه (كان ينجح بترتيبِ جمعٍ أبجديّ)
 
 from statement_qa import ledger as L            # noqa: E402
 

@@ -244,7 +244,8 @@ INS_COLUMNS = COLUMNS
 #:  · **والمالُ `str` في الرندر نفسِه** (قِيس: 5792 نصًّا) ⇒ `TEXT` مطابقٌ له لا مخالف.
 #: والقاعدة: عمودٌ يقرؤه المستهلك بغير نوعه = **مصدرٌ ناقص**، ولو تساوت قيمتُه.
 BOOL_COLUMNS = ("opening", "chain_ok")
-INT_COLUMNS = ("page", "row_no", "printed_page", "year", "counted")
+INT_COLUMNS = ("pg", "row_no", "printed_page", "year", "counted")   # `pg` لا `page`: اسمُ العمود في الجدول
+#: (مقعدُ الترتيب P3: كان مُدخَلًا خاملًا لا يُطابَق — فلا نوعَ يُفرَض على `pg`)
 DEC_COLUMNS = ("derived_movement",)
 
 

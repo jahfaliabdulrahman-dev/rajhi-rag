@@ -25,6 +25,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from statement_qa import ledger as L            # noqa: E402
 
+REPO = Path(__file__).resolve().parents[1]      # **الجذرُ يُشتقّ من موضع الملفّ لا من الـCWD:** الضابطُ
+                                                # الذي أمسك هذا (مقعدُ الترتيب P3) بنى من CWD آخر
+                                                # فأنشأ الدفترَ **خارج الشجرة** حيث لا يُهمَل ولا يُحرس.
+
 
 def _build(args) -> int:
     import to_xlsx                              # noqa: PLC0415  (يُستورد عند الحاجة فقط: يحتاج polars)
@@ -49,12 +53,22 @@ def _build(args) -> int:
 
 
 def default_db(run: Path) -> Path:
-    """المسارُ الافتراضيّ: `data/ledgers/<اسم التشغيل>.sqlite` — مُهمَلٌ ومحروسٌ بالامتداد."""
-    return Path(*L.LEDGER_SUBDIR) / f"{Path(run).name}.sqlite"
+    """المسارُ الافتراضيّ: `<جذرُ المستودع>/data/ledgers/<اسم التشغيل>.sqlite` — مُهمَلٌ ومحروس.
+
+    **مثبَّتٌ بالجذر لا بالـCWD** (مقعدُ الترتيب P3 · مُثبت): كان نسبيًّا، فيُنشئ الدفترَ حيث تُشغَّل
+    الأداة — خارجَ الشجرة عند التشغيل من غير الجذر، فلا يشملُه الإهمالُ ولا حارسُ النشر.
+    """
+    return REPO / Path(*L.LEDGER_SUBDIR) / f"{Path(run).name}.sqlite"
 
 
 def _ask(args) -> int:
-    conn = L.read_ledger(Path(args.db).expanduser())   # للقراءة: قاعدةٌ غائبةٌ تُعلَن ولا تُخترع
+    try:
+        conn = L.read_ledger(Path(args.db).expanduser())   # للقراءة: قاعدةٌ غائبةٌ تُعلَن ولا تُخترع
+    except L.LedgerUnavailable as e:
+        # **والخطأُ المسمّى يُعرَض مسمًّى** (مقعدُ الترتيب P3 · مُثبت): كان `LedgerUnavailable` يخرج
+        # traceback خامًا من واجهةٍ تشترط على نفسها «خطأٌ مسمّى لا انهيار».
+        print(f"تعذّر فتحُ الدفتر — {e}", file=sys.stderr)
+        return 2
     try:
         out = L.answer(conn, args.intent, pg=args.pg, q=args.q, limit=args.limit)
     except ValueError as e:                     # قصدٌ غيرُ مُعدَّد ⇒ خطأٌ مسمًّى لا استعلامٌ عرضيّ
@@ -81,7 +95,7 @@ def _ask(args) -> int:
             print(f"  ص{r['pg']} · {r['desc'][:60]}")
     elif out["intent"] == "pages":
         for r in out["pages"]:
-            print(f"  ص{r['pg']}: {r['verdict']} · صفوف {r['row_count']}")
+            print(f"  ص{r['pg']}: {r['verdict']} · صفوف {r['rows_count']}")
     else:
         for r in out["qa"]:
             print(f"  [{r['asked_at']}] {r['question'][:70]} ⇒ {(r['answer'] or '—')[:40]} · أدلّة {r['evidence']}")
