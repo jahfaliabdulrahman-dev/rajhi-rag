@@ -1,4 +1,4 @@
-"""بوّاباتُ دفتر الكشف (أ-٣) — ستُّ بوّابات، كلُّ واحدةٍ تقيس ما تنصّ عليه الخارطة بالاسم.
+"""بوّاباتُ دفتر الكشف (أ-٣) — اثنتا عشرةَ بوّابة، كلُّ واحدةٍ تقيس ما تنصّ عليه الخارطة بالاسم.
 
 **والقاعدةُ الحاكمة:** البوّابةُ الحاسمةُ الأولى — **ما كُتب يُقرأ صفًّا بصفّ**. فكلُّ قيدٍ آخر
 (المبالغُ TEXT · الفهرسُ لا ينطفئ · التطبيع · الخطأُ المسمّى) يُقاس لأنّه يحمي هذه القراءة.
@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import sqlite3
+import subprocess
 import sys
 from pathlib import Path
 
@@ -45,8 +46,12 @@ def _fresh(tmp_path: Path):
 
 
 def _want(row: dict, col: str):
-    """قيمةُ العمود في **الصفّ المصدر**: اسمٌ واحدٌ يختلف — الرندرُ يسمّيها `page` والدفترُ `pg`."""
-    return row["page"] if col == "pg" else row[col]
+    """قيمةُ العمود في **الصفّ المصدر** — والترجمةُ مُعلَنةٌ في موضعٍ واحد (`ledger._row_values`).
+
+    وثلاثةُ أسماءٍ تختلف بين الرندر والمواصفة: `page`↔`pg` و`source`↔`proof_source` (والمواصفةُ
+    سمّتها `proof_source` في الخارطة أ-٣)، وما سواها متطابقٌ — ويُقاس التطابقُ في ضابطٍ مجموعيّ.
+    """
+    return row[{"pg": "page", "proof_source": "source"}.get(col, col)]
 
 
 def _same(want, have) -> bool:
@@ -156,21 +161,152 @@ def test_unproven_is_derived_and_the_anchor_must_prove_itself(tmp_path):
 
 
 def test_both_guards_cover_the_ledger_path(tmp_path):
-    """**قرارُ المالك:** «ويغطّيه حارسا النشر والمبالغ، وضابطٌ يُثبت ذلك» — يُقاس لا يُدّعى."""
+    """**قرارُ المالك:** «ويغطّيه حارسا النشر والمبالغ، وضابطٌ يُثبت ذلك» — **بالخاصيّة لا بالعضويّة**.
+
+    **والعِلّةُ المقيسة (مقعدُ المعايير F2 · مُثبت):** كان الضابطُ يقول «`.sqlite` في `BINARY_EXTS`»
+    و«`data/` في `BINARY_DIRS`» — وكلاهما **عضويّةٌ في مجموعةٍ** لا **حجبٌ**: `BINARY_EXTS` مجموعةُ
+    تخطٍّ، و`amount_guard.undeclared_binaries()` على ملفٍّ مُتتبَّعٍ `data/ledgers/x.sqlite` تُعيد `[]`
+    (لا تعضّ)، فالحارسُ الثاني **لا يحجب قاعدةً** — والفعّالُ `publish_guard` بامتداد `.sqlite`
+    (`OPAQUE_EXTS`) + **الإهمالُ** في `.gitignore`. فالضابطُ الآن يقيس الثلاثةَ كما هي:
+    الحجبَ الفعليَّ، والإهمالَ الفعليَّ، وغيابَ حجب حارس المبالغ (يُعلَن لا يُخفى).
+    """
     import amount_guard as ag           # noqa: PLC0415
     import publish_guard as pg          # noqa: PLC0415
 
-    p = str(L.ledger_path(ROOT, "alrajhi-1234").relative_to(ROOT))
-    assert p.startswith("data/"), p
-    assert p.endswith(".sqlite")
-    # حارسُ النشر: امتدادُ القاعدة **ممنوعٌ في الشجرة** (BINARY_EXTS) — فالملفُّ لا يُدفع ولو أُضيف.
-    assert ".sqlite" in pg.BINARY_EXTS, "الحارسُ لا يمنع امتداد .sqlite"
-    # وحارسُ المبالغ: `data/` مجلّدُ أدلّةٍ ثنائيّةٌ عنده ⇒ لا يُنزع منه ملفُّ دليلٍ بلا إعلان.
-    assert any(str(b).startswith("data") for b in ag.BINARY_DIRS), \
-        "حارسُ المبالغ لا يعدّ data/ من مجلدات الأدلّة"
-    # ومسارُ الدفتر **ليس** تحت مسار بيانات العيّنة، فهو محروسٌ بالامتداد لا بالمسار: يُقاس صريحًا
-    # حتى لا يُقرأ لاحقًا كأنّ الملفّ مُهمَلٌ بلا حارس.
-    assert not pg.real_data_path(p), "تغيّر مسارُ الدفتر ⇒ يُعاد النظرُ في مصدر حمايته"
+    rel = str(L.ledger_path(ROOT, "alrajhi-1234").relative_to(ROOT))
+    assert rel.startswith("data/") and rel.endswith(".sqlite"), rel
+
+    # ١) حارسُ النشر **يحجب** المسار: يُقاس بالدالّة التي تُنتج الحكمَ في الماسح نفسِه
+    #    (`_check_path` تُطبّق PATH_RULES) — لا بعضويّةٍ في ثابتٍ (وهو ما قاسه المقعد).
+    findings: list = []
+    pg._check_path(rel, "tree", findings, [])   # noqa: SLF001
+    assert any(f[0] == "BLOCK" for f in findings), f"حارسُ النشر لا يحجب دفترًا: {findings}"
+
+    # ٢) والإهمالُ واقعٌ: `git check-ignore` يشهد به (لا نصُّ `.gitignore` يُقرأ بالعين).
+    check = subprocess.run(["git", "check-ignore", "-q", rel], cwd=ROOT)
+    assert check.returncode == 0, "مسارُ الدفتر غيرُ مُهمَل ⇒ قرارُ المالك غيرُ واقع"
+
+    # ٣) **وحارسُ المبالغ لا يحجب `.sqlite`** — يُقاس ويُعلَن بدل أن يُدّعى:
+    assert not getattr(ag, "BINARY", set()) & {".sqlite", ".db", ".sqlite-wal"}, \
+        "تغيّرت تغطيةُ حارس المبالغ (صار يحجب القاعدة) ⇒ يُحدَّث هذا السطر والتعليقُ في الوحدة"
+    assert any(str(b).startswith("data") for b in ag.BINARY_DIRS), "حارسُ المبالغ لا يرى data/"
+    assert not pg.real_data_path(rel), "تغيّر مسارُ الدفتر ⇒ يُعاد النظرُ في مصدر حمايته"
+
+
+def test_a_question_with_a_quote_cannot_crash_the_search(tmp_path):
+    """**مقعدُ المعايير F4 · مُثبت:** سؤالٌ فيه `"` كان يرفع `unterminated string` — انهيارٌ خامٌ على
+    نصٍّ يكتبه نموذجٌ أو إنسان. والقاعدة: الصيغةُ تُبنى من **حروف السؤال وحدَها**، والباقي يُنقّى."""
+    conn, _ = _fresh(tmp_path)
+    L.ingest(conn, _rows(2), _pages())
+    for probe in ('حوالة "10.00"', "حوالة*", "(حوالة)", 'حوالة" OR "x', "NEAR(حوالة)"):
+        got = L.search(conn, probe)          # لا انهيار — نتيجةٌ أو فراغ
+        assert isinstance(got, list), probe
+    assert L.search(conn, 'حوالة "10.00"'), "التنقيةُ أزالت الحروفَ أيضًا"
+    conn.close()
+
+
+def test_re_reading_a_statement_does_not_eat_the_evidence(tmp_path):
+    """**مقعدا المواصفة والبنية · مُثبت:** `INSERT OR REPLACE` كان يُسقط `id` و`ON DELETE CASCADE`
+    يمسح `qa_evidence` ⇒ **فقدانُ دليلِ الأسئلة صامتًا** عند إعادة قراءة كشفٍ سُئل عنه. الآن التحديثُ
+    يُبقي المعرّفَ فيبقى الدليل — وهو شرطُ «سجلُّ الأسئلة **مع صفوف الدليل**»."""
+    conn, _ = _fresh(tmp_path)
+    L.ingest(conn, _rows(2), _pages())
+    ids = [r[0] for r in conn.execute("SELECT id FROM rows_verified WHERE pg=1 ORDER BY row_no")]
+    L.record_qa(conn, "2026-10-04T00:00:00", "ما مجموع الحوالات؟", "جوابٌ", [ids[0]])
+    before = conn.execute("SELECT COUNT(*) FROM qa_evidence").fetchone()[0]
+    assert before == 1
+    L.ingest(conn, [{**_rows(2)[0], "desc": "وصفٌ مُنقَّح"}, _rows(2)[1]], _pages())   # إعادةُ قراءة
+    after = conn.execute("SELECT COUNT(*) FROM qa_evidence").fetchone()[0]
+    assert after == 1, "إعادةُ القراءة محت دليلَ السؤال"
+    ids2 = [r[0] for r in conn.execute("SELECT id FROM rows_verified WHERE pg=1 ORDER BY row_no")]
+    assert ids2 == ids, "تبدّلت المعرّفات ⇒ الدليلُ عرضةٌ للمسح"
+    conn.close()
+
+
+def test_the_column_contract_is_equal_in_both_directions():
+    """**مقعدُ البنية P2 · مُثبت:** كان الضابطُ **احتواءً** وحدَه ⇒ عمودٌ يُضاف في الرندر يُسقَط صامتًا.
+    وهنا **تساوٍ مجموعيٌّ في الاتجاهين** بين أعمدة الدفتر ومفاتيحِ صفِّ الرندر — يُشتقّان من المصدرين
+    (المخطَّطِ النصّيّ و`to_xlsx`) لا من قائمةٍ ثالثةٍ في الاختبار.
+    """
+    import ast                          # noqa: PLC0415
+
+    # أعمدةُ المخطَّط من نصّ الـSQL (لا من COLUMNS نفسِه، وإلّا لكأنّ الشيءَ يقابل نفسه).
+    body = L.SCHEMA.split("CREATE TABLE IF NOT EXISTS rows_verified", 1)[1].split(");", 1)[0]
+    sql_cols = []
+    for line in body.splitlines():
+        line = line.split("--", 1)[0].strip()
+        # سطرُ عمودٍ = اسمٌ ثمّ نوع (وما دون ذلك قيودٌ متعدّدةُ الأسطر تُتخطّى — قِيس أنّ الحصاد
+        # الساذج بالقطع عند الفاصلة يُدخل '(' و'OR' أعمدةً وهميّة).
+        parts = line.rstrip(",").split()
+        if (len(parts) >= 2 and parts[0].isidentifier()
+                and parts[1].upper().split("(")[0] in {"TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC"}):
+            sql_cols.append(parts[0])
+    assert sql_cols, "تعذّر استخراجُ أعمدة المخطَّط — البوّابةُ تحتاج إصلاحًا لا تعطيلًا"
+
+    # مفاتيحُ صفِّ الرندر من مصدره (شجرةُ `rows.append({...})` — تُقرأ لا تُستحضر).
+    tree = ast.parse((ROOT / "tools" / "to_xlsx.py").read_text(encoding="utf-8"))
+    render_keys: set[str] = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "append" and node.args
+                and isinstance(node.args[0], ast.Dict)):
+            render_keys |= {k.value for k in node.args[0].keys
+                            if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+    assert render_keys, "تعذّر استخراجُ مفاتيح الرندر"
+
+    ledger_from_render = {("pg" if k == "page" else "proof_source" if k == "source" else k)
+                          for k in render_keys}
+    assert set(L.COLUMNS) == ledger_from_render, (
+        f"عقدُ الأعمدة افترق — في الدفتر وليس في الرندر: {sorted(set(L.COLUMNS) - ledger_from_render)} · "
+        f"وفي الرندر وليس في الدفتر: {sorted(ledger_from_render - set(L.COLUMNS))}")
+    assert set(sql_cols) == {"id", *L.COLUMNS, "desc_norm"}, \
+        f"المخطَّطُ والثابتُ افترقا: {sorted(set(sql_cols) ^ {'id', *L.COLUMNS, 'desc_norm'})}"
+
+
+@pytest.mark.xfail(strict=True, reason="""
+البوّابةُ الحاسمة **مفتوحةٌ بإعلان** (لا مُخفاة): الرندرُ من الدفتر يخالف الملفَّ في **مجاميع
+مدين/دائن** (قِيس: «ص2: debits عندنا 0 وعند المحكَّم 464.00» +1109 فرقًا). والسببُ مُنعزَلٌ بالقياس:
+الفرقُ الوحيدُ في الصفوف هو `opening` — الرندرُ يحمله `True` (bool) والدفترُ نصًّا `'1'` (لا نوعَ
+منطقيًّا في SQLite) — والملخَّصُ يقرؤه **نوعًا** لا قيمةً فتخرج المجاميعُ صفرًا. ⇒ يلزم **سياسةُ نوعٍ
+مُعلَنة** للعمود (`bool` بصورة `0/1` + ترجمةٌ في القارئ) قبل أن يُسمّى الدفترُ «مصدرَ الرندر».
+وstrict=True مقصودة: يومَ يُصلَح العمودُ يصير XPASS فيُسقط المجموعةَ حتى يُنزع الوسمُ (لا يُترك حرسٌ ساقط).
+""")
+def test_the_workbook_rendered_from_the_ledger_equals_the_current_file(tmp_path):
+    """**البوّابةُ الحاسمة (الخارطة أ-٣ · مقعدا المواصفة والبنية P1):** «الإكسل المُرندَر **من الدفتر**
+    = الملف الحالي **صفًّا بصفّ** — فرقٌ واحد = توقّف».
+
+    **وهنا تُقابَل الخلايا ورقةً بورقة** (لا الصفوفُ وحدها)، لأنّ نصَّ البوّابةِ الورقةَ: أيُّ فرقٍ في
+    خليّة — عمودٌ مُشتقٌّ أو تنسيقُ قيمة — يُسقِط المقابلة. وكان قبل هذا المسارِ قياسٌ طوطولوجيّ يقابل
+    الدفترَ بمصدره (قاسه المقعدان)، والآن يمرّ الرندرُ فعليًّا من القاعدة عبر `to_xlsx --from-ledger`.
+    """
+    run = ROOT / "data" / "local_sample" / "slice_629p_v2"
+    if not (run / "results").exists():
+        pytest.skip("لا بياناتُ المالك هنا — البوّابةُ الحاسمةُ تُقاس حيث يوجد المصدر")
+    import openpyxl                     # noqa: PLC0415
+    import to_xlsx                      # noqa: PLC0415
+
+    db = tmp_path / "gate.sqlite"
+    rows, _report, per_page, _flags = to_xlsx.load(run)
+    conn = L.open_ledger(db)
+    L.ingest(conn, rows, per_page)
+    conn.close()
+
+    plain, from_db = tmp_path / "plain.xlsx", tmp_path / "from-ledger.xlsx"
+    prof = ROOT / "profiles" / "al-rajhi.json"       # العقدُ كما يمرّرهما `main`
+    to_xlsx.build(run, plain, None, profile=prof)
+    to_xlsx.build(run, from_db, None, profile=prof, ledger_db=db)
+    wa, wb = openpyxl.load_workbook(plain), openpyxl.load_workbook(from_db)
+    assert wa.sheetnames == wb.sheetnames, (wa.sheetnames, wb.sheetnames)
+    diffs = []
+    for name in wa.sheetnames:
+        sa, sb = wa[name], wb[name]
+        for r in range(1, max(sa.max_row, sb.max_row) + 1):
+            for c in range(1, max(sa.max_column, sb.max_column) + 1):
+                va, vb = sa.cell(r, c).value, sb.cell(r, c).value
+                if va != vb:
+                    diffs.append((name, r, c, va, vb))
+    assert not diffs, (f"الرندرُ من الدفتر خالف الملفَّ: {len(diffs)} فرقًا · "
+                       f"أوّلُها {diffs[0]}")
 
 
 def test_the_ingest_consumes_the_real_builder_when_the_data_is_here():
@@ -182,7 +318,7 @@ def test_the_ingest_consumes_the_real_builder_when_the_data_is_here():
 
     rows, _report, per_page, _flags = to_xlsx.load(run)
     assert rows and per_page
-    assert set(rows[0]) >= (set(L.COLUMNS) - {"pg"}) | {"page"}, \
+    assert set(rows[0]) >= (set(L.COLUMNS) - {"pg", "proof_source"}) | {"page", "source"}, \
         "أسماءُ الرندر تغيّرت — والدفترُ يتبعها"
 
 

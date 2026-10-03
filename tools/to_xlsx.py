@@ -801,9 +801,37 @@ def _contract_footer_role(profile: Path | str | None) -> str:
         return "غير مُعلن في العقد"
 
 
+def rows_from_ledger(db: Path) -> list[dict]:
+    """صفوفُ الرندر **من الدفتر** لا من ملفّات JSON — نصفُ البوّابة الحاسمة (الخارطة أ-٣).
+
+    **ولماذا هذه الدالّة:** نصُّ البوّابة «الإكسل المُرندَر **من الدفتر** = الملف الحالي **صفًّا بصفّ**»
+    ⇒ فبدون مسارِ رندرٍ من الدفتر لا تُقاس البوّابةُ أصلًا (قاسه مقعدا المواصفة والبنية: كان القياسُ
+    طوطولوجيًّا يقابل الدفترَ بمصدره). والآن يُرندَر الملفُّ من القاعدة، ويُقابَل خليّةً بخليّة.
+
+    **والترجمةُ عكسُ `ledger._row_values` في موضعٍ واحدٍ معلَن:** `page` ⇐ `pg` و`source` ⇐
+    `proof_source`. **والمبالغُ تعود نصوصًا** كما خُزّنت (عقدُ `TEXT`) — والمستهلكُ يقرؤها بـ`Decimal`
+    عند الحاجة نفسِها (`_num0`), فلا رقمَ يمرّ عائمًا في الطريق.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from statement_qa import ledger as L          # noqa: PLC0415
+
+    conn = L.read_ledger(Path(db).expanduser())   # للقراءة: قاعدةٌ غائبةٌ تُعلَن ولا تُخترع
+    try:
+        rows = L.read_rows(conn)
+    finally:
+        conn.close()
+    return [{"page": r["pg"], "source": r["proof_source"],
+             **{k: v for k, v in r.items() if k not in ("pg", "proof_source")}} for r in rows]
+
+
 def build(run: Path, out: Path, gate: Path | None,
-          profile: Path | str | None = None, desc_column: bool = False) -> dict:
+          profile: Path | str | None = None, desc_column: bool = False,
+          ledger_db: Path | None = None) -> dict:
     rows, report, per_page, flags = load(run, desc_column=desc_column)
+    if ledger_db is not None:
+        rows = rows_from_ledger(ledger_db)
+        if not rows:
+            raise SystemExit(f"الدفترُ بلا صفوف: {ledger_db}")
     if not rows:
         raise SystemExit(f"لا صفوف في {run}/results — هل المسار صحيح؟")
 
@@ -1253,10 +1281,14 @@ def main() -> None:
                     help="عقد البنك/التصميم — يُقرأ منه دورُ التذييل ويُقابَل بالتقرير")
     ap.add_argument("--desc-column", action="store_true",
                     help="البيانُ من results/desc/ (tools/desc_pass.py) — الأرقامُ لا تُمسّ")
+    ap.add_argument("--from-ledger", default=None,
+                    help="رندرُ الصفوف **من دفتر SQLite** (أ-٣) بدل نتائج التشغيل — "
+                         "يُقابَل بالمسار العادي صفًّا بصفّ (البوّابةُ الحاسمة)")
     args = ap.parse_args()
     info = build(Path(args.run).expanduser(), Path(args.out).expanduser(),
                  Path(args.gate).expanduser() if args.gate else None,
-                 profile=args.profile, desc_column=args.desc_column)
+                 profile=args.profile, desc_column=args.desc_column,
+                 ledger_db=Path(args.from_ledger).expanduser() if args.from_ledger else None)
     print(f"[to-xlsx] {info['out']}")
     print(f"  صفوف: {info['rows']} · صفحات: {info['pages']} · بلا إثبات: {info['unproven']}"
           f" · مرفوضة من البوابة: {info['rejected_by_gate']}")

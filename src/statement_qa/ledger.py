@@ -22,20 +22,28 @@
 """
 from __future__ import annotations
 
-import json
 import re
 import sqlite3
 from pathlib import Path
 
-#: مسارُ الدفتر: **مُهمَلٌ ولا يُتتبَّع أبدًا** (قرارُ المالك). ويقع تحت `data/` ليشمله
-#: **حارسا النشر والمبالغ معًا**: الحارسُ يمنع امتداد `.sqlite` تحت `data/` عند الدفع
-#: (`tools/publish_guard.py` EXT_BLOCK) و`tools/amount_guard.py` يعدّ `data/` من مجلّدات
-#: الأدلّة الثنائيّة ⇒ فالملفُّ محروسٌ من الطريقين، ولذلك **ضابطٌ يقيسهما لا نيّةٌ**.
+#: مسارُ الدفتر: **مُهمَلٌ ولا يُتتبَّع أبدًا** (قرارُ المالك) — **والدعوى صارت واقعةً يُقاس بها**
+#: (مقعدُ المعايير F1 · مُثبت): أُضيف `**/data/ledgers/` إلى `.gitignore`، ويقيس ذلك ضابطٌ في
+#: `tests/test_ledger.py` بـ`git check-ignore` (لا بالنصّ)، **لأنّه كان مكتوبًا هنا ومخالفًا للواقع**:
+#: `git status` كان يُظهر `?? data/ledgers/` و`git add` كان يقبله.
+#: **وحراستُه بالامتداد مقيسةٌ لا مُدّعاة** (F2): `tools/publish_guard.py` يحجب `.sqlite` بـ
+#: `OPAQUE_EXTS` (قِيس: `publish_guard --tree` على ملفٍّ مُتتبَّعٍ ⇒ `BLOCK opaque_binary`)،
+#: **وحارسُ المبالغ لا يحجب `.sqlite`** (قِيس: `undeclared_binaries()` ⇒ `[]`) — فالتغطيةُ حارسٌ
+#: واحدٌ + الإهمال، وهذا ما يُقال لا «حارسان».
 LEDGER_SUBDIR = ("data", "ledgers")
 
 #: **حالةُ الدفتر** — القيمةُ الوحيدةُ التي تُنشر عن توفّره هي ما تقوله هذه الدالّة.
 MISSING = "missing"
 CORRUPT = "corrupt"
+#: **وحالةٌ ثالثة (مقعدُ البنية P3 · مُثبت):** كان كلُّ `sqlite3.DatabaseError` يُسمّى «تالفة»،
+#: فبيئةٌ بلا وحدة `fts5` (`no such module: fts5`) أو عطبٌ في البناء يُعرَض للمستخدم «قاعدتُك تالفة»
+#: ⇒ **علاجٌ خاطئ** (يُعيد الملفَّ والصوابُ بناءُ البيئة). فالعطبُ الذي ليس «ليست قاعدةَ بيانات»
+#: يُسمّى باسمه: `unsupported`.
+UNSUPPORTED = "unsupported"
 
 
 class LedgerUnavailable(RuntimeError):
@@ -50,6 +58,7 @@ class LedgerUnavailable(RuntimeError):
         why = {
             MISSING: "قاعدةُ البيانات غيرُ موجودة",
             CORRUPT: "قاعدةُ البيانات غيرُ قابلةٍ للقراءة (تالفة)",
+            UNSUPPORTED: "قاعدةُ البيانات غيرُ مدعومةٍ في هذه البيئة",
         }.get(state, "قاعدةُ البيانات غيرُ متاحة")
         super().__init__(f"{why}: {path.name}" + (f" — {detail}" if detail else ""))
 
@@ -92,7 +101,7 @@ CREATE TABLE IF NOT EXISTS pages (
     CHECK (cost_usd IS NULL OR typeof(cost_usd) = 'text')
 );
 
--- الجدولُ المُتحقَّق منه: أعمدةُ الرندر العشرون نفسُها (فيُقابَل صفًّا بصفّ).
+-- الجدولُ المُتحقَّق منه: أعمدةُ الرندر **الاثنان والعشرون** نفسُها (فيُقابَل صفًّا بصفّ).
 CREATE TABLE IF NOT EXISTS rows_verified (
     id               INTEGER PRIMARY KEY,
     pg               INTEGER NOT NULL REFERENCES pages(pg) ON DELETE CASCADE,
@@ -117,7 +126,9 @@ CREATE TABLE IF NOT EXISTS rows_verified (
     opening          TEXT,
     chain_ok         INTEGER,
     row_state        TEXT,
-    source           TEXT,
+    -- **والاسمُ من المواصفة لا من الرندر:** الخارطةُ سمّته `proof_source` (سطر ١٧٠) والرندرُ يقول
+    -- `source`؛ فالعمودُ بالمواصفة، والترجمةُ مُعلَنةٌ في `_row_values` وفي مقابلة الاختبار.
+    proof_source     TEXT,
     shift            TEXT,
     footer           TEXT,
     counted          INTEGER,
@@ -130,7 +141,7 @@ CREATE TABLE IF NOT EXISTS rows_verified (
     -- **قيدُ المرساة (أ-٣: «CHECK للمرساة + proof_source»)**: صفٌّ وُسم مرساةً **يجب** أن يعلن
     -- مصدرَ إثباته؛ وإلّا فهو ادّعاءٌ بلا شاهد — وهو بعينه ما تمنعه قاعدةُ «ما لم يُثبت».
     CHECK (row_state IS NULL OR row_state NOT LIKE '%مرساة%'
-           OR (source IS NOT NULL AND source <> '')),
+           OR (proof_source IS NOT NULL AND proof_source <> '')),
     UNIQUE (pg, row_no)
 );
 
@@ -191,9 +202,9 @@ CREATE VIEW IF NOT EXISTS coverage AS
 CREATE VIEW IF NOT EXISTS unproven AS
     SELECT r.id, r.pg, r.row_no, r.printed_page, r.desc,
            COALESCE(r.balance, r.printed_balance) AS amount,
-           r.row_state, r.source
+           r.row_state, r.proof_source
       FROM rows_verified r
-     WHERE (r.source IS NULL OR r.source = '')
+     WHERE (r.proof_source IS NULL OR r.proof_source = '')
        AND COALESCE(r.row_state, '') NOT LIKE '%ملخّص%';
 """
 
@@ -202,7 +213,7 @@ COLUMNS = (
     "pg", "row_no", "printed_page", "date", "date_iso", "date_status",
     "date_source", "year", "desc", "printed_movement", "printed_balance", "movement",
     "balance", "derived_movement", "side", "opening", "chain_ok", "row_state",
-    "source", "shift", "footer", "counted",
+    "proof_source", "shift", "footer", "counted",
 )
 
 #: أعمدةُ الإدراج = أعمدةُ القراءة (و`desc_norm` عمودٌ مُشتقٌّ في القاعدة ⇒ لا يُدرَج).
@@ -210,7 +221,7 @@ INS_COLUMNS = COLUMNS
 
 
 def _row_values(r: dict) -> tuple:
-    """صفُّ الرندر ⇒ أعمدةُ الإدراج — **والتحويلُ في موضعٍ واحد**.
+    """صفُّ الرندر ⇒ أعمدةُ الإدراج — **والتحويلُ والترجمةُ في موضعٍ واحد**.
 
     **العِلّةُ المقيسة (أمسكتها بوّابةُ المقابلة صفًّا بصفّ على بيانات المالك):** صفوفُ الرندر تحمل
     `decimal.Decimal` للمبالغ، و`sqlite3` **لا يُسندها**: `ProgrammingError: Error binding parameter 14`.
@@ -219,10 +230,19 @@ def _row_values(r: dict) -> tuple:
 
     **والقاعدة:** المالُ نصٌّ (`str`) كما في عقد أ-٣ · والأعلامُ المنطقيّةُ `0/1` (لا `True/False`
     فتتفرّق القراءة) · والأعدادُ الصحيحةُ كما هي. **وما لا يُعرف نوعُه يُنصَّص** ولا يُمرَّر خامًّا.
+
+    **واسمان مُترجَمان بالعِلّة (لا بالعادة):** الرندرُ يقول `page` والمواصفةُ سمّت `proof_source`
+    (الخارطة أ-٣) والرندرُ يقول `source` — فالترجمةُ هنا **مُعلَنةٌ في موضعٍ واحد**، ويقابلها في
+    الاختبار `_want`، ويُقاس تساوي العقدين في ضابطٍ مجموعيّ (لا بالاحتواء).
     """
     out: list = []
     for c in COLUMNS:
-        v = r.get("page") if c == "pg" else r.get(c)
+        if c == "pg":
+            v = r.get("page")
+        elif c == "proof_source":
+            v = r.get("source")
+        else:
+            v = r.get(c)
         if isinstance(v, bool):
             v = int(v)
         elif v is not None and not isinstance(v, (int, str, bytes)):
@@ -235,6 +255,9 @@ def ledger_path(root: Path, statement: str) -> Path:
     """مسارُ دفترِ كشفٍ واحد: `<root>/data/ledgers/<statement>.sqlite` (مُهمَلٌ ✗ يُتتبَّع)."""
     safe = re.sub(r"[^0-9A-Za-z_.\-]", "-", statement) or "statement"
     return root.joinpath(*LEDGER_SUBDIR, f"{safe}.sqlite")
+
+
+_PATHS: dict[int, Path] = {}
 
 
 def open_ledger(path: Path, *, create: bool = True) -> sqlite3.Connection:
@@ -251,13 +274,29 @@ def open_ledger(path: Path, *, create: bool = True) -> sqlite3.Connection:
     try:
         conn = sqlite3.connect(str(path))
         conn.row_factory = sqlite3.Row
+        _PATHS[id(conn)] = path
         # **ودالّةُ التطبيع تُسجَّل قبل المخطَّط**: العمودُ المُشتقُّ `desc_norm` يعتمد عليها،
         # و`deterministic=True` شرطٌ في أعمدة SQLite المُولَّدة (وبلا الشرط يرفضها المحرّك).
         conn.create_function("norm_ar", 1, lambda s: norm_ar(s), deterministic=True)
         conn.executescript(SCHEMA)
         return conn
     except sqlite3.DatabaseError as e:
-        raise LedgerUnavailable(CORRUPT, path, type(e).__name__) from e
+        # **والتفريقُ بين «ليست قاعدةَ بيانات» و«البيئةُ لا تدعمها» (مقعدُ البنية P3 · مُثبت):** ملفٌّ
+        # ليس قاعدةً يرفع `file is not a database`، وغيابُ وحدةٍ (`no such module: fts5`) أو عطبُ
+        # إمكانٍ يرفع غيرَه — وعلاجُهما مختلف: الأوّلُ يُعاد الملفُّ، والثاني يُبنى في البيئة. فكان
+        # كلُّ عطبٍ يُسمّى «تالفة» ⇒ علاجٌ خاطئ.
+        msg = str(e)
+        state = UNSUPPORTED if ("no such module" in msg or "unable to open" in msg) else CORRUPT
+        raise LedgerUnavailable(state, path, f"{type(e).__name__}: {msg}") from e
+
+
+def read_ledger(path: Path) -> sqlite3.Connection:
+    """يفتح الدفترَ **للقراءة ولا يُنشئه**: قاعدةٌ غائبةٌ تُعلَن `missing` لا تُخترع فارغة.
+
+    **العِلّة (مقعدا المواصفة والبنية):** كان `open_ledger` يُنشئ ملفًّا فارغًا افتراضًا ⇒ فقارئٌ
+    يسأل عن كشفٍ لم يُقرأ بعد يحصل على «قاعدة» فارغةٍ بدل الخطأ المسمّى الذي تنصّ عليه المواصفة.
+    """
+    return open_ledger(Path(path), create=False)
 
 
 def _text(value) -> str | None:
@@ -287,10 +326,16 @@ def ingest(conn: sqlite3.Connection, rows: list[dict], pages: dict[int, dict],
                 (pg, str(entry.get("page_no")) if entry.get("page_no") else None, verdict,
                  int(entry.get("rows") or 0), _text(cost)),
             )
+        sets = ", ".join(f"{c}=excluded.{c}" for c in INS_COLUMNS if c not in ("pg", "row_no"))
         for r in rows:
+            # **`ON CONFLICT … DO UPDATE` لا `INSERT OR REPLACE` (مقعدا المواصفة والبنية · مُثبت):**
+            # `OR REPLACE` يحذف الصفَّ ثمّ يُدرجه ⇒ يتبدّل `id`، و`ON DELETE CASCADE` يمسح
+            # `qa_evidence` ⇒ **فقدانُ دليلِ الأسئلة صامتًا** عند إعادة قراءة كشفٍ سُئل عنه.
+            # والتحديثُ يُبقي المعرّفَ فيبقى الدليل.
             conn.execute(
-                f"INSERT OR REPLACE INTO rows_verified({', '.join(INS_COLUMNS)}) "
-                f"VALUES({', '.join('?' for _ in INS_COLUMNS)})",
+                f"INSERT INTO rows_verified({', '.join(INS_COLUMNS)}) "
+                f"VALUES({', '.join('?' for _ in INS_COLUMNS)}) "
+                f"ON CONFLICT(pg, row_no) DO UPDATE SET {sets}",
                 _row_values(r),
             )
             written += 1
@@ -309,23 +354,36 @@ def read_rows(conn: sqlite3.Connection, pg: int | None = None) -> list[dict]:
 
 
 def search(conn: sqlite3.Connection, query: str, limit: int = 20) -> list[dict]:
-    """بحثٌ نصّيّ **باستعلامٍ ثابتٍ في الكود** — النموذجُ يمرّر نصًّا ولا يكتب SQL."""
+    """بحثٌ نصّيّ **باستعلامٍ ثابتٍ في الكود** — النموذجُ يمرّر نصًّا ولا يكتب SQL.
+
+    **وزمنُ السؤال يُنقّى قبل دخوله صيغةَ FTS5 (مقعدُ المعايير F4 · مُثبت بالقياس):** كان النصُّ
+    يُقحَم بين علامتَي تنصيصٍ بلا تهريب، فسؤالٌ فيه `"` يرفع
+    `sqlite3.OperationalError: unterminated string` — انهيارٌ خامٌ على نصٍّ يكتبه نموذجٌ أو إنسان.
+    والقاعدة: **يُستخرج الحرفُ والرقمُ وحدَهما** (`\\w` بـ`re.UNICODE`)، وكلُّ ما سواهما (تنصيص ·
+    أقواس · `*` · `:` · `NEAR`) **يُحذف قبل الصيغة** — فلا تُبنى الصيغةُ من مدخلٍ إلّا من حروفه.
+    """
     needle = norm_ar(query)
-    if not needle:
+    tokens = [t for t in re.findall(r"\w+", needle, re.UNICODE) if t]
+    if not tokens:
         return []
-    rows = conn.execute(
-        "SELECT r.id, r.pg, r.row_no, r.desc, r.printed_movement, r.movement "
-        "FROM row_fts f JOIN rows_verified r ON r.id = f.rowid "
-        "WHERE row_fts MATCH ? ORDER BY rank LIMIT ?",
-        (" OR ".join(f'"{tok}"' for tok in needle.split() if tok), limit),
-    )
-    return [dict(r) for r in rows]
+    match = " OR ".join(f'"{t}"' for t in tokens)
+    try:
+        rows = conn.execute(
+            "SELECT r.id, r.pg, r.row_no, r.desc, r.printed_movement, r.movement "
+            "FROM row_fts f JOIN rows_verified r ON r.id = f.rowid "
+            "WHERE row_fts MATCH ? ORDER BY rank LIMIT ?",
+            (match, limit),
+        )
+        return [dict(r) for r in rows]
+    except sqlite3.DatabaseError as e:      # صيغةٌ رفضها المحرّك بعد التنقية ⇒ خطأٌ مسمّى لا انهيار
+        raise LedgerUnavailable(UNSUPPORTED, _PATHS.get(id(conn), Path(".")),
+                                f"{type(e).__name__}: {e}") from e
 
 
 def unproven(conn: sqlite3.Connection) -> list[dict]:
     """«ما لم يُثبت» — **من المنظار، لا من قائمةٍ مكتوبةٍ في تقرير**."""
     return [dict(r) for r in conn.execute(
-        "SELECT id, pg, row_no, printed_page, desc, amount, row_state, source FROM unproven")]
+        "SELECT id, pg, row_no, printed_page, desc, amount, row_state, proof_source FROM unproven")]
 
 
 def record_qa(conn: sqlite3.Connection, asked_at: str, question: str, answer: str | None,
@@ -340,12 +398,3 @@ def record_qa(conn: sqlite3.Connection, asked_at: str, question: str, answer: st
                          [(qid, int(i)) for i in row_ids if i is not None])
     return qid
 
-
-def load_json_pages(run: Path) -> dict[int, dict]:
-    """أحكامُ الصفحات من الكاش (بلا polars ولا نموذج) — للاختبار والتهيئة السريعة."""
-    out: dict[int, dict] = {}
-    for f in sorted((run / "results").glob("pg-*.json")):
-        data = json.loads(f.read_text(encoding="utf-8"))
-        if isinstance(data.get("pg"), int):
-            out[int(data["pg"])] = data
-    return out
