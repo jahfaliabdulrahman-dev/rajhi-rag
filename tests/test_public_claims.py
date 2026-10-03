@@ -29,6 +29,14 @@ def test_public_documents_match_the_measured_report():
             pytest.skip("لا تقرير ولا لقطة مشتقّة — لا شيء يُحرَس")
         derived = json.loads(snapshot.read_text(encoding="utf-8"))
         assert rc.check(derived) == [], "الوثيقة تخالف لقطتها المشتقّة"
+        # **والقسمةُ لا تُفقَد بحذف مفتاحها (مقعدا المعايير والبنية · P2 · ثقبٌ مُثبت):** كانت
+        # دعوتا القسمة مشروطتين بوجود المفتاحين، فحذفُهما من اللقطة يُسقط الحارسَ بصمتٍ ويمرّ
+        # `check` أخضرَ. فلقطةٌ تُعلن كوربوسًا مختلطًا (نصُّ الإعلان موجود) **يجب** أن تحمل قسمته:
+        # فإمّا مفتاحٌ مشتقٌّ أو رفضٌ صريح، لا غيابٌ صامت.
+        if derived.get("corpus_declaration"):
+            missing = [k for k in ("split_unstamped", "split_stamped") if not derived.get(k)]
+            assert not missing, \
+                f"لقطةٌ تُعلن كوربوسًا مختلطًا بلا قسمةٍ مشتقّة: {missing} ⇒ الحارسُ يسقط بصمت"
         return
     derived = rc.derive()
     assert derived is not None
@@ -203,3 +211,23 @@ def test_a_mixed_corpus_is_not_published_under_one_stamp():
     # يُشترط رقمُ القسمة في الوثيقة، ولا تُقابَل قيمةٌ بمقامٍ لا وجودَ له.
     assert rc._split_by_stamp({"per_page": [], "slice": {"pages_done": 629}},
                               Path("/nonexistent-results")) == (None, None)
+
+    # **وحكمُ المُنتِج واحدٌ لا اثنان (مقعدُ البنية P2):** القارئُ يقرأ نصَّ الكوربوس النظيف من
+    # `tools/scale_slice.py` ولا يعيد كتابتَه ⇒ فالنسختان مُقابَلتان هنا، وسببٌ ثالثٌ في المُنتِج
+    # يُقرأ مختلطًا عند القارئ بلا تعديلٍ في موضعين.
+    import scale_slice as ss
+    assert rc.CLEAN_DECLARATION == ss.CLEAN_DECLARATION, \
+        "نصُّ الكوربوس النظيف في نسختين ⇒ الافتراقُ صامتٌ إذا تغيّر أحدُهما"
+
+    # **وغيابُ الحكم يقع إلى العدّادات — ولا يُسكَت عن الاختلاط:** تقريرٌ مصنوعٌ بلا `declaration`
+    # (أو بأرشيفٍ قديم) يُقرأ عدّادُه؛ والتقريرُ الحقيقيّ لا يبلغ هذه الحال (المُنتِج يكتب الحكم دائمًا).
+    no_verdict = {"reader_stamp": "google/gemini-3.7-flash:v2:fa91de52",
+                  "slice": {"pages_done": 629},
+                  "corpus_provenance": {"legacy_unstamped_pages": 624, "stamp_conflict_pages": 3}}
+    out4 = rc.reader_declaration(no_verdict)
+    assert "624" in out4 and out4 != rc._stamp_label(no_verdict["reader_stamp"]), out4
+
+    # **وختمٌ بصيغة سلسلةٍ مُعلَنٌ لا غائب (مقعدُ البنية P3):** كان الوجودُ يُفحص بالنوع
+    # (`isinstance(raw, dict)`) فيُنشر «غيرُ مُعلَن» عن ختمٍ مُعلَنٍ نصًّا — نظيرُ العطب الذي أُغلق.
+    str_stamp = {**conflict_only, "reader_stamp": "google/gemini-3.7-flash:v2:fa91de52"}
+    assert "غيرُ مُعلَن" not in rc.reader_declaration(str_stamp), rc.reader_declaration(str_stamp)

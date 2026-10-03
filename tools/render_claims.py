@@ -90,6 +90,14 @@ def _gate3_price_cap() -> int | None:
     return int(GATE3_DECISION["price_cap_pages"])
 
 
+# **ونصُّ الكوربوس النظيف يُقرأ من المُنتِج لا يُعاد كتابتُه (مقعدُ البنية · P2):**
+# `tools/scale_slice.py` يُصدِر حكمًا نصيًّا دائمًا (`CLEAN_DECLARATION` للنظيف، وما خالفه مختلط)
+# ⇒ فالقارئُ هنا يقرأ **الحكمَ** (بالمقارنة بالنصّ النظيف) ولا يعيد اشتقاق شرط الاختلاط؛ ومقابلةُ
+# النسختين في `tests/test_public_claims.py` فلا تفترقان صامتتين (وقد سمّى المقعدُ العطب:
+# شرطٌ مُعادٌ في موضعين ⇒ سببٌ ثالثٌ في المُنتِج يُنشر ختمًا واحدًا ضدّ إعلان التقرير).
+CLEAN_DECLARATION = "كوربوسٌ بنسبٍ واحد"
+
+
 def _stamp_label(stamp) -> str:
     """ختمُ القارئ نصًّا يُقرأ: الزوجُ (نموذج · تلقينة) لا قاموسٌ خام ولا اسمٌ عامّ."""
     if isinstance(stamp, dict):
@@ -122,22 +130,35 @@ def reader_declaration(rep: dict) -> str:
     conflicts = int(prov.get("stamp_conflict_pages") or 0)
     raw = rep.get("reader_stamp")
     label = _stamp_label(raw)
-    if legacy <= 0 and conflicts <= 0:
+    # **والحكمُ من المُنتِج، والعدّانِ بديلٌ احتياطيٌّ لا مسند** (لا يُستعملان إلّا حيث يغيب الحكم —
+    # تقريرٌ مصنوعٌ بلا `declaration`): فسببٌ ثالثٌ في المُنتِج يُقرأ مختلطًا هنا بلا تعديلٍ هنا.
+    decl = prov.get("declaration")
+    mixed = (decl != CLEAN_DECLARATION) if isinstance(decl, str) \
+        else (legacy > 0 or conflicts > 0)
+    if not mixed:
         return label
-    declared = prov.get("declaration") or "يُعلن ولا يُجمَع تحت رقمٍ واحد"
+    declared = decl if isinstance(decl, str) else "يُعلن ولا يُجمَع تحت رقمٍ واحد"
+    # **ووجودُ الختم من قيمته لا من نوعها** (مقعدُ البنية P3): ختمٌ بصيغة سلسلةٍ — وهي صيغةٌ
+    # تدعمها `_stamp_label` صراحةً — كان يُنشر «غيرُ مُعلَن» عن ختمٍ مُعلَنٍ نصًّا ⇒ نصٌّ يناقض الواقع.
+    has_stamp = label != "غير مختم"
+    pages = (rep.get("slice") or {}).get("pages_done")
     pieces: list[str] = []
     if legacy > 0:
         pieces.append(f"{legacy} صفحةً غيرَ مختومة (قُرئت قبل تسجيل الهوية)")
-        pages = (rep.get("slice") or {}).get("pages_done")
-        if isinstance(raw, dict) and isinstance(pages, int) and pages - legacy > 0:
+        if has_stamp and isinstance(pages, int) and pages - legacy > 0:
             pieces.append(f"{pages - legacy} مختومة")
-    else:
+    elif conflicts > 0:
         pieces.append(f"{conflicts} صفحةً أُعيد قراءتها لتعارض ختم")
+    else:
+        # **وحكمٌ مختلطٌ بلا عدّادٍ يُسمّيه (سببٌ ثالثٌ مستقبلًا) لا يُسكَت عنه ولا يُخترع له رقم.**
+        pieces.append("القسمةُ بالختم غيرُ معلَنة في عدّادات هذا التقرير")
     text = " + ".join(pieces)
-    if isinstance(raw, dict):
+    if has_stamp:
         tail = f"بختم {label}"
         if conflicts > 0 and legacy > 0:
-            tail += f" (ومن المختومة {conflicts} أُعيد قراءتها لتعارض ختم)"
+            # **وبلا دعوى تضمينٍ غيرِ مُسندة (مقعدُ البنية P3):** «ومن المختومة» كان يفترض
+            # `conflicts ⊆ stamped` بلا مقياس؛ فيُقال العددُ بلا نسبةٍ إلى القسمة.
+            tail += f" و{conflicts} صفحةً أُعيد قراءتها لتعارض ختم"
     else:
         tail = "وختمُ القارئ غيرُ مُعلَنٍ في هذا التقرير"
     return f"{declared}: {text}، {tail}"
@@ -184,6 +205,15 @@ def derive() -> dict | None:
         facts = scale_slice._cache_facts(RESULTS)
     f = rep["footer"]
     split_un, split_st = _split_by_stamp(rep, RESULTS)
+    # **و«لا يُقاس» لا يعني «يُنشَر فراغًا» (مقعدا البنية والمعايير · P2 · ثقبٌ مُثبت):** تقريرٌ
+    # مقيسٌ وسجلاتُ صفحاته غيرُ مقروءة ⇒ القسمةُ المنشورةُ غيرُ قابلةٍ للاشتقاق، وكان `--write`
+    # يكتب `null` ويمرّ الـCI أخضرَ بلا حارس (`snapshot_drift` لا يُنادى إلّا حيث يُنادى `derive`).
+    # فالاشتقاقُ **يُرفض** هنا (رمزُ خروج ٢) بدل أن يُنشَر مقامٌ معدوم — والفشلُ مُغلَقٌ لا مُفتوح
+    # (عقيدةُ المُستودع في `_gate3_cap`: «تسقط بالاسم لا أن تُكتب قيمةٌ مخترعة»).
+    if (rep.get("per_page") or []) and not (split_un or split_st):
+        print(f"  {sys.argv[0]}: التقريرُ موجودٌ ({REPORT}) وسجلاتُ صفحاته غيرُ مقروءة ({RESULTS})"
+              " ⇒ قسمةُ القراءتين بالختم غيرُ قابلةٍ للاشتقاق ⇒ **لا تُكتب لقطةٌ بمقامٍ معدوم**.")
+        sys.exit(2)
     return {
         # كل رقم معلن مربوطٌ بالزوج الذي أنتجه (FMEA FM-1.4): نموذجٌ وتلقينة — **والكوربوسُ المختلطُ
         # يُنشر بإعلانه وقسمته** لا بختمٍ واحد (`reader_declaration`).
@@ -232,12 +262,13 @@ def claims(d: dict) -> list[tuple[str, str, str]]:
         ("README.md", d["clean_pct"], "نسبة النظافة المئوية"),
         # **وقسمةُ القراءتين تُقابَل أيضًا (البند ٧ · FM-1 · مقعدا المعايير والبنية):** كانت
         # القسمةُ تُكتب بيدٍ في الوثائق ولا يشترطها شيء ⇒ انزياحُها يفترق صامتًا، وهو صنفُ «نسختين
-        # من الحقيقة». والدعوى **مشروطةٌ بحضور الطرفين** (`_split_by_stamp` تُعيد `None` بلا كاش)
-        # ⇒ فلا تُعلن دعوى على مقامٍ لا وجودَ له، ولقطةٌ قديمة أو مثالٌ اصطناعيٌّ بلا المفتاح يمرّ
-        # كما كان (ولهذا لا تنكسر `test_claims_lists_every_metric_it_promises`).
-        *([("README.md", d["split_unstamped"], "قسمةُ القراءتين — غيرُ المختومة (FM-1)"),
-           ("README.md", d["split_stamped"], "قسمةُ القراءتين — المختومة (FM-1)")]
-          if d.get("split_unstamped") and d.get("split_stamped") else []),
+        # من الحقيقة». **وكلُّ طرفٍ يُشترَط على حِدته** (مقعدُ البنية P2): العطفُ `and` كان يُسقِط
+        # طرفًا صحيحًا قائمًا إذا غاب أخوه (قِيس على تقرير v1 الحيّ: `('621/629', None)` ⇒ تُسقَط
+        # دعوى `621/629` وهي قائمة). ولا تُدَّعى قيمةٌ لم تُشتقق (المفتاحُ غائبًا أو `None`).
+        *([("README.md", d["split_unstamped"], "قسمةُ القراءتين — غيرُ المختومة (FM-1)")]
+          if d.get("split_unstamped") else []),
+        *([("README.md", d["split_stamped"], "قسمةُ القراءتين — المختومة (FM-1)")]
+          if d.get("split_stamped") else []),
         ("PLAN.md", d["documented_ratio"], "نسبة الصفحات الموثّقة"),
         ("PLAN.md", d["clean_ratio"], "نظافة السلسلة"),
         ("PLAN.md", f"{d['recoveries']} مرساة", "عدد المراسي المُستدركة"),

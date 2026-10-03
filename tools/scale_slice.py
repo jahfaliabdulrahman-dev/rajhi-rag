@@ -55,6 +55,14 @@ from statement_qa.vlm_reader import (  # noqa: E402
 
 DEFAULT_SOURCE = None  # resolved at startup: --source, else a LOCAL pointer file
 
+# **حكمُ اختلاط الكوربوس — مُعرَّفٌ في المُنتِج مرّةً واحدة (مقعدُ البنية · P2):** كان القارئُ
+# (`tools/render_claims.py`) يعيد اشتقاق شرط الاختلاط (`legacy <= 0 and conflicts <= 0`) محلّيًّا
+# ⇒ فسببٌ ثالثٌ هنا (أو إعادةُ تعريفٍ لحدّ «الاختلاط») يُنشر منه ختمٌ واحد بينما `declaration`
+# المنقولُ من التقرير يقول «مختلط» ⇒ تناقضُ حقلين في اللقطة المنشورة، وهو صنفُ FM-1 نفسُه.
+# فصار النصُّ حكمًا مُصدَّرًا: هذا نصُّ الكوربوس النظيف، وما خالفه مختلط — والقارئُ يقرأ الحكمَ لا شرطَه
+# (`CLEAN_DECLARATION` مُقابَلٌ في `tests/test_public_claims.py` فلا تفترق النسختان صامتتين).
+CLEAN_DECLARATION = "كوربوسٌ بنسبٍ واحد"
+
 
 def _contract_footer_role() -> str:
     """دور التذييل من عقد البنك — يُقرأ ولا يُفترض."""
@@ -768,7 +776,7 @@ def main() -> None:
             "reader": read_stamp,
             "legacy_unstamped_pages": legacy_unstamped,
             "stamp_conflict_pages": stamp_conflict_pages,
-            "declaration": ("كوربوسٌ بنسبٍ واحد" if not legacy_unstamped
+            "declaration": (CLEAN_DECLARATION if not legacy_unstamped
                             and not stamp_conflict_pages else
                             "مختلط/غير مختم — يُعلن ولا يُجمَع تحت رقمٍ واحد"),
         },
