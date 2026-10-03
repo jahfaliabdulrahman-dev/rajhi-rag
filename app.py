@@ -75,6 +75,7 @@ from statement_qa.intake import (
     blocked_message_ar, inspect_locally, plan, summary_ar as summarize_intake_ar,
 )
 from statement_qa.job_lock import JobBusyError, job_lock
+from statement_qa import ledger_ui as _ledger_ui
 from statement_qa.row_bands import analyze_page
 from statement_qa.ordering import (
     adjacency, check_order, check_page_numbers, decide_order, footer_order,
@@ -1094,6 +1095,28 @@ ABOUT = """# عن المشروع
 **الإصدار:** دفتر الأستاذ — ورق دافئ، حبر زمردي، إبر نحاسية، وختم التدقيق.
 """
 
+_APP_ROOT = Path(__file__).resolve().parent   # **جذرُ المستودع من موضع الملفّ لا من الـCWD** (P3 المقعد)
+
+
+def _ledger_rows() -> list:
+    return STATE.get("rows") or []
+
+
+def _ledger_refresh_click() -> str:
+    return _ledger_ui.status_text(_APP_ROOT, _ledger_ui.pages_of(_ledger_rows()), len(_ledger_rows()))
+
+
+def _ledger_build_click():
+    rows = _ledger_rows()
+    msg = _ledger_ui.build(_APP_ROOT, rows, STATE.get("footers") or {},
+                           _ledger_ui.pages_of(rows))
+    return msg, _ledger_refresh_click()
+
+
+def _ledger_ask_click(label: str, value: str) -> str:
+    return _ledger_ui.ask(_APP_ROOT, _ledger_ui.pages_of(_ledger_rows()), label, value)
+
+
 with gr.Blocks(title="مُدقّق كشوف الراجحي") as demo:
     gr.HTML(HERO)
     with gr.Tabs():
@@ -1169,6 +1192,24 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي") as demo:
                      ).then(ask_followup, inputs=[chat],
                             outputs=[chat, src, raw, raw_note],
                             show_progress_on=[chat])
+            # **دفترُ الكشف — أسئلةٌ بلا نموذج وبلا كلفة:** الأسئلةُ البنيويّةُ (مجاميع · تغطية ·
+            # بلا إثبات · أحكام صفحات · بحث · سجلّ الأسئلة) تُجاب من SQL وحدَه. والمنطقُ في
+            # `statement_qa.ledger_ui` (نقيٌّ يُختبر بلا شاشة)، وهنا التوصيلُ فقط.
+            with gr.Accordion("دفترُ الكشف — أسئلةٌ بلا نموذج وبلا كلفة", open=False):
+                ledger_state = gr.Markdown(_ledger_ui.status_text(_APP_ROOT, None, 0), rtl=True)
+                with gr.Row():
+                    l_intent = gr.Dropdown(choices=list(_ledger_ui.INTENT_LABELS),
+                                           value=next(iter(_ledger_ui.INTENT_LABELS)),
+                                           label="القصد", scale=4)
+                    l_value = gr.Textbox(label="القيمة (رقمُ صفحةٍ لقصد «أحكام الصفحات»، أو نصُّ بحث)",
+                                         rtl=True, scale=5)
+                    l_build = gr.Button("ابنِ دفترَ الكشف", scale=2)
+                    l_ask = gr.Button("اسأل الدفتر", variant="primary", scale=2)
+                ledger_out = gr.Markdown(rtl=True)
+                l_refresh = gr.Button("حدّث الحالة", size="sm")
+                l_build.click(_ledger_build_click, outputs=[ledger_out, ledger_state])
+                l_ask.click(_ledger_ask_click, inputs=[l_intent, l_value], outputs=[ledger_out])
+                l_refresh.click(_ledger_refresh_click, outputs=[ledger_state])
         with gr.Tab("٣. عن المشروع"):
             gr.Markdown(ABOUT, rtl=True)
 

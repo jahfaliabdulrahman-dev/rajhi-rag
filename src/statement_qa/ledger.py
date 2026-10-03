@@ -389,6 +389,14 @@ def ingest(conn: sqlite3.Connection, rows: list[dict], pages: dict[int, dict],
     الصفوف تعني حكمين يُفترقان صامتين، والبوّابةُ («يُقرأ صفًّا بصفّ») تُقابِل مصدرًا بمصدر.
     """
     written = 0
+    # **وعدُ الصفوف في الصفحة يُشتقّ من الصفوف نفسِها** (قاسته بوّابةُ المسارين): كان يُؤخذ من
+    # `per_page` في مسار الأداة ⇒ فصفحةٌ حكمُها `absent` وفيها 17 صفًّا تُعَدّ صفرًا هنا، بينما
+    # مسارُ حالة التطبيق يعدّها 17. فصارت للعمود **دلالةٌ واحدة**: «كم صفًّا في الدفتر لهذه الصفحة» —
+    # وهي الدلالةُ التي يطلبها قارئُ قاعدةٍ يسأل عن محتواها. **وحكمُ الصفحة يبقى حكمَ التشغيل** فلا
+    # يضيع منه شيء، والفرقُ (17 ÷ 0) كان يُقرأ خطأً لا يُحلّ بالتسامح.
+    per_page_rows: dict = {}
+    for r in rows:
+        per_page_rows[r.get("page")] = per_page_rows.get(r.get("page"), 0) + 1
     with conn:
         for pg, entry in sorted(pages.items()):
             verdict = (entry.get("footer") or "other")
@@ -401,7 +409,7 @@ def ingest(conn: sqlite3.Connection, rows: list[dict], pages: dict[int, dict],
                 "printed_page=excluded.printed_page, verdict=excluded.verdict, "
                 "rows_count=excluded.rows_count, cost_usd=excluded.cost_usd",
                 (pg, str(entry.get("page_no")) if entry.get("page_no") else None, verdict,
-                 int(entry.get("rows") or 0), _text(cost)),
+                 int(per_page_rows.get(pg, 0)), _text(cost)),
             )
         sets = ", ".join(f"{c}=excluded.{c}" for c in INS_COLUMNS if c not in ("pg", "row_no"))
         for r in rows:
@@ -531,3 +539,46 @@ def answer(conn: sqlite3.Connection, intent: str, *, pg: int | None = None,
         "FROM qa q LEFT JOIN qa_evidence e ON e.qa_id = q.id GROUP BY q.id ORDER BY q.id DESC LIMIT ?",
         (limit,)).fetchall()
     return {"intent": intent, "qa": [dict(r) for r in got]}
+
+def pages_of(rows: list[dict]) -> int:
+    """عددُ صفحاتِ الكشف من صفوفه — تعريفٌ واحدٌ يُستعمل في التسمية والحالة والبناء."""
+    return len({r.get("page") for r in (rows or []) if r.get("page") is not None})
+
+
+def rows_without_page(rows: list[dict]) -> int:
+    """صفوفٌ **بلا حقل صفحةٍ في المصدر** — تُعدّ وتُعلَن، ولا يُخترع لها صفحة.
+
+    **العِلّة (قاستها بوّابةُ المسارين):** في مصدرك 17 صفًّا حقلُ `page` فيها `None` بينما
+    `per_page` في `to_xlsx` ينسبها إلى صفحة. فمسارُ حالة التطبيق كان **يُسقطها من عدّ الصفحات
+    صامتًا** — والفرقُ ظهر رقمًا: `(629, 17)` مقابل `(629, 0)`. والعلاجُ ليس توسيعَ التسامح بل
+    **إعلانَ الإسقاط**: تعدُّها دالّةٌ مستقلّة ويُقال عددُها في الشاشة.
+    """
+    return sum(1 for r in (rows or []) if r.get("page") is None)
+
+
+def pages_from_state(rows: list[dict], footers: dict | None = None) -> dict[int, dict]:
+    """مدخلاتُ `pages` كما يقرؤها `ingest` — **من حالة التطبيق الحيّة** (بلا polars وبلا نموذج).
+
+    **ولماذا في الوحدة لا في `app.py` (وهو الذي يستدعيها):** هي **المصدرُ الثاني** لبناء الدفتر
+    (الأوّل `tools/to_xlsx.load`)، ومصدران بلا ضابطٍ يفترقان صامتين. فالدالّةُ نقيّةٌ هنا، **وضابطٌ
+    يقابل بينهما** (نفسُ الصفوف ونفسُ أحكام الصفحات) في `tests/test_ledger_ui.py`.
+
+    **وحدُّها المُعلَن:** `cost_usd` **لا يُملأ** من هذا المسار — فحالةُ التطبيق تحمل كلفةً كلّيّةً لا
+    كلفةَ صفحة، والعمودُ يعني كلفةَ الصفحة. فيبقى `None` (يُملأ في مسار الأداة من `to_xlsx`)، ولا
+    يُخترع توزيعٌ على الصفحات. و«الرقمُ بلا بيئته دعوى»: فالمصدرُ يُعلَن مع كلّ رقمٍ يخرج من هنا.
+    """
+    per: dict[int, dict] = {}
+    for r in rows or []:
+        pg = r.get("page")
+        if pg is None:
+            continue
+        e = per.setdefault(int(pg), {"page_no": None, "footer": "unchecked",
+                                     "rows": 0, "usage": None})
+        e["rows"] += 1
+        if e["page_no"] is None and r.get("printed_page") is not None:
+            e["page_no"] = r["printed_page"]          # الرقمُ المطبوعُ من الصفوف لا من مصدرٍ آخر
+    for pg, f in (footers or {}).items():
+        e = per.setdefault(int(pg), {"page_no": None, "footer": "unchecked",
+                                     "rows": 0, "usage": None})
+        e["footer"] = str((f or {}).get("verdict") or "unchecked")
+    return per
