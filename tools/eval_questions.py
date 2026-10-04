@@ -696,7 +696,14 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     # **التذييلاتُ المطبوعة (R77):** يُبنى بالدالّة نفسِها التي يبنيها التطبيق (`app.py`)، ويُمرَّر
     # إلى الأدوات — وبدونه أجابت أداةُ `page_footer` «لا يوجد» لكلّ صفحة: **قاس المقياسُ نفسَه**
     # لا المنتجَ (قِيس: صنفُ footer 0/8، ولكلّ صفحةٍ منها تذييلٌ مطبوعٌ في البيانات).
-    footers = build_footers(a.run)
+    try:
+        footers = build_footers(a.run)
+    except Exception as e:                       # noqa: BLE001 — تشغيلٌ بلا مجلّد `results/`
+        # **لا يُسقط التشغيلَ ولا يمرّ صامتًا:** يُعلن الحدَّ ويقول ما يترتّب عليه بالضبط
+        # (أداةُ `page_footer` تُجيب «لا يوجد» لكلّ صفحة ⇒ صنفُ footer بلا معنى في هذه الجولة).
+        footers = {}
+        print(f"      ⚠️ لا تذييلاتٌ مطبوعة ({type(e).__name__}) ⇒ صنفُ التذييل لا يُقاس هذه الجولة",
+              flush=True)
     print(f"      تذييلاتٌ مطبوعة: {len(footers)} صفحة", flush=True)
     print("[2/4] بناءُ الفهرس الدلاليّ (محلّيّ) …", flush=True)
     chunks = chunk_rows([{**r, "row_no": i + 1} for i, r in enumerate(rows)])

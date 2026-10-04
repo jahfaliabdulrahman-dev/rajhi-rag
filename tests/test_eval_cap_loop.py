@@ -72,7 +72,7 @@ def _run(tmp_path, monkeypatch, meter: _Meter, budget: float, n: int = 8,
     if used is not None:                     # أثرٌ بحجمٍ محدَّد (لضابط القصّ) — يُرجَع تلقائيًّا
         monkeypatch.setattr(_Ans, "used_row_nos", list(used))
 
-    def _answer(store, qtext, rows=None, chunks=None, llm=None):
+    def _answer(store, qtext, rows=None, chunks=None, llm=None, footers=None):
         meter.calls += 1                     # الكلفةُ تُحتسب عند النداء — كما يفعل المزوّد
         return _Ans()
 
