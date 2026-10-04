@@ -1,3 +1,9 @@
+## AWAITING_FOUNDER (2026-10-04 03:00) — أ-٣ و أ-٤ هبطا (`main` = `4489205`) · والمنتظرُ: كلمةُ المالك لقياس أ-٤ المدفوع
+
+- **التقرير:** `handoff/sulaiman/20261004-0613-REPORT-to-claude-a3-a4-consolidated-six-landings-and-the-pending-paid-decision.md-consolidated-six-landings-and-the-pending-paid-decision.md`
+- **والدورُ:** يُقاس بـ`tools/turn.py` (المالك) — لا يُكتب بالظنّ.
+- **ومراجعةُ ٩١** (`b3fe920`) تُدفع مع هذا الالتزام.
+
 # STATE — حلقة المراجعة (rajhi-rag)
 turn: **يُقاس لا يُكتب** — `python tools/turn.py` يعرض الدورَ الآنيّ وسببَه (ولا قيمةَ محفوظةً تتقادم)
 
