@@ -202,6 +202,27 @@ def format_history(history) -> str:
     return "\n".join(parts)
 
 
+def history_pairs(messages) -> list[tuple[str, str]]:
+    """سجلُّ الواجهة (`role`/`content`) ⇒ أزواجُ (سؤال، جواب) — **بلا اختراع قواعد**.
+
+    دورُ المستخدم يفتح الزوج، ودورُ المساعد يُغلقه؛ ودورٌ مكرَّرٌ أو ناقصٌ **يُهمَل** بدل أن يُخمَّن
+    (سجلٌّ بجوابٍ بلا سؤالٍ أو سؤالٍ بلا جواب لا يُنسب إلى أحدهما).
+    """
+    pairs: list[tuple[str, str]] = []
+    pending = None
+    for m in messages or []:
+        if isinstance(m, dict):
+            role, content = m.get("role", ""), m.get("content", "")
+        else:
+            role, content = getattr(m, "role", ""), getattr(m, "content", "")
+        if role == "user":
+            pending = str(content or "")
+        elif role == "assistant" and pending is not None:
+            pairs.append((pending, str(content or "")))
+            pending = None
+    return pairs
+
+
 def build_system_prompt(scope: str = "", history=None) -> str:
     """تلقينُ الوكيل من القالب — بمتغيّرَي النطاق والسجلّ (وكلاهما مُعلَن في الجواب)."""
     return _render_template(AGENT_SYSTEM_PROMPT, scope or "غيرُ مُعلَن", format_history(history))

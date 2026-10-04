@@ -1030,6 +1030,22 @@ def _evidence_from_numbers(nos: list[int]) -> tuple[pd.DataFrame, str]:
     return (pd.DataFrame([_row_record(i, r) for i, r in pairs]), note)
 
 
+def _scope_text() -> str:
+    """نطاقُ الكشف — يُشتقّ من الحالة **بلا افتراض مفتاح**: كلُّ قراءةٍ `.get` ⇒ لا `KeyError`.
+
+    وهذا النطاقُ هو ما يُعلن الوكيلُ عملَه عليه، فسؤالٌ عن «الصفحة ٤» لا يُجاب من كشفٍ آخر.
+    """
+    rows = STATE.get("rows") or []
+    pages = STATE.get("pages")
+    n_pages = len(pages) if hasattr(pages, "__len__") else (STATE.get("n_pages") or 0)
+    name = STATE.get("source_name") or STATE.get("pdf_name") or "الكشف المرفوع"
+    kind = STATE.get("reader_mode") or ""
+    bits = [str(name), f"{n_pages} صفحة", f"{len(rows)} حركة مُنظَّمة"]
+    if kind:
+        bits.append(f"قارئ {kind}")
+    return " · ".join(bits)
+
+
 def ask_followup(history):
     """Phase 2: answer STATE['pending_q'] and append the reply to the chat.
 
@@ -1046,10 +1062,13 @@ def ask_followup(history):
         history.append({"role": "assistant",
                         "content": "ارفع الكشف في تبويب «قراءة وتحقق» أولاً."})
         return history, "", pd.DataFrame(), _hide_note()
-    from statement_qa.qa import answer_question
+    from statement_qa.qa import answer_question, history_pairs
 
+    # **السجلُّ يُمرَّر (R92 · البند ١):** الزوجُ السابق يُعلن في القالب، والنطاقُ يُسمّى —
+    # وكلاهما مُدخَلٌ صريحٌ لا استنتاجٌ خفيّ.
     res = answer_question(STATE["store"], q, rows=STATE.get("rows"),
-                          chunks=STATE.get("chunks"), footers=STATE.get("footers"))
+                          chunks=STATE.get("chunks"), footers=STATE.get("footers"),
+                          history=history_pairs(history[:-1]), scope=_scope_text())
     rows_now = STATE.get("rows") or []
     page_of = {i + 1: r.get("page") for i, r in enumerate(rows_now)}
     verdicts = STATE.get("verdicts") or {}
