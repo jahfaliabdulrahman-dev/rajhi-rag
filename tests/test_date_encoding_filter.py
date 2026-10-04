@@ -11,7 +11,20 @@
 
 from __future__ import annotations
 
+import pytest
 from decimal import Decimal
+
+# **والحارسُ على التبعيّات لا على الاستيراد** (نمطُ `test_answer_type` المُثبت): `qa_tools` تُزيّن
+# أدواتها بـ`@tool` من LangChain ⇒ ففي بيئة الـCI الخفيفة **يسقط الاستيراد** فتُخطَأ المجموعةُ كلُّها
+# (قِيس: ٤/٤ فاشلة في `ci-light` و`ci-claims`) — وكان الملفُّ **خارج قائمة الـCI** فيفشل **صامتًا**.
+_DEPS = []
+for _mod in ("langchain",):
+    try:
+        __import__(_mod)
+    except ImportError:                           # noqa: PERF203
+        _DEPS.append(_mod)
+pytestmark = pytest.mark.skipif(
+    bool(_DEPS), reason=f"أدواتُ الطبقة تحتاج {'، '.join(_DEPS)} — تُقاس في البيئة الكاملة")
 
 from statement_qa.qa_tools import make_qa_tools
 
