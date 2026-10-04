@@ -21,6 +21,7 @@ happens to repeat in prose; and it never enters the text the model reads.
 """
 from __future__ import annotations
 
+import re
 from decimal import Decimal, InvalidOperation
 
 _MONEY = "{:,.2f}"
@@ -112,6 +113,41 @@ _FOOTER_AR = {
 }
 
 
+# ── ترميزُ التاريخ المطبوع (R90) ────────────────────────────────────────────────
+# **العلّة (مقيسة):** سؤالُ الحزمة «كم صفًّا كُتب تاريخُه بأرقامٍ عربيّةٍ-هندية؟» انتهى **بمهلة** لأنّه
+# لا سبيلَ للعدّ بترميز التاريخ: الوكيلُ يستنطق ٥٧٩٢ صفًّا بأدواته ⇒ يتجاوز المهلة. **والترميزُ حقيقيّ
+# ومقيسٌ في البيانات:** التاريخُ المطبوع في صدر الوصف عربيٌّ-هنديّ (U+0660-0669) في ٣٣١٠ صفًّا،
+# بينما حقلُ `date` المنظَّم يستعمل المجموعةَ **الممتدّة** (U+06F0-06F9) في الأسطر كلِّها — مجموعتان
+# لا تُخلطان. فصار العدُّ قدرةً واحدةً في الأداة العامّة بدل «أداةٍ لكلّ سؤال».
+_DATE_LEAD = re.compile(r"^\s*([0-9\u0660-\u0669\u06F0-\u06F9]{8})")
+_AR_IND = re.compile(r"[\u0660-\u0669]")
+_AR_EXT = re.compile(r"[\u06F0-\u06F9]")
+
+
+def _stored_date_encoding(row: dict) -> str:
+    """ترميزُ **حقل التاريخ المخزَّن**: `arabic_ind` (المجموعتان معًا: العربيّة-الهندية والممتدّة —
+    وهو تعريفُ الحاكم في `eval_questions`) | `latin` | `none`."""
+    dt = str(row.get("date") or "")
+    if not dt:
+        return "none"
+    if re.search(r"[\u0660-\u0669\u06F0-\u06F9]", dt):
+        return "arabic_ind"
+    return "latin" if re.search(r"\d", dt) else "none"
+
+
+def _printed_date_encoding(row: dict) -> str:
+    """ترميزُ التاريخ **المطبوع** في صدر الوصف: `arabic_ind` | `extended` | `latin` | `none`."""
+    m = _DATE_LEAD.match(str(row.get("desc") or ""))
+    if not m:
+        return "none"
+    token = m.group(1)
+    if _AR_IND.search(token):
+        return "arabic_ind"
+    if _AR_EXT.search(token):
+        return "extended"
+    return "latin"
+
+
 def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
                   footers: dict | None = None):
     """Bind the verified rows to LangChain tools (import kept lazy).
@@ -176,13 +212,17 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
                 f" → الرصيد {bal} — {_desc(r)[:_ROW_DESC_LEN]}")
 
     def _filtered(side: str = "الكل", keyword: str = "", tx_type: str = "",
-                  amount=None, page: int | None = None) -> list[dict]:
+                  amount=None, page: int | None = None,
+                  base: list[dict] | None = None) -> list[dict]:
         kw = (keyword or "").strip()
         tt = (tx_type or "").strip()
         amt = _parse_amount_arg(amount)
         pg = None if page is None else int(page)
         out = []
-        for r in movements:
+        # **الوحدةُ تُختار بالسؤال (R90):** سؤالُ العدّ الافتراضيّ عن **الحركات**؛ وسؤالُ ترميز
+        # التاريخ عن **الصفوف المطبوعة** (ومنها صفوفٌ ليست حركة) — فيُقاس على القاعدة المطلوبة.
+        src = movements if base is None else base
+        for r in src:
             if pg is not None and not _on_page(r, pg):
                 continue
             if not _side_match(r.get("side", ""), side):
@@ -229,14 +269,37 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
 
     @tool
     def count_movements(side: str = "الكل", keyword: str = "", tx_type: str = "",
-                        amount: float | None = None) -> str:
+                        amount: float | None = None, date_encoding: str = "",
+                        printed_date_encoding: str = "") -> str:
         """عدّ الحركات (بلا جمع مبالغ). نفس فلاتر sum_movements:
         side (اتجاه) | tx_type (النوع) | keyword (وصف) | amount (مبلغ بالريال).
-        مثال: count_movements(tx_type="سحب صراف آلي", amount=1000) = عدد السحوبات بهذا المبلغ."""
-        sel = _filtered(side, keyword, tx_type, amount)
+
+        **معيارا التاريخ (لا تخلطهما):**
+        ① `date_encoding` يعدّ بحسب **حقل التاريخ المخزَّن** (النظاميّ): `"arabic_ind"`
+        (المجموعتان معًا: العربيّة-الهندية ٠١٢…٩ والممتدّة ۰۱۲…۹) · `"latin"` · `"none"`.
+        ② `printed_date_encoding` يعدّ بحسب **التاريخ المطبوع في صدر الوصف**:
+        `"arabic_ind"` · `"extended"` · `"latin"` · `"none"`.
+        **والكشفُ يحمل تاريخين:** هجريًّا مطبوعًا (عربيٌّ-هنديّ غالبًا) وميلاديًّا مخزَّنًا (ممتدٌّ) —
+        فاسأل عن الذي يعنيه السؤال، وأعلن أيَّهما عدَدت.
+
+        مثال: count_movements(tx_type="سحب صراف آلي", amount=1000) = عدد السحوبات بهذا المبلغ.
+        مثال: count_movements(date_encoding="arabic_ind") = عددُ الصفوف التي تاريخُها المخزَّن بالأرقام العربيّة-الهندية.
+        مثال: count_movements(printed_date_encoding="arabic_ind") = عددُ الصفوف التي تاريخُها المطبوع كذلك."""
+        by_date = bool(date_encoding or printed_date_encoding)
+        sel = _filtered(side, keyword, tx_type, amount,
+                        base=(numbered if by_date else None))
+        if date_encoding:
+            sel = [r for r in sel if _stored_date_encoding(r) == date_encoding]
+        if printed_date_encoding:
+            sel = [r for r in sel if _printed_date_encoding(r) == printed_date_encoding]
         _record("count_movements", sel)
-        return (f"العدد = {len(sel)} حركة "
-                f"(الفلتر: {_filter_note(side, keyword, tx_type, amount)})")
+        note = _filter_note(side, keyword, tx_type, amount)
+        if date_encoding:
+            note = f"{note} | ترميزُ التاريخ المخزَّن = {date_encoding}"
+        if printed_date_encoding:
+            note = f"{note} | ترميزُ التاريخ المطبوع = {printed_date_encoding}"
+        return (f"العدد = {len(sel)} {'صفًّا' if by_date else 'حركة'} "
+                f"(الفلتر: {note})")
 
     @tool
     def balance_extremes() -> str:
