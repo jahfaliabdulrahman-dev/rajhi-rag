@@ -88,6 +88,7 @@ tests/test_ledger_ui.py
 tests/test_ledger_search_reach.py
 tests/test_answer_type.py
 tests/test_date_encoding_filter.py
+tests/test_agent_prompt_memory.py
 ```
 
 **وحدُ الإدراج مُعلَنٌ بالقياس (R72-1 · مراجعة ٧٢ · شقّاها معًا):** حرّاسُ جولة البيان الخمسة صاروا في

@@ -163,6 +163,50 @@ class Answer(BaseModel):
     refused: bool = Field(default=False, description="True إن امتنع: لا شاهدَ يحمل الجواب")
 
 
+# ── قوالبُ التلقين وذاكرةُ الحوار (R92 · البند ١) ────────────────────────────────
+# **العطبُ الذي يمنعه:** كان تلقينُ الوكيل **نصًّا مجمَّدًا** لا يعرف نطاقَ الكشف ولا سؤالَه السابق ⇒
+# فسؤالٌ تابعٌ يُجاب كأنّه مبتدأ، أو يُنقل فيه رقمٌ من جوابٍ سابق بلا أداة. فصار التلقينُ **قالبًا
+# بمتغيّرين** عبر `ChatPromptTemplate` من LangChain — **وبتراجعٍ مُعلَن** إلى القالب نفسه يدويًّا.
+_TEMPLATE_HEAD = (
+    "{system}\n\n"
+    "**نطاقُ الكشف الذي تعمل عليه:** {scope}\n"
+    "**وسجلُّ الحوار السابق (يُستأنس به لفهم السؤال، ولا يُنقل عنه رقمٌ بلا أداة):**\n{history}"
+)
+MEMORY_TURNS = 3          # **حدٌّ مُعلَن:** آخرُ ثلاث دورات — لا ذاكرةٌ تنمو بلا سقف
+
+
+def _render_template(system: str, scope: str, history: str) -> str:
+    """قالبُ التلقين: `ChatPromptTemplate` إن أمكن، **وإلّا القالبُ نفسه يدويًّا**.
+
+    **والحارسُ واسعٌ قصْدًا:** ضيقُه (`ImportError` وحدَه) أسقط مسارَ الوكيل إلى البديل النصّيّ في
+    بيئةٍ لم تُهيّأ فيها المكتبة (قِيس: ضابطان سقطا بـ`AttributeError`). فأيُّ تعذُّرٍ ⇒ النصُّ نفسه
+    — **لا سلوكَ آخر**.
+    """
+    try:
+        from langchain_core.prompts import ChatPromptTemplate          # noqa: PLC0415
+        tpl = ChatPromptTemplate.from_messages([("system", _TEMPLATE_HEAD)])
+        return tpl.format_messages(system=system, scope=scope, history=history)[0].content
+    except Exception:                            # noqa: BLE001
+        return _TEMPLATE_HEAD.format(system=system, scope=scope, history=history)
+
+
+def format_history(history) -> str:
+    """آخرُ `MEMORY_TURNS` دورةً — **ويُعلن ما أُسقط** بدل أن يُخفى."""
+    if not history:
+        return "لا سجلَّ سابق (هذا أوّلُ سؤال في الجلسة)."
+    items = list(history)
+    kept = items[-MEMORY_TURNS:]
+    parts = [f"- سؤالٌ سابق: {q}\n  جوابُه: {a}" for q, a in kept]
+    if len(items) > len(kept):
+        parts.append(f"(و{len(items) - len(kept)} دورةً أقدم أُسقطت من النافذة — والحدُّ {MEMORY_TURNS})")
+    return "\n".join(parts)
+
+
+def build_system_prompt(scope: str = "", history=None) -> str:
+    """تلقينُ الوكيل من القالب — بمتغيّرَي النطاق والسجلّ (وكلاهما مُعلَن في الجواب)."""
+    return _render_template(AGENT_SYSTEM_PROMPT, scope or "غيرُ مُعلَن", format_history(history))
+
+
 def _run_agent(llm, tools, system_prompt: str, user_content: str,
                response_format=None) -> tuple[str, object | None, str]:
     """create_agent (langchain 1.x) مع نوعٍ مُقيَّد، و**وضعٌ يُعلَن**: `typed` أو `prose`.
@@ -201,14 +245,18 @@ def _run_agent(llm, tools, system_prompt: str, user_content: str,
 
 
 def _answer_with_tools(llm, rows, context: str, question: str,
-                       footers=None) -> tuple[str, list[dict], object | None, str]:
+                       footers=None, history=None,
+                       scope: str = "") -> tuple[str, list[dict], object | None, str]:
     from statement_qa.qa_tools import make_qa_tools
 
     trace: list[dict] = []
     tools = make_qa_tools(rows, trace=trace, footers=footers)
     user = (f"القطع المرفقة:\n{context}\n\n"
             f"إن احتجت حساب أي رقم فاستخدم الأدوات.\n\nالسؤال: {question}")
-    text, parsed, mode = _run_agent(llm, tools, AGENT_SYSTEM_PROMPT, user,
+    # **توافقٌ خلفيّ تامّ:** بلا ذاكرةٍ ولا نطاقٍ يبقى التلقينُ نصَّه القديم بحرفه.
+    system_prompt = (build_system_prompt(scope=scope, history=history)
+                     if (history or scope) else AGENT_SYSTEM_PROMPT)
+    text, parsed, mode = _run_agent(llm, tools, system_prompt, user,
                                     response_format=Answer)
     return text, trace, parsed, mode
 
@@ -317,7 +365,8 @@ def _data_facts(rows) -> tuple[set, int | None, frozenset]:
 
 
 def answer_question(store, question: str, rows=None, chunks=None,
-                    llm=None, k: int = 4, footers=None) -> QAResult:
+                    llm=None, k: int = 4, footers=None, history=None,
+                    scope: str = "") -> QAResult:
     """Agent-with-tools answer when rows exist; strict RAG fallback otherwise.
 
     `chunks` (optional): the run's chunks — used ONLY to boost the last page
@@ -346,7 +395,7 @@ def answer_question(store, question: str, rows=None, chunks=None,
     # grounded — on its own.
     parts = split_compound(question)
     if len(parts) > 1:
-        results = [_answer_one(store, part, rows, chunks, llm, k, footers)
+        results = [_answer_one(store, part, rows, chunks, llm, k, footers, history=history, scope=scope)
                    for part in parts]
         merged_used = [n for r in results for n in (r.used_row_nos or [])]
         hits = boost_last_page(retrieve(store, question, k=k), chunks, question)
@@ -369,11 +418,11 @@ def answer_question(store, question: str, rows=None, chunks=None,
             citation_mode=merged_mode,
             unsupported_citations=merged_unsup)
 
-    return _answer_one(store, question, rows, chunks, llm, k, footers)
+    return _answer_one(store, question, rows, chunks, llm, k, footers, history=history, scope=scope)
 
 
 def _answer_one(store, question: str, rows, chunks, llm, k: int,
-                footers=None) -> QAResult:
+                footers=None, history=None, scope: str = "") -> QAResult:
     """One question, one answer, with its own tool trace and its own honesty.
 
     `footers` (R77): التذييلاتُ المطبوعةُ لكلّ صفحة — تُمرَّر إلى الأدوات فيُجيب `page_footer` عنها."""
@@ -389,7 +438,7 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
     if rows:
         try:
             answer, trace, parsed, mode = _answer_with_tools(llm, rows, context, question,
-                                                             footers=footers)
+                                                             footers=footers, history=history, scope=scope)
             from statement_qa.qa_tools import used_rows_from_trace
 
             used = used_rows_from_trace(trace)
@@ -402,7 +451,7 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
                     llm, rows, context,
                     question + "\n\n(استخدم أداة حسابية واحدة على الأقل قبل "
                                "الجواب، ولا تحسب بنفسك.)",
-                    footers=footers)
+                    footers=footers, history=history, scope=scope)
                 used2 = used_rows_from_trace(trace2)
                 if used2 or _tool_was_used(trace2):
                     answer, used = answer2, used2
