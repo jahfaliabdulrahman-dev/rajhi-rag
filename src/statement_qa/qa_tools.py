@@ -25,6 +25,21 @@ import re
 from decimal import Decimal, InvalidOperation
 
 _MONEY = "{:,.2f}"
+
+def _m(value) -> str:
+    """مالٌ ⇒ نصٌّ مُنسَّق **أيًّا كان مصدرُه** (نصٌّ من العقد أو `Decimal` حسابيّ).
+
+    **ولماذا:** عقدُ المال `TEXT` (لا يُطبَع عائمًا)، فحقولُ الصفوف نصوصٌ — و`_MONEY.format(str)`
+    يسقط بـ`ValueError` (قِيس: أداةُ `page_summary` سقطت على `balance` نصّيّ). فتمرُّ كلُّ الحقول
+    الماليّة من هنا، فلا يعود نوعُ المصدر يُسقط أداة.
+    """
+    if value is None or value == "":
+        return "—"
+    try:
+        return _MONEY.format(Decimal(str(value)))
+    except (ArithmeticError, ValueError):                 # noqa: PERF203
+        return str(value)                                  # قيمةٌ ليست رقمًا تُعرَض كما هي، لا تُخفى
+
 _ROW_DESC_LEN = 70     # حدُّ الوصف في سطر الصفّ — **موضعٌ واحد** (كان ٦٠ في `page_rows` و٧٠ في `search_rows`)
 
 _SIDE_AR = {"debit": "مدين", "credit": "دائن"}
@@ -205,8 +220,8 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
         مسمًّى `_ROW_DESC_LEN`، ولم يبقَ معامَلٌ لا يمرّره أحدٌ — قِيس في مقعد البنية: كان `desc_len`
         معامَلًا بلا مستدعٍ. **وتغيّرُ مخرَج `page_rows` بذلك (٦٠ ⇒ ٧٠ خانة) مُعلَن** ولا مستهلكَ له.)
         """
-        move = _MONEY.format(r["movement"]) if r.get("movement") is not None else "—"
-        bal = _MONEY.format(r["balance"]) if r.get("balance") is not None else "—"
+        move = _m(r["movement"]) if r.get("movement") is not None else "—"
+        bal = _m(r["balance"]) if r.get("balance") is not None else "—"
         return (f"{_ref(r)}: [{r.get('type') or 'غير مصنّف'}] "
                 f"{_SIDE_AR.get(r.get('side') or '', 'غير محسوم')} {move}"
                 f" → الرصيد {bal} — {_desc(r)[:_ROW_DESC_LEN]}")
@@ -310,8 +325,8 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
         hi = max(with_bal, key=lambda r: r["balance"])
         lo = min(with_bal, key=lambda r: r["balance"])
         _record("balance_extremes", [hi, lo])
-        return (f"أعلى رصيد = {_MONEY.format(hi['balance'])} {_ref(hi)}"
-                f" | أدنى رصيد = {_MONEY.format(lo['balance'])} {_ref(lo)}")
+        return (f"أعلى رصيد = {_m(hi['balance'])} {_ref(hi)}"
+                f" | أدنى رصيد = {_m(lo['balance'])} {_ref(lo)}")
 
     @tool
     def closing_balance() -> str:
@@ -321,7 +336,7 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
             return "لا توجد أرصدة في الكشف."
         last = with_bal[-1]
         _record("closing_balance", [last])
-        return f"آخر رصيد = {_MONEY.format(last['balance'])} {_ref(last)}"
+        return f"آخر رصيد = {_m(last['balance'])} {_ref(last)}"
 
     @tool
     def page_summary(page: int) -> str:
@@ -356,8 +371,8 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
                     f" | إجمالي دائن = {_MONEY.format(credits)}"
                     f" | عدد الصفوف = {len(rows_on_page)}" + note)
         first, last = with_bal[0], with_bal[-1]
-        return (f"صفحة {page}: أول رصيد = {_MONEY.format(first['balance'])} {_ref(first)}"
-                f" | آخر رصيد = {_MONEY.format(last['balance'])} {_ref(last)}"
+        return (f"صفحة {page}: أول رصيد = {_m(first['balance'])} {_ref(first)}"
+                f" | آخر رصيد = {_m(last['balance'])} {_ref(last)}"
                 f" | إجمالي مدين = {_MONEY.format(debits)}"
                 f" | إجمالي دائن = {_MONEY.format(credits)}"
                 f" | عدد الصفوف = {len(rows_on_page)}" + note)

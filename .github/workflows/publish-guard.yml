@@ -120,6 +120,7 @@ jobs:
                            tests/test_app_binds_history.py \
                            tests/test_the_memory_reaches_the_model.py \
                            tests/test_app_excel_button.py \
+                           tests/test_money_string_fields.py \
           # **وأربعةُ ملفّاتِ أ-٣/أ-٤ دخلت القائمة (مراجعة ٩١ · الإصلاحُ المطلوب ①):** قِيس أنّ
           # العدّادَ يعدّ `tests/` كلَّها بينما **التشغيلُ** يقف على هذه القائمة ⇒ فبقيت اختباراتُ
           # الدفتر (٢٢) تجري هنا ولا تُذكر، **وأيُّ عطبٍ فيها يُخضرّ**. والقاعدة: **القائمةُ والعدّادُ
