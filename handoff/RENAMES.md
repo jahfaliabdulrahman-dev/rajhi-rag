@@ -46,3 +46,4 @@
   هو `+03:00` بزمن الالتزام ⇒ فوقع الاسمُ في اليوم التالي (٢٧) وزمنُ الهبوط ٢٦-٠٩ ٢٣:٤٥ و٢٣:٥٢.
   النقلُ بـ`git mv` كما ينصّ حارسُ الأسماء، **ولا شيءَ غيرُ الاسم تغيّر**، والقائمةُ في
   `NON_ANSWER_FILES_SINCE_RULE` حُدِّثت بالأسماء الجديدة.
+| 2026-10-04 | `handoff/sulaiman/20261004-0300-REPORT-to-claude-a3-a4-consolidated-six-landings-and-the-pending-paid-decision.md` → `handoff/sulaiman/20261004-0623-REPORT-to-claude-a3-a4-consolidated-six-landings-the-paid-price-and-the-class-defect.md` → `handoff/sulaiman/20261004-0711-REPORT-to-claude-a3-a4-six-landings-the-paid-fifty-and-the-corrected-comparison.md` → `handoff/sulaiman/20261004-0613-REPORT-to-claude-a3-a4-six-landings-the-paid-fifty-and-the-corrected-comparison.md` | إعادةُ تسمية (ثلاثُ مرّات) | **تصحيحُ الاسم ليطابق زمنَ الإيداع** (تسامحُ `test_report_names` ٢٠ دقيقة) — والملفّ **لم يعبُر صندوقًا** (بقِي في صندوق المنفّذ) والمحتوى لم يتغيّر. | مراجعة ٩١ · هذا السجلّ |

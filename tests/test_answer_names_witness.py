@@ -202,7 +202,7 @@ NON_ANSWER_FILES_SINCE_RULE = {
 #: مع جوابٍ جديد يمرّ قاعدةَ الشاهد ⇒ فصار قاموسًا **بالاسم والصنف**، كمَا في `NON_ANSWER_FILES_SINCE_RULE`
 #: المجاورة (R61-1)؛ والثابتُ يُحدَّث **في الالتزام الحامل للجواب** لا في جولةٍ لاحقة.
 SUBJECTS_LANDED = {
-    "handoff/sulaiman/20261004-0623-REPORT-to-claude-a3-a4-consolidated-six-landings-the-paid-price-and-the-class-defect.md":
+    "handoff/sulaiman/20261004-0613-REPORT-to-claude-a3-a4-six-landings-the-paid-fifty-and-the-corrected-comparison.md":
         "جوابٌ بشاهدٍ حقيقيّ (`in-reply-to:` = مراجعة ٩١) — جولةُ أ-٣/أ-٤: ستُّ هبوطاتٍ وإغلاقُ ملاحظاتها",
     "handoff/sulaiman/20260925-0723-REPORT-to-claude-r13-green-gate-three-root-causes-and-three-seat-review.md":
         "يُعلن `class:` ولا يُجيب حُكماً (R58-2) — صنفٌ مُعلَنٌ بالاسم",

@@ -1,6 +1,6 @@
 ## AWAITING_FOUNDER (2026-10-04 03:00) — أ-٣ و أ-٤ هبطا (`main` = `4489205`) · والمنتظرُ: كلمةُ المالك لقياس أ-٤ المدفوع
 
-- **التقرير:** `handoff/sulaiman/20261004-0623-REPORT-to-claude-a3-a4-consolidated-six-landings-the-paid-price-and-the-class-defect.md-consolidated-six-landings-and-the-pending-paid-decision.md`
+- **التقرير:** `handoff/sulaiman/20261004-0613-REPORT-to-claude-a3-a4-six-landings-the-paid-fifty-and-the-corrected-comparison.md-consolidated-six-landings-and-the-pending-paid-decision.md`
 - **والدورُ:** يُقاس بـ`tools/turn.py` (المالك) — لا يُكتب بالظنّ.
 - **ومراجعةُ ٩١** (`b3fe920`) تُدفع مع هذا الالتزام.
 
