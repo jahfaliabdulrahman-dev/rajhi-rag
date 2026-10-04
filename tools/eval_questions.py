@@ -684,7 +684,7 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     """تشغيلُ الأسئلة على سلسلة السؤال الحقيقيّة — **مدفوع**، ويُقاس بأمرٍ صريح."""
     src = pathlib.Path(__file__).resolve().parent.parent / "src"
     sys.path.insert(0, str(src))
-    from tools.refusal_test import build_rows                     # noqa: PLC0415
+    from tools.refusal_test import build_footers, build_rows      # noqa: PLC0415
     from statement_qa.chunking import chunk_rows                  # noqa: PLC0415
     from statement_qa.qa import answer_question, build_llm        # noqa: PLC0415
     from statement_qa.retriever import build_index                # noqa: PLC0415
@@ -693,6 +693,11 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     print(f"[1/4] بناءُ الجدول من {a.run} …", flush=True)
     rows, n_pages = build_rows(a.run)
     print(f"      {n_pages} صفحة | {len(rows)} صفًّا", flush=True)
+    # **التذييلاتُ المطبوعة (R77):** يُبنى بالدالّة نفسِها التي يبنيها التطبيق (`app.py`)، ويُمرَّر
+    # إلى الأدوات — وبدونه أجابت أداةُ `page_footer` «لا يوجد» لكلّ صفحة: **قاس المقياسُ نفسَه**
+    # لا المنتجَ (قِيس: صنفُ footer 0/8، ولكلّ صفحةٍ منها تذييلٌ مطبوعٌ في البيانات).
+    footers = build_footers(a.run)
+    print(f"      تذييلاتٌ مطبوعة: {len(footers)} صفحة", flush=True)
     print("[2/4] بناءُ الفهرس الدلاليّ (محلّيّ) …", flush=True)
     chunks = chunk_rows([{**r, "row_no": i + 1} for i, r in enumerate(rows)])
     store = build_index(chunks)
@@ -732,7 +737,8 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     def _ask(qtext: str, out_box: dict) -> None:
         """سؤالٌ واحدٌ في خيط: تعليقُه لا يُسقط الجولةَ (ولا يُقتل الخيط — يُترك معلّقاً ويُسجَّل فشلُه)."""
         try:
-            r = answer_question(store, qtext, rows=rows, chunks=chunks, llm=llm)
+            r = answer_question(store, qtext, rows=rows, chunks=chunks, llm=llm,
+                                footers=footers)
             out_box.update({"answer": r.answer or "", "used": list(getattr(r, "used_row_nos", None) or []),
                             "scope": getattr(r, "scope", None), "refused": bool(getattr(r, "refused", False))})
         except Exception as e:                                   # noqa: BLE001 — عطبٌ يُسمّى لا يُسقط الجولة
