@@ -1046,6 +1046,24 @@ def _scope_text() -> str:
     return " · ".join(bits)
 
 
+def export_xlsx():
+    """زرُّ التنزيل: **نفسُ كاتب سطر الأوامر**، مَرندَرًا من دفترٍ يُكتب من الحالة.
+
+    **ولماذا لا بناءٌ مباشرٌ هنا:** طريقٌ ثانٍ يعني حكمين لملفٍّ واحد يفترقان صامتين. فالنواةُ
+    `export_from_state` تكتب الدفترَ ثمّ تستدعي `to_xlsx.build(ledger_db=…)` — وهي المقابَلةُ خليّةً
+    بخليّة مع مخرَج الـCLI في `tests/test_app_excel_button.py`.
+
+    **والرفضُ يُعرَض ولا يُبتلع:** كاتبُ الإكسل يرفض التسليم عند اختلاف الاشتقاق أو دورِ التذييل
+    (`to_xlsx.py:846`) — ورفضُه إشارةُ أمانةٍ، فيُقرأ نصًّا بدل أن يُخفى.
+    """
+    from statement_qa.export_from_state import export_xlsx_from_state
+
+    out, msg = export_xlsx_from_state(
+        STATE.get("rows") or [], STATE.get("footers"),
+        out_dir=Path(tempfile.mkdtemp(prefix="rajhi_xlsx_")))
+    return (str(out) if out else None), _note_update(msg)
+
+
 def ask_followup(history):
     """Phase 2: answer STATE['pending_q'] and append the reply to the chat.
 
@@ -1217,6 +1235,15 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي") as demo:
                     # development diagnostics only, collapsed out of the way.
                     with gr.Accordion("تفاصيل تقنية (قطع الاسترجاع)", open=False):
                         src = gr.Markdown(rtl=True)
+            # **البند ٢ — زرُّ التنزيل:** الملفُّ يُبنى بالنواة نفسها التي يُبنى بها ملفُّ سطر الأوامر،
+            # فالمقابلةُ خليّةً بخليّة في `tests/test_app_excel_button.py` قائمةٌ لا موعودة.
+            with gr.Row():
+                xlsx_btn = gr.Button("⬇ تنزيل Excel (نفس ملفّ سطر الأوامر)",
+                                     variant="secondary", scale=2)
+                xlsx_note = gr.Markdown(rtl=True, scale=3)
+            xlsx_file = gr.File(label="ملفّ الكشف (xlsx)")
+            xlsx_btn.click(export_xlsx, inputs=[], outputs=[xlsx_file, xlsx_note],
+                           api_name="export_xlsx")
             ask.click(prepare_ask, inputs=[q, chat], outputs=[chat, q],
                       show_progress="hidden", api_name="ask_question"
                       ).then(ask_followup, inputs=[chat],

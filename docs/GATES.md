@@ -91,6 +91,7 @@ tests/test_date_encoding_filter.py
 tests/test_agent_prompt_memory.py
 tests/test_app_binds_history.py
 tests/test_the_memory_reaches_the_model.py
+tests/test_app_excel_button.py
 ```
 
 **وحدُ الإدراج مُعلَنٌ بالقياس (R72-1 · مراجعة ٧٢ · شقّاها معًا):** حرّاسُ جولة البيان الخمسة صاروا في
