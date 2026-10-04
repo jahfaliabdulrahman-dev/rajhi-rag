@@ -21,7 +21,13 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from statement_qa import qa
+import pytest
+
+# **حارسُ التبعيّات (قاعدةٌ مقيسة):** بيئتا الـCI بلا LangChain ⇒ بلا هذا السطر **يسقط الاستيرادُ**
+# بدل أن يُتخطّى، فيقرأ المشرفُ «فشلٌ» ويظنّ العطبَ في المنطق. الحدُّ: في البيئة الكاملة يعمل (4✓).
+pytest.importorskip("langchain")
+
+from statement_qa import qa  # noqa: E402
 
 QA_SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "statement_qa" / "qa.py"
 ROWS = [{"page": 1, "row": 1, "description": "شراء", "amount": "10.00",
