@@ -287,13 +287,14 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
         if not sel:
             return "لا توجد حركات مطابقة لهذا الفلتر في الكشف."
         vals = [_dec(r.get("movement")) for r in sel]
-        missed = sum(1 for v in vals if v is None)
         total = sum((v for v in vals if v is not None), Decimal("0"))
         examples = "؛ ".join(
             f"[{r.get('type') or 'غير مصنّف'}] {_m(r['movement'])} {_ref(r)}"
             for r in sel[:3])
         return (f"المجموع = {_MONEY.format(total)} ريال | عدد الحركات = {len(sel)}"
-                f" | أمثلة: {examples}")
+                + (f" · واستُبعد {sum(1 for v in vals if v is None)} بلا مبلغ"
+                   if any(v is None for v in vals) else "")
+                + f" | أمثلة: {examples}")
 
     @tool
     def count_movements(side: str = "الكل", keyword: str = "", tx_type: str = "",
