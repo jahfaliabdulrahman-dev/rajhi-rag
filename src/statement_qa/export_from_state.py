@@ -35,7 +35,8 @@ def export_xlsx_from_state(rows: list[dict], footers: dict | None = None, *,
                           profile: Path | str | None = None,
                           out_dir: Path | None = None,
                           gate: Path | None = None,
-                          run: Path | None = None) -> tuple[Path | None, str]:
+                          run: Path | None = None,
+                          recoveries=None, rereads=None) -> tuple[Path | None, str]:
     """(مسارُ الملفّ أو None، رسالةٌ تُعرَض للمستخدم) — **والفشلُ يُعلَن ولا يُخترع ملفّ**.
 
     **ولا يُبتلع `SystemExit` بصمت:** كاتبُ الإكسل يرفض التسليم عند اختلاف الاشتقاق أو دورِ التذييل
@@ -74,6 +75,7 @@ def export_xlsx_from_state(rows: list[dict], footers: dict | None = None, *,
     finally:
         conn.close()
 
+    owned_run = run is None
     if run is None:
         role = _contract_footer_role(profile)
         if role in ("", "غير مُعلن في العقد"):
@@ -87,6 +89,26 @@ def export_xlsx_from_state(rows: list[dict], footers: dict | None = None, *,
             encoding="utf-8")
     else:
         run = Path(run)
+
+    # **مخبّأ كلّ صفحة** — يقرؤه كاتبُ الإكسل للرايات وإجماليات المطبوع (`to_xlsx.py:315-323`).
+    # ويُكتب في التشغيلة التي بنيناها: أمّا تشغيلةٌ مُمرَّرة فمخبّآتها ليست ملكَنا فلا نمسّها.
+    if owned_run:
+        recovered_pages = {int(e.get("page")) for e in (recoveries or []) if e.get("page") is not None}
+        reread_pages = {int(e.get("page")) for e in (rereads or []) if e.get("page") is not None}
+        by_page: dict[int, list[dict]] = {}
+        for r in rows:
+            pg = r.get("page")
+            if pg is not None:
+                by_page.setdefault(int(pg), []).append(r)
+        for pg, page_rows in by_page.items():
+            footer = (footers or {}).get(pg)
+            if footer is None:
+                footer = (footers or {}).get(str(pg))
+            (run / "results" / f"pg-{pg:03d}.json").write_text(
+                json.dumps({"pg": pg, "raw_rows": page_rows,
+                            "recovered": pg in recovered_pages, "reread": pg in reread_pages,
+                            "error": False, "arbitrated_by": None,
+                            "footer": footer or {}}, ensure_ascii=False, default=str), encoding="utf-8")
 
     out = work / "statement.xlsx"
     try:

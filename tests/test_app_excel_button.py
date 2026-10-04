@@ -70,8 +70,14 @@ def test_the_shipped_branch_is_missing_the_derivation_detail_known_and_owned(tmp
     rows, *_ = _load(run)
     out, _msg = export_xlsx_from_state(rows, None, profile=PROFILE, out_dir=tmp_path / "known")
     assert out is not None
-    assert not list((tmp_path / "known" / "run" / "results").glob("pg-*.json")), \
-        "تغيّر المشهد: صار للفرع الشاحن مخبّآتُ صفحة ⇒ يُعاد قياسُ البوّابة"
+    # **قُلب المشهدُ عن قصد (R92-2b):** كان الفرعُ الشاحن بلا مخبّآت، وصار يكتبها من الصفوف والتذييلات
+    # ⇒ فالضابطُ الآن **يشهد بالجديد**: المخبّآتُ موجودةٌ لكلّ صفحة، وبالشكل الذي يقرؤه كاتبُ الإكسل.
+    caches = sorted((tmp_path / "known" / "run" / "results").glob("pg-*.json"))
+    assert caches, "الفرعُ الشاحن لا يكتب مخبّآت الصفحة ⇒ الراياتُ والإجمالياتُ المطبوعة تبقى فارغة"
+    import json as _json
+    one = _json.loads(caches[0].read_text(encoding="utf-8"))
+    assert {"pg", "raw_rows", "recovered", "reread", "error", "arbitrated_by", "footer"} <= set(one), \
+        f"شكلُ المخبّأ ناقص: {sorted(one)}"
 
 
 def test_the_ledger_is_the_row_source_not_the_run_caches(tmp_path) -> None:
