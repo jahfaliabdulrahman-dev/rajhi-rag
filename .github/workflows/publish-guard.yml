@@ -118,6 +118,7 @@ jobs:
                            tests/test_date_encoding_filter.py \
                            tests/test_agent_prompt_memory.py \
                            tests/test_app_binds_history.py \
+                           tests/test_the_memory_reaches_the_model.py \
           # **وأربعةُ ملفّاتِ أ-٣/أ-٤ دخلت القائمة (مراجعة ٩١ · الإصلاحُ المطلوب ①):** قِيس أنّ
           # العدّادَ يعدّ `tests/` كلَّها بينما **التشغيلُ** يقف على هذه القائمة ⇒ فبقيت اختباراتُ
           # الدفتر (٢٢) تجري هنا ولا تُذكر، **وأيُّ عطبٍ فيها يُخضرّ**. والقاعدة: **القائمةُ والعدّادُ
