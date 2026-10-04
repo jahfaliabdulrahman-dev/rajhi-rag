@@ -34,19 +34,33 @@ def test_the_button_file_equals_the_cli_file_cell_for_cell(tmp_path) -> None:
     run = _synthetic_run(tmp_path)
     rows, _report, _per_page, _flags = _load(run)
 
-    out_app, msg = export_xlsx_from_state(rows, None, profile=PROFILE,
-                                          out_dir=tmp_path / "app", run=run)
+    # **بلا `run=` — كما تنادي الواجهةُ بالحرف** (P1 مقعدَي Spec/Structure: كان `run=` يقيس فرعًا لا يُشحن).
+    out_app, msg = export_xlsx_from_state(rows, None, profile=PROFILE, out_dir=tmp_path / "app")
     assert out_app is not None, f"نواةُ الزرّ لم تُنتج ملفًّا: {msg}"
     assert "من الدفتر" in msg, f"المصدرُ غيرُ معلَن في الرسالة: {msg}"
 
     out_cli = tmp_path / "cli.xlsx"
     proc = subprocess.run(
-        [sys.executable, "-m", "tools.to_xlsx", "--run", str(run), "--out", str(out_cli),
+        [sys.executable, "-m", "tools.to_xlsx", "--out", str(out_cli),
+         "--run", str(tmp_path / "app" / "run"),
          "--profile", str(PROFILE), "--from-ledger", str(tmp_path / "app" / "ledger.db")],
         cwd=ROOT, capture_output=True, text=True)
     assert proc.returncode == 0, f"الـCLI فشل: {proc.stderr[-500:]}"
 
     assert _cells(out_app) == _cells(out_cli), "ملفُّ الزرّ ≠ ملفِّ سطر الأوامر خليّةً بخليّة"
+
+
+def test_the_shipped_branch_is_missing_the_derivation_detail_known_and_owned(tmp_path) -> None:
+    """**حدٌّ مُعلَن لا مُصلَح:** على مسار الزرّ لا `footer_detail` ⇒ `verify_derivation` خاملةٌ.
+
+    لا يُوهَم غلقُه: يُقاس فيُعرَف. والمالكُ: الجولةُ التالية — والفرقُ لا يمسّ صفوفَ الدفتر.
+    """
+    run = _synthetic_run(tmp_path)
+    rows, *_ = _load(run)
+    out, _msg = export_xlsx_from_state(rows, None, profile=PROFILE, out_dir=tmp_path / "known")
+    assert out is not None
+    assert not list((tmp_path / "known" / "run" / "results").glob("pg-*.json")), \
+        "تغيّر المشهد: صار للفرع الشاحن مخبّآتُ صفحة ⇒ يُعاد قياسُ البوّابة"
 
 
 def test_the_ledger_is_the_row_source_not_the_run_caches(tmp_path) -> None:
