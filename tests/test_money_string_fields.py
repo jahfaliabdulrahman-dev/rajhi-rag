@@ -7,6 +7,11 @@
 
 from __future__ import annotations
 
+import pytest
+
+# حارسُ التبعيّات (قاعدةٌ مقيسة: بلا LangChain يسقط الاستيرادُ بدل أن يُتخطّى ⇒ CI أحمر بلا عطب)
+pytest.importorskip("langchain")
+
 from decimal import Decimal
 
 from statement_qa.qa_tools import _m, make_qa_tools
