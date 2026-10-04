@@ -149,3 +149,34 @@ def test_the_whole_answer_carries_the_typed_citations(monkeypatch):
     assert res2.answer.startswith("المجموع"), res2.answer[:40]
     assert res2.citation_mode == "typed" and res2.cited_row_ids == [1, 4]
     assert res2.unsupported_citations == [1, 4], "الإصلاحُ لم يُقابَل بالأثر"
+
+
+def test_a_failed_tool_path_carries_no_type_and_no_citation(monkeypatch):
+    """**إصلاحُ الصنف لا الموضع** (قاسه السؤالُ المدفوع الأوّل · مُثبت):
+
+    أصلحتُ فرعَ الامتناع وتركتُ فرعَ **تعذُّر الأدوات** ⇒ فقِيس في نداءٍ حقيقيّ أنّ جوابًا **بلا أثرِ
+    أداةٍ** يحمل `citation_mode="typed"` واستشهادات ستٍّ (`unsupported=[...]`) — أي **استشهادٌ بلا
+    حساب**. والقاعدة: **من لا أثرَ له لا نوعَ له** — والمعيارُ واحدٌ في الفرعين.
+    """
+    rows = [{"row_no": i, "page": 1, "printed_page": 1, "desc": f"س{i}", "date": "2026-01-01",
+             "movement": "10.00", "side": "debit", "balance": "10.00", "printed_movement": "10.00",
+             "printed_balance": "10.00", "counted": 1, "row_state": "عادي", "source": "طباعة"}
+            for i in range(1, 4)]
+
+    def _boom(**_kw):                       # الوكيلُ يفشل: أدواتُه لم تجرِ
+        raise RuntimeError("عطبٌ مُفتعَل في الوكيل")
+
+    class _LLM:
+        """نموذجٌ بديلٌ للنثر: `_answer_one` يسقط إلى `_answer_plain` بعد تعذُّر الأدوات."""
+
+        def invoke(self, _msgs):
+            return _Msg("نثرٌ بلا أداة")
+
+    import langchain.agents as la
+    monkeypatch.setattr(la, "create_agent", _boom)
+    res = q._answer_one(store=_Store(), question="كم مجموع السحوبات؟", rows=rows, chunks=None,
+                        llm=_LLM(), k=2, footers=None)
+    assert res.tools_failed is True, "لم يُقَس مسارُ تعذُّر الأدوات"
+    assert res.citation_mode == "prose" and res.cited_row_ids == [], (
+        f"جوابٌ بلا أثرِ أداةٍ حمل نوعًا أو استشهادًا: {res.citation_mode} · {res.cited_row_ids}")
+    assert res.unsupported_citations == []

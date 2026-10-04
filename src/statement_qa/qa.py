@@ -426,6 +426,10 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
             # (audit P2-10).
             answer = ""
             tools_failed = True
+            # **والصنفُ لا الموضع (قاسه السؤالُ المدفوع · مُثبت):** أصلحتُ الامتناعَ وتركتُ تعذُّرَ الأدوات
+            # ⇒ فجوابٌ **بلا أثرِ أداةٍ** حمل `typed` واستشهادات (قِيس: `tools_failed=True` و`cited=[…6]`
+            # في نداءٍ حقيقيّ). والقاعدة: **من لا أثرَ له لا نوعَ له** — فيُصفَّران هنا أيضًا، ويقيسه ضابطٌ.
+            parsed, mode = None, "prose"
     if not answer:
         answer = _answer_plain(llm, context, question)
         used = []
