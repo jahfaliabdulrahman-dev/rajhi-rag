@@ -26,6 +26,17 @@ from decimal import Decimal, InvalidOperation
 
 _MONEY = "{:,.2f}"
 
+def _dec(value) -> "Decimal | None":
+    """مالٌ ⇒ `Decimal` للجمع — **والحدُّ مُعلَن:** قيمةٌ ليست رقمًا تُعيد `None` فيُعدّها الجامعُ
+    في «غير محسوم» بدل أن يُسقط الأداة (قِيس: `Decimal + str` كان يرفع `TypeError`)."""
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value).replace(",", ""))
+    except (ArithmeticError, ValueError):                 # noqa: PERF203
+        return None
+
+
 def _m(value) -> str:
     """مالٌ ⇒ نصٌّ مُنسَّق **أيًّا كان مصدرُه** (نصٌّ من العقد أو `Decimal` حسابيّ).
 
@@ -275,9 +286,11 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
         _record("sum_movements", sel)
         if not sel:
             return "لا توجد حركات مطابقة لهذا الفلتر في الكشف."
-        total = sum((r["movement"] for r in sel), Decimal("0"))
+        vals = [_dec(r.get("movement")) for r in sel]
+        missed = sum(1 for v in vals if v is None)
+        total = sum((v for v in vals if v is not None), Decimal("0"))
         examples = "؛ ".join(
-            f"[{r.get('type') or 'غير مصنّف'}] {_MONEY.format(r['movement'])} {_ref(r)}"
+            f"[{r.get('type') or 'غير مصنّف'}] {_m(r['movement'])} {_ref(r)}"
             for r in sel[:3])
         return (f"المجموع = {_MONEY.format(total)} ريال | عدد الحركات = {len(sel)}"
                 f" | أمثلة: {examples}")
@@ -347,12 +360,12 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
             return f"لا توجد بيانات للصفحة {page} في هذا الكشف."
         _record("page_summary", rows_on_page)
         with_bal = [r for r in rows_on_page if r.get("balance") is not None]
-        debits = sum((r["movement"] for r in rows_on_page
+        debits = sum((_dec(r.get("movement")) for r in rows_on_page
                       if r.get("kind") == "txn" and r.get("side") == "debit"
-                      and r.get("movement") is not None), Decimal("0"))
-        credits = sum((r["movement"] for r in rows_on_page
+                      and _dec(r.get("movement")) is not None), Decimal("0"))
+        credits = sum((_dec(r.get("movement")) for r in rows_on_page
                        if r.get("kind") == "txn" and r.get("side") == "credit"
-                       and r.get("movement") is not None), Decimal("0"))
+                       and _dec(r.get("movement")) is not None), Decimal("0"))
         # Rows whose direction the chain could not decide are NOT in either
         # total. Staying silent about them made a page total look complete
         # while a real movement was missing from it (audit P3-2).

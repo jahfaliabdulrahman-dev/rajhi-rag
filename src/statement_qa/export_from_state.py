@@ -62,8 +62,15 @@ def export_xlsx_from_state(rows: list[dict], footers: dict | None = None, *,
         stats = L.ingest(conn, rows, L.pages_from_state(rows, footers))
         # **أحكامُ الصفحات تُقرأ من الدفتر لا من التقرير** (مقيس: مجلّدُ تشغيلٍ بلا مخبّآت كان يُسقط
         # ورقةَ «ما لم يُثبت» كاملةً ⇒ ملفٌّ ناقصٌ يقرؤه صاحبُه تامًّا). فالمصدرُ واحد: جدول `pages`.
-        per_page = [dict(row) for row in conn.execute(
-            "SELECT pg AS \"page\", printed_page, verdict, rows_count FROM pages ORDER BY pg")]
+        # **الاسمُ المزدوج مقصودٌ (قِيس):** كاتبُ الإكسل يقرأ `footer`/`rows`/`page_no`، ومدخلاتُ
+        # الدفتر تستعمل `verdict`/`rows_count`/`printed_page`. فتُكتب بالاسمين ⇒ لا خمولَ ولا كسرَ قارئ.
+        per_page = []
+        for row in conn.execute("SELECT pg, printed_page, verdict, rows_count FROM pages ORDER BY pg"):
+            d = dict(row)
+            per_page.append({"page": d["pg"], "pg": d["pg"],
+                             "page_no": d["printed_page"], "printed_page": d["printed_page"],
+                             "footer": d["verdict"], "verdict": d["verdict"],
+                             "rows": d["rows_count"], "rows_count": d["rows_count"]})
     finally:
         conn.close()
 
