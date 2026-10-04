@@ -92,6 +92,7 @@ tests/test_agent_prompt_memory.py
 tests/test_app_binds_history.py
 tests/test_the_memory_reaches_the_model.py
 tests/test_app_excel_button.py
+tests/test_money_unit.py
 tests/test_money_string_fields.py
 ```
 

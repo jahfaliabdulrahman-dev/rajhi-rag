@@ -22,7 +22,9 @@ _BARE_REF_RE = re.compile(
 
 
 def money(v) -> str:
-    return f"{v:,.2f}" if v is not None else ""
+    """تُفوَّض إلى الموضع الواحد (`statement_qa.money`) — فلا نسختان تفترقان."""
+    from statement_qa.money import money as _m                                   # noqa: PLC0415
+    return _m(v)
 
 
 def date_cell(row: dict) -> str:

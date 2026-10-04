@@ -313,7 +313,8 @@ HERO = """
 
 def _money(v) -> str:
     """Decimal/None -> fixed 2dp display so halalas are always visible."""
-    return f"{v:,.2f}" if v is not None else ""
+    from statement_qa.money import money as _m   # **الموضعُ الواحد** (قِيس: كانت تسقط على نصّ)
+    return _m(v)
 
 
 def _kpi_html(n_rows: int, n_clean: int, n_susp: int, last_bal) -> str:
