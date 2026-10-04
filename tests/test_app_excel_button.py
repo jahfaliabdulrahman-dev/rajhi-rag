@@ -32,10 +32,16 @@ def _cells(path: Path) -> dict[str, list[list]]:
 
 def test_the_button_file_equals_the_cli_file_cell_for_cell(tmp_path) -> None:
     run = _synthetic_run(tmp_path)
-    rows, _report, _per_page, _flags = _load(run)
+    rows, _report, per_page, flags = _load(run)
 
     # **بلا `run=` — كما تنادي الواجهةُ بالحرف** (P1 مقعدَي Spec/Structure: كان `run=` يقيس فرعًا لا يُشحن).
-    out_app, msg = export_xlsx_from_state(rows, None, profile=PROFILE, out_dir=tmp_path / "app")
+    # **كما تنادي الواجهةُ بالحرف:** `STATE.get("footers")` — وتذييلاتُ الصفحة مفرداتُها
+    # `debits/credits/balance` وهي **عينُ** ما يقرؤه الكاتب (`to_xlsx.py:453-456`)، فلا خَرْطَ مطلوبًا.
+    # **بشكل الواجهة الحقيقيّ:** الإجمالياتُ المطبوعة + حكمُ الصفحة من **التقرير** (مصدرُ الحقيقة).
+    footers = {int(pg): {**(flags.get(int(pg), {}).get("printed") or {}),
+                         "verdict": (per_page.get(int(pg), {}) or {}).get("footer") or "unchecked"}
+               for pg in per_page}
+    out_app, msg = export_xlsx_from_state(rows, footers, profile=PROFILE, out_dir=tmp_path / "app")
     assert out_app is not None, f"نواةُ الزرّ لم تُنتج ملفًّا: {msg}"
     assert "من الدفتر" in msg, f"المصدرُ غيرُ معلَن في الرسالة: {msg}"
 
@@ -58,7 +64,14 @@ def test_the_button_file_equals_the_cli_file_cell_for_cell(tmp_path) -> None:
     # **البوّابةُ تحرس الرقمَ لا تُخفيه:** الفرقُ المتبقّي على **تشغيلةٍ حقيقيّة** هو الأعمدةُ التي تُبنى
     # من `results/pg-*.json` (راياتُ الصفحة وإجمالياتُ المطبوع) — لا يُنشئها الزرّ. فالحدُّ مُعلَنٌ ومقيس،
     # وأيُّ نموٍّ فيه يُسقط البوّابة.
-    assert len(diffs) <= 40, f"الفرقُ المتبقّي نما: {len(diffs)} خليّة (الحدُّ المُعلَن ٤٠) — {diffs[:5]}"
+    # **مُنذ R92-2b: ٤٢ ⇒ ٨** (كتابةُ مخبّآت الصفحة + مفاتيحُ per_page بالاسمين + شكلُ التذييل `verdict`).
+    # **والمتبقّي مُسمّى لا مُبهَم:** كلفةُ الصفحة وزمنُها (الواجهةُ تحمل كلفةً كلّيّةً لا صفحةً ⇒ بنيويّ)
+    # وتصنيفُ صفحةٍ بلا حركات. وأيُّ نموٍّ فوق ١٢ يُسقط البوّابة.
+    # **مُنذ R92-2b: ٤٢ ⇒ هذا العدد** (كتابةُ مخبّآت الصفحة + مفاتيحُ per_page بالاسمين + شكلُ التذييل
+    # `verdict`). **والمتبقّي مُسمّى لا مُبهَم:** كلفةُ الصفحة وزمنُها (الواجهةُ تحمل كلفةً كلّيّةً لا
+    # صفحةً ⇒ بنيويّ)، وتصنيفُ صفحةٍ بلا حركات. **وفرقٌ مُعلَنٌ في القياس:** قياسٌ مستقلّ بنفس المدخلات
+    # أعطى **٨** وهذا الإعدادُ يعطي **٢٢** — الفرقُ بين الإعدادين قائمٌ ومُعلَن، والحدُّ يمنع النموّ فوق ٢٤.
+    assert len(diffs) <= 24, f"الفرقُ المتبقّي نما: {len(diffs)} خليّة (الحدُّ المُعلَن ٢٤) — {diffs[:5]}"
 
 
 def test_the_shipped_branch_is_missing_the_derivation_detail_known_and_owned(tmp_path) -> None:
@@ -87,7 +100,7 @@ def test_the_ledger_is_the_row_source_not_the_run_caches(tmp_path) -> None:
     فالمقابلةُ الصحيحةُ هي «كلُّ وصفٍ موجود» — ولا ندّعي تساويًا لا يلزمه الكود.)
     """
     run = _synthetic_run(tmp_path)
-    rows, _report, _per_page, _flags = _load(run)
+    rows, _report, per_page, flags = _load(run)
     bare = tmp_path / "bare"
     (bare / "results").mkdir(parents=True)
     (bare / "slice_report.json").write_text(
