@@ -243,8 +243,9 @@ def test_the_column_contract_is_equal_in_both_directions():
             sql_cols.append(parts[0])
     assert sql_cols, "تعذّر استخراجُ أعمدة المخطَّط — البوّابةُ تحتاج إصلاحًا لا تعطيلًا"
 
-    # مفاتيحُ صفِّ الرندر من مصدره (شجرةُ `rows.append({...})` — تُقرأ لا تُستحضر).
-    tree = ast.parse((ROOT / "tools" / "to_xlsx.py").read_text(encoding="utf-8"))
+    # مفاتيحُ صفِّ الرندر من **موضعه الواحد** (`statement_qa/contract_rows.py` — نُقل إليها بالخيار (أ)
+    # · قرارُ المالك 2026-10-07 · مراجعة ٩٦): يُقرأ لا يُستحضر. وقبلها كان البناءُ في `tools/to_xlsx.py`.
+    tree = ast.parse((ROOT / "src" / "statement_qa" / "contract_rows.py").read_text(encoding="utf-8"))
     render_keys: set[str] = set()
     for node in ast.walk(tree):
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)

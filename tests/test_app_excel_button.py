@@ -123,7 +123,6 @@ def _both_files(tmp_path) -> tuple[Path, Path]:
     printed = {k: v for k, v in printed.items() if isinstance(v, int)}
     out_app, msg = export_xlsx_from_state(rows, footers, profile=PROFILE,
                                           printed_pages=printed,
-                                          read_pages=sorted(int(pg) for pg in per_page),
                                           out_dir=tmp_path / "app")
     assert out_app is not None, f"نواةُ الزرّ لم تُنتج ملفًّا: {msg}"
     assert "من الدفتر" in msg, f"المصدرُ غيرُ معلَن في الرسالة: {msg}"

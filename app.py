@@ -42,6 +42,9 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from statement_qa.chunking import chunk_rows
+# **وعقدُ الصفوف من موضعه الواحد (قرارُ المالك 2026-10-07 · الخيار (أ) · مراجعة ٩٦):** الدالّةُ نفسُها
+# التي يناديها سطرُ الأوامر — فلا يبني العقدَ مساران يفترقان صامتين.
+from statement_qa.contract_rows import build_page_rows  # noqa: F401
 from statement_qa.classify import annotate_types
 from statement_qa.qa import scope_text as _scope_text_of      # **صيغةُ النطاق في موضعٍ واحد (R93-10)**
 from statement_qa.retriever import build_index
@@ -569,6 +572,11 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
                        f"كشوف الراجحي فقط.")
 
     all_rows = []
+    # **ونسخةُ العقد (`ledger.COLUMNS` · ٢٢ عمودًا) — للسطح الذي يستهلكها وحدَه:** زرُّ التنزيل
+    # (الدفتر ثمّ الإكسل). أما `all_rows` فهي سطحُ العرض/الأسئلة بلغته (`kind`/`ok`/`type`) — سطحان
+    # لاستهلاكين مختلفين، **والعقدُ له بانٍ واحد** (`statement_qa.contract_rows.build_page_rows`)
+    # يناديه سطرُ الأوامر أيضًا (قرارُ المالك 2026-10-07 · الخيار (أ) · مراجعة ٩٦).
+    rows_contract: list[dict] = []
     failed_pages: list[int] = []
     footer_checks: list[dict] = []
     era_pages: dict[int, list] = {}
@@ -781,6 +789,16 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
                                  "side": r["side"], "ok": r["ok"],
                                  "desc": r.get("desc"), "date": r.get("date")})
             prev_closing = r["balance"]
+        # **وصفوفُ العقد تُبنى بالدالّة الواحدة (العلّةُ المقيسة: كانت ٩ حقولٍ من ٢٢ ⇒ زرُّ التنزيل
+        # يسقط من أوّل نقرة: `IntegrityError: NOT NULL constraint failed: rows_verified.row_no`
+        # ثمّ `KeyError: None` — قِيسا بالتنفيذ).** والوسائطُ كما يحملها التطبيق: قراءتُه الخامّ
+        # (`raw_rows`) وأحكامُ السلسلة (`rows` من `chain_derive`) وحكمُ الصفحة وأعلامُها ورقمُها المطبوع.
+        rows_contract += build_page_rows(
+            pg, raw_rows, rows,
+            {"footer": chk.get("status"), "rows": len(rows)},
+            {"recovered": any(x.get("page") == pg for x in recoveries),
+             "reread": any(x.get("page") == pg for x in page_rereads)},
+            page_no=page_no)
 
     # التواريخُ أولًا: تُستعاد أحيانًا من نصّ بيان قراءة الصفحة، وبيانُ العمود بلا تاريخٍ عن قصد.
     filled_dates = fill_missing_dates(all_rows)
@@ -796,6 +814,9 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
 
     progress(0.95, "بناء الفهرس…")
     STATE["rows"] = all_rows
+    # **وسطحُ العقد يُكتب باسمه (لا يُخلط بسطح العرض):** يقرؤه زرُّ التنزيل وحده، فيبقى التحويلُ
+    # في الدفتر على عقدٍ كامل — وهذا ما كان غائبًا فسقط الزرُّ.
+    STATE["rows_contract"] = rows_contract
     # **نطاقُ الكشف يُكتب حيث يُعرَف (R93-1):** `_scope_text` يقرأ `n_pages` و`source_name`، ولم يكن
     # يكتبهما أحد ⇒ كان يقول للنموذج «0 صفحة» في **كلّ** سؤال، وهو نصٌّ كاذبٌ يبلغ التلقين. فيُكتبان
     # هنا من الملفّ المقروء نفسِه — لا من افتراضٍ، ولا من عددٍ ثابت.
@@ -814,7 +835,10 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
         except (TypeError, ValueError):
             return None
 
-    STATE["read_pages"] = sorted({n for n in (_page_no(p) for p in pages) if n is not None})
+    # **ولا مفتاحَ حالةٍ لصفحاتٍ «بلا حركات» (حُذف بالقياس · الدعوى R95-1-a · تبنتها مراجعة ٩٦):** كان
+    # يُبنى من عدّ الصفحات المقروءة ليُمرَّر إلى ناقل الإكسل، وقِيس أنّه **لا يُحرّك الخليّةَ المُسلَّمة**
+    # (٤ = ٤ = ٤، وهو عددُ ملفّ سطر الأوامر) — فالعدُّ من أحكام الدفتر، **وأخطرُ منه** أنّه كان يُلصق
+    # وسمَ «لا حركات» على ما يُسمّيه التطبيقُ نفسُه «قراءةٌ فاشلة». فبقي المعنى في مصدره الواحد.
     STATE["source_name"] = Path(pdf_path).name
     # **وخريطةُ الأرقام المطبوعة (R93-4):** يُمرّرها زرُّ التنزيل إلى ناقل الإكسل، فيُكتب رقمُ
     # الصفحة المطبوع من **مصدره** (قراءةُ الورقة) لا من خريطةٍ محلّيّةٍ ولا `None`.
@@ -1121,9 +1145,8 @@ def export_xlsx():
     # ويُنسخ **ملفُّ الإكسل وحدَه** إلى موضعٍ يخدم التنزيل.
     with tempfile.TemporaryDirectory(prefix="rajhi_xlsx_") as work:
         out, msg = export_xlsx_from_state(
-            STATE.get("rows") or [], STATE.get("footers"),
+            STATE.get("rows_contract") or STATE.get("rows") or [], STATE.get("footers"),
             printed_pages=STATE.get("printed_pages"),
-            read_pages=STATE.get("read_pages"),
             out_dir=Path(work))
         if out is None:
             return None, _note_update(msg)
