@@ -26,3 +26,18 @@ def money(value, *, dash: str = "") -> str:
         return text
 
 
+def amount(value) -> "Decimal | None":
+    """مالٌ ⇒ `Decimal` للمقارنة والجمع — **موضعُ التحويل الواحد** كما أنّ `money` موضعُ التنسيق.
+
+    **وكان هذا منطقًا ثانيًا في `qa_tools` (`_dec`)**: نسخةٌ من السطر نفسه في ملفٍّ آخر ⇒ افتراقٌ
+    صامتٌ ينتظر (R93-7). و`None` هنا تعني **«لم يُقرأ رقمًا»** لا «صفر» — فيُعدّها الجامعُ في
+    «غير محسوم» ولا تُبتلع.
+    """
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value).replace(",", ""))
+    except (InvalidOperation, ArithmeticError, ValueError):              # noqa: PERF203
+        return None
+
+

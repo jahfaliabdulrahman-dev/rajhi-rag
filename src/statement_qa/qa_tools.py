@@ -24,32 +24,16 @@ from __future__ import annotations
 import re
 from decimal import Decimal, InvalidOperation
 
-_MONEY = "{:,.2f}"
-
-def _dec(value) -> "Decimal | None":
-    """مالٌ ⇒ `Decimal` للجمع — **والحدُّ مُعلَن:** قيمةٌ ليست رقمًا تُعيد `None` فيُعدّها الجامعُ
-    في «غير محسوم» بدل أن يُسقط الأداة (قِيس: `Decimal + str` كان يرفع `TypeError`)."""
-    if value is None or value == "":
-        return None
-    try:
-        return Decimal(str(value).replace(",", ""))
-    except (ArithmeticError, ValueError):                 # noqa: PERF203
-        return None
+# **المالُ في موضعٍ واحد (R93-7):** كان هنا `_MONEY` و`_dec` و`_m` — نسخةٌ ثانيةٌ من
+# `statement_qa.money`، **وفرقُهما مقيس:** `money(None)` ⇒ "" و`_m(None)` ⇒ «—» ⇒ افتراقٌ صامتٌ
+# ينتظر. فصارت الأدواتُ تنادي الموضعَ الواحد: `money` للتنسيق و`amount` للتحويل الرقميّ.
+from statement_qa.money import amount as _dec, money as _money
 
 
 def _m(value) -> str:
-    """مالٌ ⇒ نصٌّ مُنسَّق **أيًّا كان مصدرُه** (نصٌّ من العقد أو `Decimal` حسابيّ).
-
-    **ولماذا:** عقدُ المال `TEXT` (لا يُطبَع عائمًا)، فحقولُ الصفوف نصوصٌ — و`_MONEY.format(str)`
-    يسقط بـ`ValueError` (قِيس: أداةُ `page_summary` سقطت على `balance` نصّيّ). فتمرُّ كلُّ الحقول
-    الماليّة من هنا، فلا يعود نوعُ المصدر يُسقط أداة.
-    """
-    if value is None or value == "":
-        return "—"
-    try:
-        return _MONEY.format(Decimal(str(value)))
-    except (ArithmeticError, ValueError):                 # noqa: PERF203
-        return str(value)                                  # قيمةٌ ليست رقمًا تُعرَض كما هي، لا تُخفى
+    """**غلافٌ بسطرٍ واحد — لا منطقَ ثانيًا:** الشرطةُ («—») هي صيغةُ العرض في الأدوات وحدَها،
+    والمنطقُ (التنسيقُ وحدُّ غير الرقميّ) في `statement_qa.money`."""
+    return _money(value, dash="—")
 
 _ROW_DESC_LEN = 70     # حدُّ الوصف في سطر الصفّ — **موضعٌ واحد** (كان ٦٠ في `page_rows` و٧٠ في `search_rows`)
 
@@ -291,7 +275,7 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
         examples = "؛ ".join(
             f"[{r.get('type') or 'غير مصنّف'}] {_m(r['movement'])} {_ref(r)}"
             for r in sel[:3])
-        return (f"المجموع = {_MONEY.format(total)} ريال | عدد الحركات = {len(sel)}"
+        return (f"المجموع = {_m(total)} ريال | عدد الحركات = {len(sel)}"
                 + (f" · واستُبعد {sum(1 for v in vals if v is None)} بلا مبلغ"
                    if any(v is None for v in vals) else "")
                 + f" | أمثلة: {examples}")
@@ -332,15 +316,32 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
 
     @tool
     def balance_extremes() -> str:
-        """أعلى رصيد وأدنى رصيد ظهر في الكشف (مع موقعهما)."""
-        with_bal = [r for r in numbered if r.get("balance") is not None]
-        if not with_bal:
+        """أعلى رصيد وأدنى رصيد ظهر في الكشف (مع موقعهما) — **بالمقارنة الرقميّة لا النصّيّة**.
+
+        **والعطبُ المقيس (R93-7):** كانت `max(..., key=r["balance"])` والمبالغُ نصوصٌ ⇒ تُقارَن
+        نصًّا: بمبالغ `9.00 · 10.00 · 120.00` تقول «أعلى = 9.00» و«أدنى = 10.00» — **جوابٌ خاطئ
+        يُسلَّم**، وضابطُها القديم كان يقيس غيابَ `TypeError` فقط فيمرّ عليه.
+        """
+        pairs: list[tuple[dict, Decimal]] = []
+        unparsed = 0
+        for r in numbered:
+            bal = r.get("balance")
+            if bal is None:
+                continue
+            val = _dec(bal)
+            if val is None:
+                unparsed += 1              # **يُعدّ ولا يُبتلع:** يُقال بعدده في الجواب
+                continue
+            pairs.append((r, val))
+        if not pairs:
             return "لا توجد أرصدة في الكشف."
-        hi = max(with_bal, key=lambda r: r["balance"])
-        lo = min(with_bal, key=lambda r: r["balance"])
+        hi = max(pairs, key=lambda p: p[1])[0]
+        lo = min(pairs, key=lambda p: p[1])[0]
         _record("balance_extremes", [hi, lo])
+        tail = (f" · و{unparsed} رصيدًا غيرُ مقروء لم يُدخَل في المقارنة (لم يُخمَّن رقمُه)"
+                if unparsed else "")
         return (f"أعلى رصيد = {_m(hi['balance'])} {_ref(hi)}"
-                f" | أدنى رصيد = {_m(lo['balance'])} {_ref(lo)}")
+                f" | أدنى رصيد = {_m(lo['balance'])} {_ref(lo)}{tail}")
 
     @tool
     def closing_balance() -> str:
@@ -378,17 +379,17 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
         if undecided:
             tot = sum((r["movement"] for r in undecided), Decimal("0"))
             note = (f" | تحفّظ: {len(undecided)} صف غير محسوم الاتجاه "
-                    f"بإجمالي {_MONEY.format(tot)} — غير مشمول في المجاميع")
+                    f"بإجمالي {_m(tot)} — غير مشمول في المجاميع")
         if not with_bal:
             return (f"صفحة {page}: لا توجد أرصدة مقروءة"
-                    f" | إجمالي مدين = {_MONEY.format(debits)}"
-                    f" | إجمالي دائن = {_MONEY.format(credits)}"
+                    f" | إجمالي مدين = {_m(debits)}"
+                    f" | إجمالي دائن = {_m(credits)}"
                     f" | عدد الصفوف = {len(rows_on_page)}" + note)
         first, last = with_bal[0], with_bal[-1]
         return (f"صفحة {page}: أول رصيد = {_m(first['balance'])} {_ref(first)}"
                 f" | آخر رصيد = {_m(last['balance'])} {_ref(last)}"
-                f" | إجمالي مدين = {_MONEY.format(debits)}"
-                f" | إجمالي دائن = {_MONEY.format(credits)}"
+                f" | إجمالي مدين = {_m(debits)}"
+                f" | إجمالي دائن = {_m(credits)}"
                 f" | عدد الصفوف = {len(rows_on_page)}" + note)
 
     @tool

@@ -237,3 +237,62 @@ def test_a_mixed_corpus_is_not_published_under_one_stamp():
     # (`isinstance(raw, dict)`) فيُنشر «غيرُ مُعلَن» عن ختمٍ مُعلَنٍ نصًّا — نظيرُ العطب الذي أُغلق.
     str_stamp = {**conflict_only, "reader_stamp": "google/gemini-3.7-flash:v2:fa91de52"}
     assert "غيرُ مُعلَن" not in rc.reader_declaration(str_stamp), rc.reader_declaration(str_stamp)
+
+
+def test_the_group_guide_renders_its_numbers_and_names_langchain() -> None:
+    """**R93-5:** دليلُ المجموعة (١) يصوغ أرقامَه فعلًا — لا `{V['pages']}` حرفًا — و(٢) فيه فصلُ LangChain.
+
+    **العطبُ المقيس:** ثلاثةُ أجسادٍ في `SECTIONS` كانت نصوصًا بلا `f` ⇒ خرج الرمزُ **حرفًا** في PDF
+    يُسلَّم للمجموعة (١٣ رمزًا)، ولم يكن في المستودع ضابطٌ يقرؤه — وبوّابةُ البناء كانت تفحص `**` و`##`
+    ولا تفحص `{V[`. وهذا الضابطُ يقرأ **المصدر** (لا الـPDF: بناؤه يحتاج Chrome)، فيمسك الصنفَ نفسَه
+    بلا تبعيّة، ويسقط على النسخة التي وُلد فيها العطب.
+    """
+    import ast
+    import pathlib
+
+    src = pathlib.Path(__file__).resolve().parents[1] / "tools" / "build_explainer.py"
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    sections = None
+    for node in tree.body:
+        if (isinstance(node, ast.Assign)
+                and any(getattr(t, "id", "") == "SECTIONS" for t in node.targets)):
+            sections = node.value
+    assert isinstance(sections, ast.List), f"شكلُ SECTIONS غيرُ متوقَّع: {type(sections).__name__}"
+    listed = list(getattr(sections, "elts", []))      # نوعٌ من AST ⇒ يُقرأ بلا افتراض شكل
+
+    bodies = [e.elts[1] for e in listed]
+    titles = [ast.literal_eval(e.elts[0]) for e in listed]
+    raw = [b for b in bodies
+           if isinstance(b, ast.Constant) and ("{V[" in str(b.value) or "{T." in str(b.value))]
+    assert not raw, ("قسمٌ يحمل رقمًا وليس f-string ⇒ يخرج الرمزُ خامًّا في ملفٍّ يُسلَّم: "
+                     f"{str(raw[0].value)[:60]}")
+    assert any("LangChain" in str(t) for t in titles), f"لا فصلَ LangChain في الدليل: {titles}"
+
+
+def test_the_slides_name_the_four_missing_topics_and_source_their_numbers() -> None:
+    """**R93-6:** الشرائحُ تحمل الأربعةَ الغائبة (أهداف · معماريّة · تقنيات · LangChain)، ولا رقمَ
+    كلفةٍ بلا مصدرٍ في المستودع، والزمنُ **مشتقٌّ** من وسيط الصفحة المقيس لا مكتوبًا.
+
+    **العطبُ المقيس:** كانت عشرَ شرائحَ: صفرُ ذكرٍ لـLangChain وGradio وSQLite وFAISS،
+    وفيها كلفةٌ **بلا مصدر** ($0.2492)، وزمنٌ مكتوبٌ «١:٣٠» لعشر صفحات — والقياسُ (وسيطُ الصفحة
+    26.13 ث) يقول ~٤٫٤ دقائق ⇒ كان العرضُ يَعِد بما لا يقيسه شيء.
+    """
+    import pathlib
+
+    src = pathlib.Path(__file__).resolve().parents[1] / "tools" / "build_slides.py"
+    text = src.read_text(encoding="utf-8")
+    for topic in ("الأهداف", "المعمارية", "التقنيات", "LangChain"):
+        assert topic in text, f"شريحةٌ غائبة عن العرض: {topic}"
+    assert "0.2575" in text, "الكلفةُ المقيَّدة بمصدرها لم تُكتب"
+    # **والقاعدةُ لا العدّ (وقد قاسها الضابطُ على نفسي أوّلًا):** الرقمُ بلا مصدرٍ يجوز أن يبقى
+    # **داخل جملةِ سحبٍ مُعلَنة** (يُسمّى ثمّ يُسحب) — ولا يجوز أن يُستعمل رقمًا في شريحة.
+    used = [ln for ln in text.splitlines()
+            if "0.2492" in ln and "سُحبت" not in ln and "بلا مصدر" not in ln]
+    assert not used, f"رقمُ كلفةٍ بلا مصدر يُستعمل بلا سحبٍ معلن: {used[:2]}"
+    # **والقاعدةُ نفسُها للزمن (قاسها الضابطُ عليّ ثانيةً):** «١:٣٠» يجوز أن يُسمّى **رقمًا مسحوبًا**،
+    # ولا يجوز أن يكون زمنَ خطوةٍ في الشريحة.
+    stale = [ln for ln in text.splitlines()
+             if "١:٣٠" in ln and "كانت" not in ln and "القياس" not in ln]
+    assert not stale, f"زمنٌ مكتوبٌ عاد إلى خطوات العرض: {stale[:2]}"
+    assert "{{READ_MMSS}}" in text and "{{MEDIAN_S}}" in text, "الحاملُ المشتقّ غاب"
+    assert '"{{"' in text, "بوّابةُ الرموز الخامّة لا تفحص الحوامل ({{) ⇒ يمرّ حاملٌ فارغ للمجموعة"

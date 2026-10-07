@@ -742,10 +742,17 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     import threading
 
     def _ask(qtext: str, out_box: dict) -> None:
-        """سؤالٌ واحدٌ في خيط: تعليقُه لا يُسقط الجولةَ (ولا يُقتل الخيط — يُترك معلّقاً ويُسجَّل فشلُه)."""
+        """سؤالٌ واحدٌ في خيط: تعليقُه لا يُسقط الجولةَ (ولا يقتل الخيط — يُترك معلّقاً ويُسجَّل فشلُه)."""
         try:
+            # **النطاقُ يُمرَّر كما يُمرّره التطبيق (R93-10):** كان النداءُ بلا `scope` ⇒ القالبُ يقول
+            # «غيرُ مُعلَن» بينما المستخدمُ يرى نصًّا كاملًا («<الاسم> · ٦٢٩ صفحة · <N> حركة مُنظَّمة»)
+            # ⇒ **الرقمُ المنشور يصف تلقينًا لا يُرسله التطبيق.** والصيغةُ تُنادَى من موضعها الواحد
+            # (`statement_qa.qa.scope_text`)، والاسمُ اسمُ مجلّد التشغيلة (والتطبيقُ يضع اسمَ الملفّ
+            # المرفوع — المصدرُ مختلفٌ ومُعلَن، والصيغةُ واحدة).
+            # **والسجلُّ فارغٌ بالبناء:** الحزمةُ تطرح كلَّ سؤالٍ في دورةٍ مستقلّة ⇒ فالرقمُ يصف
+            # **الدورةَ الأولى** في جلسةٍ جديدة، ولا يُدَّعى أنّه يصف سؤالًا تابعًا.
             r = answer_question(store, qtext, rows=rows, chunks=chunks, llm=llm,
-                                footers=footers)
+                                footers=footers, scope=_pack_scope(rows, a.run))
             out_box.update({"answer": r.answer or "", "used": list(getattr(r, "used_row_nos", None) or []),
                             "scope": getattr(r, "scope", None), "refused": bool(getattr(r, "refused", False))})
         except Exception as e:                                   # noqa: BLE001 — عطبٌ يُسمّى لا يُسقط الجولة
@@ -877,6 +884,19 @@ def _print_metrics(results: list[dict]) -> None:
 
 def _repo_root() -> pathlib.Path:
     return pathlib.Path(__file__).resolve().parent.parent
+
+
+def _pack_scope(rows: list[dict], run_dir) -> str:
+    """نطاقُ الكشف كما يبنيه التطبيق — **بالصيغة نفسِها** (R93-10).
+
+    الصيغةُ تُنادَى من موضعها الواحد (`statement_qa.qa.scope_text`)، وعددُ الصفحات من **موضع العدّ
+    نفسه** الذي تستعمله الواجهة (`ledger.pages_of`) ⇒ فلا تُشتقّ صفحةٌ بقاعدةٍ ثانية.
+    والاسمُ اسمُ مجلّد التشغيلة، والواجهةُ تضع اسمَ الملفّ المرفوع — **مصدرٌ مختلفٌ مُعلَن، وصيغةٌ واحدة.**
+    """
+    from statement_qa.ledger import pages_of                       # noqa: PLC0415
+    from statement_qa.qa import scope_text                          # noqa: PLC0415
+    return scope_text(name=getattr(run_dir, "name", "") or "",
+                      n_pages=pages_of(rows), n_rows=len(rows), kind="")
 
 
 def main(argv=None) -> int:

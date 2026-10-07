@@ -82,6 +82,23 @@ def _row_date_source(row: dict) -> str:
         return "unknown"
 
 
+def _counted(value) -> str:
+    """عددٌ لا يمكن معرفته يُسمّى «غيرُ مسجَّل» — **ولا يُطبع `None` في ملفٍّ يُسلَّم** (R93-4)."""
+    return str(value) if value is not None else "غيرُ مسجَّل"
+
+
+def _n_pages_read(rows: list[dict], per_page: dict) -> int:
+    """عددُ الأوراق التي قُرئت فعلًا في هذه التشغيلة — **لا «629» نصًّا ثابتًا** (R93-4).
+
+    كان سطرُ «المصدر» يقول «629 ورقة ممسوحة» **أيًّا كان الكشف** ⇒ عيّنةٌ من صفحتين تقول ٦٢٩ في
+    ملفٍّ يفتحه من يُسلَّم إليه. والعددُ يُشتقّ من مادّة التشغيلة نفسِها: صفحاتُ التقرير، وإلّا
+    صفحاتُ الصفوف (وكلا المصدرين يُقاس على تشغيلةٍ حقيقيّة في `tests/test_app_excel_button.py`).
+    """
+    if per_page:
+        return len(per_page)
+    return len({r.get("page") for r in rows or [] if r.get("page") is not None})
+
+
 def _page_no_label(page: int) -> str | None:
     """رقم الصفحة المطبوع: مقروء إن قُرئ، وإلا مشتقّ بالحساب — والوسم يمنع الالتباس.
 
@@ -1010,7 +1027,7 @@ def build(run: Path, out: Path, gate: Path | None,
          "عدد الشكوك", "المصدر", "زمن القراءة (ملّي ث)", "تناقض داخلي",
          "استُدركت آلياً", "أُعيدت قراءتها", "خطأ قراءة"],
         [[p, (f"{e['page_no']} — مقروء من الورق" if e.get("page_no")
-             else _page_no_label(p)), e.get("rows"),
+             else (_page_no_label(p) or "غيرُ مقروء")), e.get("rows"),
           page_verdict(e, max(per_page) if per_page else 0,
                        verdict_map=verdict_map),
           e.get("suspects"), e.get("origin"), e.get("ms_read"), bool(e.get("paradox")),
@@ -1060,7 +1077,9 @@ def build(run: Path, out: Path, gate: Path | None,
             cert = _cert(p)
             reason = str(ARABIC_VERDICT.get(str(e.get("footer") or ""))
                          or e.get("footer") or "")
-            unproven.append([p, e.get("page_no"), e.get("rows"), reason + cert,
+            unproven.append([p, (e.get("page_no") if e.get("page_no") is not None
+                                 else (_page_no_label(p) or "غيرُ مقروء")),
+                             e.get("rows"), reason + cert,
                              "من تقرير التشغيل (المحكَّم)"
                              + (" + شاهد الموضع" if cert else "")])
     gate_verdict = {}
@@ -1164,10 +1183,10 @@ def build(run: Path, out: Path, gate: Path | None,
         ("المصدر", (f"{run} — قراءةٌ حتميّة من نصّ ملف PDF صادر عن نظام المصرف "
                     "(بلا مسح ولا صور ولا نموذج لغوي)")
                     if period_layout else
-                    f"{run} — نتائج القراءة الفعلية للكشف (629 ورقة ممسوحة)"),
+                    f"{run} — نتائج القراءة الفعلية للكشف ({_n_pages_read(rows, per_page)} ورقة ممسوحة)"),
         ("تاريخ التصدير", datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M %z")),
         ("الصفوف المصدَّرة", f"{len(rows)} صفّاً كما قرأها النظام (منها سطور ملخّص لا معاملات)"),
-        ("الصفوف المحتسبة في التقرير", f"{(report.get('totals') or {}).get('rows')} معاملة"),
+        ("الصفوف المحتسبة في التقرير", f"{_counted((report.get('totals') or {}).get('rows'))} معاملة"),
         ("كلفة التشغيل المدفوعة", f"${cost:.4f}" if isinstance(cost, (int, float)) else "غير مسجّلة"),
         ("قاعدة الأمانة", "الرقم الذي لا يمكن إثباته لا يُقال: كل صفّ هنا يحمل قيمته المطبوعة "
                           "بجانب قيمته الرقمية، وحالة إجماليات صفحته من المحكَّم لا من تقدير."),
@@ -1183,7 +1202,7 @@ def build(run: Path, out: Path, gate: Path | None,
                               "على صفحة**. (٤) «غير قابل للتحقق» — الصفحة موجودة وجارُها بلا إطار. "
                               "والثالث هو ما يُقرأ خطأً اتهاماً لصفحة سليمة."),
         ("فرق الصفوف", f"المصدَّر {len(rows)} صفّاً والمحتسب في التقرير "
-                       f"{(report.get('totals') or {}).get('rows')} — الفرق سطور ملخّص في الصفحة "
+                       f"{_counted((report.get('totals') or {}).get('rows'))} — الفرق سطور ملخّص في الصفحة "
                        f"الختامية (الرصيد المتاح لليوم · إجماليات القيود) لا معاملات."),
         ("ما لا تجده هنا", "لا مجموع نهائي واحد ولا نسبة دقة واحدة: الأعمدة قابلة للفرز والجمع "
                             "في برنامجك، والمجاميع ملكك لا ملكنا."),

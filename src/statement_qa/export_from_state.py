@@ -36,6 +36,7 @@ def export_xlsx_from_state(rows: list[dict], footers: dict | None = None, *,
                           out_dir: Path | None = None,
                           gate: Path | None = None,
                           run: Path | None = None,
+                          printed_pages: dict | None = None,
                           recoveries=None, rereads=None) -> tuple[Path | None, str]:
     """(مسارُ الملفّ أو None، رسالةٌ تُعرَض للمستخدم) — **والفشلُ يُعلَن ولا يُخترع ملفّ**.
 
@@ -60,7 +61,16 @@ def export_xlsx_from_state(rows: list[dict], footers: dict | None = None, *,
         db.unlink()                       # تشغيلٌ نظيف: لا صفوفَ باقية من نداءٍ سابق
     conn = L.open_ledger(db)
     try:
-        stats = L.ingest(conn, rows, L.pages_from_state(rows, footers))
+        pages = L.pages_from_state(rows, footers)
+        # **رقمُ الصفحة المطبوع من مصدره (R93-4):** `pages_from_state` تقرؤه من الصفوف إن حملته،
+        # وصفوفُ التطبيق لا تحمله (القراءةُ تحفظه في `STATE["printed_pages"]` من `page_no_by_pg`)
+        # ⇒ يُمرَّر من الحالة. وبلا مصدرٍ يبقى العمودُ الرقميُّ فارغًا (لا يُخترع رقم)، والعرضُ
+        # يسمّي الفراغ «غيرُ مقروء».
+        for pg, printed in (printed_pages or {}).items():
+            entry = pages.get(int(pg))
+            if entry is not None and isinstance(printed, int):
+                entry["page_no"] = printed
+        stats = L.ingest(conn, rows, pages)
         # **أحكامُ الصفحات تُقرأ من الدفتر لا من التقرير** (مقيس: مجلّدُ تشغيلٍ بلا مخبّآت كان يُسقط
         # ورقةَ «ما لم يُثبت» كاملةً ⇒ ملفٌّ ناقصٌ يقرؤه صاحبُه تامًّا). فالمصدرُ واحد: جدول `pages`.
         # **الاسمُ المزدوج مقصودٌ (قِيس):** كاتبُ الإكسل يقرأ `footer`/`rows`/`page_no`، ومدخلاتُ
@@ -68,8 +78,13 @@ def export_xlsx_from_state(rows: list[dict], footers: dict | None = None, *,
         per_page = []
         for row in conn.execute("SELECT pg, printed_page, verdict, rows_count FROM pages ORDER BY pg"):
             d = dict(row)
+            # **والعمودُ نصّيّ في الدفتر** ⇒ يُعاد رقمًا كما هو في تقرير CLI، وإلّا اختلف الملفّان
+            # في النوع وحده ('2' مقابل 2) — وهو فرقٌ يُقاس ولا يُتسامَح عنه (R93-4).
+            printed = d["printed_page"]
+            if isinstance(printed, str) and printed.strip().isdigit():
+                printed = int(printed.strip())
             per_page.append({"page": d["pg"], "pg": d["pg"],
-                             "page_no": d["printed_page"], "printed_page": d["printed_page"],
+                             "page_no": printed, "printed_page": printed,
                              "footer": d["verdict"], "verdict": d["verdict"],
                              "rows": d["rows_count"], "rows_count": d["rows_count"]})
     finally:
@@ -84,8 +99,13 @@ def export_xlsx_from_state(rows: list[dict], footers: dict | None = None, *,
         run = work / "run"
         (run / "results").mkdir(parents=True, exist_ok=True)
         # **التقريرُ يحمل الدورَ من العقد حرفيًّا** ⇒ فلا يخالف `build` بين العقد والتقرير.
+        # **و`totals` تُكتب (R93-4):** ورقةُ «كيف تُقرأ هذه الأوراق» تقرأ عددَ الحركات المحتسبة
+        # من `report["totals"]["rows"]` — وكان الزرُّ لا يكتبه ⇒ «None معاملة» و«المحتسب في
+        # التقرير None» مطبوعةً في ملفٍّ يُسلَّم. والقيمةُ من **الدفتر** (مصدر الصفوف) لا من عدٍّ ثانٍ.
         (run / "slice_report.json").write_text(
-            json.dumps({"footer_role": role, "per_page": per_page}, ensure_ascii=False),
+            json.dumps({"footer_role": role, "per_page": per_page,
+                        "totals": {"rows": stats["rows"], "pages": stats["pages"]}},
+                       ensure_ascii=False),
             encoding="utf-8")
     else:
         run = Path(run)

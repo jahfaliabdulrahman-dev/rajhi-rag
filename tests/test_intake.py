@@ -335,3 +335,48 @@ def test_the_description_pass_stops_at_the_cost_cap(monkeypatch):
     rep = app._desc_pass([1, 2, 3], pages, rows, {}, spent.append, lambda: len(spent) >= 1)
     assert len(seen) == 1 and rep["skipped"] == [2, 3]
     assert rows[1]["desc"] == "قديم 2"
+
+
+# ————————————— R93: نطاقُ الكشف · وأسطحُ السؤال عند قراءة كشفٍ جديد —————————————
+
+def test_the_reader_writes_the_scope_the_agent_reads(app_run):
+    """**R93-1 على حالة القارئ نفسِها (لا على AST):** القراءةُ تكتب عددَ الصفحات واسمَ الملفّ، فيقرأهما
+    `_scope_text` ⇒ «3 صفحة».
+
+    **وقبل الإصلاح:** كان يقرأ مفتاحين لا يكتبهما أحدٌ ⇒ «0 صفحة» في **كلّ** سؤال — نصٌّ كاذبٌ يبلغ
+    تلقينَ النموذج، وضابطُه القديم كان يحرس القيمةَ الافتراضيّةَ الصامتة لا صوابَها.
+    """
+    import app
+
+    _out, _calls, pages, state = app_run([("10", "0"), ("20", "0"), ("30", "0")])
+    assert state["n_pages"] == len(pages) == 3, "القارئُ لا يكتب عددَ الصفحات ⇒ النطاقُ يقول «0 صفحة»"
+    assert state["source_name"] == "upload.pdf", state.get("source_name")
+    scope = app._scope_text()
+    assert "3 صفحة" in scope and "0 صفحة" not in scope, scope
+
+
+def test_the_scope_says_unknown_instead_of_a_false_zero(app_run):
+    """**R93-1 — لا صفرَ كاذب:** غاب الكاتبُ ⇒ يُشتقّ العددُ من صفحات الصفوف؛ وغابت الحالةُ كلُّها ⇒
+    يُسمّى الغيابُ («غيرُ معروف») ولا يُنشر «0 صفحة»."""
+    import app
+
+    _out, _calls, _pages, _state = app_run([("10", "0")])
+    app.STATE.pop("n_pages")                                    # كأنّ كاتبَ المفتاح غاب
+    app.STATE.pop("source_name")
+    assert "1 صفحة" in app._scope_text(), app._scope_text()      # الاشتقاقُ من الصفوف
+
+    app.STATE.clear()
+    scope = app._scope_text()
+    assert "0 صفحة" not in scope and "غيرُ معروف" in scope, scope
+
+
+def test_a_new_read_clears_the_surfaces_the_next_answer_is_built_on():
+    """**R93-2:** المسحُ يُعيد الأسطحَ الأربعة فارغة ⇒ سؤالُ الكشف الجديد لا يُبنى على زوجٍ من القديم."""
+    if not _app_stack():
+        pytest.skip("حزمة التطبيق غير مثبّتة هنا (CI خفيف) — فحص محلي فقط")
+    import app
+
+    chat, src, raw, note = app._reset_qa_surfaces()
+    assert chat == [] and src == "", "المحادثةُ أو تفاصيلُ الاسترجاع لم تُمسح"
+    assert getattr(raw, "empty", False), "الصفوفُ التي بُني عليها الجواب لم تُمسّح"
+    assert note["visible"] is False and note["value"] == "", "ملاحظةُ الصفوف لم تُطوَ"

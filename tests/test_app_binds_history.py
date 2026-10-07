@@ -70,3 +70,33 @@ def test_the_pairs_flow_through_the_bounded_window() -> None:
     prompt = build_system_prompt(scope="كشفُ الاختبار", history=history_pairs(log))
     assert prompt.count("سؤالٌ سابق") == MEMORY_TURNS
     assert "أُسقطت" in prompt and "كشفُ الاختبار" in prompt
+
+
+def test_the_read_button_clears_the_question_surfaces() -> None:
+    """**R93-2 (AST):** حدثٌ على زرّ القراءة مخرجاتُه أسطحُ السؤال الأربعة.
+
+    **العلّةُ التي يمنعها:** صارت المحادثةُ مُدخَلًا للنموذج (R92)، فبقاؤها عند قراءة كشفٍ جديد يحمل
+    سؤالَ الكشف السابق وجوابَه باستشهاده إلى أسئلة الجديد — وهو الصنفُ الذي أُغلق قبل ٩٢.
+    """
+    calls = [n for n in ast.walk(TREE)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+             and n.func.attr == "click"
+             and any(getattr(a, "id", "") == "_reset_qa_surfaces" for a in n.args)]
+    assert calls, "لا مسحَ لأسطح السؤال عند القراءة — الذاكرةُ تحمل كشفًا سابقًا إلى كشفٍ جديد"
+    wanted = {"chat", "src", "raw", "raw_note"}
+    got: set[str] = set()
+    for c in calls:
+        for kw in c.keywords:
+            if kw.arg == "outputs":
+                got |= {getattr(e, "id", "") for e in getattr(kw.value, "elts", [])}
+    assert wanted <= got, f"أسطحٌ خارج المسح: {sorted(wanted - got)}"
+
+
+def test_the_reader_records_the_scope_the_prompt_reads() -> None:
+    """**R93-1 (AST):** `_process_pdf_locked` تكتب `n_pages` و`source_name` — المفتاحَين الذين يقرأهما
+    `_scope_text`. (والقياسُ السلوكيُّ على حالة القارئ في `tests/test_intake.py`.)"""
+    body = _fn("_process_pdf_locked")
+    written = {n.slice.value for n in ast.walk(body)
+               if isinstance(n, ast.Subscript) and getattr(n.value, "id", "") == "STATE"
+               and isinstance(n.ctx, ast.Store) and isinstance(n.slice, ast.Constant)}
+    assert {"n_pages", "source_name"} <= written, f"مفتاحٌ لا يُكتب: {sorted(map(str, written))}"

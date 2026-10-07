@@ -43,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from statement_qa.chunking import chunk_rows
 from statement_qa.classify import annotate_types
+from statement_qa.qa import scope_text as _scope_text_of      # **صيغةُ النطاق في موضعٍ واحد (R93-10)**
 from statement_qa.retriever import build_index
 from statement_qa.vlm_reader import (
     chain_derive, fill_missing_dates, read_rows_vlm, recover_anchor,
@@ -795,6 +796,14 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
 
     progress(0.95, "بناء الفهرس…")
     STATE["rows"] = all_rows
+    # **نطاقُ الكشف يُكتب حيث يُعرَف (R93-1):** `_scope_text` يقرأ `n_pages` و`source_name`، ولم يكن
+    # يكتبهما أحد ⇒ كان يقول للنموذج «0 صفحة» في **كلّ** سؤال، وهو نصٌّ كاذبٌ يبلغ التلقين. فيُكتبان
+    # هنا من الملفّ المقروء نفسِه — لا من افتراضٍ، ولا من عددٍ ثابت.
+    STATE["n_pages"] = len(pages)
+    STATE["source_name"] = Path(pdf_path).name
+    # **وخريطةُ الأرقام المطبوعة (R93-4):** يُمرّرها زرُّ التنزيل إلى ناقل الإكسل، فيُكتب رقمُ
+    # الصفحة المطبوع من **مصدره** (قراءةُ الورقة) لا من خريطةٍ محلّيّةٍ ولا `None`.
+    STATE["printed_pages"] = dict(page_no_by_pg)
     STATE["chunks"] = chunk_rows(
         [{**r, "row_no": i + 1} for i, r in enumerate(all_rows)])
     STATE["store"] = build_index(STATE["chunks"])
@@ -1016,6 +1025,18 @@ def _hide_note():
     return gr.update(value="", visible=False)
 
 
+def _reset_qa_surfaces():
+    """**كشفٌ جديد ⇒ لا سؤالَ من القديم (R93-2):** المحادثةُ صارت **مُدخَلًا** للنموذج (R92)، فبقاؤها
+    يحمل سؤالَ الكشف السابق وجوابَه — بمبلغه واستشهاده («صفحة ٧») — إلى أسئلة الكشف الجديد، وهو الصنفُ
+    نفسه الذي أُغلق قبل ٩٢: رقمٌ يُنسب إلى كشفٍ آخر.
+
+    فتُمسح أربعةُ أسطحٍ معًا: المحادثة · الصفوفُ التي بُني عليها الجواب · تفاصيلُ الاسترجاع · ملاحظتُها.
+    **والمسحُ يقع عند النقر** لا بعد انتهاء القراءة (وهي دقائقُ مدفوعة) — فلا تبقى نافذةٌ يُسأل فيها
+    عن القديم، ولا يُنتظر انتهاءُ مسارٍ قد يفشل.
+    """
+    return [], "", pd.DataFrame(), _hide_note()
+
+
 def _evidence_from_numbers(nos: list[int]) -> tuple[pd.DataFrame, str]:
     """Rows by their GLOBAL statement numbers — the SAME numbers the tools
     cite and the main table shows, so # stays identical across surfaces."""
@@ -1031,24 +1052,44 @@ def _evidence_from_numbers(nos: list[int]) -> tuple[pd.DataFrame, str]:
     return (pd.DataFrame([_row_record(i, r) for i, r in pairs]), note)
 
 
+def _scope_n_pages(rows: list[dict]) -> int:
+    """عددُ صفحات الكشف المُعلَن للوكيل: من الحالة، وإلّا من **صفحات الصفوف**، وإلّا **صفرٌ بمعنى «غيرُ معروف»**.
+
+    **ولماذا لا يُنشر الصفرُ كما هو (R93-1):** الصفرُ هنا يُقرأ «كشفٌ بلا صفحات»، وهي حقيقةٌ كاذبةٌ تدخل
+    تلقينَ الوكيل في كلّ سؤال — والحدُّ الذي يُسقط صنفًا بصمتٍ أسوأُ من توقّفٍ مسموع. فصفرٌ ⇒ يُسمّى
+    الغيابُ في `_scope_text` صراحةً، ولمصدرٍ واحدٍ للعدّ يُستعمل `ledger.pages_of` (كما في الدفتر).
+    """
+    raw = STATE.get("pages")
+    n = len(raw) if isinstance(raw, (list, tuple)) else (STATE.get("n_pages") or 0)
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        n = 0
+    return n if n > 0 else _ledger.pages_of(rows)
+
+
 def _scope_text() -> str:
     """نطاقُ الكشف — يُشتقّ من الحالة **بلا افتراض مفتاح**: كلُّ قراءةٍ `.get` ⇒ لا `KeyError`.
 
     وهذا النطاقُ هو ما يُعلن الوكيلُ عملَه عليه، فسؤالٌ عن «الصفحة ٤» لا يُجاب من كشفٍ آخر.
+
+    **والصيغةُ ليست هنا (R93-10):** هي في `statement_qa.qa.scope_text` — لأنّ أداةَ التقييم تُناديها
+    أيضًا، والحزمةُ كانت تُقاس بنطاقٍ فارغٍ بينما التطبيقُ يرسل نصًّا كاملًا. فالواجهةُ تجمع المدخلاتِ
+    من حالتها وحدَها، والصيغةُ واحدة.
     """
     rows = STATE.get("rows") or []
-    pages = STATE.get("pages")
-    n_pages = len(pages) if hasattr(pages, "__len__") else (STATE.get("n_pages") or 0)
-    name = STATE.get("source_name") or STATE.get("pdf_name") or "الكشف المرفوع"
-    kind = STATE.get("reader_mode") or ""
-    bits = [str(name), f"{n_pages} صفحة", f"{len(rows)} حركة مُنظَّمة"]
-    if kind:
-        bits.append(f"قارئ {kind}")
-    return " · ".join(bits)
+    return _scope_text_of(
+        name=STATE.get("source_name") or STATE.get("pdf_name") or "",
+        n_pages=_scope_n_pages(rows),
+        n_rows=len(rows),
+        kind=STATE.get("reader_mode") or "",
+    )
 
 
 def export_xlsx():
-    """زرُّ التنزيل: **نفسُ كاتب سطر الأوامر**، مَرندَرًا من دفترٍ يُكتب من الحالة.
+    """زرُّ التنزيل: **بنفس كاتب سطر الأوامر**، مَرندَرًا من دفترٍ يُكتب من الحالة — **والفرقُ
+    المعروفُ محدودٌ ومُسمًّى** (كلفةُ الصفحة وزمنُها: لا يملكهما التطبيق؛ وصفوفُ دعم الجواب
+    المبنيّةُ من مخبّآت الصفحات المحكَّمة) — وكلُّ فرقٍ خارج الأصناف المُعلَنة يُسقط البوّابة.
 
     **ولماذا لا بناءٌ مباشرٌ هنا:** طريقٌ ثانٍ يعني حكمين لملفٍّ واحد يفترقان صامتين. فالنواةُ
     `export_from_state` تكتب الدفترَ ثمّ تستدعي `to_xlsx.build(ledger_db=…)` — وهي المقابَلةُ خليّةً
@@ -1059,10 +1100,20 @@ def export_xlsx():
     """
     from statement_qa.export_from_state import export_xlsx_from_state
 
-    out, msg = export_xlsx_from_state(
-        STATE.get("rows") or [], STATE.get("footers"),
-        out_dir=Path(tempfile.mkdtemp(prefix="rajhi_xlsx_")))
-    return (str(out) if out else None), _note_update(msg)
+    # **ولا تبقى نسخةُ الكشف في مجلّدٍ مؤقّت (R93-8):** كان كلُّ نقرةٍ تترك في مجلّدٍ **دائم**
+    # `ledger.db` (كلُّ الصفوف) و`run/results/pg-*.json` (الصفوفَ الخامّة) وملفَّ الإكسل — أي نسخةً
+    # كاملةً من الكشف مقابل كلّ نقرة. فصار البناءُ في مجلّدٍ مؤقّتٍ **يُحذف بانتهاء النداء**،
+    # ويُنسخ **ملفُّ الإكسل وحدَه** إلى موضعٍ يخدم التنزيل.
+    with tempfile.TemporaryDirectory(prefix="rajhi_xlsx_") as work:
+        out, msg = export_xlsx_from_state(
+            STATE.get("rows") or [], STATE.get("footers"),
+            printed_pages=STATE.get("printed_pages"),
+            out_dir=Path(work))
+        if out is None:
+            return None, _note_update(msg)
+        kept = Path(tempfile.mkdtemp(prefix="rajhi_export_")) / out.name
+        out.replace(kept)                      # نقلٌ لا نسخ: الملفُّ وحدَه يخرج من مجلّد العمل
+    return str(kept), _note_update(msg + " · ونُظّف مجلّدُ العمل (لا نسخةَ صفوفٍ باقية)")
 
 
 def ask_followup(history):
@@ -1239,7 +1290,7 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي") as demo:
             # **البند ٢ — زرُّ التنزيل:** الملفُّ يُبنى بالنواة نفسها التي يُبنى بها ملفُّ سطر الأوامر،
             # فالمقابلةُ خليّةً بخليّة في `tests/test_app_excel_button.py` قائمةٌ لا موعودة.
             with gr.Row():
-                xlsx_btn = gr.Button("⬇ تنزيل Excel (نفس ملفّ سطر الأوامر)",
+                xlsx_btn = gr.Button("⬇ تنزيل Excel (بنفس كاتب سطر الأوامر — والفرقُ المعروف: كلفةُ الصفحة وزمنُها)",
                                      variant="secondary", scale=2)
                 xlsx_note = gr.Markdown(rtl=True, scale=3)
             xlsx_file = gr.File(label="ملفّ الكشف (xlsx)")
@@ -1255,6 +1306,10 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي") as demo:
                      ).then(ask_followup, inputs=[chat],
                             outputs=[chat, src, raw, raw_note],
                             show_progress_on=[chat])
+            # **R93-2 · حدثٌ ثانٍ على زرّ القراءة:** يمسح أسطحَ السؤال الأربعة. وموضعُه هذا لأنّ
+            # الأسطحَ تُعرَّف في هذا التبويب، وهو مستقلٌّ عن مسار القراءة فلا يقف في طريقه ولا يُنتظره.
+            btn.click(_reset_qa_surfaces, outputs=[chat, src, raw, raw_note],
+                      show_progress="hidden")
             # **دفترُ الكشف — أسئلةٌ بلا نموذج وبلا كلفة:** الأسئلةُ البنيويّةُ (مجاميع · تغطية ·
             # بلا إثبات · أحكام صفحات · بحث · سجلّ الأسئلة) تُجاب من SQL وحدَه. والمنطقُ في
             # `statement_qa.ledger_ui` (نقيٌّ يُختبر بلا شاشة)، وهنا التوصيلُ فقط.

@@ -223,6 +223,25 @@ def history_pairs(messages) -> list[tuple[str, str]]:
     return pairs
 
 
+def scope_text(name: str = "", n_pages: int = 0, n_rows: int = 0, kind: str = "") -> str:
+    """نصُّ نطاق الكشف — **موضعٌ واحدٌ** يقرأه التطبيقُ وأداةُ التقييم معًا (R93-10).
+
+    **ولماذا هنا لا في الواجهة:** كان الصياغةُ مبنيّةً في `app.py` (`_scope_text`) ⇒ وأداةُ التقييم
+    (`tools/eval_questions.py`) بلا Gradio فلم تستطع أن تناديها، فقاس الحزمةَ بنطاقٍ **فارغ** بينما
+    التطبيقُ يرسل نصًّا كاملًا ⇒ **الرقمُ المنشور (٤٦/٥٠) يصف تلقينًا لا يراه المستخدم** (وهو ما أمسكته
+    مراجعة ٩٣). والصيغةُ الآن في وحدةٍ حرّةٍ من الواجهة، فيستعملها الاثنان بالحرف نفسه.
+
+    **وحدُّ غيرِ الرقميّ:** `n_pages = 0` لا يُطبع صفرًا كاذبًا بل **يُسمّى غيابُه** («عددُ الصفحات غيرُ
+    معروف») — صفرٌ يُقرأ «الكشفُ فارغ» فيُغلق بابَ سؤالٍ صحيح، والغِيابُ المسمّى يُبقي البابَ مفتوحًا.
+    """
+    bits = [str(name or "الكشف المرفوع")]
+    bits.append(f"{n_pages} صفحة" if n_pages else "عددُ الصفحات غيرُ معروف")
+    bits.append(f"{n_rows} حركة مُنظَّمة")
+    if kind:
+        bits.append(f"قارئ {kind}")
+    return " · ".join(bits)
+
+
 def build_system_prompt(scope: str = "", history=None) -> str:
     """تلقينُ الوكيل من القالب — بمتغيّرَي النطاق والسجلّ (وكلاهما مُعلَن في الجواب)."""
     return _render_template(AGENT_SYSTEM_PROMPT, scope or "غيرُ مُعلَن", format_history(history))
