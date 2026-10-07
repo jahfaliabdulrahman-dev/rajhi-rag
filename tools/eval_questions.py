@@ -752,7 +752,7 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
             # **والسجلُّ فارغٌ بالبناء:** الحزمةُ تطرح كلَّ سؤالٍ في دورةٍ مستقلّة ⇒ فالرقمُ يصف
             # **الدورةَ الأولى** في جلسةٍ جديدة، ولا يُدَّعى أنّه يصف سؤالًا تابعًا.
             r = answer_question(store, qtext, rows=rows, chunks=chunks, llm=llm,
-                                footers=footers, scope=_pack_scope(rows, a.run))
+                                footers=footers, scope=_pack_scope(rows, a.run, n_pages))
             out_box.update({"answer": r.answer or "", "used": list(getattr(r, "used_row_nos", None) or []),
                             "scope": getattr(r, "scope", None), "refused": bool(getattr(r, "refused", False))})
         except Exception as e:                                   # noqa: BLE001 — عطبٌ يُسمّى لا يُسقط الجولة
@@ -886,17 +886,20 @@ def _repo_root() -> pathlib.Path:
     return pathlib.Path(__file__).resolve().parent.parent
 
 
-def _pack_scope(rows: list[dict], run_dir) -> str:
-    """نطاقُ الكشف كما يبنيه التطبيق — **بالصيغة نفسِها** (R93-10).
+def _pack_scope(rows: list[dict], run_dir, n_pages: int = 0) -> str:
+    """نطاقُ الكشف كما يبنيه التطبيق — **بالصيغة نفسِها وبالرقم نفسِه** (R93-10 · R94-4).
 
-    الصيغةُ تُنادَى من موضعها الواحد (`statement_qa.qa.scope_text`)، وعددُ الصفحات من **موضع العدّ
-    نفسه** الذي تستعمله الواجهة (`ledger.pages_of`) ⇒ فلا تُشتقّ صفحةٌ بقاعدةٍ ثانية.
-    والاسمُ اسمُ مجلّد التشغيلة، والواجهةُ تضع اسمَ الملفّ المرفوع — **مصدرٌ مختلفٌ مُعلَن، وصيغةٌ واحدة.**
+    الصيغةُ تُنادَى من موضعها الواحد (`statement_qa.qa.scope_text`).
+    **وعددُ الصفحات كان يُعدّ هنا بعدّادٍ ثانٍ** (`ledger.pages_of` = الصفحاتُ التي فيها صفوف ⇒ ٦٢٦)،
+    والتطبيقُ يعدّ **الصفحات المقروءة** (٦٢٩) ⇒ فالنطاقُ كان يخالف نطاقَ التطبيق في الرقم وإن اتّفق في
+    الصيغة. والعددُ الآن يأتي من **`build_rows`** الذي يُرجعه في السطر نفسِه (وكان مهمَلًا) ⇒ مصدرٌ واحد.
+    والاسمُ يبقى اسمَ مجلّد التشغيلة (والتطبيقُ يضع اسمَ الملفّ المرفوع) — **مصدرٌ مختلفٌ مُعلَن.**
     """
-    from statement_qa.ledger import pages_of                       # noqa: PLC0415
     from statement_qa.qa import scope_text                          # noqa: PLC0415
+    if not n_pages:
+        n_pages = len({r.get("page") for r in rows if r.get("page") is not None})
     return scope_text(name=getattr(run_dir, "name", "") or "",
-                      n_pages=pages_of(rows), n_rows=len(rows), kind="")
+                      n_pages=n_pages, n_rows=len(rows), kind="")
 
 
 def main(argv=None) -> int:

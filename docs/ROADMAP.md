@@ -137,7 +137,7 @@
   و`grep -n "btn.click(process_pdf" app.py` ⇒ مخرجاتُه بلا `chat`.
 - ٣: `stat -f %Sm data/eval_pack/answers_50.json` (10-04 08:45) قبل `git log -1 --format=%ad 9effa36` (10-04 14:59).
 - ٤: `grep -n "629 ورقة" tools/to_xlsx.py` ⇒ سطرٌ ثابت · و`grep -c totals src/statement_qa/export_from_state.py` ⇒ 0.
-- ٥: `grep -c -E "ChatPromptTemplate|ذاكرة|زرّ" docs/DELIVERY_REPORT.md` ⇒ 0 · و`grep -n "١٠٧٨" docs/DELIVERY_REPORT.md` ⇒ أربعة مواضع.
+- ٥: `grep -c -E "ChatPromptTemplate|ذاكرة|زرّ" docs/DELIVERY_REPORT.md` ⇒ **10** · و`grep -c "1078\|١٠٧٨" docs/DELIVERY_REPORT.md` ⇒ **0** (الخليّةُ صارت الرقمَ الحيّ) — **مُغلَقٌ بالقياس (R93-9 · R94-5)**.
 - ٦ و٨: نصُّ الملفّين بـ`pymupdf` ⇒ «LangChain» صفرَ مرّة، و`{V['` في ملفّ الشرح.
 - ٧: `git -C <مجلّد التطبيق> status --short docs/LIVE_DEMO_SCENARIO.md` ⇒ `??`.
 

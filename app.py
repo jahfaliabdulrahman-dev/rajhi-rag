@@ -800,6 +800,21 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
     # يكتبهما أحد ⇒ كان يقول للنموذج «0 صفحة» في **كلّ** سؤال، وهو نصٌّ كاذبٌ يبلغ التلقين. فيُكتبان
     # هنا من الملفّ المقروء نفسِه — لا من افتراضٍ، ولا من عددٍ ثابت.
     STATE["n_pages"] = len(pages)
+    # **والصفحاتُ المقروءةُ بأرقامها (R94-3):** يحتاجها زرُّ التنزيل ليعرف صفحةً **قُرئت ولا حركات
+    # فيها** — فبدونها لا تدخل الدفترَ أصلًا، فيقول ملخّصُ الملفّ «صفر صفحات بلا حركات» بينما ورقةُ
+    # «ما لم يُثبت» تسمّيها. والعددُ من قراءة الملفّ نفسِه لا من ثابت.
+    # **وبلا افتراض شكلٍ واحد:** صفوفُ القارئ قواميسُ (`{"page": 2}`)، وبعضُ المسارات تمرّر أرقامًا
+    # أو نصوصًا (قِيس: ثمانيةُ ضوابط تمرّر نصوصًا ⇒ `'str' has no attribute 'get'`) ⇒ يُقبل الشكلان.
+    def _page_no(item) -> int | None:
+        raw = item.get("page") if isinstance(item, dict) else item
+        if raw is None:
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+
+    STATE["read_pages"] = sorted({n for n in (_page_no(p) for p in pages) if n is not None})
     STATE["source_name"] = Path(pdf_path).name
     # **وخريطةُ الأرقام المطبوعة (R93-4):** يُمرّرها زرُّ التنزيل إلى ناقل الإكسل، فيُكتب رقمُ
     # الصفحة المطبوع من **مصدره** (قراءةُ الورقة) لا من خريطةٍ محلّيّةٍ ولا `None`.
@@ -1108,6 +1123,7 @@ def export_xlsx():
         out, msg = export_xlsx_from_state(
             STATE.get("rows") or [], STATE.get("footers"),
             printed_pages=STATE.get("printed_pages"),
+            read_pages=STATE.get("read_pages"),
             out_dir=Path(work))
         if out is None:
             return None, _note_update(msg)
@@ -1290,7 +1306,7 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي") as demo:
             # **البند ٢ — زرُّ التنزيل:** الملفُّ يُبنى بالنواة نفسها التي يُبنى بها ملفُّ سطر الأوامر،
             # فالمقابلةُ خليّةً بخليّة في `tests/test_app_excel_button.py` قائمةٌ لا موعودة.
             with gr.Row():
-                xlsx_btn = gr.Button("⬇ تنزيل Excel (بنفس كاتب سطر الأوامر — والفرقُ المعروف: كلفةُ الصفحة وزمنُها)",
+                xlsx_btn = gr.Button("⬇ تنزيل Excel (بنفس كاتب سطر الأوامر — والفروقُ المعروفةُ مسمّاةٌ في ورقة الشرح)",
                                      variant="secondary", scale=2)
                 xlsx_note = gr.Markdown(rtl=True, scale=3)
             xlsx_file = gr.File(label="ملفّ الكشف (xlsx)")
