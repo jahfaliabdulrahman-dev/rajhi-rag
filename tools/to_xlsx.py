@@ -41,12 +41,11 @@ from openpyxl.utils import get_column_letter
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 # **وعقدُ الصفوف من موضعه الواحد (`statement_qa.contract_rows` — قرارُ المالك 2026-10-07 · الخيار (أ)):**
-# كان بناؤه هنا وحده، فبقي التطبيقُ بلا عقد (٩ حقولٍ من ٢٢ ⇒ زرُّ التنزيل لا يُنتج ملفًّا). فيُنقل هنا
-# ويُعاد تصديرُ الأسماء نفسِها من هذا الملفّ — فقارئٌ يستورد `normalize_date` أو `_assertion_source`
-# من `tools.to_xlsx` (‎`tests/test_exports.py`) **لا ينكسر**.
-from statement_qa.contract_rows import (  # noqa: E402,F401
-    DEBIT_ONLY, _assertion_source, _dec, _num0, _row_date_source, _row_state,
-    _shift_suspect, build_page_rows, normalize_date, to_ascii_digits,
+# كان بناؤه هنا وحده، فبقي التطبيقُ بلا عقد (٩ حقولٍ من ٢٢ في موضع البناء ⇒ زرُّ التنزيل لا يُنتج ملفًّا).
+# **ولا رداءَ إعادةِ تصدير (F3 · مقعدُ البنية):** كان يُصدّر الأسماءَ الثمانيةَ كلَّها فلزم إسكاتُ pyflakes
+# تسعَ مرات، وقارئان فقط يحتاجانها — فنُقلا إلى الموضع نفسه (`tests/test_exports.py`) وسقط الرداء.
+from statement_qa.contract_rows import (  # noqa: E402
+    _dec, build_page_rows, to_ascii_digits,
 )
 from statement_qa.gap_ledger import (  # noqa: E402
     PageFacts, build_gap_entries, debit_credit, identity,
@@ -729,7 +728,7 @@ def build(run: Path, out: Path, gate: Path | None,
                        and r.get("balance") is not None), None)
     opening = Decimal(str(first_open)) if first_open is not None else Decimal("0")
     walk = identity(opening, totals["debits"], totals["credits"])
-    closing = _num0(facts["printed_balance"])
+    closing = _dec(facts["printed_balance"])
     identity_ok = closing is not None and abs(walk - closing) <= Decimal("0.005")
     _fmt = lambda v: f"{v:,.2f}"  # noqa: E731 — صيغة عرض واحدة في هذا القسم
     # **الصياغة الصادقة لقيود الفجوة (رفعها مدقّق خارجي):** المقدار ليس «حركات

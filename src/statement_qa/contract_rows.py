@@ -6,8 +6,9 @@
 **ولماذا في `statement_qa` لا في `tools/`:** مدخلاتُه **وسائطُ لا ملفّات** — فالتطبيقُ لا يكتب كاشَ
 `results/`، ولا يجوز أن يُلزَم بكتابته ليجد ما يقرؤه (والكاتبُ يقرأ ما يكتبه غيره: نسختان تزيغان صامتتين).
 
-**والعلّةُ المقيسة (قرارُ المالك 2026-10-07 · الخيار (أ) · مراجعة ٩٦):** صفوفُ التطبيق كانت **٩ حقولٍ من
-٢٢** ⇒ فزرُّ التنزيل **لا يُنتج ملفًّا**:
+**والعلّةُ المقيسة (قرارُ المالك 2026-10-07 · الخيار (أ) · مراجعة ٩٦):** صفوفُ التطبيق كانت **٩ حقولٍ
+من ٢٢ في موضع البناء** (`app.py` حين يُبنى الصفّ — وهو السطحُ الذي بلغ الكاتب؛ أما سطحُ الحالة فكان ١٣
+حقلًا بعد ما يُضيفه المسارُ بعده) ⇒ فزرُّ التنزيل **لا يُنتج ملفًّا**:
 `IntegrityError: NOT NULL constraint failed: rows_verified.row_no` (على `main`)، ثمّ `KeyError: None`
 عند `tools/to_xlsx.py:995` بعد ترقيم الصفوف — قِيسا بالتنفيذ، وكلٌّ منهما من غياب العقد لا من عطبٍ سطريّ.
 """
@@ -55,11 +56,6 @@ def _dec(value) -> Decimal | None:
         return Decimal(str(to_ascii_digits(str(value)).replace(",", "")))
     except (ArithmeticError, ValueError):
         return None
-
-
-def _num0(value) -> Decimal | None:
-    """القيمة كـDecimal للجمع والمقارنة (لا للعرض)."""
-    return _dec(value)
 
 
 def _row_state(der: dict) -> str:
@@ -134,7 +130,10 @@ def build_page_rows(page: int, raw_rows: list[dict], derived: list[dict],
 
     الوسائطُ صريحةٌ لا ملفّات، فيناديها الطريقان ببياناتهما:
     `raw_rows` كما قرأها القارئ · `derived` أحكامَ السلسلة لكل صفّ (وقد تكون هي نفسَها
-    حين يحمل القارئُ الحكمَ معه) · `verdict` حكمَ الصفحة (`footer` و`rows`) ·
+    حين يحمل القارئُ الحكمَ معه) · `verdict` حكمَ الصفحة (`footer` وحدَه — **و`counted` يُحسب هنا** من
+    الصفوف التي لها رصيدٌ مطبوع: كان يأتي من المنادي مُدخلًا فقاس مقعدُ البنية **كمّيتين مختلفتين**
+    باسمٍ واحد (`len(rows)` عند التطبيق و`len(rows with balance)` عند سطر الأوامر) ⇒ خليّةُ `counted`
+    في الدفتر تفرق بحسب مَن كتبه. فصار المعنى داخل الباني، ولا يُختلف عليه) ·
     `page_flags` أعلامَ الصفحة (`recovered`/`reread`/`arbitrated` — يقرؤها `_assertion_source`) ·
     `page_no` **الرقمَ المطبوع** كما قُرئ من الورقة (لا يُخترع: يبقى `None` إن لم يُقرأ).
     """
@@ -155,7 +154,7 @@ def build_page_rows(page: int, raw_rows: list[dict], derived: list[dict],
         # كان خطأً يُنكر حركةً مبصوطة على الورق.
         state = ("حركة — مرساة بعد ورقة غائبة (المبلغ مطبوع ولا تُقفله السلسلة)"
                  if (is_movement and der.get("opening")
-                     and _num0(row.get("movement")))
+                     and _dec(row.get("movement")))
                  else (_row_state(der) if is_movement
                        else "سطر ملخّص/افتتاحي — ليست حركة"))
         out.append({
@@ -187,9 +186,9 @@ def build_page_rows(page: int, raw_rows: list[dict], derived: list[dict],
             # داخلي بين عمودين (رفعه مدقّق ثلاث مرات). والصواب: المرساة تُثبت
             # **مبلغها المطبوع** بنفسها — ولا يدخل «مدين/دائن» فلا تتغيّر المجاميع
             # (الفجوة محسوبة في قيودها المستقلّة)، والوسم يبقى في «حكم السلسلة».
-            "derived_movement": (_num0(row.get("movement"))
+            "derived_movement": (_dec(row.get("movement"))
                                  if (is_movement and der.get("opening")
-                                     and _num0(row.get("movement")))
+                                     and _dec(row.get("movement")))
                                  else der.get("derived_movement")),
             "side": der.get("side") or "",
             "opening": bool(der.get("opening")),
@@ -198,6 +197,10 @@ def build_page_rows(page: int, raw_rows: list[dict], derived: list[dict],
             "source": _assertion_source(state, page_flags),
             "shift": _shift_suspect(row, der),
             "footer": verdict.get("footer"),
-            "counted": verdict.get("rows"),
+            # **و`counted` يُحسب من الصفوف نفسِها (قرارُ المقعد البنيويّ · F1):** عددُ الصفوف التي لها
+            # رصيدٌ مطبوع = «الحركات» بلغة الكشف — وهو عينُ ما يحسبه مسارُ سطر الأوامر
+            # (`scale_slice`: `[r for r in rows if r["balance"] is not None]`). وكان يُمرَّر من المنادي
+            # فحمل المعنى الواحد كمّيتين (`len(rows)` عند التطبيق) ⇒ فرقٌ صامت في الدفتر.
+            "counted": sum(1 for rr in raw_rows if rr.get("balance") is not None),
         })
     return out

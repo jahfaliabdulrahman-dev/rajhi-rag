@@ -95,8 +95,10 @@ class BadArguments(Exception):
 
 
 def to_ascii_digits(s: str) -> str:
-    """عربيّة-هندية (٠-٩) وفارسيّة (۰-۹) ⇒ لاتينيّة."""
-    return s.translate(AR_INDIC).translate(AR_EXTENDED)
+    """عربيّة-هندية (٠-٩) وفارسيّة (۰-۹) ⇒ لاتينيّة — **والمنطقُ في موضعٍ واحد**
+    (`statement_qa.contract_rows` · R96-4): كانت ثلاثَ نسخٍ تزيغ إحداها صامتة."""
+    from statement_qa.contract_rows import to_ascii_digits as _shared
+    return _shared(s)
 
 
 def canonical(tok: str) -> str | None:

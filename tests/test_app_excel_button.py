@@ -257,7 +257,11 @@ def test_the_button_leaves_no_statement_copy_behind(tmp_path, monkeypatch) -> No
                for pg in per_page}
     printed = {int(pg): (per_page.get(int(pg)) or {}).get("page_no") for pg in per_page}
     app.STATE.clear()
-    app.STATE.update({"rows": rows, "footers": footers,
+    # **وسطحُ العقد هو ما يقرؤه الزرّ (F2 · SPEC-96-4):** حُذف الرداءُ `or STATE["rows"]` فلا يُعاد إدخالُ
+    # سطح العرض (٩ حقول) إلى الكاتب — وهو المسارُ الذي كان يرفع `IntegrityError`. وصفوفُ هذا الضابط من
+    # مسار سطر الأوامر (بعقدٍ كامل)، **ووفاءُ مسار التطبيق نفسِه** يحرسه
+    # `tests/test_contract_rows_conformance.py` (واختبارُ المدقّق يحرس الزرَّ والأوراق).
+    app.STATE.update({"rows": rows, "rows_contract": rows, "footers": footers,
                       "printed_pages": {k: v for k, v in printed.items() if isinstance(v, int)}})
     app_tmp = tmp_path / "tmpapp"          # **معزولٌ عن مجلّد العيّنة** (fixture له run/ خاصٌّ به)
     app_tmp.mkdir()

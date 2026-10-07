@@ -83,7 +83,7 @@ def test_xlsx_has_the_seven_sheets(tmp_path):
 
 def test_dates_are_normalised_across_all_three_digit_sets():
     """The defect a buyer sees first: one column, three numeral systems, mixed."""
-    from tools.to_xlsx import normalize_date
+    from statement_qa.contract_rows import normalize_date
 
     assert normalize_date("٢٠١٣١٠٣١")[:2] == ("2013-10-31", "ok")      # عربية-هندية
     assert normalize_date("۲۰۱۳۱۱۲۹")[:2] == ("2013-11-29", "ok")      # فارسية
@@ -193,7 +193,7 @@ def test_movement_source_column_separates_the_chain_from_the_paper(tmp_path):
 
 
 def test_an_anchor_declares_the_paper_and_a_chain_row_declares_the_chain():
-    from tools.to_xlsx import _assertion_source
+    from statement_qa.contract_rows import _assertion_source
 
     anchor = _assertion_source(
         "حركة — مرساة بعد ورقة غائبة (المبلغ مطبوع ولا تُقفله السلسلة)", {})

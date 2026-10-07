@@ -526,6 +526,29 @@ def process_pdf(pdf_path: str, skip_rejected: bool = False, progress=gr.Progress
                        "انتظر انتهاءه ثم أعد المحاولة.")
 
 
+def _view_rows(contract: list[dict]) -> list[dict]:
+    """**صفوفُ العرض/الأسئلة مشتقّةٌ من صفوف العقد — لا بناءٌ ثانٍ (F5 · مقعدُ البنية):**
+
+    كانت تُبنى مستقلّةً عن القراءة نفسِها، فصار لتصنيف «حركة/افتتاح» و«حكم السلسلة» موضعان يزيغان
+    (يُعدَّل أحدُهما ويبقى الآخر). والسطحان يبقيان مختلفَين بمفاتيحهما (`kind`/`ok`/`type` للعرض ·
+    العقدُ بعشرين عمودًا للدفتر) — **لكنّ المعنى يُحسب مرّةً واحدةً في `build_page_rows`.**
+    """
+    out: list[dict] = []
+    for c in contract:
+        if c.get("balance") is None:      # سطرٌ بلا رصيد ليس حركةً في العرض أيضًا (كما كانت)
+            continue
+        opening = bool(c.get("opening"))
+        out.append({"page": c["page"],
+                    "kind": "opening" if opening else "txn",
+                    "balance": c["balance"],
+                    "movement": None if opening else c.get("derived_movement"),
+                    "printed_mv": c.get("printed_movement"),
+                    "side": c.get("side") or "",
+                    "ok": c.get("chain_ok"),
+                    "desc": c.get("desc"), "date": c.get("date")})
+    return out
+
+
 def _footer_delta_nonzero(now, prev) -> bool:
     """**هل يُظهر تذييلُ الصفحة حركاتٍ لها؟** الفرقُ بين إجمالياتها المتراكمة وإجمالياتِ سابقتها.
 
@@ -773,32 +796,28 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
             own_by_pg[pg] = (chk["own"]["debits"], chk["own"]["credits"])
         prev_footer = footer
         prev_page_no = page_no
-        for r in rows:
-            if r["balance"] is None:
-                continue
-            if r["opening"]:
-                all_rows.append({"page": pg, "kind": "opening",
-                                 "balance": r["balance"], "movement": None,
-                                 "side": "", "ok": True,
-                                 "desc": r.get("desc"), "date": r.get("date")})
-            else:
-                all_rows.append({"page": pg, "kind": "txn",
-                                 "balance": r["balance"],
-                                 "movement": r["derived_movement"],
-                                 "printed_mv": r["movement"],
-                                 "side": r["side"], "ok": r["ok"],
-                                 "desc": r.get("desc"), "date": r.get("date")})
-            prev_closing = r["balance"]
-        # **وصفوفُ العقد تُبنى بالدالّة الواحدة (العلّةُ المقيسة: كانت ٩ حقولٍ من ٢٢ ⇒ زرُّ التنزيل
-        # يسقط من أوّل نقرة: `IntegrityError: NOT NULL constraint failed: rows_verified.row_no`
-        # ثمّ `KeyError: None` — قِيسا بالتنفيذ).** والوسائطُ كما يحملها التطبيق: قراءتُه الخامّ
-        # (`raw_rows`) وأحكامُ السلسلة (`rows` من `chain_derive`) وحكمُ الصفحة وأعلامُها ورقمُها المطبوع.
-        rows_contract += build_page_rows(
+        # **والعقدُ يُبنى أوّلًا، ثمّ يُشتقّ العرضُ منه (F5):** ترتيبٌ واحدٌ للمعنى — والعقدُ هو ما
+        # يقرؤه كاتبُ الإكسل والدفتر. (العلّةُ المقيسة: كانت ٩ حقولٍ من ٢٢ في موضع البناء ⇒ زرُّ
+        # التنزيل لا يُنتج ملفًّا: `IntegrityError: NOT NULL constraint failed: rows_verified.row_no`
+        # ثمّ `KeyError: None`.) والوسائطُ كما يحملها التطبيق: قراءتُه الخامّ (`raw_rows`) وأحكامُ
+        # السلسلة (`rows` من `chain_derive`) وحكمُ الصفحة وأعلامُها ورقمُها المطبوع.
+        page_contract = build_page_rows(
             pg, raw_rows, rows,
-            {"footer": chk.get("status"), "rows": len(rows)},
+            {"footer": chk.get("status")},
+            # **والتحكيمُ غيرُ معلومٍ هنا بإعلانٍ صريح (R96-2):** يُسجَّل في كاش التشغيل (`arbitrated_by`)
+            # ويقرؤه مسارُ سطر الأوامر، فلا يعرفه التطبيق ⇒ فخليّةُ «مصدر الإثبات» لصفحةٍ محكَّمة تفرق
+            # بين الملفّين. وهذا **صنفُ فرقِ مصدرِ إدخالٍ مُعلَن** كالكلفة والزمن اللذين لا يملكهما التطبيق،
+            # لا انزياحُ عقد. (مقيس: لا تظهر على عيّنةٍ بلا تحكيم، وتظهر بـ«تحكيم موثَّق بمصدره».)
             {"recovered": any(x.get("page") == pg for x in recoveries),
              "reread": any(x.get("page") == pg for x in page_rereads)},
             page_no=page_no)
+        rows_contract += page_contract
+        all_rows += _view_rows(page_contract)
+        # **و`prev_closing` كما كان:** آخرُ رصيدٍ مقروءٍ في الصفحة يقود سلسلةَ التالية — كان يُحدَّث
+        # صفًّا صفًّا في حلقة العرض، ويُقرأ الآن من الصفوف نفسِها فلا يُفقد أثرُه.
+        _last_bal = next((r["balance"] for r in reversed(rows) if r["balance"] is not None), None)
+        if _last_bal is not None:
+            prev_closing = _last_bal
 
     # التواريخُ أولًا: تُستعاد أحيانًا من نصّ بيان قراءة الصفحة، وبيانُ العمود بلا تاريخٍ عن قصد.
     filled_dates = fill_missing_dates(all_rows)
@@ -821,20 +840,10 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
     # يكتبهما أحد ⇒ كان يقول للنموذج «0 صفحة» في **كلّ** سؤال، وهو نصٌّ كاذبٌ يبلغ التلقين. فيُكتبان
     # هنا من الملفّ المقروء نفسِه — لا من افتراضٍ، ولا من عددٍ ثابت.
     STATE["n_pages"] = len(pages)
-    # **والصفحاتُ المقروءةُ بأرقامها (R94-3):** يحتاجها زرُّ التنزيل ليعرف صفحةً **قُرئت ولا حركات
-    # فيها** — فبدونها لا تدخل الدفترَ أصلًا، فيقول ملخّصُ الملفّ «صفر صفحات بلا حركات» بينما ورقةُ
-    # «ما لم يُثبت» تسمّيها. والعددُ من قراءة الملفّ نفسِه لا من ثابت.
-    # **وبلا افتراض شكلٍ واحد:** صفوفُ القارئ قواميسُ (`{"page": 2}`)، وبعضُ المسارات تمرّر أرقامًا
-    # أو نصوصًا (قِيس: ثمانيةُ ضوابط تمرّر نصوصًا ⇒ `'str' has no attribute 'get'`) ⇒ يُقبل الشكلان.
-    def _page_no(item) -> int | None:
-        raw = item.get("page") if isinstance(item, dict) else item
-        if raw is None:
-            return None
-        try:
-            return int(raw)
-        except (TypeError, ValueError):
-            return None
-
+    # **ولا سطرَ ولا مُساعدَ من الأداة المحذوفة (أغلقه مقعدُ المواصفة · SPEC-96-2):** كان هنا شرحٌ
+    # بنصّ الحاضر («يحتاجها زرُّ التنزيل…») و`_page_no` الجاهزةُ لإعادة شبكها — بعد أن حُذف مفتاحُ
+    # `read_pages` ومَن يناديه. فالسطرُ الذي يصف آليةً محذوفةً كنصّ حاضر يُعيد بناءَها، والمُساعدُ الذي
+    # لا يناديه أحدٌ يُغري بذلك. حُذفا معًا، والشاهدُ على الإزالة وسببُها في موضعه أعلاه.
     # **ولا مفتاحَ حالةٍ لصفحاتٍ «بلا حركات» (حُذف بالقياس · الدعوى R95-1-a · تبنتها مراجعة ٩٦):** كان
     # يُبنى من عدّ الصفحات المقروءة ليُمرَّر إلى ناقل الإكسل، وقِيس أنّه **لا يُحرّك الخليّةَ المُسلَّمة**
     # (٤ = ٤ = ٤، وهو عددُ ملفّ سطر الأوامر) — فالعدُّ من أحكام الدفتر، **وأخطرُ منه** أنّه كان يُلصق
@@ -1145,7 +1154,7 @@ def export_xlsx():
     # ويُنسخ **ملفُّ الإكسل وحدَه** إلى موضعٍ يخدم التنزيل.
     with tempfile.TemporaryDirectory(prefix="rajhi_xlsx_") as work:
         out, msg = export_xlsx_from_state(
-            STATE.get("rows_contract") or STATE.get("rows") or [], STATE.get("footers"),
+            STATE.get("rows_contract") or [], STATE.get("footers"),
             printed_pages=STATE.get("printed_pages"),
             out_dir=Path(work))
         if out is None:

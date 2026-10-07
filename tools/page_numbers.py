@@ -57,7 +57,10 @@ _PERSIAN = {ord(c): str(i) for i, c in enumerate("۰۱۲۳۴۵۶۷۸۹")}
 
 
 def to_ascii_digits(s: str) -> str:
-    return s.translate(_INDIC).translate(_PERSIAN)
+    """توحيدُ الأرقام ⇒ لاتينيّة — **والمنطقُ في موضعٍ واحد** (`statement_qa.contract_rows` · R96-4):
+    كانت ثلاثَ نسخٍ (هنا وفي `tools/local_reader_probe.py` وفي العقد) تزيغ إحداها صامتة."""
+    from statement_qa.contract_rows import to_ascii_digits as _shared
+    return _shared(s)
 
 
 def find_number_candidates(png: Path, xlim=XLIM, ylim=YLIM, thr=THR):
