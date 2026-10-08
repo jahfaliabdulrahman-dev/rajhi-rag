@@ -138,12 +138,30 @@ def test_the_window_keeps_three_turns_and_names_the_drop() -> None:
     kept, removals, note = qa._window(prior)
     assert len(kept) == 2 * MEMORY_TURNS and len(removals) == 2 * 2, (len(kept), len(removals))
     assert note == f"(و2 دورةً أقدم أُسقطت من النافذة — والحدُّ {MEMORY_TURNS})", note
+    # **وعلى شكلِ الإنتاج (دورُ الأداة أربعُ رسائل لا ثنتان):** النافذةُ تُبقي ثلاثَ دوراتٍ على
+    # الحالتين — وهذا قياسُ العطب الذي أمسكه مقعدُ البنية (قبل التصحيح: يبقى **دورةٌ واحدة** من
+    # أربع ويُعلَن «و6 أُسقطت»؛ ووحدةُ الميزانية صارت **دُورًا** بموضعِ عدٍّ واحد `_turns`).
+    from langchain_core.messages import ToolMessage as _T
+
+    tool_msgs = []
+    for i in range(4):
+        tool_msgs += [_H(f"ط{i}", id=f"th{i}"),
+                      _AI("؟", id=f"tq{i}", tool_calls=[{"name": "sum_rows", "args": {}, "id": f"tc{i}"}]),
+                      _T("نتيجة", id=f"tt{i}", tool_call_id=f"tc{i}"),
+                      _AI(f"ج{i}", id=f"ta{i}")]
+    kept2, removals2, note2 = qa._window(tool_msgs)
+    assert len(kept2) == 4 * 3 and _human(kept2) == ["ط1", "ط2", "ط3"], \
+        f"النافذةُ ليست ثلاثَ دوراتٍ على شكل الأداة: {[m.type for m in kept2]}"
+    assert len(removals2) == 4 and note2 == f"(و1 دورةً أقدم أُسقطت من النافذة — والحدُّ {MEMORY_TURNS})", \
+        (len(removals2), note2)
     stored = qa._thread_messages({"configurable": {"thread_id": tid}})
     assert len(stored) <= 2 * MEMORY_TURNS + 2, f"الحافظةُ تنمو بلا سقف: {len(stored)} رسالة"
 
 
 def test_a_new_statement_wipes_the_conversation() -> None:
-    """**R93-2 · شرط ٢ (جهةُ الحافظة):** `clear_conversation` يمحو الخيط — فكلُّ قراءةٍ تبدأ نظيفة."""
+    """**R93-2 · شرط ٢ (جهةُ الحافظة):** `clear_conversation` يمحو الخيط — فكلُّ قراءةٍ تبدأ نظيفة.
+    (ومسارُ الواجهة الكاملُ يُقاس بالـAST في `test_app_binds_history::test_the_read_wipes_the_conversation_too`
+    — وهذا الضابطُ يقيس الدالّةَ عند الحافظة وحدها، لا سيناريو النقر.)"""
     llm = _Recorder()
     tid = "t-wipe"
     qa._run_agent(llm, [], build_system_prompt(), "سؤالٌ سابق", thread_id=tid)

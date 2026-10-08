@@ -21,11 +21,13 @@ from statement_qa.qa import (AGENT_SYSTEM_PROMPT, MEMORY_TURNS, _memory_note,
 
 def test_the_template_renders_its_variables_and_declares_the_scope() -> None:
     """**القالبُ لا نصٌّ مجمَّد:** النطاقُ يظهر، والحدُّ يُعلن من `MEMORY_TURNS` لا يُكتب بالحرف."""
-    out = build_system_prompt(scope="كشفُ ٦٢٩ صفحة · بنك الراجحي")
+    out = build_system_prompt(scope="كشفُ ٦٢٩ صفحة · بنك الراجحي", with_memory=True)
     assert "كشفُ ٦٢٩ صفحة" in out
     assert f"آخرُ {MEMORY_TURNS} دورات" in out, "حدُّ الذاكرة يُعلن من مصدره لا من يد"
     assert "لا يُنقل عنه رقمٌ بلا أداة" in out, "القاعدةُ الحاكمة للسجلّ لا تُشطب من القالب"
     assert AGENT_SYSTEM_PROMPT.splitlines()[0] in out, "نصُّ الوكيل الأصليّ يبقى أساسَ القالب"
+    assert "ذاكرةُ الحوار" not in build_system_prompt(scope="حزمةٌ بلا خيط"), \
+        "مُستدعٍ بلا ذاكرةٍ يُخاطَب بحفظٍ لا وجودَ له (تصحيحُ مقعد المعايير)"
 
 
 def test_the_memory_window_is_bounded_and_the_drop_is_declared() -> None:

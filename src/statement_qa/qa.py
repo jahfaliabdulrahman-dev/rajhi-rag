@@ -167,16 +167,30 @@ class Answer(BaseModel):
 # **المسارُ واحد (لا طريقان):** السجلُّ **رسائلُ** خيطٍ في `MemorySaver` بمعرّف الكشف، والنافذةُ
 # بـ`trim_messages` (أداةُ المكتبة) لا بعدٍّ يدوي، والساقطُ يُحذف من الحافظة **ويُسمّى بعدده** في
 # التلقين. والدالّةُ اليدويّة (`format_history`/`history_pairs`) **محذوفة** بقرار 98ب ولا تُعاد.
+_MEMORY_POLICY = (
+    "**ذاكرةُ الحوار (رسائلُ لا نصّ في التعليمات — يُستأنس به لفهم السؤال، ولا يُنقل عنه رقمٌ بلا أداة):**\n"
+    "يُحفظ سجلُّ كلِّ دورةٍ بمعرّف الكشف — آخرُ {turns} دوراتٍ يبقين، وما سقط يُسمّى بعدده."
+)
 _TEMPLATE_HEAD = (
     "{system}\n\n"
     "**نطاقُ الكشف الذي تعمل عليه:** {scope}\n"
-    "**ذاكرةُ الحوار (رسائلُ لا نصّ في التعليمات — يُستأنس به لفهم السؤال، ولا يُنقل عنه رقمٌ بلا أداة):**\n"
-    "آخرُ {turns} دورات محفوظةٌ بمعرّف الكشف — وما سقط يُسمّى بعدده."
+    "{memory}"
 )
 MEMORY_TURNS = 3          # **حدٌّ مُعلَن:** آخرُ ثلاث دورات — ولا ذاكرةٌ تنمو بلا سقف
 
 
-def _render_template(system: str, scope: str, turns: int) -> str:
+def _turns(messages) -> int:
+    """عددُ الدُّور — **كلُّ دورةٍ تبدأ برسالةٍ بشرية** لا نصفُ الرسائل.
+
+    **وهذا موضعُ العدِّ الواحد** للميزانية والإعلان معًا (تصحيحُ مقعد البنية 2026-10-08): دورُ
+    الأداة أربعُ رسائل (`Human · AI(tool_calls) · Tool · AI`)، فـ`len//2` كان يعدّه دَورتَين
+    ويُبقي دورةً واحدةً من أربعٍ موعودًا بثلاث. ووحدةُ الميزانية في `trim_messages` **دُورٌ لا
+    رسائل** (قِيس: بعدّادٍ يعدّ الرسائلَ لم يُقصّ شيء، وبالقائمةِ البشريّة أبقى الثلاثَ على الشكلَين).
+    """
+    return sum(1 for m in messages if getattr(m, "type", "") == "human")
+
+
+def _render_template(system: str, scope: str, memory: str) -> str:
     """قالبُ التلقين: `ChatPromptTemplate` إن أمكن، **وإلّا القالبُ نفسه يدويًّا**.
 
     **والحارسُ واسعٌ قصْدًا:** ضيقُه (`ImportError` وحدَه) أسقط مسارَ الوكيل إلى البديل النصّيّ في
@@ -186,9 +200,9 @@ def _render_template(system: str, scope: str, turns: int) -> str:
     try:
         from langchain_core.prompts import ChatPromptTemplate          # noqa: PLC0415
         tpl = ChatPromptTemplate.from_messages([("system", _TEMPLATE_HEAD)])
-        return tpl.format_messages(system=system, scope=scope, turns=turns)[0].content
+        return tpl.format_messages(system=system, scope=scope, memory=memory)[0].content
     except Exception:                            # noqa: BLE001
-        return _TEMPLATE_HEAD.format(system=system, scope=scope, turns=turns)
+        return _TEMPLATE_HEAD.format(system=system, scope=scope, memory=memory)
 
 
 def _memory_note(prior_turns: int, dropped_turns: int) -> str:
@@ -241,11 +255,11 @@ def _window(prior) -> tuple[list, list, str]:
     """
     from langchain_core.messages import RemoveMessage, trim_messages    # noqa: PLC0415
 
-    kept = trim_messages(list(prior), max_tokens=2 * MEMORY_TURNS,
-                         token_counter=len, strategy="last", start_on="human")
+    kept = trim_messages(list(prior), max_tokens=MEMORY_TURNS,
+                         token_counter=_turns, strategy="last", start_on="human")
     kept_ids = {m.id for m in kept if getattr(m, "id", None)}
     dropped = [m for m in prior if getattr(m, "id", None) and m.id not in kept_ids]
-    note = _memory_note(len(prior) // 2, len(dropped) // 2)
+    note = _memory_note(_turns(prior), _turns(dropped))
     return kept, [RemoveMessage(id=m.id) for m in dropped], note
 
 
@@ -268,9 +282,15 @@ def scope_text(name: str = "", n_pages: int = 0, n_rows: int = 0, kind: str = ""
     return " · ".join(bits)
 
 
-def build_system_prompt(scope: str = "") -> str:
-    """تلقينُ الوكيل من القالب — بالنطاق (وذاكرتُه **رسائلُ لا نصّ**: إعلانُها يُلحق في `_run_agent`)."""
-    return _render_template(AGENT_SYSTEM_PROMPT, scope or "غيرُ مُعلَن", MEMORY_TURNS)
+def build_system_prompt(scope: str = "", with_memory: bool = False) -> str:
+    """تلقينُ الوكيل من القالب — بالنطاق، **وسياسةِ الذاكرة حيث ذاكرةٌ فعلًا**.
+
+    **ولا وعدٍ بذاكرةٍ معدومة** (تصحيحُ مقعد المعايير 2026-10-08): مُستدعٍ بلا خيطٍ (الحزمةُ
+    مثلًا) لا يُخاطَب بجملةِ الحفظ — وسيطُ `with_memory` شرطُ حضور سطرِ السياسة وحده. وحالاتُ
+    السجلّ («أوّلُ سؤال» · «و{N} أُسقطت») تُلحق في `_run_agent` حيث تُقاس عند النموذج.
+    """
+    memory = _MEMORY_POLICY.format(turns=MEMORY_TURNS) if with_memory else ""
+    return _render_template(AGENT_SYSTEM_PROMPT, scope or "غيرُ مُعلَن", memory)
 
 
 def _run_agent(llm, tools, system_prompt: str, user_content: str,
@@ -335,7 +355,7 @@ def _answer_with_tools(llm, rows, context: str, question: str,
     user = (f"القطع المرفقة:\n{context}\n\n"
             f"إن احتجت حساب أي رقم فاستخدم الأدوات.\n\nالسؤال: {question}")
     # **توافقٌ خلفيّ تامّ:** بلا ذاكرةٍ ولا نطاقٍ يبقى التلقينُ نصَّه القديم بحرفه.
-    system_prompt = (build_system_prompt(scope=scope)
+    system_prompt = (build_system_prompt(scope=scope, with_memory=bool(thread_id))
                      if (thread_id or scope) else AGENT_SYSTEM_PROMPT)
     text, parsed, mode = _run_agent(llm, tools, system_prompt, user,
                                     response_format=Answer, thread_id=thread_id)
