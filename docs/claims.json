@@ -20,6 +20,7 @@
  "median_page_s": 26.13,
  "tests": 1110,
  "gate3_price_cap_pages": 133,
+ "rehearsal_read_s": 346,
  "tests_by_env": {
   "full": 1110,
   "ci-light": 1070,
