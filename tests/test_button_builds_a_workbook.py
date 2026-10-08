@@ -103,3 +103,19 @@ def test_the_download_button_builds_a_workbook_from_the_app_state(read_sample) -
     assert moves.max_row - 1 == len(read_sample.STATE["rows"]), "صفوفُ الحركات لا تساوي صفوفَ الحالة"
     for row in wb["كيف تُقرأ هذه الأوراق"].iter_rows(values_only=True):
         assert "None" not in " ".join(str(v) for v in row if v is not None), row
+
+
+def test_the_ledger_buttons_build_refresh_and_answer(read_sample, tmp_path, monkeypatch) -> None:
+    """**زرّا الدفتر (R98-1 · مراجعة ٩٨):** «ابنِ الدفتر» ثمّ «حدّث» ثمّ سؤالٌ ثابت — على حالة التطبيق نفسِها.
+
+    سقطت الثلاثةُ في كلّ ضغطةٍ منذ 10-04 (`_ledger_ui.pages_of` لا وجودَ له)، ولم يضغطها اختبارٌ عبر
+    التطبيق. والدفترُ يُكتب في مجلّدٍ مؤقّت لا في `data/` (`_APP_ROOT` مُستبدَل).
+    """
+    app = read_sample
+    monkeypatch.setattr(app, "_APP_ROOT", tmp_path)
+    msg, status = app._ledger_build_click()
+    assert msg and status, "زرُّ «ابنِ الدفتر» لم يُعِد رسالةً ولا حالة"
+    assert list(tmp_path.rglob("*.sqlite")), f"لم يُكتب دفتر: {msg}"
+    assert app._ledger_refresh_click(), "زرُّ «حدّث» لم يُعِد حالة"
+    answer = app._ledger_ask_click("تغطيةُ الكشف (صفوف · صفحات · بلا إثبات)", "")
+    assert answer and "تعذّر" not in answer, answer[:200]

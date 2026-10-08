@@ -1246,12 +1246,19 @@ _APP_ROOT = Path(__file__).resolve().parent   # **جذرُ المستودع من
 
 
 def _ledger_rows() -> list:
-    return STATE.get("rows") or []
+    """صفوفُ الدفتر = **صفوفُ العقد** (`STATE["rows_contract"]`) — لا سطحُ العرض (R98-1).
+
+    سطحُ العرض بلا رقم صفّ ولا حقول العقد ⇒ كان «ابنِ الدفتر» يسقط بـ`IntegrityError … row_no` (كما سقط
+    زرُّ Excel قبل ٩٧). وزرُّ Excel يكتب الدفترَ من صفوف العقد نفسِها ⇒ مصدرٌ واحدٌ للزرّين.
+    """
+    return STATE.get("rows_contract") or []
 
 
 def _ledger_key() -> str:
     """مفتاحُ الدفتر: من **بصمة الكشف** (STATE["era"]) ⇒ الكشفُ نفسُه يُعطي المفتاحَ نفسَه."""
-    return _ledger_ui.statement_key(STATE.get("era"), _ledger_ui.pages_of(_ledger_rows()))
+    # **`pages_of` في `ledger` لا في `ledger_ui` (R98-1):** كان الاسمُ يُطلب من الوحدة الخطأ منذ 10-04 ⇒ زرّا
+    # «ابنِ الدفتر» و«حدّث الحالة» يسقطان في كلّ ضغطة (`AttributeError`)، ولم يضغطهما اختبارٌ عبر التطبيق.
+    return _ledger_ui.statement_key(STATE.get("era"), _ledger.pages_of(_ledger_rows()))
 
 
 def _ledger_refresh_click() -> str:
