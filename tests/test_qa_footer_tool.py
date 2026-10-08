@@ -117,7 +117,8 @@ def test_the_printed_footer_reaches_the_tools_through_the_real_call_chain(monkey
     monkeypatch.setattr(qa, "retrieve", lambda *a, **k: [])
     monkeypatch.setattr(qa, "format_hits", lambda hits: "")
 
-    def _fake_agent(llm, tools, system_prompt, user_content, response_format=None):
+    def _fake_agent(llm, tools, system_prompt, user_content, response_format=None,
+                    thread_id=None):
         # الوكيلُ الحقيقيّ يُعيد **النصَّ** وحدَه؛ والأثرُ يلتقطه `make_qa_tools` بنفسه
         # (وأداةُ التذييل تسجّل استدعاءَها بأرقام صفوفٍ فارغة) ⇒ فالمسارُ المُقاس هو مسارُ الإنتاج.
         # **والتوقيعُ تغيّر بـأ-٤** (`response_format=` وثلاثيّةٌ تُعلن الوضع): فالبديلُ يتبع العقدَ

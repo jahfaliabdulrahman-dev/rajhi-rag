@@ -61,11 +61,11 @@ def test_the_harness_sends_the_scope_the_app_sends_and_declares_single_turn() ->
         assert "history" not in kws, "الحزمةُ دورةٌ واحدة بالبناء — فلا يُمرَّر سجلّ"
 
 
-def test_the_app_sends_both_scope_and_history() -> None:
-    """والنصفُ الآخر: التطبيقُ يمرّر الاثنين ⇒ فحزمةٌ بنطاقٍ بلا سجلّ تصف **الدورةَ الأولى**،
-    وهذا ما يقوله التقريرُ لا أكثر."""
+def test_the_app_sends_both_scope_and_the_memory_key() -> None:
+    """والنصفُ الآخر: التطبيقُ يمرّر الاثنين (النطاقَ **ومعرّفَ المحادثة** — قرار 98ب: السجلُّ
+    رسائلُ خيطٍ لا نصٌّ يُمرَّر) ⇒ فحزمةٌ بلا خيطٍ تصف **الدورةَ الأولى**، وهو ما يقوله التقرير."""
     calls = _calls("app.py", "answer_question")
-    assert calls and all({"scope", "history"} <= _kw(c) for c in calls)
+    assert calls and all({"scope", "thread_id"} <= _kw(c) for c in calls)
 
 
 def test_the_scope_reaches_the_prompt() -> None:

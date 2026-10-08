@@ -51,7 +51,9 @@ class _Agent:
     def __init__(self, payload):
         self.payload = payload
 
-    def invoke(self, _msgs):
+    def invoke(self, _msgs, config=None):
+        # **التوقيعُ يتبع العقد الجديد** (سابقةُ هذه الحيلة في `test_qa_footer_tool`): `_run_agent`
+        # يمرّر `config=` (معرّفَ الخيط — قرار 98ب) ⇒ البديلُ يقبله ولا يكسر بـ`TypeError`.
         return self.payload
 
 

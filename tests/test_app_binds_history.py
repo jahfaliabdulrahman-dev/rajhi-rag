@@ -1,18 +1,19 @@
-"""البوّابةُ التي تمنع عودةَ «الميزةُ معلَّنةٌ وخاملة» (R92 · البند ١).
+"""البوّابةُ التي تمنع عودةَ «الميزةُ معلَّنةٌ وخاملة» (R92 · وقرار 98ب).
 
-**العلّةُ التي تمنعها:** دالّةُ `ask_followup` في الواجهة تحمل سجلَّ المحادثة بيدها ثمّ **لا تمرّره**
-إلى `answer_question` ⇒ الوكيلُ يُسأل كأنّه مبتدأ، والميزةُ موجودةٌ في المسار **وغيرُ مستدعاةٍ من
-الواجهة**. فتُقاس هنا **بالـAST** (بلا استيراد Gradio) **وسلوكيًّا** على الدالّة النقيّة.
+**العلّةُ التي تمنعها:** دالّةُ `ask_followup` كانت تحمل سجلَّ المحادثة بيدها ثمّ **لا تمرّره** إلى
+`answer_question` ⇒ الوكيلُ يُسأل كأنّه مبتدأ. فتُقاس هنا **بالـAST** (بلا استيراد Gradio):
+المدخلُ يصل (المفتاحُ = بصمةُ الكشف، والنطاق)، والسؤالُ لا يُغذّى نفسه سجلًّا، والقراءةُ تمسح
+**ذاكرةَ المحادثة** لا أسطحَ العرض وحدها.
 
 **وما لا تقيسه:** أن يجيب النموذجُ أحسن — تقيس أنّ المُدخَل **يصل**، لا أن الأثرَ بلغ. ولذلك
-يُقاس الأثرُ في جولةٍ مدفوعة، لا هنا.
+يُقاس الأثرُ في جولةٍ مدفوعة، لا هنا. (والدالّةُ اليدويّة `history_pairs` محذوفةٌ بقرار 98ب —
+فما كان يقيس اقترانَها من ضابطٍ هنا قد **تقاعد مع صاحبته**، ومحلُّه مذكورٌ في تقرير النقل.)
 """
 
 from __future__ import annotations
 
 import ast
 import pathlib
-
 APP = pathlib.Path(__file__).resolve().parents[1] / "app.py"
 TREE = ast.parse(APP.read_text(encoding="utf-8"))
 
@@ -24,23 +25,28 @@ def _fn(name: str) -> ast.FunctionDef:
     raise AssertionError(f"{name} غابت من الواجهة — البوّابةُ تفشل معلنةً لا صامتة")
 
 
-def test_the_ui_passes_history_and_scope_to_the_agent() -> None:
-    """**المُدخَلُ يصل:** نداءُ `answer_question` في `ask_followup` يحمل الكلمتين صراحةً."""
+def test_the_ui_passes_the_memory_key_and_scope_to_the_agent() -> None:
+    """**المُدخَلُ يصل:** نداءُ `answer_question` في `ask_followup` يحمل المفتاحَ والنطاق صراحةً."""
     call = None
     for node in ast.walk(_fn("ask_followup")):
         if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "answer_question":
             call = node
     assert call is not None, "الواجهةُ لا تنادي answer_question إطلاقًا"
     kwargs = {k.arg for k in call.keywords}
-    assert {"history", "scope"} <= kwargs, f"مُدخَلٌ ناقص: {sorted(kwargs)} — الوكيلُ يُسأل بلا ذاكرة"
+    assert {"thread_id", "scope"} <= kwargs, f"مُدخَلٌ ناقص: {sorted(kwargs)} — الوكيلُ يُسأل بلا ذاكرة"
 
 
 def test_the_current_question_is_not_fed_back_as_history() -> None:
-    """**لا يُغذّى السؤالُ نفسُه كسجلّ:** `history[:-1]` — والسؤالُ يُضاف في `prepare_ask:953`."""
+    """**لا يُغذّى السؤالُ نفسُه سجلًّا:** المُدخلُ الوحيدُ للنموذج هو سؤالُ هذه اللحظة (رسائلُ
+    الخيط تحمل القديم وحده)، والسؤالُ يُضاف في `prepare_ask` للعرض لا للتلقين."""
+    call = next(n for n in ast.walk(_fn("ask_followup"))
+                if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "answer_question")
+    kwargs = {k.arg for k in call.keywords}
+    assert "history" not in kwargs, "سجلٌّ يدويٌّ رجع — والقرار: رسائلُ الحافظة لا نصٌّ يُمرَّر"
     src = ast.get_source_segment(APP.read_text(encoding="utf-8"), _fn("ask_followup")) or ""
-    assert "history_pairs(history[:-1])" in src, "passes the whole log, so the question feeds itself"
+    assert "history_pairs(" not in src, "الدالّةُ اليدويّةُ استُدعيت (محذوفةٌ بقرار 98ب)"
     prep = ast.get_source_segment(APP.read_text(encoding="utf-8"), _fn("prepare_ask")) or ""
-    assert '{"role": "user", "content": q}' in prep, "تغيّر موضعُ إضافة السؤال — راجع [:-1]"
+    assert '{"role": "user", "content": q}' in prep, "تغيّر موضعُ إضافة السؤال — راجع prepare_ask"
 
 
 def test_the_scope_never_raises_on_a_missing_key() -> None:
@@ -50,26 +56,22 @@ def test_the_scope_never_raises_on_a_missing_key() -> None:
     assert not bad, f"قراءةٌ بلا حماية في النطاق (سطر {bad[0].lineno})"
 
 
-def test_history_pairs_pairs_and_ignores_the_dangling() -> None:
-    """**الدالّةُ النقيّة:** المستخدمُ يفتح والمساعدُ يُغلق — والناقصُ يُهمَل لا يُخمَّن."""
-    from statement_qa.qa import history_pairs
-    log = [{"role": "user", "content": "س١"}, {"role": "assistant", "content": "ج١"},
-           {"role": "user", "content": "س٢"}, {"role": "assistant", "content": "ج٢"},
-           {"role": "user", "content": "س٣"}]
-    assert history_pairs(log) == [("س١", "ج١"), ("س٢", "ج٢")], "زوجٌ زائدٌ أو نقصٌ"
-    assert history_pairs([{"role": "assistant", "content": "ج"}]) == [], "جوابٌ بلا سؤالٍ لا يُنسب"
-    assert history_pairs(None) == [] and history_pairs([]) == []
+def test_the_memory_key_is_the_statement_fingerprint() -> None:
+    """**شرط ٢ (قرار 98ب):** معرّفُ المحادثة = **بصمةُ الكشف** (`_ledger_key` ⇒ `statement_key`) —
+    مصدرُها واحدٌ مع مفتاح الدفتر، فيقرأ الكشفُ نفسُه المفتاحَ نفسَه."""
+    read = APP.read_text(encoding="utf-8")
+    ask = ast.get_source_segment(read, _fn("ask_followup")) or ""
+    assert "thread_id=_ledger_key()" in ask, "المعرّفُ ليس بصمةَ الكشف — والذاكرةُ تلتصق بغير صاحبها"
+    key = ast.get_source_segment(read, _fn("_ledger_key")) or ""
+    assert "statement_key(" in key, "مفتاحُ البصمة انقطع عن مصدره (`statement_key`)"
 
 
-def test_the_pairs_flow_through_the_bounded_window() -> None:
-    """**ومن الأزواج إلى القالب:** النافذةُ تُطبَّق (آخرُ `MEMORY_TURNS`) والإسقاطُ يُعلَن."""
-    from statement_qa.qa import MEMORY_TURNS, build_system_prompt, history_pairs
-    log = []
-    for i in range(MEMORY_TURNS + 2):
-        log += [{"role": "user", "content": f"س{i}"}, {"role": "assistant", "content": f"ج{i}"}]
-    prompt = build_system_prompt(scope="كشفُ الاختبار", history=history_pairs(log))
-    assert prompt.count("سؤالٌ سابق") == MEMORY_TURNS
-    assert "أُسقطت" in prompt and "كشفُ الاختبار" in prompt
+def test_the_read_wipes_the_conversation_too() -> None:
+    """**R93-2 (جهةُ الحافظة · شرط ٢):** القراءةُ تمسح **ذاكرةَ المحادثة** لا أسطحَ العرض وحدها
+    (`clear_conversation(_ledger_key())`) — وكلُّ سيناريوهات العودة تبدأ نظيفة."""
+    reset = ast.get_source_segment(APP.read_text(encoding="utf-8"), _fn("_reset_qa_surfaces")) or ""
+    assert "clear_conversation(_ledger_key())" in reset, \
+        "القراءةُ لا تمسح ذاكرةَ المحادثة — والقديمُ يعود في كشفٍ جديد (R93-2)"
 
 
 def test_the_read_button_clears_the_question_surfaces() -> None:

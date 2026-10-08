@@ -1078,10 +1078,15 @@ def _reset_qa_surfaces():
     يحمل سؤالَ الكشف السابق وجوابَه — بمبلغه واستشهاده («صفحة ٧») — إلى أسئلة الكشف الجديد، وهو الصنفُ
     نفسه الذي أُغلق قبل ٩٢: رقمٌ يُنسب إلى كشفٍ آخر.
 
-    فتُمسح أربعةُ أسطحٍ معًا: المحادثة · الصفوفُ التي بُني عليها الجواب · تفاصيلُ الاسترجاع · ملاحظتُها.
+    فتُمسح أربعةُ أسطحٍ ومعها **ذاكرةُ المحادثة نفسها** (قرار 98ب · شرط ٢): رسائلُ الخيط تُمحى
+    (`clear_conversation`) — لا سطحُ العرض وحده. والمعرّفُ **بصمةُ الكشف الحاليّ** (`_ledger_key`)
+    ⇒ كلُّ سيناريوهات العودة (كشفٌ جديد · إعادةُ قراءة · رجوعٌ إلى قديم) تبدأ محادثةً نظيفة.
     **والمسحُ يقع عند النقر** لا بعد انتهاء القراءة (وهي دقائقُ مدفوعة) — فلا تبقى نافذةٌ يُسأل فيها
     عن القديم، ولا يُنتظر انتهاءُ مسارٍ قد يفشل.
     """
+    from statement_qa.qa import clear_conversation
+
+    clear_conversation(_ledger_key())
     return [], "", pd.DataFrame(), _hide_note()
 
 
@@ -1180,13 +1185,14 @@ def ask_followup(history):
         history.append({"role": "assistant",
                         "content": "ارفع الكشف في تبويب «قراءة وتحقق» أولاً."})
         return history, "", pd.DataFrame(), _hide_note()
-    from statement_qa.qa import answer_question, history_pairs
+    from statement_qa.qa import answer_question
 
-    # **السجلُّ يُمرَّر (R92 · البند ١):** الزوجُ السابق يُعلن في القالب، والنطاقُ يُسمّى —
-    # وكلاهما مُدخَلٌ صريحٌ لا استنتاجٌ خفيّ.
+    # **والذاكرةُ في مكوّنها (قرار 98ب · شرط ١ و٢):** السجلُّ **رسائلُ** خيطٍ في الحافظة بمعرّف
+    # الكشف (`_ledger_key` = بصمةُ الكشف — ومصدرُها واحدٌ مع مفتاح الدفتر)، والنطاقُ يُسمّى.
+    # و`history_pairs` **محذوفة** (لا طريقان) — فالمُدخلُ الوحيدُ للنموذج سؤالُ هذه اللحظة.
     res = answer_question(STATE["store"], q, rows=STATE.get("rows"),
                           chunks=STATE.get("chunks"), footers=STATE.get("footers"),
-                          history=history_pairs(history[:-1]), scope=_scope_text())
+                          thread_id=_ledger_key(), scope=_scope_text())
     rows_now = STATE.get("rows") or []
     page_of = {i + 1: r.get("page") for i, r in enumerate(rows_now)}
     verdicts = STATE.get("verdicts") or {}

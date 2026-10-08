@@ -1,48 +1,55 @@
-"""البندُ ١ (R92): **قوالبُ التلقين وذاكرةُ الحوار** — بوّاباتٌ بلا نداء نموذج.
+"""البندُ ١ (R92 · وقرار 98ب): **قوالبُ التلقين وذاكرةُ الحوار** — بوّاباتٌ بلا نداء نموذج.
 
 **العطبُ الذي تمنعه:** كان تلقينُ الوكيل **نصًّا مجمَّدًا** لا يعرف نطاقَ الكشف ولا سؤالَه السابق ⇒
 فسؤالٌ تابعٌ («وماذا عن الصفحة ٤؟») يُجاب كأنّه مبتدأ، أو يُنقل فيه رقمٌ من جوابٍ سابق بلا أداة.
 
-**وما تُثبته هذه البوّابات (لا تُدّعيه):** ① القالبُ يُصيغ بالمتغيّرين ويُعلن النطاقَ في متنه
-② والنافذةُ محدودةٌ بـ`MEMORY_TURNS` **والإسقاطُ يُعدّ ويُسمّى** ③ ولا نداءَ شبكةٍ في المسار كلّه
-④ **والتوصيلُ لا يكسر القائم:** بلا ذاكرةٍ ولا نطاقٍ يبقى التلقينُ نصَّه القديم بحرفه.
+**وما تُثبته هذه البوّابات (لا تُدّعيه):** ① القالبُ يُصيغ بالنطاق ويُعلن **حدَّ الذاكرة** من
+`MEMORY_TURNS` لا من يد ② وسطرُ الإعلان يُسمّي الإسقاطَ بعددِه ويقول «أوّلُ سؤال» للفراغ
+③ ولا نداءَ شبكةٍ في المسار كلّه ④ **والتوصيلُ لا يكسر القائم:** بلا ذاكرةٍ ولا نطاقٍ يبقى التلقينُ
+نصَّه القديم بحرفه — والدالّةُ اليدويّة (`format_history`/`history_pairs`) محذوفةٌ لا تعود (لا طريقان).
+**ونافذةُ `trim_messages` نفسُها** (القصُّ عند النموذج والتخزينُ المحدود) تُقاس في
+`tests/test_the_memory_reaches_the_model.py` حيث تُحمَّل التبعيّة.
 """
 
 from __future__ import annotations
 
 import socket
 
-from statement_qa.qa import (AGENT_SYSTEM_PROMPT, MEMORY_TURNS, build_system_prompt,
-                             format_history)
+from statement_qa.qa import (AGENT_SYSTEM_PROMPT, MEMORY_TURNS, _memory_note,
+                             build_system_prompt)
 
 
 def test_the_template_renders_its_variables_and_declares_the_scope() -> None:
-    """**القالبُ لا نصٌّ مجمَّد:** النطاقُ والسجلُّ يظهران في التلقين المُصاغ."""
-    out = build_system_prompt(scope="كشفُ ٦٢٩ صفحة · بنك الراجحي",
-                              history=[("كم عدد الحركات؟", "١٠٣ حركة")])
-    assert "كشفُ ٦٢٩ صفحة" in out and "كم عدد الحركات؟" in out and "١٠٣ حركة" in out
+    """**القالبُ لا نصٌّ مجمَّد:** النطاقُ يظهر، والحدُّ يُعلن من `MEMORY_TURNS` لا يُكتب بالحرف."""
+    out = build_system_prompt(scope="كشفُ ٦٢٩ صفحة · بنك الراجحي")
+    assert "كشفُ ٦٢٩ صفحة" in out
+    assert f"آخرُ {MEMORY_TURNS} دورات" in out, "حدُّ الذاكرة يُعلن من مصدره لا من يد"
     assert "لا يُنقل عنه رقمٌ بلا أداة" in out, "القاعدةُ الحاكمة للسجلّ لا تُشطب من القالب"
     assert AGENT_SYSTEM_PROMPT.splitlines()[0] in out, "نصُّ الوكيل الأصليّ يبقى أساسَ القالب"
 
 
 def test_the_memory_window_is_bounded_and_the_drop_is_declared() -> None:
-    """**حدٌّ مُعلَن لا ذاكرةٌ تنمو:** آخرُ `MEMORY_TURNS` دورات، وما سقط يُسمّى بعدده."""
-    short = format_history([("س١", "ج١"), ("س٢", "ج٢")])
-    assert short.count("سؤالٌ سابق") == 2 and "أُسقطت" not in short
-    long = format_history([("س١", "ج١"), ("س٢", "ج٢"), ("س٣", "ج٣"), ("س٤", "ج٤"), ("س٥", "ج٥")])
-    assert long.count("سؤالٌ سابق") == MEMORY_TURNS, long
-    assert "أُسقطت" in long and "2" in long, "الإسقاطُ يجب أن يُعدّ لا أن يُخفى"
-    assert "أوّلُ سؤال" in format_history(None), "بلا سجلٍّ يُقال ذلك صراحةً"
+    """**حدٌّ مُعلَن لا ذاكرةٌ تنمو:** ما سقط يُسمّى بعددِه، وبلا سجلٍّ يُعلَن «أوّلُ سؤال» صراحةً.
+
+    (والإزاحةُ نفسها بالحرف تصل التلقينَ عند النموذج — مقيسةٌ في الملف المحمّل.)
+    """
+    note = _memory_note(5, 2)
+    assert note == f"(و2 دورةً أقدم أُسقطت من النافذة — والحدُّ {MEMORY_TURNS})", note
+    assert _memory_note(MEMORY_TURNS, 0) == "", "بلا سقوطٍ لا حشو"
+    assert "أوّلُ سؤال" in _memory_note(0, 0), "بلا سجلٍّ يُقال ذلك صراحةً"
 
 
 def test_the_wiring_is_backward_compatible() -> None:
     """**توافقٌ خلفيّ:** بلا ذاكرةٍ ولا نطاقٍ ⇒ التلقينُ نصُّه القديم بحرفه (فلا سلوكَ يتبدّل)."""
-    assert build_system_prompt() != AGENT_SYSTEM_PROMPT, "بلا مدخلٍ يُبنى القالبُ الموسَّع"
-    # والقرارُ في موضع التوصيل: `history or scope` — يُقاس بالنصّ الحرفيّ في الوحدة
+    assert build_system_prompt(scope="نطاق") != AGENT_SYSTEM_PROMPT, "بالنطاق يُبنى القالبُ الموسَّع"
+    # والقرارُ في موضع التوصيل: `thread_id or scope` — يُقاس بالنصّ الحرفيّ في الوحدة
     import pathlib
     src = pathlib.Path(__file__).resolve().parents[1] / "src" / "statement_qa" / "qa.py"
     text = src.read_text(encoding="utf-8")
-    assert "if (history or scope) else AGENT_SYSTEM_PROMPT" in text, "شرطُ التوافق الخلفيّ غائب"
+    assert "if (thread_id or scope) else AGENT_SYSTEM_PROMPT" in text, "شرطُ التوافق الخلفيّ غائب"
+    # **ولا طريقان (قرار 98ب):** الدالّةُ اليدويّةُ لا تعود بأيّ اسم.
+    assert "def format_history" not in text and "def history_pairs" not in text, \
+        "الدالّةُ اليدويّةُ رجعت — والسجلُّ صار رسائلَ لا نصًّا"
 
 
 def test_no_network_in_the_prompt_path() -> None:
@@ -54,6 +61,6 @@ def test_no_network_in_the_prompt_path() -> None:
     original = socket.socket.connect
     socket.socket.connect = _deny                      # type: ignore[method-assign]
     try:
-        assert build_system_prompt(scope="عيّنة", history=[("س", "ج")])
+        assert build_system_prompt(scope="عيّنة")
     finally:
         socket.socket.connect = original

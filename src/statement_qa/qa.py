@@ -163,19 +163,20 @@ class Answer(BaseModel):
     refused: bool = Field(default=False, description="True إن امتنع: لا شاهدَ يحمل الجواب")
 
 
-# ── قوالبُ التلقين وذاكرةُ الحوار (R92 · البند ١) ────────────────────────────────
-# **العطبُ الذي يمنعه:** كان تلقينُ الوكيل **نصًّا مجمَّدًا** لا يعرف نطاقَ الكشف ولا سؤالَه السابق ⇒
-# فسؤالٌ تابعٌ يُجاب كأنّه مبتدأ، أو يُنقل فيه رقمٌ من جوابٍ سابق بلا أداة. فصار التلقينُ **قالبًا
-# بمتغيّرين** عبر `ChatPromptTemplate` من LangChain — **وبتراجعٍ مُعلَن** إلى القالب نفسه يدويًّا.
+# ── ذاكرةُ الحوار بمكوّن LangChain (قرار 98ب) ─────────────────────────────────
+# **المسارُ واحد (لا طريقان):** السجلُّ **رسائلُ** خيطٍ في `MemorySaver` بمعرّف الكشف، والنافذةُ
+# بـ`trim_messages` (أداةُ المكتبة) لا بعدٍّ يدوي، والساقطُ يُحذف من الحافظة **ويُسمّى بعدده** في
+# التلقين. والدالّةُ اليدويّة (`format_history`/`history_pairs`) **محذوفة** بقرار 98ب ولا تُعاد.
 _TEMPLATE_HEAD = (
     "{system}\n\n"
     "**نطاقُ الكشف الذي تعمل عليه:** {scope}\n"
-    "**وسجلُّ الحوار السابق (يُستأنس به لفهم السؤال، ولا يُنقل عنه رقمٌ بلا أداة):**\n{history}"
+    "**ذاكرةُ الحوار (رسائلُ لا نصّ في التعليمات — يُستأنس به لفهم السؤال، ولا يُنقل عنه رقمٌ بلا أداة):**\n"
+    "آخرُ {turns} دورات محفوظةٌ بمعرّف الكشف — وما سقط يُسمّى بعدده."
 )
-MEMORY_TURNS = 3          # **حدٌّ مُعلَن:** آخرُ ثلاث دورات — لا ذاكرةٌ تنمو بلا سقف
+MEMORY_TURNS = 3          # **حدٌّ مُعلَن:** آخرُ ثلاث دورات — ولا ذاكرةٌ تنمو بلا سقف
 
 
-def _render_template(system: str, scope: str, history: str) -> str:
+def _render_template(system: str, scope: str, turns: int) -> str:
     """قالبُ التلقين: `ChatPromptTemplate` إن أمكن، **وإلّا القالبُ نفسه يدويًّا**.
 
     **والحارسُ واسعٌ قصْدًا:** ضيقُه (`ImportError` وحدَه) أسقط مسارَ الوكيل إلى البديل النصّيّ في
@@ -185,42 +186,67 @@ def _render_template(system: str, scope: str, history: str) -> str:
     try:
         from langchain_core.prompts import ChatPromptTemplate          # noqa: PLC0415
         tpl = ChatPromptTemplate.from_messages([("system", _TEMPLATE_HEAD)])
-        return tpl.format_messages(system=system, scope=scope, history=history)[0].content
+        return tpl.format_messages(system=system, scope=scope, turns=turns)[0].content
     except Exception:                            # noqa: BLE001
-        return _TEMPLATE_HEAD.format(system=system, scope=scope, history=history)
+        return _TEMPLATE_HEAD.format(system=system, scope=scope, turns=turns)
 
 
-def format_history(history) -> str:
-    """آخرُ `MEMORY_TURNS` دورةً — **ويُعلن ما أُسقط** بدل أن يُخفى."""
-    if not history:
-        return "لا سجلَّ سابق (هذا أوّلُ سؤال في الجلسة)."
-    items = list(history)
-    kept = items[-MEMORY_TURNS:]
-    parts = [f"- سؤالٌ سابق: {q}\n  جوابُه: {a}" for q, a in kept]
-    if len(items) > len(kept):
-        parts.append(f"(و{len(items) - len(kept)} دورةً أقدم أُسقطت من النافذة — والحدُّ {MEMORY_TURNS})")
-    return "\n".join(parts)
+def _memory_note(prior_turns: int, dropped_turns: int) -> str:
+    """سطرُ إعلان الذاكرة — **والإسقاطُ يُعدّ ويُسمّى** لا يُخفى (ادّعاءُ R92 باقٍ).
 
-
-def history_pairs(messages) -> list[tuple[str, str]]:
-    """سجلُّ الواجهة (`role`/`content`) ⇒ أزواجُ (سؤال، جواب) — **بلا اختراع قواعد**.
-
-    دورُ المستخدم يفتح الزوج، ودورُ المساعد يُغلقه؛ ودورٌ مكرَّرٌ أو ناقصٌ **يُهمَل** بدل أن يُخمَّن
-    (سجلٌّ بجوابٍ بلا سؤالٍ أو سؤالٍ بلا جواب لا يُنسب إلى أحدهما).
+    بلا سجلٍّ ⇒ يُعلَن «أوّلُ سؤال» صراحةً؛ وبسقوطٍ ⇒ يُسمّى بعددِه؛ ولا فلا حشو.
+    **والعدُّ هنا لما أُسقط في هذه الخطوة وحدَها** (قرار 98ب · شرط ٣: السجلُّ **محدودٌ بالحذف**) —
+    فما أُسقط قبلها لم يبقَ له أثرٌ يُعدّ من جديد؛ والصيغةُ صادقةٌ لكلِّ مقدارٍ سقط دفعةً.
     """
-    pairs: list[tuple[str, str]] = []
-    pending = None
-    for m in messages or []:
-        if isinstance(m, dict):
-            role, content = m.get("role", ""), m.get("content", "")
-        else:
-            role, content = getattr(m, "role", ""), getattr(m, "content", "")
-        if role == "user":
-            pending = str(content or "")
-        elif role == "assistant" and pending is not None:
-            pairs.append((pending, str(content or "")))
-            pending = None
-    return pairs
+    if prior_turns == 0:
+        return "لا سجلَّ سابق (هذا أوّلُ سؤال في الجلسة)."
+    if dropped_turns:
+        return f"(و{dropped_turns} دورةً أقدم أُسقطت من النافذة — والحدُّ {MEMORY_TURNS})"
+    return ""
+
+
+_MEMORY_SAVER = None
+
+
+def _memory():
+    """الحافظةُ (مكوّنُ LangChain `MemorySaver`) — كائنٌ واحدٌ لكلّ العملية، بلا اختراع مخزن."""
+    global _MEMORY_SAVER
+    if _MEMORY_SAVER is None:
+        from langgraph.checkpoint.memory import MemorySaver            # noqa: PLC0415
+
+        _MEMORY_SAVER = MemorySaver()
+    return _MEMORY_SAVER
+
+
+def _thread_messages(config: dict) -> list:
+    """رسائلُ الخيط من الحافظة — بقراءة `get_tuple` الرسميّة لا بترتيبٍ مبتكر."""
+    tup = _memory().get_tuple(config)
+    if tup is None:
+        return []
+    return list(((tup.checkpoint or {}).get("channel_values") or {}).get("messages") or [])
+
+
+def clear_conversation(thread_id: str | None) -> None:
+    """مسحُ محادثة الكشف (R93-2 · شرط ٢ من قرار 98ب): كلُّ قراءةٍ ⇒ محادثةٌ نظيفة."""
+    if thread_id:
+        _memory().delete_thread(thread_id)
+
+
+def _window(prior) -> tuple[list, list, str]:
+    """نافذةُ الذاكرة: `trim_messages` (آخرُ `MEMORY_TURNS` دورات) + حذفُ الساقط + إعلانُه.
+
+    **وحدُّ العدّ أداةُ لا يدويّة** (قرار 98ب · شرط ٣): التقطيعُ بأداة المكتبة (`strategy="last"`
+    و`start_on="human"` فلا يُبدأ إلا بدور)، والزائدُ يُحذف من الحافظة (`RemoveMessage` في مُدخل
+    النداء) فلا تنمو بلا سقف — وسطرُ الإعلان يحمل عدَدَ ما سقط.
+    """
+    from langchain_core.messages import RemoveMessage, trim_messages    # noqa: PLC0415
+
+    kept = trim_messages(list(prior), max_tokens=2 * MEMORY_TURNS,
+                         token_counter=len, strategy="last", start_on="human")
+    kept_ids = {m.id for m in kept if getattr(m, "id", None)}
+    dropped = [m for m in prior if getattr(m, "id", None) and m.id not in kept_ids]
+    note = _memory_note(len(prior) // 2, len(dropped) // 2)
+    return kept, [RemoveMessage(id=m.id) for m in dropped], note
 
 
 def scope_text(name: str = "", n_pages: int = 0, n_rows: int = 0, kind: str = "") -> str:
@@ -242,37 +268,52 @@ def scope_text(name: str = "", n_pages: int = 0, n_rows: int = 0, kind: str = ""
     return " · ".join(bits)
 
 
-def build_system_prompt(scope: str = "", history=None) -> str:
-    """تلقينُ الوكيل من القالب — بمتغيّرَي النطاق والسجلّ (وكلاهما مُعلَن في الجواب)."""
-    return _render_template(AGENT_SYSTEM_PROMPT, scope or "غيرُ مُعلَن", format_history(history))
+def build_system_prompt(scope: str = "") -> str:
+    """تلقينُ الوكيل من القالب — بالنطاق (وذاكرتُه **رسائلُ لا نصّ**: إعلانُها يُلحق في `_run_agent`)."""
+    return _render_template(AGENT_SYSTEM_PROMPT, scope or "غيرُ مُعلَن", MEMORY_TURNS)
 
 
 def _run_agent(llm, tools, system_prompt: str, user_content: str,
-               response_format=None) -> tuple[str, object | None, str]:
+               response_format=None, thread_id: str | None = None) -> tuple[str, object | None, str]:
     """create_agent (langchain 1.x) مع نوعٍ مُقيَّد، و**وضعٌ يُعلَن**: `typed` أو `prose`.
+
+    **والذاكرةُ هنا (قرار 98ب):** بخيطٍ (`thread_id`) ⇒ الحافظةُ تحمل رسائلَ الدورات السابقة،
+    والنافذةُ تُقصّها بأداة المكتبة قبل النداء، والساقطُ يُحذف من الحافظة **ويُسمّى بعدده** في
+    التلقين. وبلا خيطٍ ⇒ لا ذاكرة (والتلقينُ نصُّه القديم يمرّ بحرفه). ومصدرُ المعرّف **بصمةُ
+    الكشف** (`app._ledger_key` ⇒ `statement_key`) — فكشفٌ جديدٌ = محادثةٌ جديدة (R93-2).
 
     **ولا انحدارَ صامت:** نسخةٌ لا تعرف الوسيط ترفع `TypeError` ⇒ يُبنى بلا نوعٍ **ويُعلَن**
     أنّ الجواب نصّيّ (`prose`)، فلا يُقرأ لاحقًا كأنّ استشهادَه مُصرَّحٌ به. وكذلك مسارُ
     `create_react_agent` الاحتياطيّ ⇒ `prose`. **ولا نداءَ نموذجٍ هنا في الاختبار** (يُقاس ببديل).
     """
     typed = response_format is not None
+    config = {"configurable": {"thread_id": thread_id}} if thread_id else None
+    removals: list = []
+    if config is not None:
+        _kept, removals, note = _window(_thread_messages(config))
+        if note:
+            system_prompt = f"{system_prompt}\n\n{note}"
     try:
         from langchain.agents import create_agent
     except ImportError:  # pragma: no cover - depends on installed stack
         from langgraph.prebuilt import create_react_agent
 
-        agent = create_react_agent(llm, tools, prompt=system_prompt)
+        agent = create_react_agent(llm, tools, prompt=system_prompt,
+                                   checkpointer=_memory() if config else None)
         typed = False
     else:
-        kw = {"model": llm, "tools": tools, "system_prompt": system_prompt}
+        kw = {"model": llm, "tools": tools, "system_prompt": system_prompt,
+              "checkpointer": _memory() if config else None}
         if typed:
             kw["response_format"] = response_format
         try:
             agent = create_agent(**kw)
         except TypeError:      # نسخةٌ لا تعرف `response_format` ⇒ بلا نوع، ويُعلَن ذلك
-            agent = create_agent(model=llm, tools=tools, system_prompt=system_prompt)
+            agent = create_agent(model=llm, tools=tools, system_prompt=system_prompt,
+                                 checkpointer=_memory() if config else None)
             typed = False
-    res = agent.invoke({"messages": [{"role": "user", "content": user_content}]})
+    res = agent.invoke({"messages": [*removals, {"role": "user", "content": user_content}]},
+                       config=config)
     parsed = res.get("structured_response") if isinstance(res, dict) else None
     if typed and parsed is not None and getattr(parsed, "answer", None):
         return str(parsed.answer).strip(), parsed, "typed"
@@ -285,7 +326,7 @@ def _run_agent(llm, tools, system_prompt: str, user_content: str,
 
 
 def _answer_with_tools(llm, rows, context: str, question: str,
-                       footers=None, history=None,
+                       footers=None, thread_id: str | None = None,
                        scope: str = "") -> tuple[str, list[dict], object | None, str]:
     from statement_qa.qa_tools import make_qa_tools
 
@@ -294,10 +335,10 @@ def _answer_with_tools(llm, rows, context: str, question: str,
     user = (f"القطع المرفقة:\n{context}\n\n"
             f"إن احتجت حساب أي رقم فاستخدم الأدوات.\n\nالسؤال: {question}")
     # **توافقٌ خلفيّ تامّ:** بلا ذاكرةٍ ولا نطاقٍ يبقى التلقينُ نصَّه القديم بحرفه.
-    system_prompt = (build_system_prompt(scope=scope, history=history)
-                     if (history or scope) else AGENT_SYSTEM_PROMPT)
+    system_prompt = (build_system_prompt(scope=scope)
+                     if (thread_id or scope) else AGENT_SYSTEM_PROMPT)
     text, parsed, mode = _run_agent(llm, tools, system_prompt, user,
-                                    response_format=Answer)
+                                    response_format=Answer, thread_id=thread_id)
     return text, trace, parsed, mode
 
 
@@ -405,7 +446,7 @@ def _data_facts(rows) -> tuple[set, int | None, frozenset]:
 
 
 def answer_question(store, question: str, rows=None, chunks=None,
-                    llm=None, k: int = 4, footers=None, history=None,
+                    llm=None, k: int = 4, footers=None, thread_id: str | None = None,
                     scope: str = "") -> QAResult:
     """Agent-with-tools answer when rows exist; strict RAG fallback otherwise.
 
@@ -435,7 +476,8 @@ def answer_question(store, question: str, rows=None, chunks=None,
     # grounded — on its own.
     parts = split_compound(question)
     if len(parts) > 1:
-        results = [_answer_one(store, part, rows, chunks, llm, k, footers, history=history, scope=scope)
+        results = [_answer_one(store, part, rows, chunks, llm, k, footers,
+                               thread_id=thread_id, scope=scope)
                    for part in parts]
         merged_used = [n for r in results for n in (r.used_row_nos or [])]
         hits = boost_last_page(retrieve(store, question, k=k), chunks, question)
@@ -458,11 +500,12 @@ def answer_question(store, question: str, rows=None, chunks=None,
             citation_mode=merged_mode,
             unsupported_citations=merged_unsup)
 
-    return _answer_one(store, question, rows, chunks, llm, k, footers, history=history, scope=scope)
+    return _answer_one(store, question, rows, chunks, llm, k, footers,
+                        thread_id=thread_id, scope=scope)
 
 
 def _answer_one(store, question: str, rows, chunks, llm, k: int,
-                footers=None, history=None, scope: str = "") -> QAResult:
+                footers=None, thread_id: str | None = None, scope: str = "") -> QAResult:
     """One question, one answer, with its own tool trace and its own honesty.
 
     `footers` (R77): التذييلاتُ المطبوعةُ لكلّ صفحة — تُمرَّر إلى الأدوات فيُجيب `page_footer` عنها."""
@@ -478,7 +521,8 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
     if rows:
         try:
             answer, trace, parsed, mode = _answer_with_tools(llm, rows, context, question,
-                                                             footers=footers, history=history, scope=scope)
+                                                             footers=footers,
+                                                             thread_id=thread_id, scope=scope)
             from statement_qa.qa_tools import used_rows_from_trace
 
             used = used_rows_from_trace(trace)
@@ -491,7 +535,7 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
                     llm, rows, context,
                     question + "\n\n(استخدم أداة حسابية واحدة على الأقل قبل "
                                "الجواب، ولا تحسب بنفسك.)",
-                    footers=footers, history=history, scope=scope)
+                    footers=footers, thread_id=thread_id, scope=scope)
                 used2 = used_rows_from_trace(trace2)
                 if used2 or _tool_was_used(trace2):
                     answer, used = answer2, used2
