@@ -232,12 +232,58 @@ def _memory():
     return _MEMORY_SAVER
 
 
+_HOLDER = None
+
+
+def _memory_holder():
+    """حاملُ الرسائل: أصغرُ رسمٍ من LangGraph يقرأ المخزنَ ويكتبه **بواجهته العامّة**.
+
+    **ولماذا رسمٌ صغيرٌ لا رسمُ الوكيل:** رسمٌ مشحونٌ بحافظةٍ **لا يُنادى** بلا `thread_id`
+    (قِيس: `ValueError: Checkpointer requires … 'thread_id'`) ⇒ فالنداءُ إمّا يكتب أو يفشل،
+    والذاكرةُ يجب أن تُكتب **مُنتقاةً** لا بكلّ خطوة. فنداءُ النموذج يقع في رسمٍ **بلا حافظة**
+    (لا يكتب شيئًا)، وهذا الحاملُ يحمل `MemorySaver` وحدَه ⇒ **الكتابةُ بيدنا**.
+
+    **ولا داخليّةَ حافظةٍ هنا:** `get_state`/`update_state` واجهتُه العامّة (R99-7)، بعد أن كانت
+    النافذةُ تُحسب بقراءة `get_tuple().checkpoint["channel_values"]` — وهي قراءةٌ هشّةٌ عند الترقية.
+    """
+    global _HOLDER
+    if _HOLDER is None:
+        from langgraph.graph import END, START, MessagesState, StateGraph   # noqa: PLC0415
+
+        b = StateGraph(MessagesState)
+        b.add_node("hold", lambda _s: {})
+        b.add_edge(START, "hold")
+        b.add_edge("hold", END)
+        _HOLDER = b.compile(checkpointer=_memory())
+    return _HOLDER
+
+
 def _thread_messages(config: dict) -> list:
-    """رسائلُ الخيط من الحافظة — بقراءة `get_tuple` الرسميّة لا بترتيبٍ مبتكر."""
-    tup = _memory().get_tuple(config)
-    if tup is None:
-        return []
-    return list(((tup.checkpoint or {}).get("channel_values") or {}).get("messages") or [])
+    """رسائلُ الخيط من الحافظة — بالواجهة العامّة (`get_state`)، لا بقراءةٍ داخليّة."""
+    state = _memory_holder().get_state(config)
+    return list((getattr(state, "values", None) or {}).get("messages") or [])
+
+
+def _remember(thread_id: str | None, question: str, answer: str) -> None:
+    """**التبادلُ المقبولُ وحدَه** يُثبَّت في الخيط: سؤالُ المستخدم كما سأله + الجوابُ المعروض.
+
+    **وهو موضعُ الكتابة الواحد** (R99-1 · قرار 98ب): الرسمُ الذي ينادي النموذج **بلا حافظة**،
+    فلا تُحفظ محاولةٌ مرفوضةٌ ولا توجيهُ «استخدم أداة» ولا قطعُ استرجاعٍ ولا نتائجُ أدوات —
+    والقديمُ كان يحفظ كلَّ ما رآه الوكيل (فسؤالٌ رقميٌّ مرفوضٌ يبلغ نداءَ السؤال التالي).
+    والنافذةُ تُقصّ هنا بـ`trim_messages` (أداةُ المكتبة) والساقطُ يُحذف بـ`RemoveMessage`
+    ⇒ السجلُّ **محدودٌ بالحذف** لا بالإخفاء.
+
+    **ووحدتُه سؤالُ المستخدم لا نداءُ النموذج** (طلبُ المالك · R99-1): فسؤالٌ مركّبٌ جزءاه نداءان،
+    ولمحاولةُ رفضٍ تليها إعادة ⇒ **دورةٌ واحدةٌ** في الحافظة.
+    """
+    if not thread_id or not answer:
+        return
+    from langchain_core.messages import AIMessage, HumanMessage     # noqa: PLC0415
+
+    config = {"configurable": {"thread_id": thread_id}}
+    _kept, removals, _note = _window(_thread_messages(config))
+    _memory_holder().update_state(
+        config, {"messages": [*removals, HumanMessage(content=question), AIMessage(content=answer)]})
 
 
 def clear_conversation(thread_id: str | None) -> None:
@@ -293,72 +339,127 @@ def build_system_prompt(scope: str = "", with_memory: bool = False) -> str:
     return _render_template(AGENT_SYSTEM_PROMPT, scope or "غيرُ مُعلَن", memory)
 
 
+@dataclass
+class _ChunkContext:
+    """سياقُ النداء: قطعُ **هذا** السؤال — يمرّ إلى خطّاف التلقين **ولا يُحفظ** (R99-2).
+
+    **ولماذا في السياق لا في الحالة:** ما دخل الحالةَ دخل الحافظة؛ والقطعُ مادّةٌ لحظيّةٌ لهذا
+    النداء وحده. و`context_schema` هو ما تشحنه المكتبةُ لهذا الغرض.
+    """
+
+    chunks: str = ""
+
+
+def _chunks_prompt(base_prompt: str):
+    """خطّافُ التلقين: **قطعُ هذا السؤال** تُحقن في رسالة النظام بلا حفظ (R99-2).
+
+    **مكوّنُ LangChain لا يدٌ محليّة:** `@dynamic_prompt` يُنتج رسالةَ النظام لكلّ نداء، والقطعُ
+    تُقرأ من **سياق النداء** (`context_schema`) لا من الحالة ⇒ فلا تدخل الحافظةَ أصلًا، ولا يتراكم
+    حملُ سؤالٍ على سؤال (كانت كلُّ رسالةٍ بشريّةٍ محفوظةٍ تحمل قطعَها: السؤالُ الرابعُ ٤١٨٦ حرفًا
+    مقابل ٢٢٢٩ · و٨ قطع مقابل ٢). وبلا قطعٍ ⇒ القالبُ نفسُه بلا زيادة.
+    """
+    from langchain.agents.middleware import dynamic_prompt      # noqa: PLC0415
+
+    @dynamic_prompt
+    def _prompt(request) -> str:
+        ctx = getattr(getattr(request, "runtime", None), "context", None)
+        chunks = getattr(ctx, "chunks", "") or ""
+        if not chunks:
+            return base_prompt
+        return f"القطع المرفقة:\n{chunks}\n\nإن احتجت حساب أي رقم فاستخدم الأدوات.\n\n{base_prompt}"
+
+    return _prompt
+
+
 def _run_agent(llm, tools, system_prompt: str, user_content: str,
-               response_format=None, thread_id: str | None = None) -> tuple[str, object | None, str]:
+               response_format=None, thread_id: str | None = None,
+               chunks: str = "", remember: bool = True) -> tuple[str, object | None, str]:
     """create_agent (langchain 1.x) مع نوعٍ مُقيَّد، و**وضعٌ يُعلَن**: `typed` أو `prose`.
 
-    **والذاكرةُ هنا (قرار 98ب):** بخيطٍ (`thread_id`) ⇒ الحافظةُ تحمل رسائلَ الدورات السابقة،
-    والنافذةُ تُقصّها بأداة المكتبة قبل النداء، والساقطُ يُحذف من الحافظة **ويُسمّى بعدده** في
-    التلقين. وبلا خيطٍ ⇒ لا ذاكرة (والتلقينُ نصُّه القديم يمرّ بحرفه). ومصدرُ المعرّف **بصمةُ
-    الكشف** (`app._ledger_key` ⇒ `statement_key`) — فكشفٌ جديدٌ = محادثةٌ جديدة (R93-2).
+    **والذاكرةُ هنا (قرار 98ب · وتصحيحُ R99-1/2):** بخيطٍ (`thread_id`) تُقرأ رسائلُ الدورات
+    السابقة من الحافظة وتُمرَّر **رسائلَ** في المدخل بعد قصّها بـ`trim_messages`، والساقطُ يُسمّى
+    بعدده في التلقين. **والنداءُ نفسُه بلا حافظة** ⇒ لا يُكتب شيءٌ من المحاولة؛ والكتابةُ وحدها في
+    `_remember` عند بوّابة السؤال. وقطعُ الاسترجاع تُحقن بخطّاف `dynamic_prompt` من سياق النداء
+    فلا تُحفظ. ومصدرُ المعرّف **بصمةُ الكشف** (`app._ledger_key` ⇒ `statement_key`) — فكشفٌ جديدٌ =
+    محادثةٌ جديدة (R93-2). وبلا خيطٍ ⇒ لا ذاكرة (والتلقينُ نصُّه القديم يمرّ بحرفه).
 
     **ولا انحدارَ صامت:** نسخةٌ لا تعرف الوسيط ترفع `TypeError` ⇒ يُبنى بلا نوعٍ **ويُعلَن**
     أنّ الجواب نصّيّ (`prose`)، فلا يُقرأ لاحقًا كأنّ استشهادَه مُصرَّحٌ به. وكذلك مسارُ
     `create_react_agent` الاحتياطيّ ⇒ `prose`. **ولا نداءَ نموذجٍ هنا في الاختبار** (يُقاس ببديل).
+
+    **و`remember`:** عقدُ هذه الدالّة دورةٌ تدخل ⇒ دورةٌ تُحفظ (وهو ما تقيسه ضوابطُها). ويمرّره
+    `_answer_with_tools` بـ`False` حين يكون النداءُ **محاولةً** قد تُرفض: فالوحدةُ المحفوظةُ سؤالُ
+    المستخدم (`answer_question`)، لا نداءُ النموذج.
     """
     typed = response_format is not None
     config = {"configurable": {"thread_id": thread_id}} if thread_id else None
-    removals: list = []
+    kept: list = []
     if config is not None:
-        _kept, removals, note = _window(_thread_messages(config))
+        kept, _dropped, note = _window(_thread_messages(config))
         if note:
             system_prompt = f"{system_prompt}\n\n{note}"
+    middleware, run_context = [], None
+    if chunks:
+        middleware = [_chunks_prompt(system_prompt)]
+        run_context = _ChunkContext(chunks=chunks)
     try:
         from langchain.agents import create_agent
     except ImportError:  # pragma: no cover - depends on installed stack
         from langgraph.prebuilt import create_react_agent
 
-        agent = create_react_agent(llm, tools, prompt=system_prompt,
-                                   checkpointer=_memory() if config else None)
+        agent = create_react_agent(llm, tools, prompt=system_prompt)
         typed = False
     else:
         kw = {"model": llm, "tools": tools, "system_prompt": system_prompt,
-              "checkpointer": _memory() if config else None}
+              "middleware": middleware}
+        if middleware:
+            kw["context_schema"] = _ChunkContext
         if typed:
             kw["response_format"] = response_format
         try:
             agent = create_agent(**kw)
         except TypeError:      # نسخةٌ لا تعرف `response_format` ⇒ بلا نوع، ويُعلَن ذلك
             agent = create_agent(model=llm, tools=tools, system_prompt=system_prompt,
-                                 checkpointer=_memory() if config else None)
+                                 middleware=middleware)
             typed = False
-    res = agent.invoke({"messages": [*removals, {"role": "user", "content": user_content}]},
-                       config=config)
+    call = {"messages": [*kept, {"role": "user", "content": user_content}]}
+    res = agent.invoke(call, context=run_context) if run_context is not None else agent.invoke(call)
     parsed = res.get("structured_response") if isinstance(res, dict) else None
     if typed and parsed is not None and getattr(parsed, "answer", None):
-        return str(parsed.answer).strip(), parsed, "typed"
-    msgs = res.get("messages", []) if isinstance(res, dict) else []
-    if not msgs:
-        return "", None, "prose"
-    # **والوضعُ يوصف ما سُلِّم لا ما طُلب** (أمسكه ضابطُ النوع): إن مرّرنا الوسيطَ ولم يعد كائنٌ
-    # مُقيَّد، فالجوابُ **نثرٌ** ⇒ يُعلَن كذلك، وإلّا قُرئ استشهادُه لاحقًا كأنّه مُصرَّحٌ به وهو مُقتطع.
-    return _text(msgs[-1].content).strip(), None, "prose"
+        answer, mode = str(parsed.answer).strip(), "typed"
+    else:
+        msgs = res.get("messages", []) if isinstance(res, dict) else []
+        # **والوضعُ يوصف ما سُلِّم لا ما طُلب** (أمسكه ضابطُ النوع): إن مرّرنا الوسيطَ ولم يعد كائنٌ
+        # مُقيَّد، فالجوابُ **نثرٌ** ⇒ يُعلَن كذلك، وإلّا قُرئ استشهادُه لاحقًا كأنّه مُصرَّحٌ به وهو مُقتطع.
+        answer = _text(msgs[-1].content).strip() if msgs else ""
+        parsed, mode = None, "prose"
+    if config is not None and remember:
+        _remember(thread_id, user_content, answer)
+    return answer, parsed, mode
 
 
 def _answer_with_tools(llm, rows, context: str, question: str,
                        footers=None, thread_id: str | None = None,
-                       scope: str = "") -> tuple[str, list[dict], object | None, str]:
+                       scope: str = "", remember: bool = True) -> tuple[str, list[dict], object | None, str]:
+    """One tool-armed turn — **والسؤالُ البشريُّ هو السؤالُ وحدَه** (R99-2).
+
+    كانت القطعُ تُدمج في نصّ الرسالة البشريّة (`القطع المرفقة: … السؤال: …`) ⇒ فتُحفظ معها في
+    كلّ دورة، ويحمل السؤالُ الرابعُ قطعَ الأسئلة كلِّها (٤١٨٦ حرفًا مقابل ٢٢٢٩ · و٨ قطع مقابل ٢).
+    والآن تُمرَّر **سياقًا** إلى `_run_agent` فيُحقنها خطّافُ `dynamic_prompt` في التلقين بلا حفظ.
+
+    و`remember` يُمرَّر `False` من `_answer_one`: فالنداءُ **محاولةٌ** قد تُرفض أو تُعاد، والوحدةُ
+    المحفوظةُ سؤالُ المستخدم عند بوّابته (`answer_question`).
+    """
     from statement_qa.qa_tools import make_qa_tools
 
     trace: list[dict] = []
     tools = make_qa_tools(rows, trace=trace, footers=footers)
-    user = (f"القطع المرفقة:\n{context}\n\n"
-            f"إن احتجت حساب أي رقم فاستخدم الأدوات.\n\nالسؤال: {question}")
     # **توافقٌ خلفيّ تامّ:** بلا ذاكرةٍ ولا نطاقٍ يبقى التلقينُ نصَّه القديم بحرفه.
     system_prompt = (build_system_prompt(scope=scope, with_memory=bool(thread_id))
                      if (thread_id or scope) else AGENT_SYSTEM_PROMPT)
-    text, parsed, mode = _run_agent(llm, tools, system_prompt, user,
-                                    response_format=Answer, thread_id=thread_id)
+    text, parsed, mode = _run_agent(llm, tools, system_prompt, question,
+                                    response_format=Answer, thread_id=thread_id,
+                                    chunks=context, remember=remember)
     return text, trace, parsed, mode
 
 
@@ -509,7 +610,7 @@ def answer_question(store, question: str, rows=None, chunks=None,
         merged_unsup = sorted({n for r in results for n in (r.unsupported_citations or [])})
         merged_mode = ("typed" if any(r.citation_mode == "typed" for r in results)
                        else "prose")
-        return QAResult(
+        res = QAResult(
             answer=body,
             sources=[{k2: h[k2] for k2 in
                       ("chunk_id", "page", "row_start", "row_end")} for h in hits],
@@ -519,14 +620,23 @@ def answer_question(store, question: str, rows=None, chunks=None,
             cited_row_ids=merged_cited,
             citation_mode=merged_mode,
             unsupported_citations=merged_unsup)
-
-    return _answer_one(store, question, rows, chunks, llm, k, footers,
-                        thread_id=thread_id, scope=scope)
+    else:
+        res = _answer_one(store, question, rows, chunks, llm, k, footers,
+                          thread_id=thread_id, scope=scope)
+    # **التبادلُ المقبولُ وحدَه يُثبَّت — وسؤالُ مستخدمٍ واحدٍ = دورةٌ واحدة** (R99-1 · قرار 98ب):
+    # سؤالُ المستخدم كما سأله، والجوابُ المعروض — لا المحاولةُ المرفوضةُ ولا توجيهُ «استخدم أداة»
+    # ولا قطعُ الاسترجاع ولا نتائجُ الأدوات. وللمركّب: الجزءانِ نُوديا بلا كتابة، والكتابةُ هنا مرّةً.
+    _remember(thread_id, question, res.answer)
+    return res
 
 
 def _answer_one(store, question: str, rows, chunks, llm, k: int,
                 footers=None, thread_id: str | None = None, scope: str = "") -> QAResult:
     """One question, one answer, with its own tool trace and its own honesty.
+
+    **ولا كتابةَ ذاكرةٍ هنا** (R99-1): النداءاتُ **محاولاتٌ** — تُرفض فتُعاد بتوجيهٍ، أو يُجزَّأ
+    السؤالُ المركّبُ. ولو كتبت لأصبح لسؤالٍ واحدٍ دورتان ولبلغ الرقمُ المرفوضُ السؤالَ التالي.
+    فالكتابةُ في بوّابة السؤال (`answer_question`) وحدَها، وهي التبادلُ المقبولُ وحدَه.
 
     `footers` (R77): التذييلاتُ المطبوعةُ لكلّ صفحة — تُمرَّر إلى الأدوات فيُجيب `page_footer` عنها."""
     hits = boost_last_page(retrieve(store, question, k=k), chunks, question)
@@ -542,7 +652,8 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
         try:
             answer, trace, parsed, mode = _answer_with_tools(llm, rows, context, question,
                                                              footers=footers,
-                                                             thread_id=thread_id, scope=scope)
+                                                             thread_id=thread_id, scope=scope,
+                                                             remember=False)
             from statement_qa.qa_tools import used_rows_from_trace
 
             used = used_rows_from_trace(trace)
@@ -555,7 +666,7 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
                     llm, rows, context,
                     question + "\n\n(استخدم أداة حسابية واحدة على الأقل قبل "
                                "الجواب، ولا تحسب بنفسك.)",
-                    footers=footers, thread_id=thread_id, scope=scope)
+                    footers=footers, thread_id=thread_id, scope=scope, remember=False)
                 used2 = used_rows_from_trace(trace2)
                 if used2 or _tool_was_used(trace2):
                     answer, used = answer2, used2

@@ -118,12 +118,14 @@ def test_the_printed_footer_reaches_the_tools_through_the_real_call_chain(monkey
     monkeypatch.setattr(qa, "format_hits", lambda hits: "")
 
     def _fake_agent(llm, tools, system_prompt, user_content, response_format=None,
-                    thread_id=None):
+                    thread_id=None, **_kw):
         # الوكيلُ الحقيقيّ يُعيد **النصَّ** وحدَه؛ والأثرُ يلتقطه `make_qa_tools` بنفسه
         # (وأداةُ التذييل تسجّل استدعاءَها بأرقام صفوفٍ فارغة) ⇒ فالمسارُ المُقاس هو مسارُ الإنتاج.
         # **والتوقيعُ تغيّر بـأ-٤** (`response_format=` وثلاثيّةٌ تُعلن الوضع): فالبديلُ يتبع العقدَ
         # الجديد ويُعلن «prose» — ولو تُرك على القديم لأخذ `TypeError` **ابتلعه** `except Exception`
         # في `_answer_one`، فظهر العطبُ بعيدًا عن سببه (قِيس) — وهو ثمنُ الالتقاط الواسع.
+        # **ثمّ تغيّر ثانيةً بـR99** (`chunks=` سياقُ الاسترجاع · `remember=` كتابةُ الذاكرة):
+        # أُضيف `**_kw` اتباعًا للعقد لا استثناءً منه — والصنفُ نفسُه: البديلُ يتبع التوقيعَ الحيّ.
         return {t.name: t for t in tools}["page_footer"].invoke({"page": 5}), None, "prose"
 
     monkeypatch.setattr(qa, "_run_agent", _fake_agent)

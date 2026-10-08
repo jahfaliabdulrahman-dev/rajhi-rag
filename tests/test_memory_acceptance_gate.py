@@ -120,3 +120,67 @@ def test_a_new_read_starts_a_clean_conversation(chat) -> None:
     app._process_pdf_locked(str(SAMPLE), progress=lambda *_a, **_k: None)
     ask([], Q2)
     assert not any(Q1 in _text(m) for m in rec.calls[-1]), "سؤالُ القراءة السابقة بلغ النموذج"
+
+
+#: سؤالٌ رقميٌّ: `needs_tools` يطلبه ⇒ بلا استدعاء أداةٍ يعرض التطبيقُ رفضًا ولا يعرض رقمًا.
+NUMERIC_Q = "كم مجموع الحركات في الصفحة ١؟"
+
+
+def test_a_refused_number_does_not_reach_the_next_call(chat) -> None:
+    """**R99-1 (P2 · مراجعة ٩٩ · الإصلاحُ بطلب المالك):** الذاكرةُ تحفظ **ما عُرض** لا ما قاله النموذج.
+
+    سؤالٌ رقميٌّ يُجاب بلا أداةٍ ⇒ يعرض التطبيقُ رفضًا (لا رقم)، والمطلوبُ أنّ **الرقمَ المرفوضَ
+    لا يبلغ نداءَ السؤال التالي** — لا المحاولةُ المرفوضةُ ولا نصُّ توجيه «استخدم أداة» يُحفظان.
+    و**سؤالُ المستخدم الواحد ⇒ دورةٌ واحدة** (المحفوظُ: السؤالُ كما سأله + الجوابُ المعروض).
+    """
+    from statement_qa import qa
+
+    app, rec, ask = chat
+    h = ask([], NUMERIC_Q)                       # محاولةٌ بلا أداةٍ ⇒ رفضٌ معروض
+    assert "لم أستطع" in h[-1]["content"], f"التطبيقُ لم يعرض رفضًا: {h[-1]['content'][:60]}"
+    assert REFUSED not in h[-1]["content"], "التطبيقُ عرض رقمًا لم يُحسَب"
+
+    ask(h, Q2)                                   # سؤالٌ تابعٌ على الخيط نفسه
+    seen = "\n".join(_text(m) for m in rec.calls[-1])
+    assert REFUSED not in seen, \
+        "الرقمُ المرفوضُ بلغ نداءَ السؤال التالي — الذاكرةُ حفظت ما قاله النموذجُ لا ما عُرض"
+
+    stored = qa._thread_messages({"configurable": {"thread_id": app._ledger_key()}})
+    humans = [str(m.content) for m in stored if m.type == "human"]
+    assert humans == [NUMERIC_Q, Q2], \
+        f"سؤالُ مستخدمٍ واحد ⇒ دورةٌ واحدة، والمحفوظُ السؤالُ كما سأله: {humans}"
+    assert all("استخدم أداة" not in str(m.content) for m in stored), \
+        "توجيهُ «استخدم أداة» حُفظ في الذاكرة — وهو محاولةٌ لا تبادل"
+
+
+def test_each_question_carries_only_its_own_chunks(chat, monkeypatch) -> None:
+    """**R99-2 (P2 · مراجعة ٩٩ · الإصلاحُ بطلب المالك):** قطعُ الاسترجاع **لا تُحفظ**.
+
+    كانت كلُّ رسالةٍ بشريّةٍ محفوظةٍ تحمل قطعَ سؤالها ⇒ فالسؤالُ الرابعُ يحمل قطعَ الأسئلة كلِّها
+    (٤١٨٦ حرفًا مقابل ٢٢٢٩ · و٨ قطع مقابل ٢). والآن تُحقن قطعةُ **هذا** السؤال في التلقين بخطّاف
+    `dynamic_prompt` من سياق النداء، ولا تبلغ الحالة.
+
+    **والقياسُ على «قطعِ سؤاله وحدَه»** لا على «القطعِ لا تتراكم»: الاسترجاعُ في هذا الضابط
+    **يُعلّم كلَّ قطعةٍ بسؤالها** ⇒ قطعةُ سؤالٍ سابقٍ **تُسمّى** فغيابُها دليلٌ لا صمت.
+    """
+    from statement_qa import qa
+
+    app, rec, ask = chat
+    monkeypatch.setattr(qa, "retrieve", lambda _s, q, k=4: [
+        {"chunk_id": f"c-{len(q)}", "page": 1, "row_start": 1, "row_end": 1,
+         "text": f"قطعةُ السؤال: {q}", "score": 0.0}])
+
+    qs = ["سؤالٌ أوّل ١", "سؤالٌ ثانٍ ٢", "سؤالٌ ثالث ٣"]
+    h = []
+    for q in qs:
+        h = ask(h, q)
+    seen = "\n".join(_text(m) for m in rec.calls[-1])
+    assert f"قطعةُ السؤال: {qs[-1]}" in seen, "قطعُ السؤال الحاليّ لم تُحقن في النداء"
+    for older in qs[:-1]:
+        assert f"قطعةُ السؤال: {older}" not in seen, \
+            f"قطعةُ سؤالٍ سابق («{older}») بلغت النداء الثالث — فالقطعُ تُحفظ وتتراكم"
+
+    stored = qa._thread_messages({"configurable": {"thread_id": app._ledger_key()}})
+    assert len(stored) == 2 * len(qs), f"دوراتٌ غيرُ متوقّعة في الحافظة: {len(stored)}"
+    assert all("قطعةُ السؤال" not in str(m.content) for m in stored), \
+        "قطعُ الاسترجاع دخلت الحافظة — والمحفوظُ السؤالُ وحدَه"
