@@ -51,9 +51,13 @@ class _Agent:
     def __init__(self, payload):
         self.payload = payload
 
-    def invoke(self, _msgs, config=None):
+    def invoke(self, _msgs, config=None, context=None):
         # **التوقيعُ يتبع العقد الجديد** (سابقةُ هذه الحيلة في `test_qa_footer_tool`): `_run_agent`
         # يمرّر `config=` (معرّفَ الخيط — قرار 98ب) ⇒ البديلُ يقبله ولا يكسر بـ`TypeError`.
+        # **ثمّ `context=` بـR99** (سياقُ النداء يحمل قطعَ هذا السؤال إلى خطّاف `dynamic_prompt`):
+        # و`_answer_with_tools` يمرّر القطعَ دائمًا (ولو فارغةً ليحمل التلقينُ سطرَ «استخدم الأدوات»)
+        # ⇒ فالبديلُ يقبل الوسيطَين اتباعًا للعقد، وإلّا فسقط بـ`TypeError` التقطه `except Exception`
+        # في `_answer_one` فظهر العطبُ بعيدًا عن سببه — وهو ثمنُ الالتقاط الواسع (قِيس مرّتين).
         return self.payload
 
 

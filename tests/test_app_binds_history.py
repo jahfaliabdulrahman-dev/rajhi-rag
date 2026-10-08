@@ -27,14 +27,25 @@ def _fn(name: str) -> ast.FunctionDef:
 
 
 def test_the_ui_passes_the_memory_key_and_scope_to_the_agent() -> None:
-    """**المُدخَلُ يصل:** نداءُ `answer_question` في `ask_followup` يحمل المفتاحَ والنطاق صراحةً."""
+    """**المُدخَلُ يصل:** نداءُ `answer_question` في `ask_followup` يحمل المفتاحَ والنطاق صراحةً.
+
+    **والكتابةُ عند بوّابة العرض (R99 · وتصحيحُ مقعد المواصفة):** `remember` تُنادى هناك — والواجهةُ
+    وحدَها تعرف **ما عرضته للمستخدم** (براياتِ `render.answer_text`)، فالمحفوظُ هو المعروضُ لا نصُّ
+    النموذج. ويُقاس بالـAST هنا (بلا `gradio`) فلا يبقى موضعُ الكتابة الواحد دعوى في ملفٍّ يتخطّاه الـCI.
+    """
+    fn = _fn("ask_followup")
     call = None
-    for node in ast.walk(_fn("ask_followup")):
-        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "answer_question":
-            call = node
+    called: set[str] = set()
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Call):
+            called.add(getattr(node.func, "id", ""))
+            if getattr(node.func, "id", "") == "answer_question":
+                call = node
     assert call is not None, "الواجهةُ لا تنادي answer_question إطلاقًا"
     kwargs = {k.arg for k in call.keywords}
     assert {"thread_id", "scope"} <= kwargs, f"مُدخَلٌ ناقص: {sorted(kwargs)} — الوكيلُ يُسأل بلا ذاكرة"
+    assert "remember" in called, \
+        "الواجهةُ لا تحفظ التبادلَ (`remember`) — فلا موضعَ كتابةٍ للذاكرة في أيّ مكان"
 
 
 def test_the_current_question_is_not_fed_back_as_history() -> None:

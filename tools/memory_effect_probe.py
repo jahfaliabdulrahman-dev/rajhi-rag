@@ -61,7 +61,10 @@ def main() -> int:
     llm = qa.build_llm()
     before = _usage()
     qa.clear_conversation(tid)                                   # نقاءُ المسبار: لا سجلٌّ من تشغيلٍ سابق
-    qa._answer_with_tools(llm, rows, ctx, "ما عدد الحركات في الصفحة ١؟", thread_id=tid)  # دورةٌ أولى
+    # **والكتابةُ صريحةٌ (R99):** `_answer_with_tools` صار يقرأ ولا يكتب — الكتابةُ `qa.remember`
+    # كما في الإنتاج (`app.ask_followup`)، فالذراعُ ذو الخيط يبدأ بسؤالٍ حقيقيّ محفوظٍ ثمّ يأتي التابع.
+    first = qa._answer_with_tools(llm, rows, ctx, "ما عدد الحركات في الصفحة ١؟", thread_id=tid)[0]
+    qa.remember(tid, "ما عدد الحركات في الصفحة ١؟", first)
     with_mem = qa._answer_with_tools(llm, rows, ctx, question, thread_id=tid)[0]
     without = qa._answer_with_tools(llm, rows, ctx, question)[0]
     time.sleep(8)

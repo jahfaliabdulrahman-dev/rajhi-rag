@@ -1194,19 +1194,26 @@ def ask_followup(history):
         history.append({"role": "assistant",
                         "content": "ارفع الكشف في تبويب «قراءة وتحقق» أولاً."})
         return history, "", pd.DataFrame(), _hide_note()
-    from statement_qa.qa import answer_question
+    from statement_qa.qa import answer_question, remember
 
     # **والذاكرةُ في مكوّنها (قرار 98ب · شرط ١ و٢):** السجلُّ **رسائلُ** خيطٍ في الحافظة بمعرّف
     # الكشف (`_ledger_key` = بصمةُ الكشف — ومصدرُها واحدٌ مع مفتاح الدفتر)، والنطاقُ يُسمّى.
     # و`history_pairs` **محذوفة** (لا طريقان) — فالمُدخلُ الوحيدُ للنموذج سؤالُ هذه اللحظة.
+    # **والنموذجُ لا يكتب الذاكرة** (R99-1): نداؤه بلا حافظة، والكتابةُ وحدَها هنا في `remember`.
     res = answer_question(STATE["store"], q, rows=STATE.get("rows"),
                           chunks=STATE.get("chunks"), footers=STATE.get("footers"),
                           thread_id=_ledger_key(), scope=_scope_text())
     rows_now = STATE.get("rows") or []
     page_of = {i + 1: r.get("page") for i, r in enumerate(rows_now)}
     verdicts = STATE.get("verdicts") or {}
-    history.append({"role": "assistant",
-                    "content": render_answer_text(res, page_of, verdicts)})
+    displayed = render_answer_text(res, page_of, verdicts)
+    history.append({"role": "assistant", "content": displayed})
+    # **والحفظُ عند بوّابة العرض — موضعُ الكتابة الواحد** (R99-1 · قرار 98ب · تصحيحُ مقعد المواصفة):
+    # تُحفظ **التبادلَ المقبولَ وحدَه**: سؤالُ المستخدم كما سأله، و**الجوابَ المعروضَ** بحرفه —
+    # وبراياتِه التي تُضاف هنا (تعذُّرُ الأدوات · «رقمٌ بلا شاهد»). فالمحفوظُ = ما رآه المستخدم
+    # بالبناء، لا نصُّ النموذج ثمّ يُعرض غيرُه. ووحدتُه سؤالُ المستخدم ⇒ **دورةٌ واحدةٌ** لكلّ سؤال
+    # (لا المحاولةَ المرفوضة، ولا نصفَ سؤالٍ مركّب، ولا توجيهَ «استخدم أداة»).
+    remember(_ledger_key(), q, displayed)
     sources_md = "\n".join(
         f"- {s['chunk_id']} (صفحة {s['page']}، صفوف {s['row_start']}–{s['row_end']})"
         for s in res.sources)

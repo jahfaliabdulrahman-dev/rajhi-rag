@@ -100,18 +100,24 @@ def _ask(**kw):
 
 def test_the_previous_turn_reaches_the_model_as_messages() -> None:
     """**الدعوى الحاكمة (شرط ١):** السجلُّ السابق يبلغ النموذجَ **رسائلَ** — لا نصًّا داخل
-    التعليمات. والقياسُ عند مدخل النموذج نفسه (البديلُ المسجِّل) لا عند نية الكاتب."""
+    التعليمات. والقياسُ عند مدخل النموذج نفسه (البديلُ المسجِّل) لا عند نية الكاتب.
+
+    **والكتابةُ صريحةٌ هنا** (R99 · عقدٌ جديد): `_run_agent` صار **يقرأ ولا يكتب** — الكتابةُ
+    الوحيدةُ `qa.remember` تُناديها الواجهةُ بما عرضته. فالضابطُ يكتب كما يكتب الإنتاج.
+    """
     llm = _Recorder()
     sp = build_system_prompt(scope="كشفُ الاختبار")
-    qa._run_agent(llm, [], sp, "كم عدد الحركات في الصفحة ١؟", thread_id="t-reach")
+    q1 = "كم عدد الحركات في الصفحة ١؟"
+    qa._run_agent(llm, [], sp, q1, thread_id="t-reach")
+    qa.remember("t-reach", q1, "الجواب")
     qa._run_agent(llm, [], sp, Q, thread_id="t-reach")
     msgs = llm.calls[-1]
     joined = "\n".join(_texts(msgs))
-    assert "كم عدد الحركات في الصفحة ١؟" in joined, "السؤالُ السابقُ لم يبلغ النموذج"
+    assert q1 in joined, "السؤالُ السابقُ لم يبلغ النموذج"
     assert "الجواب" in joined, "الجوابُ السابقُ لم يبلغ النموذج (رسائلُ لا نصّ)"
     assert Q in joined, "السؤالُ الحاليُّ لم يبلغ النموذج"
     assert "كشفُ الاختبار" in _system(msgs), "النطاقُ لم يبلغ التلقين"
-    assert "كم عدد الحركات" not in _system(msgs), \
+    assert q1 not in _system(msgs), \
         "السجلُّ عاد نصًّا داخل التعليمات — والشرط ١: رسائلُ لا نصّ"
 
 
@@ -122,6 +128,7 @@ def test_the_window_keeps_three_turns_and_names_the_drop() -> None:
     tid = "t-window"
     for i in range(MEMORY_TURNS + 3):
         qa._run_agent(llm, [], build_system_prompt(), f"س{i}", thread_id=tid)
+        qa.remember(tid, f"س{i}", "الجواب")      # الكتابةُ صريحةٌ (R99: `_run_agent` يقرأ ولا يكتب)
     msgs = llm.calls[-1]
     humans = _human(msgs)
     assert humans == [f"س{i}" for i in (2, 3, 4, 5)], \
@@ -165,6 +172,7 @@ def test_a_new_statement_wipes_the_conversation() -> None:
     llm = _Recorder()
     tid = "t-wipe"
     qa._run_agent(llm, [], build_system_prompt(), "سؤالٌ سابق", thread_id=tid)
+    qa.remember(tid, "سؤالٌ سابق", "جوابٌ سابق")     # الكتابةُ صريحةٌ (R99)
     qa.clear_conversation(tid)
     qa._run_agent(llm, [], build_system_prompt(), "سؤالٌ جديد", thread_id=tid)
     msgs = llm.calls[-1]

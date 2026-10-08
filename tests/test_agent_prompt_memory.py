@@ -13,10 +13,14 @@
 
 from __future__ import annotations
 
+import ast
+import pathlib
 import socket
 
 from statement_qa.qa import (AGENT_SYSTEM_PROMPT, MEMORY_TURNS, _memory_note,
                              build_system_prompt)
+
+QA_SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "statement_qa" / "qa.py"
 
 
 def test_the_template_renders_its_variables_and_declares_the_scope() -> None:
@@ -42,16 +46,35 @@ def test_the_memory_window_is_bounded_and_the_drop_is_declared() -> None:
 
 
 def test_the_wiring_is_backward_compatible() -> None:
-    """**توافقٌ خلفيّ:** بلا ذاكرةٍ ولا نطاقٍ ⇒ التلقينُ نصُّه القديم بحرفه (فلا سلوكَ يتبدّل)."""
+    """**توافقٌ خلفيّ:** بلا ذاكرةٍ ولا نطاقٍ ⇒ التلقينُ نصُّه القديم بحرفه (فلا سلوكَ يتبدّل).
+    **وموضعُ الكتابة الواحد** يُقاس هنا بالـAST — وهو **الحرسُ الوحيدُ لهذه الدعوى في الـCI**:
+
+    ملفُّ ضوابط الذاكرة السلوكيّة (`test_the_memory_reaches_the_model.py`) وضابطُ القبول
+    (`test_memory_acceptance_gate.py`) يحتاجان `langchain`+`gradio`، وخطوةُ الـCI الخفيفة
+    تُعلن «no ML deps» ⇒ **تتخطّى هناك**. فهذا الضابطُ لا يستورد شيئًا ثقيلًا (‏`ast` وحدَه)،
+    ويمنع بصمتٍ عودةَ الصنف الذي فتحته R99: عَلَمُ `remember=True` في التواقيع ⇒ نداءٌ مباشرٌ
+    يكتب **نصَّ النموذج** قبل أيّ بوّابة (قِيس: خزّن الرقمَ المرفوضَ نفسَه).
+    """
     assert build_system_prompt(scope="نطاق") != AGENT_SYSTEM_PROMPT, "بالنطاق يُبنى القالبُ الموسَّع"
     # والقرارُ في موضع التوصيل: `thread_id or scope` — يُقاس بالنصّ الحرفيّ في الوحدة
-    import pathlib
-    src = pathlib.Path(__file__).resolve().parents[1] / "src" / "statement_qa" / "qa.py"
-    text = src.read_text(encoding="utf-8")
+    text = QA_SRC.read_text(encoding="utf-8")
     assert "if (thread_id or scope) else AGENT_SYSTEM_PROMPT" in text, "شرطُ التوافق الخلفيّ غائب"
     # **ولا طريقان (قرار 98ب):** الدالّةُ اليدويّةُ لا تعود بأيّ اسم.
     assert "def format_history" not in text and "def history_pairs" not in text, \
         "الدالّةُ اليدويّةُ رجعت — والسجلُّ صار رسائلَ لا نصًّا"
+    # **والنداءُ لا يكتب ذاكرة (R99):** لا عَلَمَ `remember` في التواقيع، ولا نداءَ لها من دالّات
+    # النداء/الجواب. والكاتبُ الوحيدُ `remember` — تُناديها الواجهةُ بما عرضته (يُقاس في
+    # `test_app_binds_history`). فمن أعاد العَلَمَ الافتراضيّ يُسقط هذا الضابطَ باسمه.
+    fns = {n.name: n for n in ast.parse(text).body if isinstance(n, ast.FunctionDef)}
+    for name in ("_run_agent", "_answer_with_tools", "answer_question"):
+        fn = fns.get(name)
+        assert fn is not None, f"{name} غابت — العقدُ تغيّر بلا إعلان"
+        params = {a.arg for a in (*fn.args.args, *fn.args.kwonlyargs)}
+        assert "remember" not in params, \
+            f"{name} ما زالت تحمل عَلَمَ `remember` — والكتابةُ موضعٌ واحدٌ بأمر الواجهة"
+        called = {getattr(c.func, "id", "") for c in ast.walk(fn) if isinstance(c, ast.Call)}
+        assert "remember" not in called, \
+            f"{name} تكتب الذاكرةَ — والكاتبُ الوحيدُ `remember` عند بوّابة العرض"
 
 
 def test_no_network_in_the_prompt_path() -> None:
