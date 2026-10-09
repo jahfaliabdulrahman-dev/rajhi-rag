@@ -337,6 +337,15 @@ def claims(d: dict) -> list[tuple[str, str, str]]:
         # على الوثيقة بصيغتها المنشورة، والانزياحُ يُحمرّ البوّابةَ.
         *[("docs/QA_CHECKLIST.md", f"⇒ **{v}**", f"قيمةُ بيئة `{e}` المنشورة")
           for e, v in sorted(_env_values(d).items())],
+        # **ونتائجُ R-1 (غلقُ مقعد المعايير F1 · 2026-10-09):** كان الرقمُ البيئيُّ في هاتين الوثيقتين
+        # **بلا حارس** ⇒ تقادم بصمتٍ حين تحرّكت `ci-light` بطلب المالك (P-2)، وفي الشجرة الواحدة
+        # «نسختان من الحقيقة». والقرارُ المُتَّخذ: **ناقلٌ محروس** لا حذفُ الرقم — فيُربَط كلُّ موضعٍ
+        # بصيغته المنشورة نفسِها، وانزياحُ أيٍّ منها يُسقط البوّابةَ بالاسم (`test_public_claims`).
+        ("docs/DELIVERY_REPORT.md", f"**{_env_values(d).get('ci-light')} · {_env_values(d).get('ci-claims')}**",
+         "قيمتا بيئتَي الـCI في التقرير (§١٦ و§١٧)"),
+        ("docs/COURSE_REQUIREMENTS.md",
+         f"({d['tests']} · {_env_values(d).get('ci-light')} · {_env_values(d).get('ci-claims')})",
+         "قيمُ البيئات الثلاث في متطلّبات المشروع (§٧)"),
         # The ABOUT screen said «about 1.6% of 629 pages» long after the project
         # accounted for every page: the number a stranger reads first had no
         # guard at all (external audit).
