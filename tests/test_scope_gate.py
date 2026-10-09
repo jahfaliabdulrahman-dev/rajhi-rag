@@ -170,7 +170,7 @@ def test_an_ungrounded_numeric_answer_is_labelled_and_unpanelled():
         ungrounded = True
 
     text = render.answer_text(_Res(), {}, {})
-    assert text.startswith("⚠ سؤال رقمي بلا أي استدعاء أداة")
+    assert text.startswith("⚠ جوابٌ يحمل أرقامًا بلا أي استدعاء أداة")
     assert "12,345.00" in text                      # kept, labelled
     assert render.evidence_mode(_Res()) == "none"   # and no evidence shown
 

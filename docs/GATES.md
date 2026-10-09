@@ -87,6 +87,7 @@ tests/test_ledger.py
 tests/test_ledger_ui.py
 tests/test_ledger_search_reach.py
 tests/test_answer_type.py
+tests/test_scope_gate.py
 tests/test_date_encoding_filter.py
 tests/test_agent_prompt_memory.py
 tests/test_app_binds_history.py

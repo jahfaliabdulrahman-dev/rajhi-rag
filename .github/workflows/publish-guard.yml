@@ -95,6 +95,11 @@ jobs:
           # بقرار المالك** («بلا `gradio`») ⇒ فالحدُّ يبقى قائمًا هناك، ويحرسه هنا ضابطُ البنية بالـAST
           # (`test_agent_prompt_memory::test_the_wiring_is_backward_compatible` يقيس موضعَ الكتابة الواحد
           # وغيابَ عَلَم `remember`) — وهو لا يستورد شيئًا ثقيلًا.
+          # **وملفُّ بوّابةِ نصّ التحذير دخل القائمة (R105-1 · مراجعة ١٠٥):** يحرس النصَّ الذي يراه
+          # المستخدم، وقد تغيّر نصُّه (صار يصف حالَه: «جوابٌ يحمل أرقامًا») وبقي الضابطُ يطلب القديم ⇒
+          # فكان أحمرَ في شجرة المالك **وأخضرَ هنا** لأنّ الملفَّ لم يكن في هذه القائمة. **واسمُ مساره
+          # لا يُكتب في هذا التعليق** (قارئُ القائمة يستخرج المسارات من نصّ الملفّ كلِّه — ومنه التعليقات
+          # ⇒ فذكرُ مسارٍ هنا يُقرأ إدراجًا) — وهو في سطور التشغيل أدناه وحدَها.
           python3 -m pip install --quiet "pytest==9.1.1" openpyxl==3.1.5 PyYAML==6.0.3 \
                                       "numpy==2.4.6" "pillow==12.3.0" \
                                       "langchain==1.4.0" "langchain-core==1.6.3" "langgraph==1.2.11"
@@ -131,6 +136,7 @@ jobs:
                            tests/test_ledger_ui.py \
                            tests/test_ledger_search_reach.py \
                            tests/test_answer_type.py \
+                           tests/test_scope_gate.py \
                            tests/test_date_encoding_filter.py \
                            tests/test_agent_prompt_memory.py \
                            tests/test_app_binds_history.py \
