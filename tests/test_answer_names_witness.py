@@ -265,8 +265,8 @@ NON_ANSWER_FILES_SINCE_RULE = {
     # **وجولةُ R104 (بكلمة المالك · مراجعة ١٠٤):** الخطةُ والطلبُ المدفوع يُسمَّيان في الالتزام نفسه.
     "handoff/sulaiman/20261010-0900-PLAN-r104-the-gate-reads-the-answer-and-the-two-arm-experiment.md":
         "خطةُ R104 (البوّابةُ تقرأ الجواب · R104-2 · تجربةُ الذراعين بسقف $0.05) — لا تُجيب حُكماً",
-    "handoff/sulaiman/20261010-0900-request-REQ-104-01-the-two-armed-experiment-on-four-questions.md":
-        "طلبٌ مدفوع (REQ-104-01: ٢٤ طرحًا على ذراعَي القاعدة ٣ · سقفُ $0.05) — لا يُجيب حُكماً",
+    "handoff/sulaiman/20261010-0052-request-REQ-104-01-the-two-armed-experiment-on-four-questions.md":
+        "طلبٌ مدفوع (REQ-104-01: ٢٤ طرحًا على ذراعَي جملةِ القاعدة (صياغتان لا يفترقان إلّا بها) · سقفُ $0.05) — لا يُجيب حُكماً",
 }
 #: وأصنافُها مذكورةٌ **في القاموس نفسِه** (`NON_ANSWER_FILES_SINCE_RULE` — البند ٦) لا في تعليقٍ ثانٍ.
 #: **ومُخاطَبٌ واحدٌ هبط بالقاعدة، وهو صنفٌ مُعلَنٌ بالاسم:** `20260925-0723-REPORT-to-claude-r13-…`
