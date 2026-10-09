@@ -74,21 +74,24 @@ jobs:
           git diff --exit-code -- docs/claims.json || {
             echo "⛔ اللقطةُ لا تطابق قياسَ بيئة هذه الخطوة (ci-claims) ⇒ خُذ القيمةَ من الفرق أعلاه."; exit 1; }
           python3 tools/render_claims.py --check
-      - name: Lightweight suite (no ML deps — compile, lock, public claims, gate injection)
+      - name: Lightweight suite (no ML deps — compile, lock, public claims, gate injection, memory)
         id: gate_suite
         run: |
           # **وتبعيّاتُ الخطوة مثبَّتةٌ من `requirements.lock` (R72-1 · الشقّ (ب) · مراجعة ٧٢):**
           # `numpy` و`Pillow` أُضيفتا ليُشغَّل هنا حرّاسُ قراءة البيان الثلاثة، وهما ليستا من تعلّم
           # الآلة ⇒ فاسمُ الخطوة «no ML deps» يبقى صادقًا (وهو الاعتراضُ الذي أجابته مراجعة ٧٢ في موضعه).
-          # **وحدُّ هذه الخطوة مُعلَن (R99 · مقعدُ المعايير):** «no ML deps» تعني أنّ البيانَ القائم هنا
-          # لا يثبّت `langchain`/`langgraph`/`gradio` ⇒ **كلُّ ضابطِ ذاكرةٍ سلوكيّ يتخطّى في هذه الخطوة**
-          # (`test_the_memory_reaches_the_model.py` و`test_memory_acceptance_gate.py` — والثاني غيرُ
-          # مُدرَجٍ أصلًا). فدعوى الذاكرة يحرسها هنا **ضابطُ البنية بالـAST** فقط
+          # **وحدُّ الذاكرة تحرّك (P-2 · بكلمة المالك 2026-10-09 · توصيةُ مراجعة ١٠٠):** كان البيانُ هنا
+          # بلا `langchain`/`langgraph` ⇒ **كلُّ ضابطِ ذاكرةٍ سلوكيّ يتخطّى**. والآن يُثبَّتان فيصيران
+          # يعملان على GitHub لا في جهاز المالك وحده: `test_the_memory_reaches_the_model.py` (**٦**
+          # اختبارات كانت تتخطّى) و`test_money_string_fields.py` (**٤**) ⇒ **+١٠** في هذه البيئة.
+          # **والباقي خارجَ هذه الخطوة مُعلَنٌ باسمه لا مُضمَرٌ:** `test_memory_acceptance_gate.py`
+          # (ضابطا R99-1/R99-2 على الـfixture «chat») يستورد الواجهة ⇒ يحتاج `gradio`، وهو **مستبعَدٌ
+          # بقرار المالك** («بلا `gradio`») ⇒ فالحدُّ يبقى قائمًا هناك، ويحرسه هنا ضابطُ البنية بالـAST
           # (`test_agent_prompt_memory::test_the_wiring_is_backward_compatible` يقيس موضعَ الكتابة الواحد
-          # وغيابَ عَلَم `remember`) — وهو لا يستورد شيئًا ثقيلًا. وثمنُ إثبات الدعوى سلوكيًّا هنا هو
-          # إدخالُ `langchain`+`langgraph` في هذه الخطوة (تغييرُ بيئةٍ مُعلَنة ⇒ يُعرض على المالك).
+          # وغيابَ عَلَم `remember`) — وهو لا يستورد شيئًا ثقيلًا.
           python3 -m pip install --quiet "pytest==9.1.1" openpyxl==3.1.5 PyYAML==6.0.3 \
-                                      "numpy==2.4.6" "pillow==12.3.0"
+                                      "numpy==2.4.6" "pillow==12.3.0" \
+                                      "langchain==1.4.0" "langchain-core==1.6.3" "langgraph==1.2.11"
           python3 -m pytest tests/test_compile_all.py \
                            tests/test_requirements_lock.py \
                            tests/test_public_claims.py \
