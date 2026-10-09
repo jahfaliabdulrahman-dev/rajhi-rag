@@ -232,3 +232,32 @@ def test_a_failed_tool_path_carries_no_type_and_no_citation(monkeypatch):
     assert res.citation_mode == "prose" and res.cited_row_ids == [], (
         f"جوابٌ بلا أثرِ أداةٍ حمل نوعًا أو استشهادًا: {res.citation_mode} · {res.cited_row_ids}")
     assert res.unsupported_citations == []
+
+
+def test_a_compound_question_carries_its_parts_tool_names(monkeypatch):
+    """**R104-1 · P1 (قاسه مقعدا المواصفة والبنية):** جمعُ الأجزاء كان يبني `QAResult` المُدمَج
+    بـ`used_row_nos` وحدَها **ويُسقِط `tools_used`** ⇒ فسؤالٌ مركّبٌ (وهو نصفُ أسئلة الحزمة، ومنها
+    `chn-03` و`chn-04` في تجربة R104) يُسجَّل «بلا أدوات» أيًّا كان ما استدعاه النموذج — وهو **عينُ ما
+    وُلد الحقلُ لفصله** («صفرُ صفوف» ≠ «لا نداء»).
+
+    **وما يقيسه:** سؤالٌ مركّبٌ جزآن، كلٌّ استدعى أداةً ⇒ الأسماءُ تجتمع في النتيجة المُدمَجة. ولو أُسقِط
+    الدمجُ لسقط الضابط (وهو نقصٌ مُثبتٌ في شجرة R104 قبل الإصلاح).
+    """
+    rows = [{"row_no": i, "page": 1, "printed_page": 1, "desc": f"سطر {i}", "date": "2026-01-01",
+             "movement": "10.00", "side": "debit", "balance": "10.00", "printed_movement": "10.00",
+             "printed_balance": "10.00", "counted": 1, "row_state": "عادي", "source": "طباعة"}
+            for i in range(1, 6)]
+    calls = {"n": 0}
+
+    def fake(store, part, rows_, chunks, llm, k, footers=None, thread_id=None, scope=""):
+        calls["n"] += 1
+        return q.QAResult(answer=f"جزءٌ {calls['n']}", sources=[], used_row_nos=[calls["n"]],
+                         tools_used=["row_chain"] if calls["n"] == 1 else ["page_footer"])
+
+    monkeypatch.setattr(q, "_answer_one", fake)
+    assert len(q.split_compound("هل يتّصل الرصيد؟ وما مجموع المدين؟")) > 1, "المِثالُ ليس مركّبًا"
+    res = q.answer_question(store=_Store(), question="هل يتّصل الرصيد؟ وما مجموع المدين؟", rows=rows,
+                            chunks=None, llm=object(), k=2, footers=None)
+    assert sorted(res.tools_used) == ["page_footer", "row_chain"], \
+        f"أسماءُ أجزاء السؤال المركّب غابت أو ضاعت: {res.tools_used}"
+    assert res.used_row_nos == [1, 2], res.used_row_nos
