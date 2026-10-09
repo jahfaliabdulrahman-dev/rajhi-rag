@@ -230,49 +230,24 @@ def test_the_questions_chunks_reach_the_model_and_not_the_human_turn() -> None:
         f"القطعةُ بلغت الرسالةَ البشريّة (تُحفظ مع السجلّ): {_human(msgs)}"
 
 
-def test_the_static_prompt_equals_what_the_deleted_hook_produced() -> None:
-    """**شاهدُ دعوى التطابق البايتيّ:** «التلقينُ مطابقٌ بايتًا لما كان الخطّافُ يُنتجه» كانت دعوى
-    بلا ضابطٍ مُلتزَم ولا رقمٍ يُعيدها (قاسه مقعدا المعايير والبنية). فيُبنى الخطّافُ **فرضيّةً داخل
-    الاختبار** (لا كودَ إنتاج — فقد حُذف بطلب المالك) ويُقاس التلقينُ **عند مدخل النموذج** في الحالتين.
+def test_the_fallback_path_carries_the_same_fence() -> None:
+    """**P-A (بكلمة المالك):** صيغةُ القطع **موضعٌ واحد** — ومسارُ السقوط الأخير يحمل السياجَ نفسَه.
 
-    **والقاعدةُ التي يحرسها:** حذفُ مفهومٍ لا يكون تصحيحًا إلّا إذا كان **صفرَ أثر** — ويُقاس بمساواة
-    ما يراه النموذج، لا بتشابهِ نيّة الكاتب.
+    كان `_answer_plain` يبني القطعَ في **الرسالة البشريّة** بلا سياجٍ وبـ`SYSTEM_PROMPT` الخامّ ⇒ موضعان
+    لصيغةٍ واحدة يفترقان (قاسه مقعدُ البنية، وسمّاه المدقّق). والسقوطُ الأخير هو ما يُنادى حين يعود
+    الجوابُ فارغًا — ومسارٌ نادرٌ لا يعني نصَّ كشفٍ بلا إعلان أنّه بيانات.
     """
-    from dataclasses import dataclass
-
-    from langchain.agents import create_agent
-    from langchain.agents.middleware import dynamic_prompt
-
-    @dataclass
-    class _Ctx:                       # فرضيّةُ الاختبار: شكلُ سياق النداء الذي كان يحمله الخطّاف
-        chunks: str = ""
-
-    def _hook(base: str):
-        @dynamic_prompt
-        def _prompt(request) -> str:
-            ctx = getattr(getattr(request, "runtime", None), "context", None)
-            return qa._with_context(base, getattr(ctx, "chunks", "") or "")
-
-        return _prompt
-
-    sp = build_system_prompt(scope="كشفُ الاختبار")
-    chunks = "قطعة-أ\nقطعة-ب"
-    static = _Recorder()
-    qa._run_agent(static, [], sp, Q, chunks=chunks)          # التصميمُ الحاليّ (P-1)
-    hooked = _Recorder()
-    agent = create_agent(model=hooked, tools=[], system_prompt=sp,
-                         middleware=[_hook(sp)], context_schema=_Ctx)
-    agent.invoke({"messages": [{"role": "user", "content": Q}]}, context=_Ctx(chunks=chunks))
-    now, before = _system(static.calls[-1]), _system(hooked.calls[-1])   # التصميمُ المحذوف
-    assert now and before, "لم يُلتقط تلقينٌ في إحدى الحالتين ⇒ القياسُ مُغلَق"
-    assert now == before, \
-        "التلقينُ الثابتُ خالف ما كان الخطّافُ يُنتجه ⇒ الحذفُ ليس صفرَ أثر"
-    assert len(now) > 0 and "قطعة-أ" in now, "الالتقاطُ لم يمرّ بالقطع أصلًا"
-    # **ومرساةٌ رقميةٌ مُشتقّة:** الرقمُ يُقرأ **من هذا الضابط** لا من تعليقٍ لا يُعيده أمر (وهو ما
-    # قاسه مقعدا المعايير والبنية: «دعوى بلا شاهدٍ في الشجرة»). وإن تغيّرت الصيغةُ عمدًا، يُعاد
-    # القياسُ ويُحدَّث الرقمُ هنا وفي `qa.py` — والضابطُ يقول العددَ الجديد في رسالته.
-    import hashlib
-    digest = hashlib.sha256(now.encode()).hexdigest()
-    assert (len(now), digest[:8]) == (1603, "bdba591a"), (
-        f"تلقينُ الحقن تغيّر: len={len(now)} sha={digest[:8]}… — إن كان التغييرُ مقصودًا "
-        "فأعِد القياسَ وحدِّث الرقمَ (وهو مرجعُ `qa.py`)")
+    llm = _Recorder()
+    qa._answer_plain(llm, "قطعة-أ\nقطعة-ب", Q)
+    msgs = llm.calls[-1]
+    sys_txt = _system(msgs)
+    assert "قطعة-أ" in sys_txt and "قطعة-ب" in sys_txt, "القطعُ لم تبلغ تلقين مسار السقوط"
+    assert "لا تعليمات" in sys_txt, "مسارُ السقوط يمرّر نصَّ الكشف بلا إعلان أنّه بيانات (السياجُ غاب)"
+    assert "استخدم الأدوات" in sys_txt, "سطرُ الأدوات غاب عن مسار السقوط"
+    assert _human(msgs) == [Q], f"القطعةُ في الرسالة البشريّة: {_human(msgs)}"
+    # **وبلا قطعٍ ⇒ لا سياجَ كاذب:** السياجُ يُعلن بياناتٍ موجودةً، فلا يُطبع على فراغ.
+    empty = _Recorder()
+    qa._answer_plain(empty, "", Q)
+    txt = _system(empty.calls[-1])
+    assert "لا تعليمات" not in txt and "استخدم الأدوات" in txt, \
+        "سياجٌ على غير قطع، أو سطرُ الأدوات سقط مع الفراغ"
