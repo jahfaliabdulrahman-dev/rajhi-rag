@@ -243,7 +243,7 @@ NON_ANSWER_FILES_SINCE_RULE = {
         "خطةُ R102 (P-D: القطعُ تعود إلى رسالة المستخدم · والقياسُ على الفرع) — لا تُجيب حُكماً",
     "handoff/sulaiman/20261009-1907-request-REQ-102-01-re-measure-the-fifty-on-the-user-message-layout.md":
         "طلبٌ مدفوع (REQ-102-01: قياسُ الخمسين على تخطيط رسالة المستخدم · سقفُ $0.20 · سؤالٌ أوّلًا) — لا يُجيب حُكماً",
-    "handoff/sulaiman/20261009-1955-PLAN-r102-closure-three-seats.md":
+    "handoff/sulaiman/20261009-1924-PLAN-r102-closure-three-seats.md":
         "خطةُ غلق ملاحظات R102 (ثلاثةُ مقاعد: P0 من كلّ مقعد + البنود البنيويّة — ما يُصلَح وما يُعلَن) — لا تُجيب حُكماً",
 }
 #: وأصنافُها مذكورةٌ **في القاموس نفسِه** (`NON_ANSWER_FILES_SINCE_RULE` — البند ٦) لا في تعليقٍ ثانٍ.
