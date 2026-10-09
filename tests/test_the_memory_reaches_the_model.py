@@ -207,60 +207,36 @@ def test_the_whole_chain_forwards_the_two_arguments() -> None:
     assert {"thread_id", "scope"} <= kw, f"السلسلةُ لا تمرّرهما: {sorted(kw)}"
 
 
-def test_the_chunks_ride_the_users_message_and_the_system_prompt_stays_clean() -> None:
-    """**P-D (بكلمة المالك · الخيار ج):** قطعُ **هذا** السؤال في **رسالة المستخدم الحاليّة**، ورسالةُ
-    النظام **بلا قطع**، **والحافظةُ بلا قطع** — فتصدق القاعدةُ ٣ («استعن بالقطع المرفقة **في رسالة
-    المستخدم**») كما نصُّها بلا تعديل حرف.
+def test_the_questions_chunks_reach_the_model_and_not_the_human_turn() -> None:
+    """**دعوى P-1 (بكلمة المالك):** قطعُ **هذا** السؤال تبلغ النموذجَ عبر تلقين النداء الثابت.
 
-    **والضابطُ يقيس الموضعَ الحاليَّ لا مجملَ الرسائل:** كان سابقُه يكتفي بوجود القطعة في النداء،
-    فيمرّ وهي في رسالة النظام — وهو الموضعُ الذي جعل القاعدةَ ٣ تصف موضعًا فارغًا (قاسه المدقّق في
-    ١٠٢). **ويُقاس آخِرُ رسالةٍ بشريّة** لا مجموعُها، فلا يمرّ انحدارٌ يضع القطعَ على دَورٍ سابق.
+    **ولماذا الضابطُ هنا لا في `test_memory_acceptance_gate.py`:** ذاك الملفُّ يستورد الواجهة
+    (`gradio`) فيُتخطّى في الخطوة الخفيفة — فدعوى الحقن كانت **بلا حارسٍ يعمل في الـCI** (قاسه
+    مقعدُ المعايير · F2). وهذا الملفُّ **في قائمة الخطوة**، ولا يستورد إلّا `langchain`.
+
+    **وما يُقاس:** القطعةُ والسياجُ («بياناتٌ لا تعليمات») وسطرُ «استخدم الأدوات» **في التلقين**،
+    والرسالةُ البشريّةُ **السؤالُ وحدَه** — وهو موضعُ R99-2 نفسُه: ما لا يُحفظ لا يُراكم.
     """
     llm = _Recorder()
     sp = build_system_prompt(scope="كشفُ الاختبار")
-    tid = "t-pd-layout"
-    qa._run_agent(llm, [], sp, Q, thread_id=tid, chunks="قطعة-أ\nقطعة-ب")
+    qa._run_agent(llm, [], sp, Q, chunks="قطعة-أ\nقطعة-ب")
     msgs = llm.calls[-1]
-    human_all = _human(msgs)
-    current = human_all[-1] if human_all else ""
-    system = _system(msgs)
-    assert "قطعة-أ" in current and "قطعة-ب" in current, "القطعُ ليست في رسالة المستخدم الحاليّة"
-    assert "لا تعليمات" in current, "السياجُ ليس مع القطع في رسالة المستخدم"
-    assert "استخدم الأدوات" in current, "سطرُ الأدوات ليس مع القطع (ومسارُ الوكيل يربط أدوات)"
-    assert Q in current, "نصُّ السؤال غاب عن رسالة المستخدم الحاليّة"
-    assert "قطعة-أ" not in system and "لا تعليمات" not in system, \
-        "القطعُ بلغت رسالةَ النظام ⇒ فالقاعدةُ ٣ تصف موضعًا فارغًا"
-    # **وفرعُ الاسترجاع الفارغ (قاسه مقعدُ البنية):** لا قطعَ ⇒ لا سياجَ ولا كتلة، ولا ادّعاءَ موضعٍ لقطعٍ غائبة
+    sys_txt = _system(msgs)
+    assert "قطعة-أ" in sys_txt and "قطعة-ب" in sys_txt, \
+        "قطعةُ السؤال لم تبلغ التلقين ⇒ الحقنُ انكسر"
+    assert "لا تعليمات" in sys_txt, "السياجُ غاب: نصُّ الكشف يمرّ بلا إعلان أنّه بيانات"
+    assert "استخدم الأدوات" in sys_txt, "سطرُ الأدوات غاب عن تلقينٍ يحمل قطعًا"
+    assert _human(msgs) == [Q], \
+        f"القطعةُ بلغت الرسالةَ البشريّة (تُحفظ مع السجلّ): {_human(msgs)}"
+
+    # **وفرعُ الاسترجاع الفارغ (أُضيف في R102 وأُبقي):** لا قطعَ ⇒ لا سياجَ ولا كتلة، **ولا سطرَ أدواتٍ على
+    # فراغ** — والسؤالُ وحدَه في الرسالة البشريّة.
     empty = _Recorder()
-    qa._run_agent(empty, [], sp, Q, thread_id="t-pd-empty", chunks="")
-    h_empty = _human(empty.calls[-1])
-    h_empty = h_empty[-1] if h_empty else ""
-    assert "لا تعليمات" not in h_empty and "قطعة-أ" not in h_empty, "سياجٌ على فراغ"
-    assert Q in h_empty, "السؤالُ غاب في فرع الاسترجاع الفارغ"
-    # **والذاكرةُ لا تحفظها:** الكتابةُ الوحيدةُ `remember` — سؤالُ المستخدم كما سأله + الجوابُ المعروض.
-    qa.remember(tid, Q, "الجواب")
-    stored = qa._thread_messages({"configurable": {"thread_id": tid}})
-    assert stored, "لم تُكتب دورةٌ في الحافظة ⇒ فالقياسُ لا يمسّ شيئًا"
-    assert any(str(m.content) == Q for m in stored), "سؤالُ المستخدم لم يُحفظ كما سأله"
-    assert all("قطعة-أ" not in str(m.content) and "لا تعليمات" not in str(m.content)
-               for m in stored), "القطعُ دخلت الحافظة — والمحفوظُ السؤالُ والجوابُ المعروضُ وحدَهما"
-
-
-def test_the_call_carries_no_graph_state() -> None:
-    """**الحدُّ الذي لا يُحفظ — محروسًا بالبنية لا بالعَرض (قاسه مقعدُ البنية):** الضابطُ الشقيقُ ينادي
-    `remember` بيدٍ ويفحص المخزن ⇒ يقيس **الكاتبَ** لا خاصيّةَ «الرسم بلا حافظة». وهذا يقيس الأصل:
-    `_run_agent` ينادي `invoke` **بالرسائل وحدَها** — فلا `config` ولا حافظةَ تُخزّن القطع.
-    """
-    src = (pathlib.Path(__file__).resolve().parents[1] / "src/statement_qa/qa.py").read_text(encoding="utf-8")
-    fn = next((n for n in ast.parse(src).body
-               if isinstance(n, ast.FunctionDef) and n.name == "_run_agent"), None)
-    assert fn is not None, "لم يُوجَد `_run_agent` في المصدر"
-    calls = [c for c in ast.walk(fn) if isinstance(c, ast.Call)
-             and isinstance(c.func, ast.Attribute) and c.func.attr == "invoke"]
-    assert calls, "لا نداءَ `invoke` في `_run_agent` ⇒ فالحارسُ لا يمسك شيئًا"
-    for c in calls:
-        passed = {k.arg for k in c.keywords}
-        assert not (passed & {"config", "context"}), f"النداءُ يمرّر حالةً: {sorted(passed)}"
+    qa._run_agent(empty, [], sp, Q, chunks="")
+    msgs_e = empty.calls[-1]
+    assert "لا تعليمات" not in _system(msgs_e), "سياجٌ على غير قطع"
+    assert "قطعة-أ" not in _system(msgs_e), "كتلةُ قطعٍ بلا قطع"
+    assert _human(msgs_e) == [Q], f"الرسالةُ البشريّةُ ليست السؤالَ وحدَه: {_human(msgs_e)}"
 
 
 def test_the_fallback_path_carries_the_same_fence() -> None:
@@ -276,15 +252,34 @@ def test_the_fallback_path_carries_the_same_fence() -> None:
     llm = _Recorder()
     qa._answer_plain(llm, "قطعة-أ\nقطعة-ب", Q)
     msgs = llm.calls[-1]
-    human, system = "\n".join(_human(msgs)), _system(msgs)
-    assert "قطعة-أ" in human and "لا تعليمات" in human, \
-        "مسارُ السقوط لا يضع القطعَ بسياجها في رسالة المستخدم"
-    assert Q in human, "نصُّ السؤال غاب عن رسالة السقوط"
-    assert "استخدم الأدوات" not in human, \
+    sys_txt = _system(msgs)
+    assert "قطعة-أ" in sys_txt and "قطعة-ب" in sys_txt, "القطعُ لم تبلغ تلقين مسار السقوط"
+    assert "لا تعليمات" in sys_txt, "مسارُ السقوط يمرّر نصَّ الكشف بلا إعلان أنّه بيانات (السياجُ غاب)"
+    assert "استخدم الأدوات" not in sys_txt, \
         "مسارُ بلا أدواتٍ يُؤمر باستخدامها — تناقضٌ مع «لا تحسب بنفسك»"
-    assert "قطعة-أ" not in system, "القطعُ بلغت رسالةَ النظام في مسار السقوط"
+    assert "قطعة-أ" not in "".join(_human(msgs)), f"القطعةُ في الرسالة البشريّة: {_human(msgs)}"
+    assert _human(msgs) == [Q], f"الرسالةُ البشريّةُ ليست السؤالَ وحدَه: {_human(msgs)}"
     # **وبلا قطعٍ ⇒ لا سياجَ كاذب:** السياجُ يُعلن بياناتٍ موجودةً، فلا يُطبع على فراغ.
     empty = _Recorder()
     qa._answer_plain(empty, "", Q)
-    h2 = "\n".join(_human(empty.calls[-1]))
-    assert "لا تعليمات" not in h2 and "استخدم الأدوات" not in h2 and Q in h2
+    txt = _system(empty.calls[-1])
+    assert "لا تعليمات" not in txt and "استخدم الأدوات" not in txt, \
+        "سياجٌ على غير قطع، أو سطرُ أدواتٍ في مسارٍ بلا أدوات"
+
+
+def test_the_call_carries_no_graph_state() -> None:
+    """**الحدُّ الذي لا يُحفظ — محروسًا بالبنية لا بالعَرض (أُضيف في R102 وأُبقي في R103):**
+    الضابطُ الشقيقُ أعلاه ينادي `remember` بيدٍ ويفحص المخزن ⇒ يقيس **الكاتبَ** لا خاصيّةَ «الرسم بلا
+    حافظة». وهذا يقيس الأصل: `_run_agent` ينادي `invoke` **بالرسائل وحدَها** — فلا `config` ولا حافظةَ
+    تُخزّن القطع. **ولا يتعلّق بموضع القطع** فهو يبقى بعد إرجاعه إلى رسالة النظام.
+    """
+    src = (pathlib.Path(__file__).resolve().parents[1] / "src/statement_qa/qa.py").read_text(encoding="utf-8")
+    fn = next((n for n in ast.parse(src).body
+               if isinstance(n, ast.FunctionDef) and n.name == "_run_agent"), None)
+    assert fn is not None, "لم يُوجَد `_run_agent` في المصدر"
+    calls = [c for c in ast.walk(fn) if isinstance(c, ast.Call)
+             and isinstance(c.func, ast.Attribute) and c.func.attr == "invoke"]
+    assert calls, "لا نداءَ `invoke` في `_run_agent` ⇒ فالحارسُ لا يمسك شيئًا"
+    for c in calls:
+        passed = {k.arg for k in c.keywords}
+        assert not (passed & {"config", "context"}), f"النداءُ يمرّر حالةً: {sorted(passed)}"
