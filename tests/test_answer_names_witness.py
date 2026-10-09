@@ -256,6 +256,12 @@ NON_ANSWER_FILES_SINCE_RULE = {
         "خطةُ R103 (إرجاعُ الموضع إلى رسالة النظام + تصحيحُ نصّ قاعدة القطع (في هذه التعليمات لا في رسالة المستخدم) + الخمسون كاملةً) — لا تُجيب حُكماً",
     "handoff/sulaiman/20261009-2109-request-REQ-103-01-the-full-fifty-on-the-system-prompt-layout.md":
         "طلبٌ مدفوع (REQ-103-01: الخمسون كاملةً على تخطيط (أ) · مقابلةٌ بـr100 في النتيجة وtrace_len والزمن) — لا يُجيب حُكماً",
+    "handoff/sulaiman/20261009-2155-MEASURE-REQ-103-01-the-full-fifty-on-option-a-44-of-50-and-the-traces-are-back.md":
+        "إيداعُ قياس الخمسين كاملةً على (أ) (٤٤/٥٠ · $0.0577 · ومقابلةٌ ثلاثةَ أعمدة بـr100) — لا يُجيب حُكماً",
+    "handoff/sulaiman/20261009-2200-SEATS-r103-three-isolated-seats-verbatim.md":
+        "نقلُ المقاعد الثلاثة بالحرف (R103: P0=٠ · P1=١ · P2=٢ · P3≈١٤ وما أُغلق منها) — لا يُجيب حُكماً",
+    "handoff/sulaiman/20261009-2150-REPORT-to-owner-r103-option-a-landed-forty-four-of-fifty-and-the-traces-are-back.md":
+        "تقريرُ غلق R103 إلى المالك (الخيارُ أ مُنفَّذ · ٤٤/٥٠ · الالتزاماتُ وكلُّ أحمرَ · الفرضيّةُ ومقترحُ التجربة) — ويُجيب حُكماً: شاهِدُه في `in-reply-to`",
 }
 #: وأصنافُها مذكورةٌ **في القاموس نفسِه** (`NON_ANSWER_FILES_SINCE_RULE` — البند ٦) لا في تعليقٍ ثانٍ.
 #: **ومُخاطَبٌ واحدٌ هبط بالقاعدة، وهو صنفٌ مُعلَنٌ بالاسم:** `20260925-0723-REPORT-to-claude-r13-…`
