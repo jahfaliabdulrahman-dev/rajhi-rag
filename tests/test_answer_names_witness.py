@@ -99,11 +99,6 @@ PRE_RULE_ANSWERS = {
     "handoff/sulaiman/20260925-0203-REPORT-to-claude-round54-three-notes-mechanised-P4-P5-P6-and-two-recommendations.md": "20260925-020300",
     "handoff/sulaiman/20260925-0247-REPORT-to-claude-round55-three-seats-attacked-my-fixes-and-the-registry.md": "20260925-024700",
     "handoff/sulaiman/20260925-0355-REPORT-to-claude-round56-closure-the-gate-that-replaced-the-window.md": "20260925-035500",
-    # **وجولةُ R102 (P-D = الخيار ج · بكلمة المالك):** الخطةُ والطلبُ المدفوع يُسمَّيان في الالتزام نفسه.
-    "handoff/sulaiman/20261009-1907-PLAN-r102-the-chunks-return-to-the-user-message.md":
-        "خطةُ R102 (P-D: القطعُ تعود إلى رسالة المستخدم · والقياسُ على الفرع) — لا تُجيب حُكماً",
-    "handoff/sulaiman/20261009-1907-request-REQ-102-01-re-measure-the-fifty-on-the-user-message-layout.md":
-        "طلبٌ مدفوع (REQ-102-01: قياسُ الخمسين على تخطيط رسالة المستخدم · سقفُ $0.20 · سؤالٌ أوّلًا) — لا يُجيب حُكماً",
 }
 #: **أصنافُ ما ليس جوابًا — بالهويّة لا بالعدد (R61-1).** كلُّ ملفٍّ في صندوق المنفّذ هبط بعد
 #: `WITNESS_FROM` وليس من صنف `ANSWER_MARK` **يُسمّى هنا باسمه وصنفه**. وكان عدّادًا (`6`): ورفعُ رقمٍ
@@ -243,6 +238,11 @@ NON_ANSWER_FILES_SINCE_RULE = {
         "نقلُ المقاعد الثلاثة بالحرف (R101) — لا يُجيب حُكماً",
     "handoff/sulaiman/20261009-1757-REPORT-to-owner-r101-the-correction-p-a-and-the-three-seats-closed.md":
         "تقريرُ غلق R101 (التصحيحُ المؤرَّخ · P-A · وموقفُ ٢٤ ملاحظةً · وP-D معروضةٌ على المالك) — لا يُجيب حُكماً على فرع",
+    # **وجولةُ R102 (P-D = الخيار ج · بكلمة المالك):** الخطةُ والطلبُ المدفوع يُسمَّيان في الالتزام نفسه.
+    "handoff/sulaiman/20261009-1907-PLAN-r102-the-chunks-return-to-the-user-message.md":
+        "خطةُ R102 (P-D: القطعُ تعود إلى رسالة المستخدم · والقياسُ على الفرع) — لا تُجيب حُكماً",
+    "handoff/sulaiman/20261009-1907-request-REQ-102-01-re-measure-the-fifty-on-the-user-message-layout.md":
+        "طلبٌ مدفوع (REQ-102-01: قياسُ الخمسين على تخطيط رسالة المستخدم · سقفُ $0.20 · سؤالٌ أوّلًا) — لا يُجيب حُكماً",
 }
 #: وأصنافُها مذكورةٌ **في القاموس نفسِه** (`NON_ANSWER_FILES_SINCE_RULE` — البند ٦) لا في تعليقٍ ثانٍ.
 #: **ومُخاطَبٌ واحدٌ هبط بالقاعدة، وهو صنفٌ مُعلَنٌ بالاسم:** `20260925-0723-REPORT-to-claude-r13-…`
