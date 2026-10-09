@@ -99,6 +99,11 @@ PRE_RULE_ANSWERS = {
     "handoff/sulaiman/20260925-0203-REPORT-to-claude-round54-three-notes-mechanised-P4-P5-P6-and-two-recommendations.md": "20260925-020300",
     "handoff/sulaiman/20260925-0247-REPORT-to-claude-round55-three-seats-attacked-my-fixes-and-the-registry.md": "20260925-024700",
     "handoff/sulaiman/20260925-0355-REPORT-to-claude-round56-closure-the-gate-that-replaced-the-window.md": "20260925-035500",
+    # **وجولةُ R102 (P-D = الخيار ج · بكلمة المالك):** الخطةُ والطلبُ المدفوع يُسمَّيان في الالتزام نفسه.
+    "handoff/sulaiman/20261009-1907-PLAN-r102-the-chunks-return-to-the-user-message.md":
+        "خطةُ R102 (P-D: القطعُ تعود إلى رسالة المستخدم · والقياسُ على الفرع) — لا تُجيب حُكماً",
+    "handoff/sulaiman/20261009-1907-request-REQ-102-01-re-measure-the-fifty-on-the-user-message-layout.md":
+        "طلبٌ مدفوع (REQ-102-01: قياسُ الخمسين على تخطيط رسالة المستخدم · سقفُ $0.20 · سؤالٌ أوّلًا) — لا يُجيب حُكماً",
 }
 #: **أصنافُ ما ليس جوابًا — بالهويّة لا بالعدد (R61-1).** كلُّ ملفٍّ في صندوق المنفّذ هبط بعد
 #: `WITNESS_FROM` وليس من صنف `ANSWER_MARK` **يُسمّى هنا باسمه وصنفه**. وكان عدّادًا (`6`): ورفعُ رقمٍ
