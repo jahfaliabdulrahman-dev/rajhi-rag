@@ -268,9 +268,9 @@ NON_ANSWER_FILES_SINCE_RULE = {
     "handoff/sulaiman/20261010-0052-request-REQ-104-01-the-two-armed-experiment-on-four-questions.md":
         "طلبٌ مدفوع (REQ-104-01: ٢٤ طرحًا على ذراعَي جملةِ القاعدة (صياغتان لا يفترقان إلّا بها) · سقفُ $0.05) — لا يُجيب حُكماً",
     # **وغلقُ R104 (ثلاثةُ مقاعد: P1 في الدمج + المُعلَن والمُغلق):** نقلُ المقاعد وخطةُ الغلق.
-    "handoff/sulaiman/20261010-0140-SEATS-r104-three-isolated-seats-verbatim.md":
+    "handoff/sulaiman/20261010-0124-SEATS-r104-three-isolated-seats-verbatim.md":
         "نقلُ المقاعد الثلاثة بالحرف (R104: P0=٠ · P1=١ في دمج الأسماء · P2=٣ · P3≈١٥) — لا يُجيب حُكماً",
-    "handoff/sulaiman/20261010-0145-PLAN-r104-closure-three-seats.md":
+    "handoff/sulaiman/20261010-0124-PLAN-r104-closure-three-seats.md":
         "خطةُ غلق ملاحظات R104 (إيقافُ التجربة · ضمُّ الأسماء · وإعادةُ التجربة) — لا تُجيب حُكماً",
 }
 #: وأصنافُها مذكورةٌ **في القاموس نفسِه** (`NON_ANSWER_FILES_SINCE_RULE` — البند ٦) لا في تعليقٍ ثانٍ.
