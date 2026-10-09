@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import re
+import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -350,3 +352,27 @@ def test_an_unpaired_fence_does_not_hide_a_real_declaration(monkeypatch, tmp_pat
     _tree(tmp_path, {"sulaiman": [("20260925-0303-REPORT", paired)]})
     assert m.main(["--json"]) == 0
     assert '"turn": "claude"' in capsys.readouterr().out, "كتلةُ شِفرةٍ **مُقفَلة** أزاحت الدور"
+
+
+def test_every_header_id_carries_its_file_names_time() -> None:
+    """**هويّةُ الترويسة تُقاس لا تُوصَف:** `tools/turn.py` يوثّق أنّ `id` يحمل **زمنَ اسمِ الملفّ نفسِه**
+    («مقيسٌ في ١٠٣ من ١٠٣») وأنّ مخالفتَه تجعل الرأسَ يُقرأ **كتلةً مقتبسةٍ تُهمَل بلا تنبيه**. ولا حارسَ كان
+    يمسكها: قاسه مقعدا المعايير والبنية في R103 فوجد **ستَّ** مخالفات (خمسٌ منها من إعاداتِ تسميةٍ
+    في R102/R103 جرى فيها تحديثُ الاسم دون الترويسة). وهذا يقيسها على كلّ ملفٍّ **يحمل `id`** في `handoff/`
+    — فالاستثناءُ صار صفرًا والقاعدةُ قابلةٌ للتصديق لا للتصديق بها.
+    """
+    root = Path(__file__).resolve().parents[1]
+    tracked = subprocess.run(["git", "ls-files", "handoff/"], cwd=root,
+                             capture_output=True, text=True, check=True).stdout.split()
+    bad = []
+    for rel in tracked:
+        p = root / rel
+        try:
+            head = p.read_text(encoding="utf-8")[:400]
+        except (OSError, UnicodeDecodeError):
+            continue
+        m = re.search(r"^id:\s*(\d{8})-(\d{4})-", head, re.M)
+        n = re.search(r"(\d{8})-(\d{4})", p.name)
+        if m and n and (m.group(1), m.group(2)) != (n.group(1), n.group(2)):
+            bad.append(f"{p.name}: id={m.group(1)}-{m.group(2)} name={n.group(1)}-{n.group(2)}")
+    assert not bad, "ترويسةٌ لا تحمل زمنَ اسمِ ملفّها (والرأسُ يُهمَل بلا تنبيه): " + " · ".join(bad)

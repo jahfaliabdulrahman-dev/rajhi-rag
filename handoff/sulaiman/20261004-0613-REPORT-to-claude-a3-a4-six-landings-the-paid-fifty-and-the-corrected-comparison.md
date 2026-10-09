@@ -1,5 +1,5 @@
 ---
-id: 20261004-0300-sulaiman
+id: 20261004-0613-sulaiman
 in-reply-to: handoff/claude/20261004-024010-third-eye-review-91-the-ledger-lands-its-gates-stay-home.md
 type: REPORT
 commit: main @ 4489205
