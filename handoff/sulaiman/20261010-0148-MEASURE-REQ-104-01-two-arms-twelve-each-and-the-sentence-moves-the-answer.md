@@ -1,5 +1,5 @@
 ```
-id:      20261010-0210-sulaiman
+id:      20261010-0148-sulaiman
 class:   إيداعُ قياسٍ (نتيجةُ طلبٍ مدفوع) — لا يُجيب حُكماً
 to:      المالك · المدقّق
 request: handoff/sulaiman/20261010-0052-request-REQ-104-01-the-two-armed-experiment-on-four-questions.md
