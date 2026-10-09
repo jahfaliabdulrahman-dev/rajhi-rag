@@ -607,6 +607,9 @@ class _Trace:
 
     def __init__(self, rec: dict):
         self.used_row_nos = list(rec.get("used_row_nos") or [])
+        # **أسماءُ الأدوات (R104-1 · البند ③):** `trace_len` يعدّ **الصفوف** لا النداءات ⇒ فسؤالٌ
+        # استدعى أداةً بلا صفوف (`page_footer`) أو لم يستدعِ شيئًا يبدوان «صفرَ أثر» سواءً.
+        self.tools_used = list(rec.get("tools_used") or [])
         self.scope = rec.get("scope") or "in_scope"
         self.refused = bool(rec.get("refused"))
 
@@ -754,6 +757,7 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
             r = answer_question(store, qtext, rows=rows, chunks=chunks, llm=llm,
                                 footers=footers, scope=_pack_scope(rows, a.run, n_pages))
             out_box.update({"answer": r.answer or "", "used": list(getattr(r, "used_row_nos", None) or []),
+                            "tools_used": list(getattr(r, "tools_used", None) or []),
                             "scope": getattr(r, "scope", None), "refused": bool(getattr(r, "refused", False))})
         except Exception as e:                                   # noqa: BLE001 — عطبٌ يُسمّى لا يُسقط الجولة
             out_box["error"] = f"{type(e).__name__}: {e}"
@@ -804,7 +808,8 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
         t.start()
         t.join(int(getattr(a, "timeout", 0) or 150))
         msg = {"error": "انتهت المهلة"} if t.is_alive() else (box or {"error": "لا جواب"})
-        res = _Trace({"used_row_nos": msg.get("used"), "scope": msg.get("scope"),
+        res = _Trace({"used_row_nos": msg.get("used"), "tools_used": msg.get("tools_used"),
+                      "scope": msg.get("scope"),
                       "refused": msg.get("refused")}) if "answer" in msg else None
         ans = msg["answer"].strip() if res else f"<{msg.get('error')}>"
         ok, why = (score_answer(q, truth_val, ans, res, rows) if res
@@ -818,6 +823,7 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                          "q": q["q"], "answer": ans, "ok": ok, "why": why,
                          "cited_pages": sorted({rows[n - 1]["page"] for n in trace if 1 <= n <= len(rows)}),
                          "used_row_nos": trace,
+                         "tools_used": list(getattr(res, "tools_used", None) or []) if res else [],
                          "trace_len": len(trace),      # **هويّةٌ محروسة**: trace_len == len(used_row_nos)
                          "scope": getattr(res, "scope", None) if res else None,
                          "refused": bool(getattr(res, "refused", False)) if res else None,
@@ -828,7 +834,8 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                                    "budget_usd": a.budget,     # **العقدةُ في الدليل**: ميزانيةُ الجولة مُعلنةٌ في ملفّها
                                    "results": [merged[k] for k in order if k in merged]},
                                   ensure_ascii=False, indent=1))   # **حفظٌ تدريجيّ: قتلُ العملية لا يُهدر جواباً**
-        print(f"{i:02d} {q['id']:9s} {'✅' if ok else '❌'} {why}", flush=True)
+        tools = ",".join(getattr(res, "tools_used", None) or []) or "—"
+        print(f"{i:02d} {q['id']:9s} {'✅' if ok else '❌'} {why}  · أدوات: {tools}", flush=True)
 
     after = _key_usage()
     results = [done[k] for k in order if k in done]

@@ -509,6 +509,10 @@ class QAResult:
     # A NUMERIC question answered without a single tool call. Not a failure —
     # a recollection, and it must be labelled as one (Gate 4, case F).
     ungrounded: bool = False
+    # **أسماءُ الأدوات المستدعاة** (R104-1 · البند ③): `used_row_nos` تعدّ الصفوفَ لا النداءات، فسؤالٌ
+    # يستدعي `page_footer` (بلا صفوف) أو يُرفض كان يُقرأ «صفر أثر» بلا تمييز ⇒ وهذا الحقلُ يفصل الحالتين،
+    # وهو ما تحتاجه مقابلةُ الذراعين في تجربة R104.
+    tools_used: list[str] = field(default_factory=list)
     # **الاستشهادُ المُصرَّح به (أ-٤):** من النوعِ لا من النثر — ومقابَلٌ بالأثر.
     cited_row_ids: list[int] = field(default_factory=list)
     citation_mode: str = "prose"          # typed | prose — يُعلَن ولا يُخمَّن
@@ -522,6 +526,20 @@ class QAResult:
 
 _INTERROGATIVE = ("كم", "هل", "ما ", "ماذا", "أي ", "ما هي", "ما هو")
 _NUMERIC_HINT = ("كم", "مجموع", "إجمالي", "اجمالي", "عدد", "نسبة", "متوسط")
+
+
+# **R104-1 (P2 قائمٌ على `main` · قاسه المدقّق في مراجعة ١٠٤):** بوّابةُ «لا رقمَ بلا أداة» كانت تقرأ
+# **السؤال** (`needs_tools`) ولا تقرأ **الجواب** ⇒ فسؤالُ سلسلةٍ بلا كلمةٍ رقميّة يُجاب بمبالغَ لم تحسبها
+# أداةٌ ويُعرَض **بلا إنذار** (قِيس: `chn-04` ب١٦ رقمًا وصفرِ صفوف). **ومقياسُ المبلغ شكلُه لا وجودُ رقم:**
+# **خانتان عشريّتان** (أي `NN.NN` — وكالمِثالِ في ملفّ الاختبار) — فلا تُطلَق البوّابةُ على «صف 23» (بلا كسر) ولا على
+# «2026» (سنةٌ بلا كسر). **و`scope.amounts_in` تبقى المرجعَ الأوسع** (تصنيفُ النطاق يحتاج كلَّ رقم)، وهذا
+# **أضيقُ منها** بحاجةِ البوّابة وحدَها — فلا إعادةَ اختراعٍ ولا مقياسَ ثانٍ للنطاق.
+_MONEY_IN_TEXT = re.compile(r"(?<![\d.,٬٫])(?:\d{1,3}(?:[,٬]\d{3})+|\d+)[.,٫]\d{2}(?!\d)")
+
+
+def _money_shaped(text: str) -> bool:
+    """هل يحمل النصُّ **مبلغًا بشكل المال** (خانتان عشريّتان)؟ — يقرأ الجوابَ لا السؤال (R104-1)."""
+    return bool(_MONEY_IN_TEXT.search(text or ""))
 
 
 def split_compound(question: str) -> list[str]:
@@ -664,6 +682,7 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
     context = format_hits(hits)
     answer = ""
     used: list[int] = []
+    tools_used: list[str] = []
     tools_failed = False
     ungrounded = False
     parsed = None
@@ -677,8 +696,13 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
             from statement_qa.qa_tools import used_rows_from_trace
 
             used = used_rows_from_trace(trace)
-            if (not used and not _tool_was_used(trace)
-                    and needs_tools(question)):
+            tools_used = [c.get("tool") for c in (trace or []) if c.get("tool")]
+            # **والبوّابةُ تقرأ الجوابَ أيضًا (R104-1 · البند ①):** الشرطُ الثاني لا يسأل عن صيغةِ
+            # السؤال — مبلغٌ في **الجواب** بلا **نداءِ أداة** ⇒ توجيهٌ ثمّ رفض. **وحدُّه:** `_tool_was_used`
+            # لا `used` ⇒ فنداءُ أداةٍ لا يلمس صفًّا (التذييلُ المطبوع · الرصيدُ الختاميّ) **يكفي** شاهدًا
+            # (وهو ما نُصَّ عليه في مراجعة ١٠٤). **والفرعُ الأوّلُ لم يُمَسّ حرفيًّا** (إضافةٌ لا تعديل).
+            if ((not used and not _tool_was_used(trace) and needs_tools(question))
+                    or (not _tool_was_used(trace) and _money_shaped(answer))):
                 # One nudge, aimed: «use a tool» is a directive the agent
                 # follows far more often than the softer wording above — and if
                 # it still does not, the answer is labelled rather than trusted.
@@ -690,6 +714,7 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
                 used2 = used_rows_from_trace(trace2)
                 if used2 or _tool_was_used(trace2):
                     answer, used = answer2, used2
+                    tools_used = [c.get("tool") for c in (trace2 or []) if c.get("tool")]
                     trace, parsed, mode = trace2, parsed2, mode2   # الوضعُ يتبع الجوابَ المُعتمَد
                 else:
                     # «رفض لا وسم» (المدقّق، جوابه ١): رقم لم يُحسَب لا يُعرض
@@ -717,6 +742,7 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
     if not answer:
         answer = _answer_plain(llm, context, question)
         used = []
+        tools_used = []
     # **والاستشهادُ من النوع يُقابَل بالأثر** (بوّابةُ أ-٤): كلُّ استشهادٍ بلا شاهدٍ يُسمّى باسمه
     from statement_qa.qa_tools import citation_truth
 
@@ -733,5 +759,6 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
                               ("chunk_id", "page", "row_start", "row_end")}
                              for h in hits],
                     used_row_nos=used,
+                    tools_used=tools_used,
                     tools_failed=tools_failed,
                     ungrounded=ungrounded)

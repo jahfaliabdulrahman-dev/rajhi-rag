@@ -148,12 +148,59 @@ def test_the_whole_answer_carries_the_typed_citations(monkeypatch):
     assert res.citation_mode == "prose" and res.cited_row_ids == [], (
         res.citation_mode, res.cited_row_ids)
 
-    # وبسؤالٍ وصفيٍّ (لا يحتاج أداة) يصل الجوابُ المُقيَّد باستشهاداته
+    # **وبسؤالٍ وصفيٍّ يصل الجوابُ المُقيَّد باستشهاداته** — بشرط ألّا يحمل الجوابُ **مبلغًا** (فالبوّابةُ
+    # تقرأ الجوابَ منذ R104-1: مبلغٌ بلا نداءِ أداةٍ يُرفض ولو كان السؤالُ وصفيًّا — ويقاس أدناه).
+    _patch_agent(monkeypatch, {"structured_response":
+                               q.Answer(answer="الصفوف ١ و٤ فيها رسوم حوالة", cited_row_ids=[1, 4]),
+                               "messages": [_Msg("نثرٌ لا يهمّ")]})
     res2 = q._answer_one(store=_Store(), question="بيّن الصفوف التي فيها رسوم حوالة", rows=rows,
                          chunks=None, llm=object(), k=2, footers=None)
-    assert res2.answer.startswith("المجموع"), res2.answer[:40]
+    assert res2.answer.startswith("الصفوف"), res2.answer[:40]
     assert res2.citation_mode == "typed" and res2.cited_row_ids == [1, 4]
     assert res2.unsupported_citations == [1, 4], "الإصلاحُ لم يُقابَل بالأثر"
+
+
+def test_a_money_answer_without_a_tool_call_is_refused_even_when_the_question_is_not_numeric(monkeypatch):
+    """**R104-1 — P2 قائمٌ على `main` (قاسه المدقّق في مراجعة ١٠٤):** بوّابةُ «لا رقمَ بلا أداة» كانت تقرأ
+    **السؤال** (`needs_tools` ⇒ «كم/مجموع/عدد…») ولا تقرأ **الجواب** ⇒ فسؤالُ سلسلةٍ بلا كلمةٍ رقميّة
+    («هل يتّصل الرصيد…؟») يُجاب بمبالغَ **لم تحسبها أداةٌ** ويُعرض للمستخدم **بلا إنذار** — وقِيس في الحزمة:
+    `chn-04` بستّةَ عشرَ رقمًا وصفرِ صفوف.
+
+    **وما يقيسه هذا الضابط:** جوابٌ يحمل مبلغًا بشكل المال (خانتان عشريّتان) بلا **نداءِ أداة** ⇒ توجيهٌ
+    بقاعدةٍ ثمّ **رفض** — أيًّا كانت صيغةُ السؤال. **وحدُّه:** «صف 23» و«2026» ليست مبالغَ (بلا كسرٍ عشريّ)،
+    فلا تُطلَق البوّابةُ على جوابٍ وصفيٍّ سليم.
+    """
+    rows = [{"row_no": i, "page": 1, "printed_page": 1, "desc": f"سطر {i}", "date": "2026-01-01",
+             "movement": "10.00", "side": "debit", "balance": "10.00", "printed_movement": "10.00",
+             "printed_balance": "10.00", "counted": 1, "row_state": "عادي", "source": "طباعة"}
+            for i in range(1, 6)]
+    # سؤالٌ **بلا** كلمةٍ رقميّة («هل…؟») وجوابٌ يحمل مبالغَ بلا أيّ أداة
+    _patch_agent(monkeypatch, {"structured_response":
+                               q.Answer(answer="لا يتّصل: رصيد 242.00 مقابل 236.00", cited_row_ids=[]),
+                               "messages": [_Msg("نثرٌ لا يهمّ")]})
+    res = q._answer_one(store=_Store(), question="هل يتّصل رصيد الصفحة الثانية برصيد الأولى؟",
+                        rows=rows, chunks=None, llm=object(), k=2, footers=None)
+    assert res.ungrounded is True, "مبلغٌ في الجواب بلا نداءِ أداةٍ مرّ بلا رفض"
+    assert res.answer.startswith("لم أستطع"), res.answer[:60]
+    assert res.tools_used == [], f"أدواتٌ بلا رفض: {res.tools_used}"
+    # **ونقيضُه:** المبلغُ نفسه **مع** نداءِ أداة (ولو بلا صفوف) يمرّ — فالحدُّ `_tool_was_used` لا `used`
+    assert q._tool_was_used([{"tool": "page_footer", "row_nos": []}]) is True
+
+
+def test_a_numeric_answer_without_money_is_not_refused_by_the_new_branch(monkeypatch):
+    """**ولا تُوسَّع البوّابةُ بلا حدّ:** جوابٌ وصفيٌّ فيه أرقامٌ **بلا شكلِ المال** («الصفوف ١ و٤» ·
+    «الصفحة 628») يمرّ كما كان — فالحدُّ **شكلُ المبلغ** لا وجودُ رقم."""
+    rows = [{"row_no": i, "page": 1, "printed_page": 1, "desc": f"سطر {i}", "date": "2026-01-01",
+             "movement": "10.00", "side": "debit", "balance": "10.00", "printed_movement": "10.00",
+             "printed_balance": "10.00", "counted": 1, "row_state": "عادي", "source": "طباعة"}
+            for i in range(1, 6)]
+    _patch_agent(monkeypatch, {"structured_response":
+                               q.Answer(answer="الصفحة 628 فيها الصفوف 12 و34", cited_row_ids=[]),
+                               "messages": [_Msg("نثرٌ لا يهمّ")]})
+    res = q._answer_one(store=_Store(), question="بيّن الصفوف التي فيها رسوم حوالة", rows=rows,
+                        chunks=None, llm=object(), k=2, footers=None)
+    assert res.ungrounded is False, "رقمٌ بلا شكلِ مبلغٍ أُرفض خطأً"
+    assert res.answer.startswith("الصفحة 628"), res.answer[:40]
 
 
 def test_a_failed_tool_path_carries_no_type_and_no_citation(monkeypatch):
