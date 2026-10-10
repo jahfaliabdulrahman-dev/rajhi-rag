@@ -665,7 +665,8 @@ def answer_question(store, question: str, rows=None, chunks=None,
         body = "\n\n".join(f"• {r.answer}" for r in results)
         # **والنوعُ يُدمَج مع الأجزاء (مقعدُ أ-٤ P2 · مُثبت):** كان ينبني بلا `cited_row_ids`
         # ولا `citation_mode` ⇒ فسؤالٌ مركّبٌ جزءُه مُقيَّدٌ يعود `prose` باستشهادٍ فارغ،
-        # **فلا تُطبَّق البوّابةُ على المركّب** — وهو نصفُ الأسئلة الحقيقيّة.
+        # **فلا تُطبَّق البوّابةُ على المركّب** — وهو **٥ من ٥٠** في الحزمة (R105-7: كان «نصفَ الأسئلة
+        # الحقيقيّة» بلا سند، والمقيسُ ٥).
         merged_cited = sorted({n for r in results for n in (r.cited_row_ids or [])})
         merged_unsup = sorted({n for r in results for n in (r.unsupported_citations or [])})
         merged_mode = ("typed" if any(r.citation_mode == "typed" for r in results)
