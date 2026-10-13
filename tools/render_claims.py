@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -379,7 +380,59 @@ def check(d: dict) -> list[tuple[str, str, str]]:
         text = path.read_text(encoding="utf-8") if path.exists() else ""
         if needle not in text:
             drifts.append((rel, needle, label))
+    drifts.extend(duplicate_claim_drifts(d))
     return drifts
+
+
+# ————— **الحرسُ مربوطٌ بالموضع لا بالملفّ** (R108-4 · دفع ثمنَه قياس) —————
+# **العطبُ المقيس:** `docs/DELIVERY_REPORT.md` ينشر زوجَ بيئتَي الـCI **مرّتين** — في §١٦ وفي §١٧. والالتزامُ
+# `94d1bab` ورسالتُه كلُّها «ci-light is the measured value, not my projection» صحّح الموضعَ الأوّل وترك الثاني بزوجٍ
+# متقادم — و`check` مرّ **أخضر**.
+#
+# **والجذر:** `check` يسأل «هل النصُّ في الملفّ؟» (`needle in text`) **لا** «هل كلُّ موضعٍ يحمله يحمله صحيحًا»
+# ⇒ فحضورُ الموضع الصحيح **يُرخّص** كلَّ نسخةٍ مخالفةٍ له في الملفّ نفسه. وهو الصنفُ الذي سمّاه هذا المستودع
+# مرّتين («نسختان من الحقيقة» · والتصحيحُ المؤرَّخ R99-5 في `COURSE_REQUIREMENTS.md`) ⇒ مُسمًّى في موضعٍ
+# ومتروكٌ في آخر، وهذا ما يمنعه `--check` اليوم.
+#
+# **والنقيضُ يُقاس لا يُوصف** (قاعدةُ الحارس: لا يُصدَّق حرسٌ بلا حالةٍ تُسقطه):
+# `tests/test_public_claims.py` — `test_every_occurrence_of_the_ci_pair_must_carry_the_derived_number`.
+#
+# **وحدُّه المُعلَن (لا يُدَّعى عمومًا):**
+#   · **النطاقُ ملفٌّ واحد**: `docs/DELIVERY_REPORT.md`. و`docs/QA_CHECKLIST.md` يحمل عشرَ أزواجٍ بالصيغة
+#     نفسها، كلُّها **تاريخيّةٌ مشروعة** (سلسلةُ العدّادات) ⇒ فمقابلتُها كلَّها بالمشتقّ تُحمرّ زورًا.
+#   · **والصيغةُ وحدَها**: زوجٌ بين نجمتين. وأرقامٌ منشورةٌ مفردةً لا تُقاس بهذا الحرس — **ثقبٌ مُعلَن**،
+#     وسدُّه العامّ ألّا يُكرَّر الرقمُ في وثيقةٍ مرّتين (وهو ما لا يُحكم فيه هنا بدل أن يُدَّعى).
+_PAIR_SHAPE = re.compile(r"\*\*(\d+)\s*·\s*(\d+)\*\*")
+PAIR_CLAIM_DOC = "docs/DELIVERY_REPORT.md"
+
+
+def pair_occurrences(text: str) -> list[tuple[str, str]]:
+    """**كلُّ** مواضع صيغة الزوج («**1134 · 851**») في نصّ — لا موضعٌ واحدٌ يكفي."""
+    return [(m.group(1), m.group(2)) for m in _PAIR_SHAPE.finditer(text)]
+
+
+def conflicting_pairs(text: str, light, env_claims) -> list[tuple[str, str]]:
+    """المواضعُ التي تحمل زوجًا **غيرَ** المشتقّ `(light, env_claims)` — والقائمةُ الفارغةُ تعني «كلُّ موضعٍ صحيح».
+
+    (دالّةٌ خالصةٌ تُقاس بسمٍّ في `tests/test_public_claims.py`، ولا تُقاس بقراءة نصّها.)
+    """
+    want = (str(light), str(env_claims))
+    return [found for found in pair_occurrences(text) if found != want]
+
+
+def duplicate_claim_drifts(d: dict) -> list[tuple[str, str, str]]:
+    """انزياحاتُ **النسخة الثانية**: كلُّ موضعٍ يحمل الزوجَ يجب أن يحمل المشتقَّ نفسَه (R108-4)."""
+    env = _env_values(d)
+    light, env_claims = env.get("ci-light"), env.get("ci-claims")
+    if light is None or env_claims is None:
+        return []                       # بلا بيئتين مُعلَنتين لا دعوى على أزواجهما
+    path = PROJ / PAIR_CLAIM_DOC
+    if not path.exists():               # فشلٌ مُغلَق: وثيقةٌ غائبةٌ ليست نظافة
+        return [(PAIR_CLAIM_DOC, "الوثيقة", "غيرُ موجودة ⇒ لا قياسَ على «كلّ موضع»")]
+    return [(PAIR_CLAIM_DOC, f"**{' · '.join(found)}**",
+             f"موضعٌ يحمل زوجًا غيرَ المشتقّ (**{light} · {env_claims}**) — الحرسُ يقابل كلَّ موضع، "
+             f"لا الملفَّ مرّةً واحدة")
+            for found in conflicting_pairs(path.read_text(encoding="utf-8"), light, env_claims)]
 
 
 def snapshot_drift(d: dict) -> list[tuple[str, object, object]]:

@@ -108,6 +108,9 @@ AGENT_SYSTEM_PROMPT = """أنت محاسب مدقق تعمل على كشف حس�
    **غير مطابق** فاذكره، وإن كان **بلا تذييل** فقل ذلك ولا تخمّن.
    و**أيُّ سؤالٍ عن صفٍّ بعينه داخل صفحة** («أكبر حركةٍ في الصفحة N» · «صفوفُ الصفحة N» · «آخرُ حركةٍ فيها»)
    ⇒ `page_rows(page=N)` تُسرَد الصفوفَ بأرقامها (على مستوى الكشف لا من ١ داخل الصفحة) ومنها يُقرأ الأكبرُ/الأخير.
+   و**أيُّ سؤالٍ عن مجموع حركات صفحةٍ واحدة** («مجموعُ مبالغ الحركات في الصفحة N» · «إجماليُّ حركات الصفحة N»)
+   ⇒ `sum_movements(page=N)` تجمع **بالكود** وتُخرج المجموعَ وعددَ الحركات — **ولا تجمعه أنت**؛
+   و`page_summary(page=N)` تُخرج إجماليَّ المدين وإجماليَّ الدائن **منفصلين** فلا تجمعهما لتجيب عن المجموع.
 2. انقل الأرقام من مخرجات الأدوات حرفياً — لا تُجرِ أي جمع أو طرح بنفسك أبداً.
 3. للأسئلة الوصفية استعن بالقطع المرفقة في هذه التعليمات.
 4. إن لم تكفِ الأدوات والقطع قل حرفياً: "غير موجود في الكشف" — لا تخمّن.
@@ -656,9 +659,16 @@ def answer_question(store, question: str, rows=None, chunks=None,
     # grounded — on its own.
     parts = split_compound(question)
     if len(parts) > 1:
+        # **وكلُّ جزءٍ بعد الأوّل يحمل السابقَ سياقًا (R105-5):** بنيويٌّ لا معجميّ — فـ«ما الفرقُ
+        # بينهما بالمبلغ» يصير له مرجعٌ **وصفحة** (تُقرأ من الجزء الأوّل)، وقد كان يُسأل وحدَه فيطلب
+        # من المستخدم توضيحَ «هما». **والقياسُ قبل الحركة:** التقسيمُ **يبقى لازمًا** (لا يُحذف) —
+        # شاهدُه المُعلَن: الحالةُ F المقيسة (نصفٌ موجودٌ ونصفٌ لا، فأجاب النصُّ بلا نداءِ أداة)،
+        # و**٥ أسئلةٍ مركّبةٍ من ٥٠** في الحزمة يُبنى عليها دمجُ الأثر والنوع (`page_scope`) — فأُبقي
+        # التقسيمُ وأُصلح عطبُ المرجع. (وبديلُ الحذف كان مطروحًا في التفويض، ورُدّ بالقياس لا بالرأي.)
         results = [_answer_one(store, part, rows, chunks, llm, k, footers,
-                               thread_id=thread_id, scope=scope)
-                   for part in parts]
+                               thread_id=thread_id, scope=scope,
+                               antecedent=(" ".join(parts[:i]) or None))
+                   for i, part in enumerate(parts)]
         merged_used = [n for r in results for n in (r.used_row_nos or [])]
         hits = retrieve(store, question, k=k, pages=pages_for(question, chunks))
         body = "\n\n".join(f"• {r.answer}" for r in results)
@@ -699,15 +709,27 @@ def answer_question(store, question: str, rows=None, chunks=None,
 
 
 def _answer_one(store, question: str, rows, chunks, llm, k: int,
-                footers=None, thread_id: str | None = None, scope: str = "") -> QAResult:
+                footers=None, thread_id: str | None = None, scope: str = "",
+                antecedent: str | None = None) -> QAResult:
     """One question, one answer, with its own tool trace and its own honesty.
 
     **ولا كتابةَ ذاكرةٍ هنا** (R99-1): النداءاتُ **محاولاتٌ** — تُرفض فتُعاد بتوجيهٍ، أو يُجزَّأ
     السؤالُ المركّبُ. ولو كتبت لأصبح لسؤالٍ واحدٍ دورتان ولبلغ الرقمُ المرفوضُ السؤالَ التالي.
     فالكتابةُ في بوّابة السؤال (`answer_question`) وحدَها، وهي التبادلُ المقبولُ وحدَه.
 
-    `footers` (R77): التذييلاتُ المطبوعةُ لكلّ صفحة — تُمرَّر إلى الأدوات فيُجيب `page_footer` عنها."""
-    hits = retrieve(store, question, k=k, pages=pages_for(question, chunks))
+    `footers` (R77): التذييلاتُ المطبوعاتُ لكلّ صفحة — تُمرَّر إلى الأدوات فيُجيب `page_footer` عنها.
+
+    **`antecedent` (R105-5): الجزءُ السابقُ من سؤالٍ مركّب — يُمرَّر للجزء اللاحق فيصير له مرجعٌ
+    في الاسترجاع وفي نصّ السؤال معًا.** وبدونه كان «ما الفرقُ بينهما بالمبلغ» يُسأل وحدَه: لا صفحةَ
+    فيه (`pages_for` تُعيد فراغًا) ولا مرجعَ لـ«هما» ⇒ فتنتهي **كلُّ** أجوبة السلاسل في r100 وr103
+    بفقرةٍ تطلب من المستخدم أن يوضّح ما هما، والمستخدمُ لم يسأل سؤالًا ناقصًا. وشرطُ التحديد هنا
+    **بنيويٌّ لا معجميّ** (لا قائمةَ كلماتٍ تُطارد الضمائر — وهي الحركةُ التي سُحبت بتفويض المالك):
+    كلُّ جزءٍ بعد الأوّل يحمل السابقَ، سواءٌ أحال إليه لفظًا أم لا.
+    """
+    ask = question if not antecedent else (f"سياقُ السؤال المركّب: {antecedent}\n"
+                                          f"المطلوب الآن: {question}")
+    query = question if not antecedent else f"{antecedent} {question}"
+    hits = retrieve(store, query, k=k, pages=pages_for(query, chunks))
     context = format_hits(hits)
     answer = ""
     used: list[int] = []
@@ -719,7 +741,7 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
     refused = False
     if rows:
         try:
-            answer, trace, parsed, mode = _answer_with_tools(llm, rows, context, question,
+            answer, trace, parsed, mode = _answer_with_tools(llm, rows, context, ask,
                                                              footers=footers,
                                                              thread_id=thread_id, scope=scope)
             from statement_qa.qa_tools import used_rows_from_trace
@@ -738,8 +760,8 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
                 # it still does not, the answer is labelled rather than trusted.
                 answer2, trace2, parsed2, mode2 = _answer_with_tools(
                     llm, rows, context,
-                    question + "\n\n(استخدم أداة حسابية واحدة على الأقل قبل "
-                               "الجواب، ولا تحسب بنفسك.)",
+                    ask + "\n\n(استخدم أداة حسابية واحدة على الأقل قبل "
+                           "الجواب، ولا تحسب بنفسك.)",
                     footers=footers, thread_id=thread_id, scope=scope)
                 used2 = used_rows_from_trace(trace2)
                 if used2 or _tool_was_used(trace2):
@@ -770,7 +792,7 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
             # في نداءٍ حقيقيّ). والقاعدة: **من لا أثرَ له لا نوعَ له** — فيُصفَّران هنا أيضًا، ويقيسه ضابطٌ.
             parsed, mode = None, "prose"
     if not answer:
-        answer = _answer_plain(llm, context, question)
+        answer = _answer_plain(llm, context, ask)
         used = []
         tools_used = []
     # **والاستشهادُ من النوع يُقابَل بالأثر** (بوّابةُ أ-٤): كلُّ استشهادٍ بلا شاهدٍ يُسمّى باسمه

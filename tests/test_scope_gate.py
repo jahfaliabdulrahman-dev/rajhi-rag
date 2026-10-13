@@ -188,3 +188,81 @@ def test_extractors_handle_both_digit_scripts():
     assert scope.page_in("الصفحة ٧٠٠") == 700
     assert Decimal("987654.32") in scope.amounts_in("بمبلغ 987,654.32 ريال")
     assert scope.amounts_in("لا أرقام هنا") == []
+
+
+# ── R105-5: النصفُ الثاني من سؤالٍ مركّب يحمل الأوّلَ سياقًا (بنيويٌّ لا معجميّ) ────────────────
+def _chain_questions() -> list[dict]:
+    """أسئلةُ عائلة السلاسل المركّبة من الحزمة — **٤ من ٥ مركّبة** ونصفُها الثاني يُحيل إلى الأوّل."""
+    import json
+    from pathlib import Path
+
+    p = Path(__file__).resolve().parents[1] / "docs" / "eval_pack" / "questions.json"
+    d = json.loads(p.read_text(encoding="utf-8"))
+    qs = d["questions"] if isinstance(d, dict) and "questions" in d else d
+    return [q for q in qs if q["id"].startswith("chn-")]
+
+
+def test_the_second_half_alone_names_no_page_and_the_antecedent_restores_it():
+    """**R105-5 · العطبُ والعلاجُ مقيسان بالنصّ لا بالنموذج** (يعمل في الـCI · بلا بيانات).
+
+    العطبُ المقيس (r100 · r103): يُقسَّم السؤالُ المركّب فيُسأل النصفُ الثاني **وحدَه** —
+    «ما الفرقُ بينهما بالمبلغ» — وهو **لا يسمّي صفحةً ولا مرجعًا** («هما» عائدٌ على النصف الأوّل)
+    ⇒ فتنتهي كلُّ أجوبة السلاسل بفقرةٍ تطلب من المستخدم توضيحَ ما هما، والمستخدمُ لم يسأل سؤالًا ناقصًا.
+    والعلاجُ: كلُّ نصٍّ يُبنى للجزء اللاحق يحمل السابقَ، فتعود الصفحتان إلى الاسترجاع وإلى السؤال.
+
+    **والضابطُ بالنقيضين** (وإلّا مرّ على نصٍّ لا صفحةَ فيه): الجزءُ الثاني وحدَه ⇒ **صفرُ صفحات**،
+    ومعه سياقُ الأوّل ⇒ **صفحتان** = صفحاتُ السؤال الكامل.
+    """
+    from statement_qa.qa import split_compound
+    from statement_qa.scope import pages_in
+
+    four = _chain_questions()
+    assert len(four) == 4, f"عائلةُ السلاسل المركّبة ليست ٤ بل {len(four)}"
+    for q in four:
+        parts = split_compound(q["q"])
+        assert len(parts) == 2, (q["id"], parts)
+        assert pages_in(parts[1]) == [], f"{q['id']}: النصفُ الثاني صار يسمّي صفحةً بنفسه؟ {parts[1]}"
+        whole = pages_in(q["q"])
+        assert len(whole) == 2, (q["id"], whole)
+        assert pages_in(f"{parts[0]} {parts[1]}") == whole, f"{q['id']}: السياقُ لا يعيد صفحاتِ السؤال"
+
+
+class _NoHits:
+    """مخزنٌ بلا نتائج: الضابطُ يقيس **ما يُمرَّر** لا ما يُسترجَع (ولا نموذجَ هنا)."""
+
+    index = type("_Idx", (), {"ntotal": 1})()
+
+    def similarity_search_with_score(self, query, k=4, filter=None, fetch_k=None):  # noqa: ARG002
+        return []
+
+
+def test_every_part_after_the_first_is_answered_with_the_parts_before_it(monkeypatch):
+    """**توصيلُ السياق مقيسٌ لا موعود:** `answer_question` يمرّر لكلّ جزءٍ بعد الأوّل الأجزاءَ السابقة.
+
+    والحدُّ أيضًا: **الجزءُ الأوّل بلا سياق** (فلا يُغذّى سؤالٌ بنفسه)، والحركةُ **بنيويّة**: لا قائمةَ
+    كلماتٍ تطارد الضمائر — وهي الحركةُ التي سُحبت بتفويض المالك لأنّها ترقيع.
+    """
+    from statement_qa import qa as q
+
+    seen: list[tuple[str, str | None]] = []
+
+    def fake(store, part, rows_, chunks, llm, k, footers=None, thread_id=None, scope="",
+             antecedent=None):                       # noqa: ARG001
+        seen.append((part, antecedent))
+        return q.QAResult(answer=f"جزءٌ {len(seen)}", sources=[], used_row_nos=[],
+                          tools_used=[])
+
+    monkeypatch.setattr(q, "_answer_one", fake)
+    rows = [{"row_no": 1, "page": 1, "printed_page": 1, "desc": "سطر", "date": "2026-01-01",
+             "movement": "10.00", "side": "debit", "balance": "10.00", "printed_movement": "10.00",
+             "printed_balance": "10.00", "counted": 1, "row_state": "عادي", "source": "طباعة"},
+            {"row_no": 2, "page": 2, "printed_page": 2, "desc": "سطر", "date": "2026-01-02",
+             "movement": "10.00", "side": "debit", "balance": "20.00", "printed_movement": "10.00",
+             "printed_balance": "20.00", "counted": 1, "row_state": "عادي", "source": "طباعة"}]
+    q.answer_question(store=_NoHits(),
+                      question="هل يساوي رصيدُ آخر صفٍّ مطبوعٍ في الصفحة ١ رصيدَ أوّل صفٍّ مطبوعٍ "
+                               "في الصفحة ٢؟ وما الفرقُ بينهما بالمبلغ؟",
+                      rows=rows, chunks=None, llm=object(), k=2, footers=None)
+    assert len(seen) == 2, seen
+    assert seen[0][1] is None, "الجزءُ الأوّل لا يُغذّى بسياقٍ (ولا بنفسه)"
+    assert seen[1][1] and "الصفحة ١" in seen[1][1], f"الجزءُ الثاني بلا سياق: {seen[1]}"
