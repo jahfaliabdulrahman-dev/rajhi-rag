@@ -20,7 +20,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
 
 from statement_qa.qa import (MODEL_CALL_LIMIT, REQUEST_TIMEOUT_S, STEP_LIMIT,
-                             _run_agent, build_llm)
+                             _run_agent)
 
 SAVED = Path("data/eval_pack")
 
@@ -82,12 +82,30 @@ def test_the_step_ceiling_is_ours_not_the_library_default():
 
 
 def test_the_model_carries_a_real_request_timeout(monkeypatch):
-    """مهلةُ الطلب نفسِه — لا مهلةُ انتظارٍ في أداة القياس (R109-1)."""
-    monkeypatch.setattr("statement_qa.api_key.get_api_key", lambda: "test-key")
-    llm = build_llm("x/y")
+    """مهلةُ الطلب نفسِه — لا مهلةُ انتظارٍ في أداة القياس (R109-1).
 
-    assert getattr(llm, "request_timeout", None) == REQUEST_TIMEOUT_S
-    assert llm.max_retries == 1
+    **ويُقاس بما بُنِي به النموذج لا بكائنٍ حقيقيّ:** `build_llm` يستورد `langchain_openai` داخل
+    الدالّة، وبيئةُ الـCI الخفيفة تُثبّت `langchain`/`langchain-core`/`langgraph` **بلا
+    `langchain_openai`** ⇒ فطلبُ الكائن حقّق `ModuleNotFoundError` في الـCI (قِيس) وهو ثقبُ بيئةٍ
+    لا ثقبُ ضابط. فيُحلّ مزوّدٌ مُلتقِطٌ محلَّ الحزمة **ويُقاس ما يُمرَّر إليها** — وهي العلّةُ نفسُها.
+    """
+    import sys
+    import types
+
+    import statement_qa.qa as qa
+
+    captured: dict = {}
+
+    class _Captured:
+        def __init__(self, **kw):
+            captured.update(kw)
+
+    monkeypatch.setitem(sys.modules, "langchain_openai", types.SimpleNamespace(ChatOpenAI=_Captured))
+    monkeypatch.setattr("statement_qa.api_key.get_api_key", lambda: "test-key")
+    qa.build_llm("x/y")
+
+    assert captured.get("timeout") == REQUEST_TIMEOUT_S, captured
+    assert captured.get("max_retries") == 1, captured
 
 
 def test_the_ceiling_sits_above_every_question_measured_so_far():
