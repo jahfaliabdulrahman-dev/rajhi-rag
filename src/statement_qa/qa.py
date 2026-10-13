@@ -67,25 +67,45 @@ _CLOSING_RE = re.compile(
     re.IGNORECASE)
 
 
-def boost_last_page(hits: list[dict], chunks, question: str) -> list[dict]:
-    """Append the final page's chunks for closing-balance questions.
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 
-    Pure and deterministic: nothing is re-scored; missing last-page chunks
-    are appended at the end so the tools/answer/sources can see them."""
-    if not chunks or not _CLOSING_RE.search(_normalize_ar(question or "")):
-        return hits
-    last_page = max(c.page for c in chunks)
-    have = {(h.get("page"), h.get("row_start"), h.get("row_end"))
-            for h in hits}
-    extra = [c for c in chunks
-             if c.page == last_page
-             and (c.page, c.start_row, c.end_row) not in have]
-    if not extra:
-        return hits
-    return hits + [{
-        "chunk_id": c.chunk_id, "page": c.page, "row_start": c.start_row,
-        "row_end": c.end_row, "text": c.text, "score": 0.0,
-    } for c in extra]
+# **كلمةُ الصفحة ثمّ أرقامُها:** الأرقامُ تُؤخذ من **نافذةٍ ملتصقةٍ بكلمة الصفحة**، مَوصولةً بـ«و» أو
+# فاصلةٍ أو شرطةٍ أو `and`/`to` — فلا يُلتقط «٥» من «الصفحة ٤ من ٥» (مقيسٌ على الحزمة نفسِها).
+_PAGE_WORDS = re.compile(r"(?:ال)?صفح(?:ة|ه|تين|تان|ات)|pages?|page", re.IGNORECASE)
+_PAGE_NUMBERS = re.compile(r"\s*\d+(?:\s*(?:و|,|،|–|—|-|إلى|and|to)\s*\d+)*")
+
+
+def named_pages(question: str) -> list[int]:
+    """أرقامُ الصفحاتِ المسمّاةِ في السؤال — **تُقرأ من نصّه** (هنديّة · عربيّة · لاتينيّة).
+
+    **R105-4:** السؤالُ يقول «الصفحة ٢» أو «الصفحتين ٢ و٣» أو «صفحة 52»، وكلُّها صورٌ للشيء نفسه؛
+    والدالّةُ **خالصةٌ** فتُختبر بلا نموذجٍ وبلا كلفة. والترتيبُ محفوظٌ وبلا تكرار.
+    """
+    text = (question or "").translate(_AR_DIGITS)
+    out: list[int] = []
+    for m in _PAGE_WORDS.finditer(text):
+        window = _PAGE_NUMBERS.match(text, m.end())
+        if not window:
+            continue
+        for n in re.findall(r"\d+", window.group(0)):
+            v = int(n)
+            if v not in out:
+                out.append(v)
+    return out
+
+
+def pages_for(question: str, chunks=None) -> list[int]:
+    """الصفحاتُ التي تُطلَب أوّلًا من الفهرس: **المسمّاةُ في السؤال**، وأخيرُ صفحةٍ لسؤال الرصيد.
+
+    **وهذه هي `boost_last_page` بعد أن طُويت في النداء (R105-4 · مراجعة ١٠٥):** كانت حالةً يدويّةً
+    خاصّةً (تُلحِق قطعَ الصفحة الأخيرة **بعد** النتائج) وهي **عينُ الشيء** الذي يفعله مرشِّحُ المكتبة
+    على `page` ⇒ فصارت رقمًا يُمرَّر إلى `retrieve`، **وقطعُها تُطلَب من الفهرس كغيرها**.
+    ودالّةٌ خالصةٌ تُختبر بلا نموذج.
+    """
+    pages = named_pages(question)
+    if not pages and chunks and _CLOSING_RE.search(_normalize_ar(question or "")):
+        pages = [max(c.page for c in chunks)]
+    return pages
 
 SYSTEM_PROMPT = """أنت محاسب مدقق تعمل على كشف حساب بنكي (الراجحي) حُوّل لنص.
 أجب عن السؤال اعتماداً حصرياً على "القطع المرفقة" في هذه التعليمات.
@@ -631,8 +651,8 @@ def answer_question(store, question: str, rows=None, chunks=None,
                     scope: str = "") -> QAResult:
     """Agent-with-tools answer when rows exist; strict RAG fallback otherwise.
 
-    `chunks` (optional): the run's chunks — used ONLY to boost the last page
-    for closing-balance questions (see boost_last_page).
+    `chunks` (optional): the run's chunks — used ONLY to name the last page for
+    closing-balance questions (see pages_for).
     `footers` (optional): the page's **printed** footer totals + verdict — the
     external referee, made answerable (R77). Absent ⇒ the tool says so."""
     # THE GATE RUNS BEFORE THE MODEL. Three measured defects (Gate 4) came from
@@ -661,7 +681,7 @@ def answer_question(store, question: str, rows=None, chunks=None,
                                thread_id=thread_id, scope=scope)
                    for part in parts]
         merged_used = [n for r in results for n in (r.used_row_nos or [])]
-        hits = boost_last_page(retrieve(store, question, k=k), chunks, question)
+        hits = retrieve(store, question, k=k, pages=pages_for(question, chunks))
         body = "\n\n".join(f"• {r.answer}" for r in results)
         # **والنوعُ يُدمَج مع الأجزاء (مقعدُ أ-٤ P2 · مُثبت):** كان ينبني بلا `cited_row_ids`
         # ولا `citation_mode` ⇒ فسؤالٌ مركّبٌ جزءُه مُقيَّدٌ يعود `prose` باستشهادٍ فارغ،
@@ -708,7 +728,7 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
     فالكتابةُ في بوّابة السؤال (`answer_question`) وحدَها، وهي التبادلُ المقبولُ وحدَه.
 
     `footers` (R77): التذييلاتُ المطبوعةُ لكلّ صفحة — تُمرَّر إلى الأدوات فيُجيب `page_footer` عنها."""
-    hits = boost_last_page(retrieve(store, question, k=k), chunks, question)
+    hits = retrieve(store, question, k=k, pages=pages_for(question, chunks))
     context = format_hits(hits)
     answer = ""
     used: list[int] = []

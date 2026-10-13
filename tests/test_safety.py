@@ -105,21 +105,18 @@ def _chunks():
     ]
 
 
-def test_boost_last_page_for_closing_questions():
-    from statement_qa.qa import boost_last_page
+def test_pages_for_names_the_last_page_of_a_closing_question():
+    """**`boost_last_page` طُويت في `pages_for` (R105-4):** الصفحةُ الأخيرةُ لسؤال الرصيد الختاميّ
+    صارت **رقمًا يُمرَّر إلى مرشِّح الفهرس** بدل إلحاقٍ يدويّ بعد النتائج — ونفسُ الحكم: سؤالُ
+    الرصيد يُطلِب أخيرَ صفحة، وغيره لا يُطلِب شيئًا، والمسمّاةُ في السؤال تسبق الكلّ."""
+    from statement_qa.qa import pages_for
 
-    hits = [{"chunk_id": "p001-r01-12", "page": 1, "row_start": 1,
-             "row_end": 12, "text": "[صفحة 1]", "score": 0.1}]
-    boosted = boost_last_page(hits, _chunks(), "كم آخر رصيد في الكشف؟")
-    assert [h["page"] for h in boosted] == [1, 10]
-    assert boosted[-1]["chunk_id"] == "p010-r95-104"
-
-    # non-closing question -> untouched
-    assert boost_last_page(hits, _chunks(), "كم مجموع السحوبات؟") == hits
-
-    # already present -> untouched
-    both = boosted
-    assert boost_last_page(both, _chunks(), "ما آخر رصيد؟") == both
+    assert pages_for("كم آخر رصيد في الكشف؟", _chunks()) == [10]
+    assert pages_for("كم مجموع السحوبات؟", _chunks()) == []
+    assert pages_for("ما آخر رصيد؟", None) == []              # بلا قطعٍ لا يُخمَّن رقم
+    # والمسمّاةُ في السؤال نفسِها تُقرأ ولو كان السؤال عن الرصيد (السؤالُ أسبقُ من الحالتين)
+    assert pages_for("ما رصيد نهاية الصفحة ٣؟", _chunks()) == [3]
+    assert pages_for("قارن الصفحتين ٢ و٣.", _chunks()) == [2, 3]
 
 
 def test_check_page_numbers_detects_a_gap():

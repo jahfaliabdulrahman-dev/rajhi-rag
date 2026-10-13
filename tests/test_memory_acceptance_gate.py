@@ -86,7 +86,7 @@ def chat(request, monkeypatch):
 
     rec = _Recorder()
     monkeypatch.setattr(qa, "build_llm", lambda *_a, **_k: rec)
-    monkeypatch.setattr(qa, "retrieve", lambda _s, _q, k=4: [
+    monkeypatch.setattr(qa, "retrieve", lambda _s, _q, k=4, pages=None: [
         {"chunk_id": c.chunk_id, "page": c.page, "row_start": c.start_row,
          "row_end": c.end_row, "text": c.text, "score": 0.0}
         for c in (app.STATE.get("chunks") or [])[:k]])
@@ -172,7 +172,7 @@ def test_each_question_carries_only_its_own_chunks(chat, monkeypatch) -> None:
     from statement_qa import qa
 
     app, rec, ask = chat
-    monkeypatch.setattr(qa, "retrieve", lambda _s, q, k=4: [
+    monkeypatch.setattr(qa, "retrieve", lambda _s, q, k=4, pages=None: [
         {"chunk_id": f"c-{len(q)}", "page": 1, "row_start": 1, "row_end": 1,
          "text": f"قطعةُ السؤال: {q}", "score": 0.0}])
 
