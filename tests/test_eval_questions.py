@@ -179,50 +179,56 @@ def test_a_suspect_record_is_excluded_from_the_headline_not_counted_in_it(capsys
     assert "أثرًا مشكوكَ القصّ" in out
 
 
-# ── R108-6: تقديرُ كلفةِ السؤال الواحد — **ولا يقلّ عن سقفِ المهلة** ────────────────────────────
-def test_the_cap_estimate_covers_a_timeout_and_does_not_hide_behind_what_was_seen():
-    """**R108-6 · أرقامُها من الواقعة نفسِها (2026-10-13):** سقفٌ 0.10، وصرفٌ بلغ 0.09 قبل السؤال
-    الذي مات بالمهلة، وكلُّ ما رُئي قبلُ أجزاءُ سنت ⇒ فتقديرُ «أعلى مُلاحَظ» يمرّره، **والسقفُ تجاوز ٣٫٥×**.
+# ── R109-1: الكلفةُ بحدٍّ حقيقيٍّ — **والمهلةُ لا تُقدّر إنفاقًا لا يقف عندها** ──────────────
+def test_the_bound_comes_from_the_real_call_ceiling_not_from_a_timeout():
+    """**R109-1 · أرقامُها من الواقعة (2026-10-13):** سقفٌ 0.10، وصرفٌ بلغ 0.09 قبل السؤال الذي مات
+    بالمهلة، **والعدّادُ زاد 0.078 بعد أن انتهت العمليّة** ⇒ *الإنفاقُ لا يقف عند المهلة*، فتقديرُ
+    R108-6 (المهلة × معدّلِ الثانية) بُني على مفترَضٍ كاذب. **والحدُّ الآن من حدِّ نداءاتٍ حقيقيّ في
+    الكود** ⇒ `أسوأُ كلفة = الحدُّ × أعلى كلفةِ نداءٍ مُشاهَدة`، **معروفٌ قبل الطرح لا مُقدَّر**.
 
-    **والنقيضان عبر الأداة نفسِها:** بالمُلاحَظ وحدَه «go» (وهو العطب)، وبالتقدير المُصلَح
-    «anticipatory». والمهلةُ **حدٌّ أعلى معروف** للزمن، والمعدّلُ مُلاحَظٌ من الجولة ⇒ فضربُهما حدٌّ.
+    والنقيضان عبر الأداة نفسِها: بالمُلاحَظ وحدَه «go» (وهو العطب)، وبحدِّ النداءات «anticipatory».
     """
-    from tools.eval_questions import cap_verdict, cost_rate_per_s, worst_case_cost
+    from statement_qa.qa import MODEL_CALL_LIMIT
+    from tools.eval_questions import cap_verdict, per_call_cost, worst_case_cost
 
-    # معدّلٌ مُلاحَظ من الجولة: سؤالٌ كلّف 0.002 في 3 ث · وآخرُ 0.004 في 5 ث ⇒ أغلى ثانية 0.0008
-    pairs = [(0.002, 3.0), (0.004, 5.0)]
-    seen_only = max(c for c, _ in pairs)                       # ما كان يُستعمل قبل الإصلاح
-    bound = worst_case_cost([c for c, _ in pairs], cost_rate_per_s(pairs), 150.0)
+    saw = [(0.02, 2), (0.04, 4)]                   # (كلفةُ السؤال, نداءاتُ أثره)
+    seen_only = max(c for c, _ in saw)             # ما يُقارَن به السقف (أعلى مُلاحَظ)
+    bound = worst_case_cost([c for c, _ in saw], saw)
 
-    assert cost_rate_per_s(pairs) == pytest.approx(0.0008), cost_rate_per_s(pairs)
-    assert bound > seen_only, "التقديرُ لم يتجاوز المُلاحَظ ⇒ المهلةُ لا تدخل الحساب"
-    assert bound == pytest.approx(0.12), bound                # 150 ث × 0.0008/ث
-    assert cap_verdict(0.09, 0.10, seen_only) == "go", "العطبُ لم يُعَد إنتاجه ⇒ الضابطُ لا يعضّ"
-    assert cap_verdict(0.09, 0.10, bound) == "anticipatory", "السؤالُ الذي مات بالمهلة مرّ رغم الإصلاح"
-    # **وحدُّه المُعلَن:** لا يُقلّ عن المُلاحَظ، ولا يُخترع معدّلٌ بلا قياس، وبلا قياسِ صرفٍ لا حكم
-    assert worst_case_cost([0.003], 0.0, 150.0) == 0.003
-    # **وحدُّ العيّنة مُعلَن (R108-6):** جوابٌ فوريّ بكلفةٍ حقيقيّة لا يُبنى عليه معدّلٌ لكلّ ثانية
-    # (قاسه ضابطُ الحلقة بالمزوّد المُحاكى: بلا الحدّ يتوقّف قبل سؤالهِ الثاني — تغطية ١ بدل ٢)
-    assert cost_rate_per_s([(0.30, 0.002)]) == 0.0
-    assert cost_rate_per_s([(0.002, 3.0)]) == pytest.approx(0.002 / 3.0)
-    assert worst_case_cost([], 0.0, 150.0) == 0.0
+    assert per_call_cost(saw) == pytest.approx(0.008), per_call_cost(saw)    # 0.04 ÷ 5
+    assert bound == pytest.approx(MODEL_CALL_LIMIT * 0.008), bound           # الحدُّ × كلفةِ النداء
+    assert bound > seen_only, "الحدُّ لا يتجاوز المُلاحَظ ⇒ فحدُّ النداءات لا يدخل الحساب"
+    assert cap_verdict(0.05, 0.10, seen_only) == "go", "العطبُ لم يُعَد إنتاجه ⇒ الضابطُ لا يعضّ"
+    assert cap_verdict(0.05, 0.10, bound) == "anticipatory"
+    # **وحدُّه المُعلَن:** لا يقلّ عن المُلاحَظ أبدًا (فما رُئي حقيقة)، وبلا عيّنةٍ يبقى المُلاحَظُ وحدَه
+    assert worst_case_cost([0.005], []) == pytest.approx(0.005)
+    assert per_call_cost([]) == 0.0 and per_call_cost([(0.0, 3)]) == 0.0
+    assert worst_case_cost([], []) == 0.0
+    # **والأثرُ أدنى حدٍّ لنداءات النموذج** (لا نداءَ أداةٍ ⇏ نداءُ نموذجٍ واحدٌ على الأقلّ) ⇒ فالحدُّ يعلو
+    assert per_call_cost([(0.003, 0)]) == pytest.approx(0.003)
+    assert worst_case_cost([0.003], [(0.003, 0)]) == pytest.approx(MODEL_CALL_LIMIT * 0.003)
     assert cap_verdict(None, 0.10, 1.0) == "unknown"
     assert cap_verdict(0.10, 0.10, 0.0) == "at-cap"
 
 
-def test_the_loop_asks_the_bounded_estimate_and_records_each_questions_cost():
-    """**توصيلٌ لا تعريف:** الدالّةُ المُصلَحة يجب أن تكون هي التي تقرّر في الحلقة، وإلّا فالعلاجُ قائمٌ
-    ولا يُستهلك. **ويُقاس بالـAST على `rescore` نفسِه** — ومعَه أنّ كلفةَ كلّ سؤالٍ تُسجَّل (بلا تسجيلٍ
-    لا تُنسب زيادةُ العدّاد إلى سؤالٍ بعينه، ولا يمكن للحاجز أن يتعلّم من ذيل جولته).
+def test_the_false_premise_is_gone_and_the_loop_records_both_numbers():
+    """**توصيلٌ لا تعريف:** أوّلًا ألّا يبقى التقديرُ الكاذبُ في الشجرة أصلًا (معدّلُ الثانية سقط
+    لأنّ الإنفاقَ لا يقف عند المهلة)، وثانيًا أن تُستهلك الدالّتان في الحلقة نفسِها (`run_questions`)
+    — **يُقاس بالـAST** — وأن يُسجَّل الرقمان: ما يُقارَن به السقف (`cap_bound_usd`) وسقفُ الخطر
+    بنصّ الحدّ (`ceiling_bound_usd`). وبلا تسجيلٍ لا تُنسب زيادةُ العدّاد إلى سؤالٍ بعينه.
     """
     import ast
 
     src = ROOT / "tools" / "eval_questions.py"
-    tree = ast.parse(src.read_text(encoding="utf-8"))
-    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "run_questions")
+    text = src.read_text(encoding="utf-8")
+    assert "cost_rate_per_s" not in text, "معدّلُ الكلفة لكلّ ثانية عاد ⇒ التقديرُ على المهلة عاد"
+
+    fn = next(n for n in ast.parse(text).body
+              if isinstance(n, ast.FunctionDef) and n.name == "run_questions")
     called = {getattr(c.func, "id", "") for c in ast.walk(fn) if isinstance(c, ast.Call)}
     assert {"worst_case_cost", "cap_verdict"} <= called, sorted(c for c in called if c)
     names = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)}
     assert "hi_cost" not in names, "التقديرُ القديم (أعلى مُلاحَظ وحدَه) عاد إلى الحلقة"
-    text = src.read_text(encoding="utf-8")
-    assert '"cost_usd"' in text and '"cap_bound_usd"' in text, "كلفةُ السؤال غيرُ مسجَّلة"
+
+    for field in ('"cost_usd"', '"cap_bound_usd"', '"ceiling_bound_usd"'):
+        assert field in text, f"{field} غيرُ مسجَّل"

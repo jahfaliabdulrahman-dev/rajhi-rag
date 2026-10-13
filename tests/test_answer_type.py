@@ -255,8 +255,7 @@ def test_a_compound_question_carries_its_parts_tool_names(monkeypatch):
             for i in range(1, 6)]
     calls = {"n": 0}
 
-    def fake(store, part, rows_, chunks, llm, k, footers=None, thread_id=None, scope="",
-             antecedent=None):      # R105-5: معامَلٌ جديد يُمرَّر للأجزاء اللاحقة
+    def fake(store, part, rows_, chunks, llm, k, footers=None, thread_id=None, scope=""):
         calls["n"] += 1
         return q.QAResult(answer=f"جزءٌ {calls['n']}", sources=[], used_row_nos=[calls["n"]],
                          tools_used=["row_chain"] if calls["n"] == 1 else ["page_footer"])

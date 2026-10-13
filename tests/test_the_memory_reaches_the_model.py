@@ -298,7 +298,16 @@ def test_the_call_carries_no_graph_state() -> None:
     assert calls, "لا نداءَ `invoke` في `_run_agent` ⇒ فالحارسُ لا يمسك شيئًا"
     for c in calls:
         passed = {k.arg for k in c.keywords}
-        assert not (passed & {"config", "context"}), f"النداءُ يمرّر حالةً: {sorted(passed)}"
+        assert "context" not in passed, f"النداءُ يمرّر سياقًا: {sorted(passed)}"
+        # **و`config` لا يمرّر حالة — يُقرأ ما فيه لا وجودُه (R109-1):** كان الحارسُ يمنع الكلمةَ
+        # كلَّها، وحدُّ النداءات (R109-1) يمرّر `recursion_limit` **بلا `configurable` ولا خيطٍ ولا
+        # حافظة**. فيُقرأ المفتاحُ المُمرَّر: **الحدُّ وحدَه مسموح**، وأيُّ `thread_id`/`checkpointer`/
+        # `configurable` ممنوع — فالشرطُ صار أضيقَ وأقوى، **ويتحمّر على رأسٍ لا يمرّر الحدَّ**.
+        cfg = next((k.value for k in c.keywords if k.arg == "config"), None)
+        assert cfg is not None, "النداءُ بلا حدِّ خطوات ⇒ يعود افتراضيّ المكتبة (R109-1)"
+        assert isinstance(cfg, ast.Dict), "config ليس قاموسًا حرفيًّا ⇒ فالحارسُ لا يقرؤه"
+        keys = {getattr(k, "value", None) for k in cfg.keys}
+        assert keys == {"recursion_limit"}, f"config يحمل ما ليس الحدَّ: {sorted(map(str, keys))}"
         assert len(c.args) == 1 and not any(isinstance(a, ast.Starred) for a in c.args), \
             "النداءُ يمرّر أكثرَ من وسيطٍ موضعيٍّ واحد (الرسائل هي المدخل وحدَه)"
         assert not any(k.arg is None for k in c.keywords), "النداءُ يمرّر `**kwargs`"

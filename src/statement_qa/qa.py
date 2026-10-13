@@ -121,6 +121,37 @@ AGENT_SYSTEM_PROMPT = """أنت محاسب مدقق تعمل على كشف حس�
    وإن ظهر المبلغ نفسه بأنواع أخرى فاذكر ذلك صراحةً في الجواب."""
 
 
+# ── حدُّ السؤال الواحد (R109-1) ────────────────────────────────────────────────
+# **قِيس الجذرُ قبل أن يوضع الحدّ:** `ChatOpenAI` بلا `timeout` ولا `max_tokens`، و`agent.invoke`
+# بلا `config` ⇒ حدُّ الخطوات افتراضيُّ langgraph 1.2.11 (`DEFAULT_RECURSION_LIMIT = 10007`،
+# مقيسٌ بالاستيراد)؛ ومهلةُ أداة القياس تُوقف **الانتظار لا الطلب**، فيبقى السؤالُ ينفق بعدها.
+# **والمقيسُ على نموذجٍ وهميّ يطلب أداةً إلى الأبد: ٥٠٠٠ نداءِ نموذجٍ ثمّ `GraphRecursionError`**
+# — مقابل **٣ نداءاتٍ** بحدٍّ مضبوط. **وحدُّ النداءات يجعل الكلفةَ معروفةً قبل الطرح**
+# (أسوأُ كلفةٍ للسؤال = الحدُّ × كلفةُ النداء الأعلى)؛ وأكثرُ ما احتاجه سؤالٌ في r105/r107/r108
+# خمسةُ نداءاتِ أدوات ⇒ **١٢ هامشٌ واسعٌ لا يمسّ جوابًا واحدًا**.
+MODEL_CALL_LIMIT = 12
+# **وحدُّ الخطوات يعلو حدَّ النداءات فلا يسبقه** (قِيس: ٢٨ خطوةً تبلغ ٦ نداءاتٍ فقط ⇒ **≈٤٫٧ خطوةً
+# لكلّ نداء**؛ فحدٌّ بـ٢٨ كان يسبق حدَّ النداءات ويرفع `GraphRecursionError` بدل الانتهاء المهذّب).
+# ومعه: حدُّ النداءات هو السقفُ الحقيقيّ، وهذا الاحتياطيُّ **لا يسقط** مع أيّ نسخة.
+STEP_LIMIT = 6 * MODEL_CALL_LIMIT + 8
+REQUEST_TIMEOUT_S = 60.0                # مهلةُ **الطلب** الواحد — تُوقف الطلبَ نفسَه
+MODEL_MAX_RETRIES = 1
+
+
+def _call_limits():
+    """حدُّ نداءات النموذج والأدوات في الدور الواحد — **مكوّنُ المكتبة** لا بناءٌ يدويّ (R109-1).
+
+    و`exit_behavior="end"` ⇒ يقف الوكيلُ **بانتهاءٍ مهذّب** لا باستثناء. **وحدُّ `recursion_limit`
+    في النداء أدناه لا يسقط مع أيّ نسخة**، فالحدُّ قائمٌ حتى لو لم تعرف النسخةُ `middleware`.
+    """
+    from langchain.agents.middleware import ModelCallLimitMiddleware, ToolCallLimitMiddleware
+
+    return [
+        ModelCallLimitMiddleware(run_limit=MODEL_CALL_LIMIT, exit_behavior="end"),
+        ToolCallLimitMiddleware(run_limit=MODEL_CALL_LIMIT, exit_behavior="end"),
+    ]
+
+
 def build_llm(model_name: str | None = None):
     """ChatOpenAI pointed at OpenRouter (key from env / ~/.hermes/.env)."""
     from langchain_openai import ChatOpenAI
@@ -134,6 +165,10 @@ def build_llm(model_name: str | None = None):
         base_url="https://openrouter.ai/api/v1",
         api_key=key,
         temperature=0,
+        # **مهلةٌ حقيقيّةٌ على الطلب نفسه، وإعادةُ محاولةٍ واحدة** (R109-1): كان الطلبُ بلا مهلة
+        # ⇒ فسؤالٌ عالقٌ ينفق إلى ما لا نهاية. والحدُّ يُناديها المكتبةُ فلا يُبنى بديلٌ يدويّ.
+        timeout=REQUEST_TIMEOUT_S,
+        max_retries=MODEL_MAX_RETRIES,
     )
 
 
@@ -407,6 +442,12 @@ def _run_agent(llm, tools, system_prompt: str, user_content: str,
  ضابطٍ بلا استرجاع)، و`chunks=""` ⇒ **لا سياجَ ولا كتلة** (لا سياجَ على فراغ — وصفُ `_with_context`)،
  ويبقى سطرُ «استخدم الأدوات» وحدَه (R102-1: كان هذا السطرُ يَعِد بسياجٍ لا يضعه الكود).
 
+    **وحدُّ السؤال الواحد (R109-1):** الوكيلُ يُبنى بـ`middleware=[ModelCallLimitMiddleware(…)`,
+    `ToolCallLimitMiddleware(…)]`، **و`recursion_limit` يُمرَّر صريحًا في النداء** — والثاني **لا يسقط
+    مع أيّ نسخة** (مقيس: بلا أيّ حدٍّ يبلغ النموذجُ الوهميُّ ٥٠٠٠ نداءٍ ثمّ `GraphRecursionError`،
+    وبالحدّ يقف عند العدد المطلوب بانتهاءٍ مهذّب). ونسخةٌ لا تعرف `middleware` ⇒ يُبنى بلا نوعٍ
+    **ويُعلَن** أنّ الجواب نصّيّ، ويبقى حدُّ `recursion_limit` قائمًا.
+
     **ولا انحدارَ صامت:** نسخةٌ لا تعرف الوسيط ترفع `TypeError` ⇒ يُبنى بلا نوعٍ **ويُعلَن**
     أنّ الجواب نصّيّ (`prose`)، فلا يُقرأ لاحقًا كأنّ استشهادَه مُصرَّحٌ به. وكذلك مسارُ
     `create_react_agent` الاحتياطيّ ⇒ `prose` **ويحمل القطعَ في تلقينه** (`_with_context`).
@@ -434,11 +475,14 @@ def _run_agent(llm, tools, system_prompt: str, user_content: str,
         if typed:
             kw["response_format"] = response_format
         try:
-            agent = create_agent(**kw)
-        except TypeError:      # نسخةٌ لا تعرف `response_format` ⇒ بلا نوع، ويُعلَن ذلك
+            agent = create_agent(**kw, middleware=_call_limits())
+        except TypeError:      # نسخةٌ لا تعرف `response_format` أو `middleware` ⇒ بلا نوع، ويُعلَن
             agent = create_agent(model=llm, tools=tools, system_prompt=prompt)
             typed = False
-    res = agent.invoke({"messages": [*kept, {"role": "user", "content": user_content}]})
+    # **وحدُّ الخطوات في النداء نفسِه (R109-1):** افتراضيُّ langgraph خطواتٌ بالآلاف (مقيس)،
+    # فيُمرَّر صريحًا — **وهو الحدُّ الذي لا يسقط** مع أيّ نسخة (بخلاف `middleware`).
+    res = agent.invoke({"messages": [*kept, {"role": "user", "content": user_content}]},
+                       config={"recursion_limit": STEP_LIMIT})
     parsed = res.get("structured_response") if isinstance(res, dict) else None
     if typed and parsed is not None and getattr(parsed, "answer", None):
         answer, mode = str(parsed.answer).strip(), "typed"
@@ -659,16 +703,9 @@ def answer_question(store, question: str, rows=None, chunks=None,
     # grounded — on its own.
     parts = split_compound(question)
     if len(parts) > 1:
-        # **وكلُّ جزءٍ بعد الأوّل يحمل السابقَ سياقًا (R105-5):** بنيويٌّ لا معجميّ — فـ«ما الفرقُ
-        # بينهما بالمبلغ» يصير له مرجعٌ **وصفحة** (تُقرأ من الجزء الأوّل)، وقد كان يُسأل وحدَه فيطلب
-        # من المستخدم توضيحَ «هما». **والقياسُ قبل الحركة:** التقسيمُ **يبقى لازمًا** (لا يُحذف) —
-        # شاهدُه المُعلَن: الحالةُ F المقيسة (نصفٌ موجودٌ ونصفٌ لا، فأجاب النصُّ بلا نداءِ أداة)،
-        # و**٥ أسئلةٍ مركّبةٍ من ٥٠** في الحزمة يُبنى عليها دمجُ الأثر والنوع (`page_scope`) — فأُبقي
-        # التقسيمُ وأُصلح عطبُ المرجع. (وبديلُ الحذف كان مطروحًا في التفويض، ورُدّ بالقياس لا بالرأي.)
         results = [_answer_one(store, part, rows, chunks, llm, k, footers,
-                               thread_id=thread_id, scope=scope,
-                               antecedent=(" ".join(parts[:i]) or None))
-                   for i, part in enumerate(parts)]
+                               thread_id=thread_id, scope=scope)
+                   for part in parts]
         merged_used = [n for r in results for n in (r.used_row_nos or [])]
         hits = retrieve(store, question, k=k, pages=pages_for(question, chunks))
         body = "\n\n".join(f"• {r.answer}" for r in results)
@@ -709,27 +746,15 @@ def answer_question(store, question: str, rows=None, chunks=None,
 
 
 def _answer_one(store, question: str, rows, chunks, llm, k: int,
-                footers=None, thread_id: str | None = None, scope: str = "",
-                antecedent: str | None = None) -> QAResult:
+                footers=None, thread_id: str | None = None, scope: str = "") -> QAResult:
     """One question, one answer, with its own tool trace and its own honesty.
 
     **ولا كتابةَ ذاكرةٍ هنا** (R99-1): النداءاتُ **محاولاتٌ** — تُرفض فتُعاد بتوجيهٍ، أو يُجزَّأ
     السؤالُ المركّبُ. ولو كتبت لأصبح لسؤالٍ واحدٍ دورتان ولبلغ الرقمُ المرفوضُ السؤالَ التالي.
     فالكتابةُ في بوّابة السؤال (`answer_question`) وحدَها، وهي التبادلُ المقبولُ وحدَه.
 
-    `footers` (R77): التذييلاتُ المطبوعاتُ لكلّ صفحة — تُمرَّر إلى الأدوات فيُجيب `page_footer` عنها.
-
-    **`antecedent` (R105-5): الجزءُ السابقُ من سؤالٍ مركّب — يُمرَّر للجزء اللاحق فيصير له مرجعٌ
-    في الاسترجاع وفي نصّ السؤال معًا.** وبدونه كان «ما الفرقُ بينهما بالمبلغ» يُسأل وحدَه: لا صفحةَ
-    فيه (`pages_for` تُعيد فراغًا) ولا مرجعَ لـ«هما» ⇒ فتنتهي **كلُّ** أجوبة السلاسل في r100 وr103
-    بفقرةٍ تطلب من المستخدم أن يوضّح ما هما، والمستخدمُ لم يسأل سؤالًا ناقصًا. وشرطُ التحديد هنا
-    **بنيويٌّ لا معجميّ** (لا قائمةَ كلماتٍ تُطارد الضمائر — وهي الحركةُ التي سُحبت بتفويض المالك):
-    كلُّ جزءٍ بعد الأوّل يحمل السابقَ، سواءٌ أحال إليه لفظًا أم لا.
-    """
-    ask = question if not antecedent else (f"سياقُ السؤال المركّب: {antecedent}\n"
-                                          f"المطلوب الآن: {question}")
-    query = question if not antecedent else f"{antecedent} {question}"
-    hits = retrieve(store, query, k=k, pages=pages_for(query, chunks))
+    `footers` (R77): التذييلاتُ المطبوعاتُ لكلّ صفحة — تُمرَّر إلى الأدوات فيُجيب `page_footer` عنها."""
+    hits = retrieve(store, question, k=k, pages=pages_for(question, chunks))
     context = format_hits(hits)
     answer = ""
     used: list[int] = []
@@ -741,7 +766,7 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
     refused = False
     if rows:
         try:
-            answer, trace, parsed, mode = _answer_with_tools(llm, rows, context, ask,
+            answer, trace, parsed, mode = _answer_with_tools(llm, rows, context, question,
                                                              footers=footers,
                                                              thread_id=thread_id, scope=scope)
             from statement_qa.qa_tools import used_rows_from_trace
@@ -760,7 +785,7 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
                 # it still does not, the answer is labelled rather than trusted.
                 answer2, trace2, parsed2, mode2 = _answer_with_tools(
                     llm, rows, context,
-                    ask + "\n\n(استخدم أداة حسابية واحدة على الأقل قبل "
+                    question + "\n\n(استخدم أداة حسابية واحدة على الأقل قبل "
                            "الجواب، ولا تحسب بنفسك.)",
                     footers=footers, thread_id=thread_id, scope=scope)
                 used2 = used_rows_from_trace(trace2)
@@ -792,7 +817,7 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
             # في نداءٍ حقيقيّ). والقاعدة: **من لا أثرَ له لا نوعَ له** — فيُصفَّران هنا أيضًا، ويقيسه ضابطٌ.
             parsed, mode = None, "prose"
     if not answer:
-        answer = _answer_plain(llm, context, ask)
+        answer = _answer_plain(llm, context, question)
         used = []
         tools_used = []
     # **والاستشهادُ من النوع يُقابَل بالأثر** (بوّابةُ أ-٤): كلُّ استشهادٍ بلا شاهدٍ يُسمّى باسمه
