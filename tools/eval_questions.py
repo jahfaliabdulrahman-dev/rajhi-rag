@@ -856,18 +856,27 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
 def _print_metrics(results: list[dict]) -> None:
     """المقاييسُ الثلاثة + تفصيلٌ بالقاعدة (يُظهر **أين** العطب لا كمّه فقط).
 
-    **والمقامُ نظيفٌ مُعلَنًا** (الجولة ٤٩ · P-2/P-3): النائبُ (`ok is None` — انتهت مهلةٌ أو عطبٌ) والأثرُ
-    المشكوكُ قصُّه (`trace_suspect`) لا يدخلان المقام — ثم يُطبع عددُ المستبعَد صراحةً، لأنّ استبعادًا صامتًا
-    يقرأ تغطيةً كاذبة.
+    **والعنوانُ على قاعدة المالك (قراره 20261007-184500 البند ١: «المهلةُ سؤالٌ بلا جواب، لا سؤالٌ خارج
+    العدّ»):** فالنائبُ (`ok is None` — انتهت مهلةٌ أو عطبٌ) **داخلَ مقام العنوان** (`X/50`)، والمقامُ
+    النظيفُ (بلا نائبٍ ولا مشكوكِ قصّ) **سطرٌ ثانٍ مُسمًّى** — فلا يقرأ قارئُ العنوانِ رقمًا يخالف القاعدة.
+
+    **(R106-2 · مراجعة ١٠٦):** كان العنوانُ على المقام المُستبعَد (تصميمُ الجولة ٤٩) ⇒ فطبع «٤٥/٤٩» ونقله
+    كاتبُ التقرير عنوانًا، وهو **R94-1 بعينه** (الخطأُ نفسه وقع في 10-07 وصُحّح). فنُقل العنوانُ إلى القاعدة،
+    **وبقي إعلانُ المستبعَد كما هو** (استبعادٌ صامتٌ يقرأ تغطيةً كاذبة). **والملفُّ لم يتغيّر:** `num-04`
+    محفوظٌ فيه `ok: false` — العرضُ وحدَه كان يُخرجه من المقام.
     """
     subs = [r for r in results if eval_stamp.is_substitute(r)]
     susp = [r for r in results if eval_stamp.is_trace_suspect(r)]
     judged = [r for r in results if eval_stamp.is_judged(r)]
     for m, label in (("number", "دقّة الرقم"), ("citation", "صدق الاستشهاد من الأثر"), ("abstain", "صحّة الامتناع")):
-        sel = [r for r in judged if r.get("metric") == m]
+        sel = [r for r in results if r.get("metric") == m]   # المقامُ على القاعدة: كلُّ أسئلة الصنف
         n_ok = sum(1 for r in sel if r.get("ok"))
         print(f"{label:26s} {n_ok:2d}/{len(sel):2d}  {'█' * n_ok}{'·' * (len(sel) - n_ok)}")
-    print(f"{'المجموع':26s} {sum(1 for r in judged if r.get('ok')):2d}/{len(judged):2d}")
+    n_ok_all = sum(1 for r in results if r.get("ok"))
+    print(f"{'المجموع':26s} {n_ok_all:2d}/{len(results):2d}")
+    if len(judged) != len(results):        # السطرُ النظيفُ يُسمّى ولا يُخفى (قاعدةٌ قديمةٌ باقية)
+        print(f"{'  وبلا المستبعَد':26s} {n_ok_all:2d}/{len(judged):2d}"
+              f"   (بلا {len(subs)} نائبًا · وبلا {len(susp)} أثرًا مشكوكَ القصّ)")
     if subs or susp:
         print(f"➖ مُستبعَدٌ من المقام: **{len(subs)} نائبًا** (مهلةٌ/عطبٌ — لم يُجب) "
               f"· **{len(susp)} أثرًا مشكوكَ القصّ** ⇒ المقامُ = {len(judged)} من {len(results)}")

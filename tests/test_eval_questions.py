@@ -102,3 +102,42 @@ def test_every_question_yields_a_value_or_a_declared_abstention():
             assert value == "null", f"{q['id']}: امتناعٌ أخرج قيمة"
         else:
             assert value not in ("null", "None"), f"{q['id']}: لا قيمةَ مُشتقّة"
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# R106-2 (مراجعة ١٠٦): **العنوانُ على قاعدة المالك** — «المهلةُ سؤالٌ بلا جواب، لا سؤالٌ خارج العدّ»
+# (قرارُه `20261007-184500` البند ١). كان `_print_metrics` يطبع «المجموع» على المقام المُستبعَد
+# (تصميمُ الجولة ٤٩) فطبع «٤٥/٤٩»، ونقله كاتبُ التقرير عنوانًا مرّتين (10-07 ثمّ R105). هذا الضابطُ
+# يُكتب **أحمرَ** على الكود قبل الإصلاح: العنوانُ كان `45/49` والمقامُ النظيفُ لم يكن سطرًا مُسمًّى.
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+def _r105_shaped_results() -> list[dict]:
+    """خمسون سؤالًا على هيئة قياس R105: ٣٠ رقمًا (٢٨ صحيحًا · ١ نائبٌ · ١ خاطئ) · ١٠ استشهاد (٨) ·
+    ١٠ امتناع (٩) ⇒ صحيحٌ ٤٥ من ٥٠، والمحكومُ ٤٩."""
+    def rec(i: int, metric: str, kind: str, ok):
+        return {"id": f"q{i:02d}", "metric": metric, "kind": kind, "ok": ok,
+                "answer": "<انتهت المهلة>" if ok is None else "جوابٌ", "why": "",
+                # **والهويّةُ تُقاس** (`eval_stamp`): `trace_len` يجب أن يساوي طولَ `used_row_nos`
+                # وإلّا صار السجلُّ «مشكوكَ القصّ» وسقط من المقام النظيف.
+                "used_row_nos": [], "trace_len": 0}
+    rows = [rec(i, "number", "footer", True) for i in range(1, 29)]          # ٢٨ صحيحًا
+    rows += [rec(29, "number", "page_sum_all", None)]                        # النائبُ (مهلة)
+    rows += [rec(30, "number", "count_rows", False)]                         # خاطئ
+    rows += [rec(i, "citation", "rows_matching", i <= 38) for i in range(31, 41)]   # ٨/١٠
+    rows += [rec(i, "abstain", "absent", i <= 49) for i in range(41, 51)]           # ٩/١٠
+    assert len(rows) == 50 and sum(1 for r in rows if r["ok"]) == 45
+    return rows
+
+
+def test_the_headline_counts_a_timeout_in_the_denominator(capsys):
+    """**قاعدةُ المالك على العنوان:** سؤالٌ انتهت مهلتُه يبقى في المقام ⇒ «٤٥/٥٠»، والمقامُ النظيفُ
+    سطرٌ ثانٍ مُسمًّى «٤٥/٤٩» — واستبعادُه من العنوان هو R94-1 بعينه."""
+    from tools.eval_questions import _print_metrics
+    _print_metrics(_r105_shaped_results())
+    out = capsys.readouterr().out
+    assert re.search(r"المجموع\s+45/50", out), f"العنوانُ ليس على قاعدة المالك:\n{out}"
+    assert re.search(r"وبلا المستبعَد\s+45/49", out), f"المقامُ النظيفُ غيرُ مُسمًّى:\n{out}"
+    assert re.search(r"دقّة الرقم\s+28/30", out), f"مقامُ صنف الرقم أخرج النائبَ:\n{out}"
+    assert re.search(r"صدق الاستشهاد من الأثر\s+8/10", out), out
+    assert re.search(r"صحّة الامتناع\s+9/10", out), out
+    assert "1 نائبًا" in out, "عددُ المستبعَد لم يُعلَن"
