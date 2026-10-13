@@ -72,14 +72,34 @@ _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567
 # **كلمةُ الصفحة ثمّ أرقامُها:** الأرقامُ تُؤخذ من **نافذةٍ ملتصقةٍ بكلمة الصفحة**، مَوصولةً بـ«و» أو
 # فاصلةٍ أو شرطةٍ أو `and`/`to` — فلا يُلتقط «٥» من «الصفحة ٤ من ٥» (مقيسٌ على الحزمة نفسِها).
 _PAGE_WORDS = re.compile(r"(?:ال)?صفح(?:ة|ه|تين|تان|ات)|pages?|page", re.IGNORECASE)
-_PAGE_NUMBERS = re.compile(r"\s*\d+(?:\s*(?:و|,|،|–|—|-|إلى|and|to)\s*\d+)*")
+_PAGE_NUMBERS = re.compile(r"\s*(?:من\s*)?\d+(?:\s*(?:و|,|،|–|—|-|إلى|and|to)\s*\d+)*")
+#: **والشرطةُ نطاقٌ لا فاصلة (مقعدُ البنية · مراجعة ١٠٧):** كانت «١٠–١٢» تُقرأ صفحتين (١٠ و١٢)
+#: **وتسقط ١١** — وهو إسقاطٌ صامتٍ في الاسترجاع. فالمدى يُفكّ إلى أعضائه، وسقفُ الفكّ مُعلَنٌ
+#: (فلا يُفكّ «١–١٠٠٠» من خطأٍ مطبعيّ إلى ألف صفحة).
+_RANGE_SPLIT = re.compile(r"\s*(?:–|—|-|إلى|to)\s*")
+_LIST_SPLIT = re.compile(r"\s*(?:و|,|،|and)\s*")
+_MAX_RANGE = 50
+
+
+def _numbers_in(window: str) -> list[int]:
+    """أرقامُ النافذة — **والمدى يُفكّ** («١٠–١٢» ⇒ ١٠ · ١١ · ١٢)، والمفصولُ يُجمَع («٢ و٣» ⇒ ٢ · ٣)."""
+    out: list[int] = []
+    for part in _LIST_SPLIT.split(window.strip()):
+        nums = [int(x) for x in re.findall(r"\d+", part)]
+        if (len(nums) == 2 and _RANGE_SPLIT.search(part)
+                and 0 < nums[1] - nums[0] <= _MAX_RANGE):
+            out.extend(range(nums[0], nums[1] + 1))
+        else:
+            out.extend(nums)
+    return out
 
 
 def named_pages(question: str) -> list[int]:
     """أرقامُ الصفحاتِ المسمّاةِ في السؤال — **تُقرأ من نصّه** (هنديّة · عربيّة · لاتينيّة).
 
-    **R105-4:** السؤالُ يقول «الصفحة ٢» أو «الصفحتين ٢ و٣» أو «صفحة 52»، وكلُّها صورٌ للشيء نفسه؛
-    والدالّةُ **خالصةٌ** فتُختبر بلا نموذجٍ وبلا كلفة. والترتيبُ محفوظٌ وبلا تكرار.
+    **R105-4:** السؤالُ يقول «الصفحة ٢» أو «الصفحتين ٢ و٣» أو «صفحات ١٠–١٢»، وكلُّها صورٌ للشيء
+    نفسه؛ والدالّةُ **خالصةٌ** فتُختبر بلا نموذجٍ وبلا كلفة. والترتيبُ محفوظٌ وبلا تكرار،
+    **والمدى يُفكّ** فلا تسقط صفحةٌ وسطُه.
     """
     text = (question or "").translate(_AR_DIGITS)
     out: list[int] = []
@@ -87,8 +107,7 @@ def named_pages(question: str) -> list[int]:
         window = _PAGE_NUMBERS.match(text, m.end())
         if not window:
             continue
-        for n in re.findall(r"\d+", window.group(0)):
-            v = int(n)
+        for v in _numbers_in(window.group(0)):
             if v not in out:
                 out.append(v)
     return out

@@ -48,11 +48,6 @@ def _derive_page(q: dict):
     return d.get("page") if isinstance(d, dict) else None
 
 
-def _named_in(question: str, n_pages: int) -> list[int]:
-    from statement_qa.qa import named_pages
-    return [p for p in named_pages(question) if 1 <= p <= n_pages]
-
-
 # ── المقطعُ الخالص: الاستخراجُ من نصّ السؤال — يعمل في الـCI بلا بياناتٍ ولا نموذج ─────────────
 def test_the_pages_named_in_the_questions_are_extracted_exactly():
     """**والأرقامُ تُقرأ من نصّ السؤال — عائلة `derive.page` هي المرجعُ (٣٩ سؤالًا)، والاستخراجُ
@@ -73,6 +68,72 @@ def test_the_pages_named_in_the_questions_are_extracted_exactly():
     assert named_pages("ما الرصيدُ في الصفحة 4 من 5؟") == [4]
     assert named_pages("ما أكبرُ حركةٍ في الصفحة ۲۴۲؟") == [242]      # هنديّةٌ ممتدّة
     assert named_pages("كم عددُ الحركات في الكشف؟") == []
+    # **والمدى يُفكّ (مقعدُ البنية · مراجعة ١٠٧):** «١٠–١٢» كانت تُقرأ صفحتين **وتسقط ١١**
+    assert named_pages("قارن صفحات ١٠–١٢.") == [10, 11, 12]
+    assert named_pages("قارن صفحات 10-12.") == [10, 11, 12]
+    assert named_pages("قارن الصفحات من ٥ إلى ٧.") == [5, 6, 7]
+    # **وسقفُ الفكّ مُعلَن:** مدى شاذٌّ (خطأٌ مطبعيّ) لا يُفكّ إلى ألف صفحة
+    assert named_pages("صفحات ١–١٠٠٠.") == [1, 1000]
+
+
+# ── الفخُّ وقاعدتا الحصّة — بفهرسٍ مُقلَّد: بلا نموذجٍ وبلا بيانات (تعمل في الـCI) ───────────────
+class _Doc:
+    def __init__(self, page: int, row: int):
+        self.metadata = {"chunk_id": f"p{page:03d}-r{row:02d}-{row:02d}",
+                         "page": page, "row_start": row, "row_end": row}
+        self.page_content = f"[صفحة {page}]"
+
+
+class _Store:
+    """فهرسٌ مُقلَّد يسجّل كلّ نداء: يُثبت **ماذا طُلب** لا **ما أُعيد** وحدَه."""
+
+    def __init__(self, per_page: dict[int, int], ntotal: int | None = None):
+        self.pages = {p: [_Doc(p, i + 1) for i in range(n)] for p, n in per_page.items()}
+        if ntotal is not None:
+            self.index = type("_Idx", (), {"ntotal": ntotal})()
+        self.calls: list[dict] = []
+
+    def similarity_search_with_score(self, query, k=4, filter=None, fetch_k=None):
+        self.calls.append({"k": k, "filter": filter, "fetch_k": fetch_k})
+        if filter is not None:
+            return [(d, 0.1) for d in self.pages.get(filter["page"], [])][:k]
+        flat = [d for p in sorted(self.pages) for d in self.pages[p]]
+        return [(d, 0.9) for d in flat][:k]
+
+
+def test_the_trap_reads_the_index_size_and_never_guesses():
+    """**الفخُّ المقيس (مراجعة ١٠٥):** المرشِّحُ يعمل بعد البحث ⇒ `fetch_k` = حجمِ الفهرس،
+    **والحجمُ يُقرأ من `index.ntotal`**. وإن كان الفهرسُ مُقلَّدًا (بلا `.index`) فلا انهيار —
+    يُطلَب `fetch_k` = العددِ المطلوب، وهذا الفرعُ الاحتياطيُّ **مقيسٌ هنا** وإلّا بقي الفخُّ بلا حرس.
+    """
+    from statement_qa.retriever import retrieve
+
+    real = _Store({242: 1, 1: 1}, ntotal=626)
+    retrieve(real, "س", k=4, pages=[242])
+    assert real.calls[0]["fetch_k"] == 626, real.calls
+    assert real.calls[0]["filter"] == {"page": 242}
+
+    fake = _Store({242: 1, 1: 1})                    # بلا `.index` ⇒ index_size ⇒ 0
+    got = retrieve(fake, "س", k=4, pages=[242])
+    assert fake.calls[0]["fetch_k"] == 4, fake.calls  # «لا أعرف» ⇒ العددُ المطلوب، لا صفر
+    assert [h["page"] for h in got][0] == 242
+
+
+def test_a_named_page_is_never_dropped():
+    """**قاعدةُ الحصّة (مقعدا المواصفة والبنية · مراجعة ١٠٧):** كانت حلقةُ `k` تقطع عند `k` بصمت
+    ⇒ سؤالٌ يسمّي خمسَ صفحاتٍ لا يبلغ الفهرسَ إلّا بأربعٍ منها. والآن لكلّ صفحةٍ حصّةٌ
+    (`max(1, limit // len(pages))`) و`limit = max(k, len(pages))` ⇒ **لا صفحةَ مسمّاةٌ تُسقَط**.
+    """
+    from statement_qa.retriever import retrieve
+
+    five = _Store({p: 1 for p in (10, 20, 30, 40, 50)}, ntotal=626)
+    got = retrieve(five, "س", k=4, pages=[10, 20, 30, 40, 50])
+    assert [h["page"] for h in got] == [10, 20, 30, 40, 50], got
+
+    two = _Store({2: 3, 3: 3}, ntotal=626)           # صفحتان كبيرتان: الحصّةُ تقتسم المجموع
+    got2 = retrieve(two, "س", k=4, pages=[2, 3])
+    assert {h["page"] for h in got2} == {2, 3}, got2
+    assert two.calls[0]["k"] == two.calls[1]["k"] == 2, two.calls
 
 
 # ── المقطعُ الكامل: الفهرسُ الحقيقيّ — يُقاس حيث يوجد الكشف (بيئة المالك · نسخة المدقّق) ────────
