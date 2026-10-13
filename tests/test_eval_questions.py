@@ -177,3 +177,52 @@ def test_a_suspect_record_is_excluded_from_the_headline_not_counted_in_it(capsys
     for m in re.finditer(r"(?:المجموع|وبلا المستبعَد)\s+(\d+)/(\d+)", out):
         assert int(m.group(1)) <= int(m.group(2)), f"بسطٌ يتجاوز مقامَه: {m.group(0)}"
     assert "أثرًا مشكوكَ القصّ" in out
+
+
+# ── R108-6: تقديرُ كلفةِ السؤال الواحد — **ولا يقلّ عن سقفِ المهلة** ────────────────────────────
+def test_the_cap_estimate_covers_a_timeout_and_does_not_hide_behind_what_was_seen():
+    """**R108-6 · أرقامُها من الواقعة نفسِها (2026-10-13):** سقفٌ 0.10، وصرفٌ بلغ 0.09 قبل السؤال
+    الذي مات بالمهلة، وكلُّ ما رُئي قبلُ أجزاءُ سنت ⇒ فتقديرُ «أعلى مُلاحَظ» يمرّره، **والسقفُ تجاوز ٣٫٥×**.
+
+    **والنقيضان عبر الأداة نفسِها:** بالمُلاحَظ وحدَه «go» (وهو العطب)، وبالتقدير المُصلَح
+    «anticipatory». والمهلةُ **حدٌّ أعلى معروف** للزمن، والمعدّلُ مُلاحَظٌ من الجولة ⇒ فضربُهما حدٌّ.
+    """
+    from tools.eval_questions import cap_verdict, cost_rate_per_s, worst_case_cost
+
+    # معدّلٌ مُلاحَظ من الجولة: سؤالٌ كلّف 0.002 في 3 ث · وآخرُ 0.004 في 5 ث ⇒ أغلى ثانية 0.0008
+    pairs = [(0.002, 3.0), (0.004, 5.0)]
+    seen_only = max(c for c, _ in pairs)                       # ما كان يُستعمل قبل الإصلاح
+    bound = worst_case_cost([c for c, _ in pairs], cost_rate_per_s(pairs), 150.0)
+
+    assert cost_rate_per_s(pairs) == pytest.approx(0.0008), cost_rate_per_s(pairs)
+    assert bound > seen_only, "التقديرُ لم يتجاوز المُلاحَظ ⇒ المهلةُ لا تدخل الحساب"
+    assert bound == pytest.approx(0.12), bound                # 150 ث × 0.0008/ث
+    assert cap_verdict(0.09, 0.10, seen_only) == "go", "العطبُ لم يُعَد إنتاجه ⇒ الضابطُ لا يعضّ"
+    assert cap_verdict(0.09, 0.10, bound) == "anticipatory", "السؤالُ الذي مات بالمهلة مرّ رغم الإصلاح"
+    # **وحدُّه المُعلَن:** لا يُقلّ عن المُلاحَظ، ولا يُخترع معدّلٌ بلا قياس، وبلا قياسِ صرفٍ لا حكم
+    assert worst_case_cost([0.003], 0.0, 150.0) == 0.003
+    # **وحدُّ العيّنة مُعلَن (R108-6):** جوابٌ فوريّ بكلفةٍ حقيقيّة لا يُبنى عليه معدّلٌ لكلّ ثانية
+    # (قاسه ضابطُ الحلقة بالمزوّد المُحاكى: بلا الحدّ يتوقّف قبل سؤالهِ الثاني — تغطية ١ بدل ٢)
+    assert cost_rate_per_s([(0.30, 0.002)]) == 0.0
+    assert cost_rate_per_s([(0.002, 3.0)]) == pytest.approx(0.002 / 3.0)
+    assert worst_case_cost([], 0.0, 150.0) == 0.0
+    assert cap_verdict(None, 0.10, 1.0) == "unknown"
+    assert cap_verdict(0.10, 0.10, 0.0) == "at-cap"
+
+
+def test_the_loop_asks_the_bounded_estimate_and_records_each_questions_cost():
+    """**توصيلٌ لا تعريف:** الدالّةُ المُصلَحة يجب أن تكون هي التي تقرّر في الحلقة، وإلّا فالعلاجُ قائمٌ
+    ولا يُستهلك. **ويُقاس بالـAST على `rescore` نفسِه** — ومعَه أنّ كلفةَ كلّ سؤالٍ تُسجَّل (بلا تسجيلٍ
+    لا تُنسب زيادةُ العدّاد إلى سؤالٍ بعينه، ولا يمكن للحاجز أن يتعلّم من ذيل جولته).
+    """
+    import ast
+
+    src = ROOT / "tools" / "eval_questions.py"
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "run_questions")
+    called = {getattr(c.func, "id", "") for c in ast.walk(fn) if isinstance(c, ast.Call)}
+    assert {"worst_case_cost", "cap_verdict"} <= called, sorted(c for c in called if c)
+    names = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)}
+    assert "hi_cost" not in names, "التقديرُ القديم (أعلى مُلاحَظ وحدَه) عاد إلى الحلقة"
+    text = src.read_text(encoding="utf-8")
+    assert '"cost_usd"' in text and '"cap_bound_usd"' in text, "كلفةُ السؤال غيرُ مسجَّلة"

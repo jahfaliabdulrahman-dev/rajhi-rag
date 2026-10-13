@@ -422,6 +422,52 @@ def _spent_since(before: dict | None, cur: dict | None) -> float | None:
     return float(c) - float(b)
 
 
+# ───────── تقديرُ كلفةِ السؤال الواحد — **ولا يقلّ عن سقفِ المهلة** (R108-6 · دفع ثمنَه قياس) ─────────
+# **العطبُ المقيس (2026-10-13):** السقفُ المأذون 0.10، والصرفُ بلغ **0.3482** (٣٫٥×)، والتوقّفُ وقع **بعد** الضرر.
+# والسببُ في التقدير لا في الفحص: كان الحدُّ = **أعلى كلفةٍ مُلاحَظة**، وكلُّ ما رُئي قبل السؤال الثلاثين كان
+# أجزاءً من سنت. ثمّ **مات سؤالٌ واحدٌ بالمهلة** (150 ث) فكلفتُه أضعافُ كلّ ما رُئي ⇒ فمرّ من بابين: البابُ
+# البعديّ (`at_or_over`) لا يقف إلّا إذا بلغ الصرفُ السقفَ، والبابُ الاستباقيُّ يقدّر بما رُئي وحدَه.
+#
+# **والجذر:** المهلةُ **حدٌّ أعلى معروف** لزمن السؤال، ومعدّلُ الكلفة لكلّ ثانية **يُقاس** من أسئلة الجولة
+# نفسِها ⇒ فضربُهما حدٌّ أعلى معروفٌ لكلفة سؤالٍ واحد، **يُحسب قبل أن يُطرح**. ودالّةٌ خالصةٌ تُقاس بسمّ
+# (`tests/test_eval_questions.py`) — ولا تُقاس بقراءة نصّها.
+def cost_rate_per_s(pairs: list[tuple[float, float]], min_sample_s: float = 1.0) -> float:
+    """أغلى ثانيةٍ مُلاحَظة: أعلى `كلفة ÷ ثواني` **من سؤالٍ استغرق ثانيةً على الأقل**.
+
+    **وحدُّ العيّنة مُعلَنٌ ومقيس:** جوابٌ يعود في أجزاء الثانية **لا يُبنى عليه معدّل** — فقسمةُ كلفةٍ
+    حقيقيّة على زمنٍ لا وجودَ له تُنتج معدّلًا لا معنى له، وضابطُ الحلقة (`tests/test_eval_cap_loop.py`)
+    يُشغّل مزوّدًا مُحاكًى يجيب فورًا ⇒ فبلا هذا الحدّ **يتوقّف قبل سؤالهِ الثاني** (قِيس: تغطية ١ بدل ٢).
+    ولا عيّنةَ مؤهَّلة ⇒ **صفر** (لا يُخترع معدّل)، ويبقى الحدُّ = أعلى مُلاحَظ — **والثقبُ يُعلَن**.
+    """
+    vals = [c / s for c, s in pairs if c is not None and s and s >= min_sample_s]
+    return max(vals) if vals else 0.0
+
+
+def worst_case_cost(observed: list[float], rate_per_s: float, timeout_s: float) -> float:
+    """أسوأُ كلفةٍ يمكن أن يكلّفها سؤالٌ واحد — **ولا تقلّ عن المُلاحَظ** (فما رُئي حقيقةٌ).
+
+    `max(أعلى مُلاحَظ, المعدّل × المهلة)`. وبلا معدّلٍ مُلاحَظ تُعيد المُلاحَظَ وحدَه — **والحدُّ يُعلَن**
+    (`cap_bound_declared`) بدل أن يُدَّعى حدٌّ لا سندَ له.
+    """
+    seen = max(observed) if observed else 0.0
+    return max(seen, max(0.0, rate_per_s) * max(0.0, timeout_s))
+
+
+def cap_verdict(spent: float | None, cap: float, bound: float) -> str:
+    """قرارُ الصرف **قبل** طرح السؤال: `"go"` أو `"at-cap"` أو `"anticipatory"` أو `"unknown"`.
+
+    دالّةٌ خالصةٌ تحمل القاعدةَ كلَّها (`tools/spend` بالسنّات) ⇒ تُقاس بسمٍّ بلا إنفاق:
+    بلوغُ السقف، أو تقديرٌ يُوصِل الصرفَ بعد السؤال فوقه.
+    """
+    if spent is None:
+        return "unknown"                     # لا قياسَ ⇒ لا حكم (ويُعلن الفرع التقديريّ المُعلَن)
+    if at_or_over(spent, cap):
+        return "at-cap"
+    if bound and would_exceed(spent + bound, cap):
+        return "anticipatory"
+    return "go"
+
+
 # ───────── السقف بالسنتات لا بالعائم (مراجعة ٥٢ · R52-4 · ومقعدُ البنية F7) ─────────
 # **الوحدةُ صارت مشتركةً**: `tools/spend.py` — لأنّ الموضعَ المحلّيّ كان يُغلق الصنفَ في أداةٍ واحدة
 # وأربعةُ أشقّاءَ يُقارنون السقفَ بعائمٍ خامّ (`compare_prompts` · `page_numbers` · `pos_witness` · `scale_slice`).
@@ -765,14 +811,20 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     halt = 0                       # **رمزُ التوقّف المُسمّى** (مراجعة ٥١ · البند ٥): 0 = لا توقّفَ بالسقف،
     # 3 = بلوغُ السقف، 4 = عدّادٌ تراجعيّ. كان `break` يُكمل إلى `return 0/1` ⇒ أتمتةٌ تقرأ توقّفًا
     # مُعلَنًا «نجاحًا». والتوقّفُ ليس حكمًا على الأجوبة ⇒ لا يجوز أن يُصبح رمزَ نجاح.
-    hi_cost, prev_spent = 0.0, 0.0  # أعلى كلفةِ سؤالٍ **مُلاحَظة** في هذه الجولة (للتوقّف الاستباقيّ)
+    # **والتقديرُ لا يقلّ عن سقفِ المهلة** (R108-6): أعلى كلفةٍ مُلاحَظة **وسقفُ المهلة × المعدّل** أيّهما أكبر.
+    obs_costs: list[float] = []                    # كلفةُ كلّ سؤالٍ مُلاحَظة في هذه الجولة
+    obs_pairs: list[tuple[float, float]] = []      # (كلفة، ثواني) ⇒ معدّلُ الكلفة لكلّ ثانية
+    bound = 0.0
+    spent = None
     for i, q in enumerate(todo, 1):
+        spent_before_i: float | None = None
+        bound = 0.0
         if a.budget:                        # **المقياسُ قبل الطلب** (S-2 · أُعيد ٢٠٢٦-٠٩-٢٤ بعد مراجعة ٥٠)
             cur_u = _key_usage()
             spent = _spent_since(before, cur_u)
-            if spent is not None:
-                hi_cost = max(hi_cost, spent - prev_spent)
-                prev_spent = spent
+            spent_before_i = spent
+            bound = worst_case_cost(obs_costs, cost_rate_per_s(obs_pairs),
+                                   float(getattr(a, "timeout", 0) or 150))
             if spent is not None and spent < 0:
                 # **توقّفٌ مُسمّى عند عدّادٍ تراجعيّ** (مراجعة ٥٠ · مقعد Spec · P1): عدّادٌ ينقص يعني أنّ ما
                 # يُقاس ليس ما يزيد بالصرف ⇒ لا سقفَ يُوثق به؛ والصمتُ هنا سقفٌ معطَّلٌ يُنشر كأنّه يعمل.
@@ -781,18 +833,24 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                       f"⇒ توقّفٌ مُسمّى قبل السؤال {i} (fail-closed) · رمزُ الخروج 4.", flush=True)
                 halt = 4
                 break
-            if spent is not None and at_or_over(spent, a.budget):
+            # **قرارُ الصرف في موضعٍ واحد** (`cap_verdict` دالّةٌ خالصةٌ تُقاس بسمّ بلا إنفاق):
+            # البابُ البعديّ (بلغ الصرفُ السقف) والبابُ الاستباقيّ (تقديرٌ يُوصِل فوقه).
+            verdict = cap_verdict(spent, float(a.budget), bound)
+            if verdict == "at-cap":
                 print(f"\n⛔ السقفُ **المقيس** بلغ {spent:.4f} من {float(a.budget):.4f} ⇒ التوقّف قبل "
                       f"السؤال {i}. **التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** · رمزُ الخروج 3.", flush=True)
                 halt = 3
                 break
-            # **توقّفٌ استباقيّ بكلفةٍ مُلاحَظة** (مراجعة ٥١ · البند ٤): بلا هذا يمرّ سؤالٌ يبلغ بالسقفِ ضِعفَه
-            # حين تكون كلفةُ السؤال أكبرَ من المتبقّي. يُقاس بـ**أعلى كلفةٍ رُصدت في هذه الجولة** لا بمعدّلٍ
-            # مفترض. (وحدُّه المُعلَن: عدّادٌ متأخّرٌ بـL نداءً قد يسمح بـL+1 نداءً زائدًا ⇒ والحدُّ الصلبُ
-            # حدُّ المفتاح عند المزوّد.)
-            if spent is not None and hi_cost and would_exceed(spent + hi_cost, a.budget):
-                print(f"\n⛔ **توقّفٌ استباقيّ**: المُنفَق {spent:.4f} + أعلى كلفةٍ مُلاحَظة {hi_cost:.4f} "
+            # **توقّفٌ استباقيّ بأقصى ما يمكن أن يكلّفه سؤالٌ واحد** (مراجعة ٥١ · البند ٤ · **وأُصلح جذره في
+            # R108-6**): كان التقديرُ **أعلى كلفةٍ رُصدت**، وسؤالٌ واحدٌ مات بالمهلة كلفتُه أضعافُها ⇒ **مرّ
+            # من البابين وتجاوز السقفَ ٣٫٥×** (قِيس). والآن `bound` = الأكبرُ من المُلاحَظ و(سقفِ المهلة ×
+            # المعدّل) — **يُحسب قبل أن يُطرح السؤال**، فيقف الاحتياطُ على ما لم يُرَ بعد لا على ما رُئي وحدَه.
+            if verdict == "anticipatory":
+                print(f"\n⛔ **توقّفٌ استباقيّ**: المُنفَق {spent:.4f} + **تقديرُ سؤالٍ واحد** {bound:.4f} "
                       f"يتجاوز السقف {float(a.budget):.4f} ⇒ لا يُطرح السؤال {i}. "
+                      f"(التقديرُ = الأكبرُ من أعلى مُلاحَظ "
+                      f"${max(obs_costs) if obs_costs else 0.0:.4f} و**سقفِ المهلة**: "
+                      f"{float(getattr(a, 'timeout', 0) or 150):.0f} ث × ${cost_rate_per_s(obs_pairs):.6f}/ث) · "
                       f"**التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** · رمزُ الخروج 3.", flush=True)
                 halt = 3
                 break
@@ -818,6 +876,7 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
         # `cited_pages` تُشتقّ كلٌّ على حِدة من `res` ⇒ قصٌّ يُطبَّق على إحداها يجعل **السجلَّ يشهد
         # بغير ما حُكم به**، و`trace_len` يبقى كاملًا فلا يوسم السجلُّ مشكوكًا. الآن: قائمةٌ واحدة.
         trace = list(getattr(res, "used_row_nos", None) or []) if res else []
+        secs = round(time.monotonic() - t0, 1)   # **يُقرأ مرّةً واحدة**: يستهلكه السجلُّ وتقديرُ الكلفة معًا
         done[q["id"]] = {"id": q["id"], "cat": q["cat"], "metric": q["metric"], "expect": q["expect"],
                          "kind": q["derive"]["kind"],
                          "q": q["q"], "answer": ans, "ok": ok, "why": why,
@@ -828,7 +887,18 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                          "scope": getattr(res, "scope", None) if res else None,
                          "refused": bool(getattr(res, "refused", False)) if res else None,
                          "spec_sha": _spec_sha(a.questions),   # **شاهدُ الربط**: أيُّ نصِّ سؤالٍ أُجيب عنه
-                         "secs": round(time.monotonic() - t0, 1)}   # **المتزنُ في الدليل**: كم أخذ السؤال
+                         "secs": secs}     # **المتزنُ في الدليل**: كم أخذ السؤال (يُقرأ قبل حساب الكلفة)
+        # **وكلفةُ هذا السؤال تُقاس وتُسجَّل** (R108-6): بلا هذا لا تُنسب زيادةُ العدّاد إلى سؤالٍ بعينه
+        # بعد وقوعها، **ولا يمكن للحاجز أن يتعلّم من ذيل جولته**. (قراءةُ عدّادٍ واحدةٌ إضافيّةٌ لكلّ سؤال —
+        # مُعلَنة، وهي بلا كلفة.) وسؤالٌ لا يُقرأ عدّادُه **لا يُكتب له رقم** (لا يُخترع صفر).
+        if a.budget and spent_before_i is not None:
+            spent_after_i = _spent_since(before, _key_usage())
+            if spent_after_i is not None:
+                q_cost = max(0.0, spent_after_i - spent_before_i)
+                done[q["id"]]["cost_usd"] = round(q_cost, 6)
+                done[q["id"]]["cap_bound_usd"] = round(bound, 6)
+                obs_costs.append(q_cost)
+                obs_pairs.append((q_cost, max(float(secs), 0.1)))
         merged = {**prev_all, **done}      # النائبُ يبقى ما لم يُجَب عنه فعلاً
         out.write_text(json.dumps({"model": a.model or "افتراضيّ", "spec_sha": _spec_sha(a.questions),
                                    "budget_usd": a.budget,     # **العقدةُ في الدليل**: ميزانيةُ الجولة مُعلنةٌ في ملفّها
