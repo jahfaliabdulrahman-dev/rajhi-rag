@@ -52,7 +52,7 @@ def _derive_page(q: dict):
 def test_the_pages_named_in_the_questions_are_extracted_exactly():
     """**والأرقامُ تُقرأ من نصّ السؤال — عائلة `derive.page` هي المرجعُ (٣٩ سؤالًا)، والاستخراجُ
     يجب أن يوافقها كلَّها** (لا أن يقاربها) — ثمّ صورُ الكتابة الأخرى تُقاس صريحةً."""
-    from statement_qa.qa import named_pages
+    from statement_qa.scope import pages_in as named_pages
 
     qs = _questions()
     with_page = [q for q in qs if _derive_page(q)]
@@ -68,7 +68,7 @@ def test_the_pages_named_in_the_questions_are_extracted_exactly():
     assert named_pages("ما الرصيدُ في الصفحة 4 من 5؟") == [4]
     assert named_pages("ما أكبرُ حركةٍ في الصفحة ۲۴۲؟") == [242]      # هنديّةٌ ممتدّة
     assert named_pages("كم عددُ الحركات في الكشف؟") == []
-    # **والمدى يُفكّ (مقعدُ البنية · مراجعة ١٠٧):** «١٠–١٢» كانت تُقرأ صفحتين **وتسقط ١١**
+    # **والمدى يُفكّ (بوّابةُ المُنتِج · R105-4):** «١٠–١٢» كانت تُقرأ صفحتين **وتسقط ١١**
     assert named_pages("قارن صفحات ١٠–١٢.") == [10, 11, 12]
     assert named_pages("قارن صفحات 10-12.") == [10, 11, 12]
     assert named_pages("قارن الصفحات من ٥ إلى ٧.") == [5, 6, 7]
@@ -120,7 +120,7 @@ def test_the_trap_reads_the_index_size_and_never_guesses():
 
 
 def test_a_named_page_is_never_dropped():
-    """**قاعدةُ الحصّة (مقعدا المواصفة والبنية · مراجعة ١٠٧):** كانت حلقةُ `k` تقطع عند `k` بصمت
+    """**قاعدةُ الحصّة (بوّابةُ المُنتِج · R105-4):** كانت حلقةُ `k` تقطع عند `k` بصمت
     ⇒ سؤالٌ يسمّي خمسَ صفحاتٍ لا يبلغ الفهرسَ إلّا بأربعٍ منها. والآن لكلّ صفحةٍ حصّةٌ
     (`max(1, limit // len(pages))`) و`limit = max(k, len(pages))` ⇒ **لا صفحةَ مسمّاةٌ تُسقَط**.
     """
@@ -164,7 +164,7 @@ def test_the_named_page_reaches_the_context():
 
     store, _n_pages, chunk_pages = _index()
     qs = _questions()
-    from statement_qa.qa import named_pages
+    from statement_qa.scope import pages_in as named_pages
 
     named = [(q["id"], named_pages(q["q"])) for q in qs]
     named = [(i, p) for i, p in named if p]
@@ -198,3 +198,64 @@ def test_the_named_page_reaches_the_context():
     # **وضابطُ الاسم لا العدد:** عائلةُ الغياب الستّةُ مُسمّاةٌ، فلا تُقرأ «٣٩» رقمًا مُرسَلًا.
     assert len(outside) == 6, outside
     assert len(derive39) == 39
+# ── R107-1 (٢)+(٣): القارئُ واحدٌ — وضابطان يقيسانه ──────────────────────────────────────────────
+def test_the_gate_and_the_retrieval_read_the_same_pages():
+    """**R107-1 (٢): أربعُ صيغٍ كان القارئُ الأوّلُ لا يراها** (بلا «ال» · «الصفحه» بالهاء ·
+    المثنّى «الصفحتين» · `page` إنجليزيّة) ⇒ فتمرّ إلى النموذج، والاسترجاعُ يعرف أنّ صفحتَها
+    **خارج الكشف**. والقارئُ اليوم واحدٌ (`scope.pages_in`) فالحكمان لا يفترقان.
+    **يُكتب أحمرَ على الرأس قبل التوحيد** (كان `page_in` يُعيد `None` للصيغ الأربع).
+    """
+    from statement_qa.scope import classify, pages_in
+
+    for q in ("كم عدد الحركات في صفحة ٧٠٠؟",
+              "ما مجموع الصفحتين ٢ و٧٠٠؟",
+              "كم عدد الحركات في الصفحه ٧٠٠؟",
+              "How many rows on page 700?"):
+        assert pages_in(q), "القارئُ الواحد لا يرى الصفحةَ في: " + q
+        assert classify(q, (), 629, frozenset()).kind == "no_such_data", q
+    # **وحدُّه:** سؤالٌ داخل الكشف لا يُرفض — الحارسُ لا يرفض ما يمكن إثباتُه
+    assert classify("ما مجموعُ مبالغ الحركة في الصفحة ٥٢؟", (), 629, frozenset()).kind == "in_scope"
+    assert classify("قارن الصفحتين ٢ و٣.", (), 629, frozenset()).kind == "in_scope"
+
+
+#: **جدولُ التكافؤ — مقيسٌ على الرأس `a60011f` قبل توحيد القارئين** (بوّابةُ المُنتِج · R105-4):
+#: لكلّ سؤالٍ: `page_in` (القارئُ القديم) · `named_pages` (قارئ الاسترجاع) · حكمُ البوّابة بـ`max_page=629`.
+#: **ولم يفترق القارئان على الأسئلة الخمسين** (قِيس: صفر اختلاف)؛ والفرقُ كان في صيغٍ لا تسألها
+#: الحزمة. **وهذا الجدولُ هو شرطُ أن يجري التوحيدُ قبل الخمسين دون أن يغيّر ما تقيسه:** يُعاد
+#: توليدُه بالقارئ الواحد ويُقابَل صفًّا صفًّا، **وأيُّ افتراقٍ يُسقط الضابط.**
+#: والصيغةُ: `id:page_in:pages:gate` (و`-` تعني «لا صفحةَ مسمّاة»).
+_PRE_CHANGE_TABLE = (
+    "num-01:2:2:in_scope num-02:2:2:in_scope num-03:52:52:in_scope num-04:52:52:in_scope num-05:242:242:in_scope "
+    "num-06:242:242:in_scope num-07:486:486:in_scope num-08:486:486:in_scope num-09:27:27:in_scope num-10:100:100:in_scope "
+    "num-11:290:290:in_scope num-12:535:535:in_scope cnt-01:2:2:in_scope cnt-02:25:25:in_scope cnt-03:51:51:in_scope "
+    "cnt-04:52:52:in_scope cnt-05:242:242:in_scope cnt-06:486:486:in_scope cnt-07:500:500:in_scope cnt-08:535:535:in_scope "
+    "bal-01:2:2:in_scope bal-02:52:52:in_scope bal-03:242:242:in_scope bal-04:486:486:in_scope chn-01:52:52,53:in_scope "
+    "chn-02:242:242,243:in_scope chn-03:486:486,487:in_scope chn-04:2:2,3:in_scope cit-01:-:-:in_scope cit-02:-:-:in_scope "
+    "cit-03:52:52:in_scope cit-04:60:60:in_scope cit-05:100:100:in_scope cit-06:242:242:in_scope cit-07:486:486:in_scope "
+    "cit-08:535:535:in_scope cit-09:25:25:in_scope cit-10:500:500:in_scope abs-01:700:700:no_such_data abs-02:629:629:in_scope "
+    "abs-03:-:-:in_scope abs-04:-:-:in_scope abs-05:243:243:in_scope abs-06:244:244:in_scope abs-07:700:700:no_such_data "
+    "abs-08:2:2:in_scope abs-09:800:800:no_such_data abs-10:900:900:no_such_data str-03:-:-:in_scope abs-11:1000:1000:no_such_data "
+)
+
+
+def test_the_single_reader_reproduces_the_pre_change_table():
+    """**R107-1 (٣): قراراتُ البوّابة وصفحاتُ الاسترجاع للأسئلة الخمسين كما قِيست قبل التوحيد.**"""
+    from statement_qa.scope import classify, pages_in
+
+    bank = {x["id"]: x["q"] for x in _questions()}
+    rows = _PRE_CHANGE_TABLE.split()      # الأسطرُ المتجاورةُ تتّصل ⇒ التقسيمُ على الفراغات
+    drifted = []
+    for row in rows:
+        qid, page_in, pages, kind = row.split(":")
+        q = bank[qid]
+        now = pages_in(q)
+        now_page_in = str(now[0]) if now else "-"
+        now_pages = ",".join(str(p) for p in now) or "-"
+        if (now_page_in, now_pages, classify(q, (), 629, frozenset()).kind) != (page_in, pages, kind):
+            drifted.append((qid, (now_page_in, now_pages), (page_in, pages)))
+    assert not drifted, "افتراقٌ بعد التوحيد عن جدول ما قبلَه: " + repr(drifted)
+    assert len(rows) == 50
+    # **وتُطبع شهادةُ التطابق** (شرطُ مراجعة ١٠٧ للخمسين: «وضابطُ R107-1 (٣) يطبع تطابقَ قرارات
+    # البوّابة وصفحاتِ الاسترجاع للأسئلة الخمسين») — تُقرأ في مخرَج التشغيل لا تُدَّعى.
+    print(f"تطابقُ الجدول: {len(rows)} سؤالًا — قراراتُ البوّابة وصفحاتُ الاسترجاع كما قِيست قبل "
+          f"توحيد القارئين (`a60011f`) · افتراقٌ 0")

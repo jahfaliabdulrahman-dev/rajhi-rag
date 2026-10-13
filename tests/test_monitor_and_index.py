@@ -131,3 +131,37 @@ def test_index_deliberately_omits_chain_derived_columns(tmp_path):
 
     df = pl.read_parquet(build(_fixture(tmp_path), tmp_path / "i.parquet"))
     assert "side" not in df.columns and "ok" not in df.columns
+
+# ── R107-2: لا «OK» ومراقبُ المصدر لا يُقرأ — المرّةُ الثالثة (R89-2 · R94-2) ──────────────────
+def test_a_stamp_that_differs_from_the_tree_is_not_ok():
+    """**ضابطُ R107-2:** التطبيقُ يجيب والقالبُ يحوّل **وكودُه مخالفٌ لكود الشجرة** ⇒ ليس `OK`
+    بل `STALE` — لأنّ أيَّ توقّفٍ للعملية يُقلعها من كود المجلّد (كودٌ لم يُقَس بالأسئلة).
+    **وكان المراقبُ يكتب «OK» طوال الوقت** في هذا الحال (المقيس في المراجعة ١٠٧: ثلاثُ ساعات).
+    """
+    assert mon.state_of(True, True, True) == "OK"
+    assert mon.state_of(True, True, False) == "STALE"      # ← عينُ العطب
+    assert mon.state_of(False, True, True) == "DOWN"       # السقوطُ يسبق حكمَ المصدر
+    assert mon.state_of(True, False, True) == "DOWN"
+
+
+def test_stale_is_a_state_the_log_and_the_transition_know():
+    """**والحالةُ الثالثةُ تُقرأ وتُنذر:** `last_state` يعرفها، و`transition` ينطق بها مرّةً عند
+    التغيّر — ولا يقرؤها «عاد» (فلا إشعارُ شفاءٍ على كودٍ غيرِ مفحوص).
+    """
+    log = ("2026-10-13 12:00:00 OK app=up redirect=up source=ok\n"
+           "2026-10-13 12:10:00 STALE app=up redirect=up source=stale\n")
+    assert mon.last_state(log) == "STALE"
+    assert mon.transition("OK", "STALE") == "stale"
+    assert mon.transition("STALE", "STALE") == ""
+    assert mon.transition("STALE", "OK") == "up"
+
+
+def test_the_provenance_reader_is_the_existing_verdict():
+    """**ولا آليّةَ جديدة:** المراقبُ ينادي `tools/qa_gate._provenance_verdict` بدوالّه القائمة —
+    يُقاس بوجود الدالّة نفسِها في مخرَج القراءة، لا بنصٍّ في الملفّ.
+    """
+    ok, why = mon.provenance_state()
+    assert isinstance(ok, bool) and isinstance(why, str)
+    if not ok:
+        assert why, "رفضٌ بلا سبب ⇒ لا يُنبّه بشيء"
+

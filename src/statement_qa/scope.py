@@ -74,7 +74,18 @@ REFUSAL = "غير موجود في الكشف"
 
 _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 _YEAR = re.compile(r"(?<!\d)(1[89]\d{2}|20\d{2})(?!\d)")
-_PAGE = re.compile(r"الصفح(?:ة|ات)?\s*([0-9٠-٩۰-۹]{1,4})")
+#: **قارئُ الصفحة الواحد (بوّابةُ المُنتِج · R105-4):** كان في المستودع قارئان لرقم الصفحة —
+#: هذا (`_PAGE`) وآخرُ في `qa.py` — **يفترقان** على الصيغ: «صفحة ٧٠٠» بلا «ال» · «الصفحه» بالهاء ·
+#: «الصفحتين ٢ و٣» (المثنّى) · `page 700` · والمدى «١٠–١٢» (كان يُسقط ١١ صامتًا).
+#: فصار **قارئٌ واحدٌ هنا يُعيد قائمةً**، تستعمله البوّابةُ والاسترجاعُ معًا؛ ومنعُ تعدّد القارئين
+#: هو نصُّ قاعدة «لا آليّةَ ثانيةٌ بجانب آليّةٍ معطوبة» — والبديلُ ترقيعٌ لا إصلاح.
+#: **وحدُّه مُعلَن:** المدى يُفكّ بسقف `_MAX_RANGE` (فلا يُفكّ «١–١٠٠٠» من خطأٍ مطبعيّ إلى ألف صفحة)،
+#: والأرقامُ تُقرأ من **نافذةٍ ملتصقةٍ بكلمة الصفحة** (فلا تُلتقط «٥» من «الصفحة ٤ من ٥»).
+_PAGE_WORDS = re.compile(r"(?:ال)?صفح(?:ة|ه|تين|تان|ات)|pages?|page", re.IGNORECASE)
+_PAGE_NUMBERS = re.compile(r"\s*(?:من\s*)?\d+(?:\s*(?:و|,|،|–|—|-|إلى|and|to)\s*\d+)*")
+_RANGE_SPLIT = re.compile(r"\s*(?:–|—|-|إلى|to)\s*")
+_LIST_SPLIT = re.compile(r"\s*(?:و|,|،|and)\s*")
+_MAX_RANGE = 50
 _AMOUNT = re.compile(r"([0-9٠-٩۰-۹][0-9٠-٩۰-۹,٬.]*[0-9٠-٩۰-۹])")
 
 # «Does this amount exist?» — the only shape where an absent amount is an answer.
@@ -107,9 +118,41 @@ def years_in(q: str) -> list[int]:
     return [int(m.group(1)) for m in _YEAR.finditer(_norm(q))]
 
 
+def _numbers_in(window: str) -> list[int]:
+    """أرقامُ النافذة — **والمدى يُفكّ** («١٠–١٢» ⇒ ١٠ · ١١ · ١٢)، والمفصولُ يُجمَع («٢ و٣» ⇒ ٢ · ٣)."""
+    out: list[int] = []
+    for part in _LIST_SPLIT.split(window.strip()):
+        nums = [int(x) for x in re.findall(r"\d+", part)]
+        if (len(nums) == 2 and _RANGE_SPLIT.search(part)
+                and 0 < nums[1] - nums[0] <= _MAX_RANGE):
+            out.extend(range(nums[0], nums[1] + 1))
+        else:
+            out.extend(nums)
+    return out
+
+
+def pages_in(q: str) -> list[int]:
+    """**قارئُ الصفحة الواحد** — كلُّ صفحةٍ يسمّيها السؤال، بترتيبها وبلا تكرار، والمدى مُفكوك.
+
+    (الصيغُ المسمّاة في البوّابة: «الصفحة ٧» · «صفحة ٧٠٠» · «الصفحه ٧٠٠» · «الصفحتين ٢ و٣» ·
+    `page 700` · و«الصفحات ١٠–١٢».) **والدالّةُ خالصةٌ** فتُقاس بلا نموذجٍ وبلا كلفة.
+    """
+    text = _norm(q)
+    out: list[int] = []
+    for m in _PAGE_WORDS.finditer(text):
+        window = _PAGE_NUMBERS.match(text, m.end())
+        if not window:
+            continue
+        for v in _numbers_in(window.group(0)):
+            if v not in out:
+                out.append(v)
+    return out
+
+
 def page_in(q: str) -> int | None:
-    m = _PAGE.search(_norm(q))
-    return int(m.group(1)) if m else None
+    """أوّلُ صفحةٍ يسمّيها السؤال — واجهةٌ رقيقةٌ فوق `pages_in` لمن يسأل «أيّ صفحة؟» وحدَها."""
+    pages = pages_in(q)
+    return pages[0] if pages else None
 
 
 def amounts_in(q: str) -> list[Decimal]:
@@ -168,12 +211,16 @@ def classify(question: str, years=(), max_page: int | None = None,
                     f"{REFUSAL} — لا توجد حركات في سنة {y}؛ فترة هذا الكشف "
                     f"{span}. لم أعرض أي مبلغ لأن لا شيء يسنده.")
 
-    # 4) a page past the last one
-    page = page_in(q)
-    if max_page is not None and page is not None and page > max_page:
+    # 4) any page past the last one — **كلُّ صفحةٍ مسمّاةٍ، لا الأولى وحدَها** (بوّابةُ المُنتِج ·
+    #    R105-4): كان الفحصُ يقرأ أوّلَ صفحةٍ بقارئٍ أضيقَ من قارئ الاسترجاع ⇒ فسؤالٌ يقول
+    #    «كم عدد الحركات في صفحة ٧٠٠؟» (بلا «ال») **يمرّ إلى النموذج** والاسترجاعُ يعرف أنّها
+    #    غيرُ موجودة. والقارئُ اليوم واحدٌ (`pages_in`) فالحكمان لا يفترقان.
+    beyond = [p for p in pages_in(q) if max_page is not None and p > max_page]
+    if beyond:
+        named = "، ".join(str(p) for p in beyond)
         return Scope(
-            "no_such_data", f"صفحة خارج الملف ({page})",
-            f"{REFUSAL} — الكشف ينتهي عند صفحة {max_page}، فلا صفحة {page} فيه.")
+            "no_such_data", f"صفحة خارج الملف ({named})",
+            f"{REFUSAL} — الكشف ينتهي عند صفحة {max_page}، فلا صفحة {named} فيه.")
 
     # 5) an amount no row carries — and ONLY when the question asks about the
     #    existence of that amount. «الحركات التي تتجاوز ٥٠٠» names a threshold,

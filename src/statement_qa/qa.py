@@ -67,64 +67,24 @@ _CLOSING_RE = re.compile(
     re.IGNORECASE)
 
 
-_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
-
-# **كلمةُ الصفحة ثمّ أرقامُها:** الأرقامُ تُؤخذ من **نافذةٍ ملتصقةٍ بكلمة الصفحة**، مَوصولةً بـ«و» أو
-# فاصلةٍ أو شرطةٍ أو `and`/`to` — فلا يُلتقط «٥» من «الصفحة ٤ من ٥» (مقيسٌ على الحزمة نفسِها).
-_PAGE_WORDS = re.compile(r"(?:ال)?صفح(?:ة|ه|تين|تان|ات)|pages?|page", re.IGNORECASE)
-_PAGE_NUMBERS = re.compile(r"\s*(?:من\s*)?\d+(?:\s*(?:و|,|،|–|—|-|إلى|and|to)\s*\d+)*")
-#: **والشرطةُ نطاقٌ لا فاصلة (مقعدُ البنية · مراجعة ١٠٧):** كانت «١٠–١٢» تُقرأ صفحتين (١٠ و١٢)
-#: **وتسقط ١١** — وهو إسقاطٌ صامتٍ في الاسترجاع. فالمدى يُفكّ إلى أعضائه، وسقفُ الفكّ مُعلَنٌ
-#: (فلا يُفكّ «١–١٠٠٠» من خطأٍ مطبعيّ إلى ألف صفحة).
-_RANGE_SPLIT = re.compile(r"\s*(?:–|—|-|إلى|to)\s*")
-_LIST_SPLIT = re.compile(r"\s*(?:و|,|،|and)\s*")
-_MAX_RANGE = 50
-
-
-def _numbers_in(window: str) -> list[int]:
-    """أرقامُ النافذة — **والمدى يُفكّ** («١٠–١٢» ⇒ ١٠ · ١١ · ١٢)، والمفصولُ يُجمَع («٢ و٣» ⇒ ٢ · ٣)."""
-    out: list[int] = []
-    for part in _LIST_SPLIT.split(window.strip()):
-        nums = [int(x) for x in re.findall(r"\d+", part)]
-        if (len(nums) == 2 and _RANGE_SPLIT.search(part)
-                and 0 < nums[1] - nums[0] <= _MAX_RANGE):
-            out.extend(range(nums[0], nums[1] + 1))
-        else:
-            out.extend(nums)
-    return out
-
-
-def named_pages(question: str) -> list[int]:
-    """أرقامُ الصفحاتِ المسمّاةِ في السؤال — **تُقرأ من نصّه** (هنديّة · عربيّة · لاتينيّة).
-
-    **R105-4:** السؤالُ يقول «الصفحة ٢» أو «الصفحتين ٢ و٣» أو «صفحات ١٠–١٢»، وكلُّها صورٌ للشيء
-    نفسه؛ والدالّةُ **خالصةٌ** فتُختبر بلا نموذجٍ وبلا كلفة. والترتيبُ محفوظٌ وبلا تكرار،
-    **والمدى يُفكّ** فلا تسقط صفحةٌ وسطُه.
-    """
-    text = (question or "").translate(_AR_DIGITS)
-    out: list[int] = []
-    for m in _PAGE_WORDS.finditer(text):
-        window = _PAGE_NUMBERS.match(text, m.end())
-        if not window:
-            continue
-        for v in _numbers_in(window.group(0)):
-            if v not in out:
-                out.append(v)
-    return out
-
-
 def pages_for(question: str, chunks=None) -> list[int]:
-    """الصفحاتُ التي تُطلَب أوّلًا من الفهرس: **المسمّاةُ في السؤال**، وأخيرُ صفحةٍ لسؤال الرصيد.
+    """الصفحاتُ التي تُطلَب أوّلاً من الفهرس: **المسمّاةُ في السؤال**، وأخيرُ صفحةٍ لسؤال الرصيد.
 
-    **وهذه هي `boost_last_page` بعد أن طُويت في النداء (R105-4 · مراجعة ١٠٥):** كانت حالةً يدويّةً
-    خاصّةً (تُلحِق قطعَ الصفحة الأخيرة **بعد** النتائج) وهي **عينُ الشيء** الذي يفعله مرشِّحُ المكتبة
-    على `page` ⇒ فصارت رقمًا يُمرَّر إلى `retrieve`، **وقطعُها تُطلَب من الفهرس كغيرها**.
-    ودالّةٌ خالصةٌ تُختبر بلا نموذج.
+    **والقارئُ واحدٌ لا اثنان (بوّابةُ المُنتِج · R105-4):** كان هنا محلّلٌ ثانٍ للأرقام وجدولُ
+    تحويلٍ ثانٍ للأرقام الهنديّة، **يفترقان** عن محلّل `scope.py` على أربع صيغٍ مُقاسة ⇒ فصارت
+    القراءةُ من `scope.pages_in` **وحدَه**، وحُذف ما كان هنا.
+
+    **وهذه هي `boost_last_page` بعد أن طُويت في النداء:** كانت حالةً يدويّةً خاصّةً (تُلحِق قطعَ
+    الصفحة الأخيرة **بعد** النتائج) وهي **عينُ الشيء** الذي يفعله مرشِّحُ المكتبة على `page` ⇒ فصارت
+    رقمًا يُمرَّر إلى `retrieve`. ودالّةٌ خالصةٌ تُختبر بلا نموذج.
     """
-    pages = named_pages(question)
+    from statement_qa.scope import pages_in
+
+    pages = pages_in(question)
     if not pages and chunks and _CLOSING_RE.search(_normalize_ar(question or "")):
         pages = [max(c.page for c in chunks)]
     return pages
+
 
 SYSTEM_PROMPT = """أنت محاسب مدقق تعمل على كشف حساب بنكي (الراجحي) حُوّل لنص.
 أجب عن السؤال اعتماداً حصرياً على "القطع المرفقة" في هذه التعليمات.

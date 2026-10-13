@@ -109,6 +109,24 @@ def main() -> None:
                   + (" (اختياري)" if optional else ""))
             failures += 0 if optional else 1
 
+    # ————— حكمُ المصدر: أيعمل التطبيقُ على كود هذه الشجرة؟ (R107-2) —————
+    # **المرّةُ الثالثة (R89-2 · R94-2 · R107-2):** مجلّدُ التطبيق نُقل إلى فرعٍ غيرِ مفحوص،
+    # والعمليةُ تُقلع من كوده عند أيّ توقّف ⇒ فالمخاطرةُ حقيقيّة. **ويُقرأ الحكمُ القائم**
+    # (`tools/qa_gate._provenance_verdict` بدوالّه) — **ولا آليّةَ جديدة**، **ولا يُعاد تشغيلُ شيء**.
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from qa_gate import (_app_code_stamp, _listener_pid, _provenance_verdict,
+                             _tree_code_hash, _tree_head)
+        refusal = _provenance_verdict(_app_code_stamp(), _tree_head(),
+                                      _tree_code_hash(), _listener_pid())
+    except Exception as e:  # noqa: BLE001 — تعذُّرُ القياس رفضٌ مسمًّى لا تمرير
+        refusal = f"تعذّر قراءةُ حكم المصدر ({type(e).__name__})"
+    if refusal is None:
+        print("[✅] المصدر — التطبيقُ الجاري على كود هذه الشجرة")
+    else:
+        print(f"[❌] المصدر — التطبيقُ يخالف كودَ الشجرة ⇒ {refusal}")
+        failures += 1
+
     age = (monitor_age_minutes(MONITOR_LOG.read_text(errors="replace"))
            if MONITOR_LOG.exists() else None)
     if age is None:

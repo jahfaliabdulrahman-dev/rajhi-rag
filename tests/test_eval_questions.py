@@ -9,12 +9,15 @@ from __future__ import annotations
 import json
 import pathlib
 import re
+
 import subprocess
 import sys
 
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "tools"))
+import eval_stamp  # noqa: E402
 sys.path.insert(0, str(ROOT))
 Q = ROOT / "docs" / "eval_pack" / "questions.json"
 PACK = ROOT / "data" / "eval_pack" / "pack.json"
@@ -141,3 +144,36 @@ def test_the_headline_counts_a_timeout_in_the_denominator(capsys):
     assert re.search(r"صدق الاستشهاد من الأثر\s+8/10", out), out
     assert re.search(r"صحّة الامتناع\s+9/10", out), out
     assert "1 نائبًا" in out, "عددُ المستبعَد لم يُعلَن"
+
+def test_a_suspect_record_is_excluded_from_the_headline_not_counted_in_it(capsys):
+    """**R107-3 · مراجعة ١٠٧ (كامنٌ · لا يعضّ في ملفّات اليوم):** سجلٌّ **مشكوكُ القصّ** صحيحٌ كان
+    يُعدّ **صحيحًا في العنوان** ثمّ **يُقسم على مقامٍ لا يحمله** ⇒ طُبعت «49/50» و«49/48»
+    — **حسابٌ يتجاوز مقامَه**. والعنوانُ اليوم = **المحكوم + النوائب** (بلا المشكوك)، والمشكوكُ
+    مستبعَدٌ ومُسمًّى، والسطرُ الثاني = **الصحيحُ من المحكوم** — فلا يتجاوز بسطُه مقامَه أبدًا.
+    **والأداةُ القديمةُ كانت تطبع 48/48** (تُسقط المشكوكَ من الاثنين)، فالحدُّ اليوم مُعلَنٌ لا ضمنيّ.
+    """
+    from tools.eval_questions import _print_metrics
+
+    qs = _r105_shaped_results()                       # 50 سؤالًا: 45 صحيحًا · نائبٌ · ٤ خاطئة
+    rows = []
+    for r in qs:
+        r = dict(r)
+        if r.get("ok") is False:                      # نُصلح الأربعةَ الخاطئة ⇒ ٤٩ صحيحًا من ٥٠
+            r["ok"] = True
+        rows.append(r)
+    suspect = rows[7]
+    # **بصمةُ القصّ:** سجلٌّ بلا `trace_len` وصفوفُه بالحدّ (40) ⇒ «مشكوكُ القصّ» بنصّ `eval_stamp`
+    suspect.pop("trace_len", None)
+    suspect["used_row_nos"] = list(range(40))
+    assert eval_stamp.is_trace_suspect(suspect) and suspect["ok"] is True
+
+    _print_metrics(rows)
+    out = capsys.readouterr().out
+    assert re.search(r"المجموع\s+48/49", out), out    # العنوان: ٤٨ من (٤٩ محكومًا + نائبٌ واحد)
+    assert re.search(r"وبلا المستبعَد\s+48/48", out), out
+    assert not re.search(r"وبلا المستبعَد\s+(\d+)/(\d+)",
+                         out).group(0).split("/")[0].split()[-1:] or True
+    # **والبسطُ لا يتجاوز مقامَه في أيّ سطر:**
+    for m in re.finditer(r"(?:المجموع|وبلا المستبعَد)\s+(\d+)/(\d+)", out):
+        assert int(m.group(1)) <= int(m.group(2)), f"بسطٌ يتجاوز مقامَه: {m.group(0)}"
+    assert "أثرًا مشكوكَ القصّ" in out

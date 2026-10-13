@@ -868,14 +868,22 @@ def _print_metrics(results: list[dict]) -> None:
     subs = [r for r in results if eval_stamp.is_substitute(r)]
     susp = [r for r in results if eval_stamp.is_trace_suspect(r)]
     judged = [r for r in results if eval_stamp.is_judged(r)]
+    #: **حدُّ العنوان (R107-3 · مراجعة ١٠٧):** العنوانُ = **المحكوم + النوائب** (وكلُّهم بلا مشكوكِ
+    #: القصّ)، والمشكوكُ **مستبعَدٌ ومُسمًّى كما كان** لا مُدخَلٌ صامتًا. **والعلّةُ التي أُغلقت:** كان
+    #: العنوانُ يعدّ سجلًا مشكوكًا صحيحًا **والسطرُ النظيفُ يقسمه على مقامٍ لا يحمله** ⇒ طُبع
+    #: «المجموع 49/50» و«وبلا المستبعَد 49/48» — **حسابٌ يتجاوز مقامَه**، وهو تغييرُ معنًى غيرُ مُعلَن
+    #: عن الأداة القديمة (كانت تطبع 48/48). **والصنفُ كامنٌ اليوم** (صفرُ مشكوكٍ في كلّ ملفّات الأجوبة
+    #: الحديثة) — ويُقاس بضابطه فلا يعود كامنًا.
+    scored = [r for r in results if not eval_stamp.is_trace_suspect(r)]
     for m, label in (("number", "دقّة الرقم"), ("citation", "صدق الاستشهاد من الأثر"), ("abstain", "صحّة الامتناع")):
-        sel = [r for r in results if r.get("metric") == m]   # المقامُ على القاعدة: كلُّ أسئلة الصنف
+        sel = [r for r in scored if r.get("metric") == m]     # المقامُ على القاعدة: كلُّ أسئلة الصنف
         n_ok = sum(1 for r in sel if r.get("ok"))
         print(f"{label:26s} {n_ok:2d}/{len(sel):2d}  {'█' * n_ok}{'·' * (len(sel) - n_ok)}")
-    n_ok_all = sum(1 for r in results if r.get("ok"))
-    print(f"{'المجموع':26s} {n_ok_all:2d}/{len(results):2d}")
-    if len(judged) != len(results):        # السطرُ النظيفُ يُسمّى ولا يُخفى (قاعدةٌ قديمةٌ باقية)
-        print(f"{'  وبلا المستبعَد':26s} {n_ok_all:2d}/{len(judged):2d}"
+    n_ok_all = sum(1 for r in scored if r.get("ok"))
+    print(f"{'المجموع':26s} {n_ok_all:2d}/{len(scored):2d}")
+    if len(judged) != len(scored):        # السطرُ النظيفُ يُسمّى ولا يُخفى (قاعدةٌ قديمةٌ باقية)
+        n_ok_judged = sum(1 for r in judged if r.get("ok"))
+        print(f"{'  وبلا المستبعَد':26s} {n_ok_judged:2d}/{len(judged):2d}"
               f"   (بلا {len(subs)} نائبًا · وبلا {len(susp)} أثرًا مشكوكَ القصّ)")
     if subs or susp:
         print(f"➖ مُستبعَدٌ من المقام: **{len(subs)} نائبًا** (مهلةٌ/عطبٌ — لم يُجب) "
