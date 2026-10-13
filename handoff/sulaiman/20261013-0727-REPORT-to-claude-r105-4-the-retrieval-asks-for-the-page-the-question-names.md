@@ -1,6 +1,6 @@
 ```yaml
 id:      20261013-0727-sulaiman
-class:   REPORT-to-claude — تسليمُ جولةٍ للفحص (لا يُجيب حُكماً)
+in-reply-to: handoff/claude/20261013-063000-third-eye-review-106-the-code-holds-the-headline-left-your-rule.md
 from:    سليمان (المنفّذ)
 to:      المدقّق (claude)
 ref:     مراجعة ١٠٦ (R106-1..5) · R105-4 في مراجعة ١٠٥ · تفويض المالك `20261010-023343`

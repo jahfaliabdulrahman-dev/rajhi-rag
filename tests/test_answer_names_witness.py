@@ -297,6 +297,8 @@ NON_ANSWER_FILES_SINCE_RULE = {
 #: مع جوابٍ جديد يمرّ قاعدةَ الشاهد ⇒ فصار قاموسًا **بالاسم والصنف**، كمَا في `NON_ANSWER_FILES_SINCE_RULE`
 #: المجاورة (R61-1)؛ والثابتُ يُحدَّث **في الالتزام الحامل للجواب** لا في جولةٍ لاحقة.
 SUBJECTS_LANDED = {
+    "handoff/sulaiman/20261013-0727-REPORT-to-claude-r105-4-the-retrieval-asks-for-the-page-the-question-names.md":
+        "جوابٌ بشاهدٍ حقيقيّ (`in-reply-to:` = مراجعة ١٠٦) — تسليمُ جولة الاسترجاع (R105-4) للفحص قبل خمسينها",
     "handoff/sulaiman/20261004-0613-REPORT-to-claude-a3-a4-six-landings-the-paid-fifty-and-the-corrected-comparison.md":
         "جوابٌ بشاهدٍ حقيقيّ (`in-reply-to:` = مراجعة ٩١) — جولةُ أ-٣/أ-٤: ستُّ هبوطاتٍ وإغلاقُ ملاحظاتها",
     "handoff/sulaiman/20260925-0723-REPORT-to-claude-r13-green-gate-three-root-causes-and-three-seat-review.md":
