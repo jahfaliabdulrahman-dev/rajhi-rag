@@ -60,20 +60,45 @@ def test_no_test_builds_a_client_without_a_key():
 
 
 # ── ② القبولُ السلوكيّ: بيتٌ مزيّفٌ بلا مفتاح ⇒ صفرُ سقوط ───────────────────────────────────
+def _pytest_interpreter() -> str | None:
+    """أوّلُ مفسّرٍ يستطيع `import pytest` — **والحدُّ مُعلَن:** في بعض المهامّ `sys.executable`
+    ليس هو مفسّرَ الخطوة (قِيس في الـCI: `/usr/bin/python3` بلا `pytest` ⇒ سقوطٌ كاذب يقرأ
+    «الضوابطُ تعتمد مفتاحَ المالك» وهو عطبُ أداةٍ لا عطبُ ضابط).
+    """
+    import shutil
+
+    for exe in (sys.executable, shutil.which("python3") or "", shutil.which("python") or ""):
+        if not exe:
+            continue
+        try:
+            ok = subprocess.run([exe, "-c", "import pytest"], capture_output=True, timeout=180)
+        except OSError:
+            continue
+        if ok.returncode == 0:
+            return exe
+    return None
+
+
 def test_the_six_files_pass_in_a_home_without_a_key(tmp_path):
     """يُشغَّل الملفّاتُ الستّة في عمليّةٍ فرعيّة بـ`HOME` مزيّفٍ ومفتاحٍ منزوعٍ من البيئة.
 
     **وحدُّ هذا الفحص مُعلَن:** يقيس ملفّات الجولة الستّة، لا `tests/` كلَّها (وهو ما يقرؤه
-    العدّاد). والباقي محروسٌ بالمسح البنيويّ أعلاه.
+    العدّاد). والباقي محروسٌ بالمسح البنيويّ أعلاه. **وإن لم تكن البيئةُ قادرةً على تشغيل
+    `pytest` في عمليّةٍ فرعيّة يُتخطّى بتسميةٍ صريحة** — ولا يُقرأ التخطّي نجاحًا.
     """
     if os.environ.get("RAJHI_NO_SUBPROCESS_GUARD"):         # مهربٌ مُعلَن لبيئةٍ لا تُشغّل عمليّات
         pytest.skip("مُعطَّلٌ بمتغيّر بيئةٍ صريح")
+    exe = _pytest_interpreter()
+    if exe is None:
+        pytest.skip("لا مفسّرَ في هذه البيئة يشغّل `pytest` في عمليّةٍ فرعيّة ⇒ يُقاس عند المالك")
     env = {k: v for k, v in os.environ.items() if k != "OPENROUTER_API_KEY"}
     env["HOME"] = str(tmp_path)                            # بيتٌ بلا `~/.hermes/.env`
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    proc = subprocess.run([sys.executable, "-m", "pytest", *SIX, "-q", "-p", "no:cacheprovider"],
+    proc = subprocess.run([exe, "-m", "pytest", *SIX, "-q", "-p", "no:cacheprovider"],
                           cwd=ROOT, env=env, capture_output=True, text=True, timeout=900)
-    tail = (proc.stdout or "")[-1200:]
+    out, tail = (proc.stdout or ""), (proc.stdout or "")[-1200:]
+    if "passed" not in out and "failed" not in out:         # شغّل شيئًا آخر: لا يُقرأ حكمًا
+        pytest.skip(f"العمليّةُ الفرعيّةُ لم تُشغّل pytest فعلًا: {(proc.stderr or '')[-200:]}")
     assert proc.returncode == 0, (
         f"سقطت ضوابطُ الجولة في بيتٍ نظيف (rc={proc.returncode}) — أي أنّها تمرّ بمفتاح المالك "
         f"وحدَه:\n{tail}")
