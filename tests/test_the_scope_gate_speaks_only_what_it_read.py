@@ -133,10 +133,11 @@ def test_answer_question_carries_the_page_count_to_the_gate():
     assert "داخلةٌ" in res.answer or "لا سطورَ" in res.answer
 
 
-def test_the_two_consumers_pass_the_page_count():
-    """**الوصلُ مقروءٌ من الملفّين:** التطبيقُ والقياسُ يمرّران عددَ الصفحات — وهو الشقُّ
-    الذي قِيس غائبًا (`grep` لـ`n_pages` في المُنادين = صفر)."""
-    for rel in ("app.py", "tools/eval_questions.py"):
+def test_the_consumers_pass_the_page_count():
+    """**الوصلُ مقروءٌ من الملفّات:** التطبيقُ والقياسُ يمرّران عددَ الصفحات — وهو الشقُّ
+    الذي قِيس غائبًا (`grep` لـ`n_pages` في المُنادين = صفر). **والثالثُ مسبارُ الرفض**
+    (`tools/refusal_test.py`) يُضاف ليُقاس الحاجزُ في شكله الحيّ لا في شكلٍ قديم."""
+    for rel in ("app.py", "tools/eval_questions.py", "tools/refusal_test.py"):
         text = (ROOT / rel).read_text(encoding="utf-8")
         calls = [m.start() for m in re.finditer(r"answer_question\(", text)]
         assert calls, f"{rel}: لا نداءَ لـ`answer_question`"
