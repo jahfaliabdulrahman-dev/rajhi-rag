@@ -56,30 +56,30 @@ def _eval_module():
 
 # ── ① السعرُ يُشاهَد من الرموز (لا من رصيدٍ متأخّر) ──────────────────────────────────────────
 def test_a_window_carries_its_own_tokens_by_the_published_price():
-    """**نافذةٌ واحدة = نافذةٌ مشهودة:** الرموزُ من فرق `usage_metadata`، والسعرُ من الرمز المنشور."""
+    """**نافذةٌ واحدة = ردٌّ مشهود:** الرموزُ من بيانات الردّ، والسعرُ من الرمز المنشور — **والحاكمُ
+    كلفةُ الردود المحاسَبة** (`billed_window` · R115-1) لا `رموز × قائمة`.
+    """
     m = _eval_module()
-    before = {"z-ai/glm-5.3-flash": {"input_tokens": 0, "output_tokens": 0}}
-    after = {"z-ai/glm-5.3-flash": {"input_tokens": 5200, "output_tokens": 240}}
-
-    cost, tin, tout = m.tokens_cost(m.usage_delta(before, after), PRICE_IN_PER_M, PRICE_OUT_PER_M)
-    assert (tin, tout) == (5200, 240), "الفرقُ لا يُقرأ من الرموز المتراكمة"
-    assert cost == pytest.approx((5200 * PRICE_IN_PER_M + 240 * PRICE_OUT_PER_M) / 1e6)
-
-    obs = m.observation(before, after, 1, PRICE_IN_PER_M, PRICE_OUT_PER_M)
-    assert obs is not None and obs[1] == 1, "النافذةُ لا تُنتج مشاهدةً (كلفة, ردود)"
-    assert obs[0] == pytest.approx(cost)
-    # **والردودُ هي المقسومُ عليها (R113-1):** نافذةٌ بخمسةِ ردودٍ تُسعَّر بكلفتها ÷ 5 لا ÷ أرضية
-    five = m.observation(before, after, 5, PRICE_IN_PER_M, PRICE_OUT_PER_M)
-    assert m.per_call_cost([five]) == pytest.approx(cost / 5)
-    assert m.per_call_cost([five]) < m.per_call_cost([obs])
-
+    # ردٌّ يحمل `cost` المزوّد **أكبرَ** من رموزه × القائمة ⇒ يُؤخذ الأكبر (قبولُ مراجعة ١١٥).
+    win = m.billed_window([(5200, 240, 0.0009)], PRICE_IN_PER_M, PRICE_OUT_PER_M, (0.225, 1.60))
+    assert win is not None, "ردٌّ مشهود بلا كلفة"
+    cost, src, replies = win
+    assert replies == 1 and src == "provider-cost", win
+    assert cost == pytest.approx(0.0009), cost
+    # وبلا `cost`: رموزُه × **أعلى سعر مضيفٍ** (لا سعرَ القائمة) — والفرقُ مقيس:
+    win2 = m.billed_window([(5200, 240, None)], PRICE_IN_PER_M, PRICE_OUT_PER_M, (0.225, 1.60))
+    assert win2[1] == "host-max-price", win2
+    assert win2[0] > (5200 * PRICE_IN_PER_M + 240 * PRICE_OUT_PER_M) / 1e6, "أعلى المضيف أرخصُ من القائمة؟"
+    # والقائمةُ وحدَها **حدٌّ أدنى** (٤٢ مقابل ٦٧٫٥ سنتًا في القياس الحقيقيّ): تُنشر للمساءلة لا للسقف
+    assert m.tokens_cost({"x": {"input_tokens": 5200, "output_tokens": 240}},
+                         PRICE_IN_PER_M, PRICE_OUT_PER_M)[0] == pytest.approx(
+        (5200 * PRICE_IN_PER_M + 240 * PRICE_OUT_PER_M) / 1e6)
 
 def test_the_ceiling_is_positive_from_the_second_question_at_the_latest():
     """**القبولُ المنصوص:** بسعرٍ مشهودٍ يصير سقفُ السؤال التالي موجبًا — لا صفرًا كما قِيس."""
     m = _eval_module()
-    obs = m.observation({"x": {"input_tokens": 0, "output_tokens": 0}},
-                        {"x": {"input_tokens": 5200, "output_tokens": 240}},
-                        1, PRICE_IN_PER_M, PRICE_OUT_PER_M)
+    w = m.billed_window([(5200, 240, 0.0009)], PRICE_IN_PER_M, PRICE_OUT_PER_M, (0.225, 1.60))
+    obs = (w[0], w[2])                     # (كلفةٌ محاسَبة, ردودٌ) — زوجُ `next_question_ceiling`
     bound = m.next_question_ceiling(SIMPLE, [obs])
     from statement_qa.qa import question_ceiling
 
@@ -90,20 +90,19 @@ def test_the_ceiling_is_positive_from_the_second_question_at_the_latest():
 
 
 def test_a_window_without_tokens_is_not_recorded_as_a_zero_price():
-    """**لا يُخترع عدد:** نافذةٌ لم تتحرّك رموزُها لا تُنتج مشاهدة (لا صفرًا يُنسب لها).
+    """**لا يُخترع عدد:** نافذةٌ بلا ردودٍ **لا تُنتج سعرًا** (‏`None`) — ولا صفرًا يُنسب لها.
 
-    و`before=None` تعني «منذ البداية» (**قراءةٌ مُعلَنةٌ للتراكم**، وهي نافذةُ السؤال الأوّل) — ولا تعني
-    «صفرَ رموز»؛ فالصفرُ سعرٌ يُقبل ويُعمي الحاجز، وهو عينُ ما وقع اثنتَي عشرةَ مرّة.
+    (R113-1 · ومُثبَّتةٌ في R115-1) و`None` تعني «لا كلفةَ تُدَّعى»، فالصفرُ سعرٌ يُقبل ويُعمي الحاجز
+    — وقد فعله اثنتَي عشرةَ مرّة. **والردُّ بلا `cost` ومع قائمة مضيفين يُسعَّر بأعلاها مُعلَنًا**
+    (‏`host-max-price`) **لا صفرًا**؛ **وبلا قائمةٍ أصلًا ⇒ `None`** (فلا سعرَ يُخترع).
     """
     m = _eval_module()
-    same = {"x": {"input_tokens": 10, "output_tokens": 10}}
-    assert m.observation(same, same, 1, 1.0, 1.0) is None
-    assert m.observation({}, {"x": {"input_tokens": 0, "output_tokens": 0}}, 1, 1.0, 1.0) is None
-    first = m.observation(None, same, 1, 1.0, 1.0)
-    assert first is not None and first[0] == pytest.approx(2e-05), "النافذةُ الأولى من البداية لا صفرًا"
-    # **ونافذةٌ أنفقت ولم يُعرف عددُ ردودها لا تُنتج سعرًا (R113-1):** تُسقَط من العيّنة، ولا يُخترع
-    # لها مقسومٌ (وهو عينُ ما كان يفعل «الأدوات + ١» ⇒ سعرٌ منفوخ ⇒ سقفٌ يقفز ⇒ توقّفُ الجولة).
-    assert m.observation(None, same, 0, 1.0, 1.0) is None, "نافذةٌ بلا ردودٍ مشهودة أنتجت سعرًا"
+    assert m.billed_window([], PRICE_IN_PER_M, PRICE_OUT_PER_M, (0.225, 1.60)) is None
+    assert m.billed_reply_cost(0, 0, None, PRICE_IN_PER_M, PRICE_OUT_PER_M, None) is None
+    # والقائمةُ وحدَها ليست حدًّا: **الرتبةُ تُسمّى**، ومع صفرِ رموزٍ لا كلفةَ تُدَّعى بلا سعر مضيف
+    assert m.billed_reply_cost(0, 0, None, PRICE_IN_PER_M, PRICE_OUT_PER_M, (0.225, 1.60))[0] == 0.0
+    got = m.billed_reply_cost(5200, 240, None, PRICE_IN_PER_M, PRICE_OUT_PER_M, (0.225, 1.60))
+    assert got[1] == "host-max-price" and got[0] > 0
 
 
 # ── ② العطبُ يُعاد إنتاجه بالأرقام المقيسة (فلا يُغلق بادّعاء) ────────────────────────────────
@@ -153,19 +152,22 @@ def test_the_coverage_tool_refuses_a_cap_that_cannot_carry_the_widest_question()
 # ── ④ الدليلُ يحمل ما حُوكم به (R112-4) ─────────────────────────────────────────────────────
 def test_the_evidence_carries_the_price_the_law_used_and_the_spend_before_it():
     m = _eval_module()
-    ev = m.cap_evidence(spent_before=0.0170, spent_after=0.0237, cost_here=0.006732, bound=0.18176,
-                        price=0.003366, source="observed-tokens", meter_delta=0.006732,
-                        tokens=0, tools=1, replies=2)
-    assert ev["cap_price_usd"] == pytest.approx(0.003366)
-    assert ev["cap_price_source"] == "observed-tokens"
+    ev = m.cap_evidence(spent_before=0.0170, spent_after=0.0237, cost_here=0.006732,
+                        cost_by_tokens=0.004200, cost_source="provider-cost",
+                        bound=0.075063, price=0.001061, source="observed-billed",
+                        meter_delta=0.006732, tokens=0, tools=1, replies=2)
+    assert ev["cost_billed_usd"] == pytest.approx(0.006732)      # **حدُّ ما يُحاسَب عليه**
+    assert ev["cost_by_tokens_usd"] == pytest.approx(0.004200)   # **حدٌّ أدنى للعرض** (كان يُظنُّ أعلى)
+    assert ev["cost_source"] == "provider-cost"                  # أيُّ رتبةٍ حكمت — مُعلَنة
+    assert ev["cap_price_usd"] == pytest.approx(0.001061)
+    assert ev["cap_price_source"] == "observed-billed"
     assert ev["spent_before_usd"] == pytest.approx(0.0170)
     assert ev["spent_after_usd"] == pytest.approx(0.0237)
-    assert ev["cost_by_tokens_usd"] == pytest.approx(0.006732)
     assert ev["meter_delta_usd"] == pytest.approx(0.006732)
-    assert ev["cap_bound_usd"] == pytest.approx(0.18176)
-    # **والمقسومُ يُنشر معه (R113-1):** الردودُ المشهودة عددًا، والأرضيةُ **مُعلَنةً** لا مقسومًا عليها
-    assert ev["replies_observed"] == 2 and ev["calls_floor"] == 2
-    assert ev["tools_in_trace"] == 1
+    assert ev["cap_bound_usd"] == pytest.approx(0.075063)
+    # **والمقسومُ يُنشر معه:** الردودُ عددًا، و«الأدوات + ١» **حدٌّ أعلى للنداءات** لا «أرضية» (R115-5)
+    assert ev["replies_observed"] == 2 and ev["tools_plus_one"] == 2 and ev["tools_in_trace"] == 1
+    assert "calls_floor" not in ev, "الاسمُ القديم (أرضية) عاد — وهو حدٌّ أعلى للنداءات لا أرضية"
     assert "next_ceiling_usd" not in ev, "الحقلُ المكرَّرُ بالاسم المضلِّل عاد"
 
 
@@ -176,7 +178,8 @@ def test_the_loop_reads_the_observed_price_and_records_it():
     fn = next(n for n in ast.parse(text).body
               if isinstance(n, ast.FunctionDef) and n.name == "run_questions")
     called = {getattr(c.func, "id", "") for c in ast.walk(fn) if isinstance(c, ast.Call)}
-    assert {"next_question_ceiling", "cap_verdict", "observation", "cap_evidence"} <= called, sorted(called)
+    assert {"next_question_ceiling", "cap_verdict", "billed_window", "cap_evidence",
+            "cost_log", "host_max_price"} <= called, sorted(called)
     # والاستيرادُ الثقيلُ ليس على مستوى الوحدة (يُقاس: أوّلُ 120 سطرًا بلا langchain)
     head = "\n".join(text.splitlines()[:120])
     assert "langchain_core" not in head, "استيرادٌ ثقيلٌ على مستوى الوحدة ⇒ البيئةُ الخفيفةُ تسقط"
