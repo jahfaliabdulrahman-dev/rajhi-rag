@@ -105,10 +105,20 @@ def test_the_six_files_pass_in_a_home_without_a_key(tmp_path):
 
 
 # ── ③ الملفّاتُ الستّةُ في قائمة الـCI (فالعدّادُ والتشغيلُ من مصدرٍ واحد) ─────────────────
-def test_the_six_files_are_in_the_ci_list():
+#: **وكلُّ ملفّات جولتَي ١١٧ و١١٨** — تُقاس قائمةُ الـCI عليها (وهذا الملفُّ نفسُه فيها،
+#: ولذلك هو **ليس** في `SIX`: تشغيلُه على نفسه في عمليّةٍ فرعيّة يدور بلا نهاية).
+ROUND_FILES = SIX + (
+    "tests/test_the_guards_do_not_need_the_owners_key.py",
+    "tests/test_the_scorer_reads_the_answer_kind.py",
+)
+
+
+def test_every_round_file_is_in_the_ci_list():
     assert WORKFLOW.exists(), "لا ملفَّ CI — والقائمةُ تُقرأ منه"
     text = WORKFLOW.read_text(encoding="utf-8")
-    missing = [name for name in SIX if name not in text]
+    missing = [name for name in ROUND_FILES if name not in text]
     assert not missing, (
         f"ملفّاتٌ تُعدّ ولا تُشغَّل في الـCI ({missing}) — أضِفها إلى قائمة خطوة الاختبارات "
         "أو اكتب سببَ غيابها")
+    # **ولماذا `ROUND_FILES` لا `SIX`:** الأخيرةُ تُشغَّل في بيتٍ مزيّف (وهذا الملفُّ خارجَها
+    # لأنّه يشغّل نفسه)، والأولى تحرس القائمةَ كلَّها — فملفٌّ جديدٌ لا ينجو من الحارس بلا قرارٍ مكتوب.

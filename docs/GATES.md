@@ -109,6 +109,7 @@ tests/test_the_tools_refuse_unknown_inputs.py
 tests/test_the_compound_split_is_measured_not_assumed.py
 tests/test_the_estimate_reads_the_newest_run.py
 tests/test_the_guards_do_not_need_the_owners_key.py
+tests/test_the_scorer_reads_the_answer_kind.py
 ```
 
 **وحدُ الإدراج مُعلَنٌ بالقياس (R72-1 · مراجعة ٧٢ · شقّاها معًا):** حرّاسُ جولة البيان الخمسة صاروا في
