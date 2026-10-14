@@ -199,3 +199,30 @@ def test_finish_reasons_are_read_from_the_response_and_never_fabricated():
                                         [_Gen({"finish_reason": "length"})]])) == ["stop", "length"]
     assert m.finish_reasons_from(_Resp([[_Gen(None)]])) == []
     assert m.finish_reasons_from(object()) == [], "ردٌّ بلا بيانات ⇒ صفرُ أسبابٍ لا سببٌ مخترع"
+
+
+# ── ⑤ الثابتُ الثالث: الردودُ تُقرأ متى حملها الملفّ، والأرضيةُ تُعلَن حين لا يحملها (R113-1) ────────
+def test_the_coverage_tool_reads_replies_when_the_file_has_them_and_declares_a_floor_when_not(tmp_path):
+    """**الثابتُ الثالثُ في مراجعة ١١٣:** أداةُ التغطية تقرأ **عددَ الردود المسجَّل** متى حمله ملفُّ
+    الأجوبة (من ملفّ هذه الجولة فصاعدًا)، **وتُعلن الأرضيةَ** حين لا يحمله — والأرضيةُ **أدنى من
+    العدد** ⇒ فالتغطيةُ المحسوبةُ بها متفائلة، والإعلانُ يمنع قراءةَ الأرضية عددًا.
+
+    والمقيسُ **المصدرُ المُعلَنُ نفسُه** (`observed-replies` / `floor-tools-plus-one`) لا رقمٌ في نثر.
+    """
+    import json
+
+    from tools import expected_coverage as ec
+
+    with_replies = {"results": [{"id": "q1", "tools_used": ["a"], "replies_observed": 7},
+                                {"id": "q2", "tools_used": ["a", "b"], "replies_observed": 3}]}
+    floor_only = {"results": [{"id": "q1", "tools_used": ["a"]},
+                              {"id": "q2", "tools_used": ["a", "b"]}]}
+    p1, p2 = tmp_path / "with.json", tmp_path / "without.json"
+    p1.write_text(json.dumps(with_replies), encoding="utf-8")
+    p2.write_text(json.dumps(floor_only), encoding="utf-8")
+
+    calls1, src1 = ec.calls_from_answers(p1)
+    calls2, src2 = ec.calls_from_answers(p2)
+    assert (src1, calls1) == ("observed-replies", {"q1": 7, "q2": 3}), (src1, calls1)
+    assert (src2, calls2) == ("floor-tools-plus-one", {"q1": 2, "q2": 3}), (src2, calls2)
+    assert calls2["q1"] < calls1["q1"], "الأرضيةُ ليست أدنى من العدد ⇒ فالفرضُ عن الأرضية خاطئ"
