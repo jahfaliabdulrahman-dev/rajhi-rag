@@ -145,8 +145,10 @@ MAX_ANSWER_TOKENS = 3000
 def _call_limits():
     """حدُّ نداءات النموذج والأدوات في الدور الواحد — **مكوّنُ المكتبة** لا بناءٌ يدويّ (R109-1).
 
-    و`exit_behavior="end"` ⇒ يقف الوكيلُ **بانتهاءٍ مهذّب** لا باستثناء. **وحدُّ `recursion_limit`
-    في النداء أدناه لا يسقط مع أيّ نسخة**، فالحدُّ قائمٌ حتى لو لم تعرف النسخةُ `middleware`.
+    و`exit_behavior="error"` ⇒ **يرفع استثناءً مُسمًّى** (`ModelCallLimitExceededError`) يلتقطه
+    `_answer_one` بنوعه فيُترجَم إلى رسالةٍ عربيّة (R110-2) — **لا نصَّ المكتبة الإنجليزيّ إلى الشاشة**.
+    **وحدُّ `recursion_limit` في النداء أدناه لا يسقط مع أيّ نسخة**، فالحدُّ قائمٌ حتى لو لم تعرف
+    النسخةُ `middleware`.
     """
     from langchain.agents.middleware import ModelCallLimitMiddleware, ToolCallLimitMiddleware
 
