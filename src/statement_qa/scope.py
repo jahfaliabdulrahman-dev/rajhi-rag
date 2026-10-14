@@ -169,7 +169,7 @@ def amounts_in(q: str) -> list[Decimal]:
 
 
 def classify(question: str, years=(), max_page: int | None = None,
-             amounts=frozenset()) -> Scope:
+             amounts=frozenset(), *, n_pages: int | None = None) -> Scope:
     """Decide the question's scope from its text and the data. No model, no luck.
 
     `years` = the years the statement actually covers; `max_page` = the last page
@@ -215,12 +215,26 @@ def classify(question: str, years=(), max_page: int | None = None,
     #    R105-4): كان الفحصُ يقرأ أوّلَ صفحةٍ بقارئٍ أضيقَ من قارئ الاسترجاع ⇒ فسؤالٌ يقول
     #    «كم عدد الحركات في صفحة ٧٠٠؟» (بلا «ال») **يمرّ إلى النموذج** والاسترجاعُ يعرف أنّها
     #    غيرُ موجودة. والقارئُ اليوم واحدٌ (`pages_in`) فالحكمان لا يفترقان.
+    # **(R115-7 · مراجعةُ ١١٥): لا يُدَّعى عن الكشف ما لم يُقرأ.** `max_page` = **أقصى صفحةٍ فيها
+    # سطورٌ مقروءة**، لا عددَ صفحات المستند ⇒ فقولُ «الكشف ينتهي عند ٦٢٨» كان **كلامًا غيرَ صحيحٍ
+    # أمام المستخدم** (الكشفُ ٦٢٩ صفحة، وفيها ثلاثُ صفحاتٍ بلا سطور مقروءة). والقاعدةُ الآن:
+    # ① صفحةٌ تفوق **عددَ صفحات المستند** (`n_pages`، إن مُرِّر) ⇒ «خارج الملف» بحقّ.
+    # ② صفحةٌ داخلةٌ فيه ولم تُقرأ سطورُها ⇒ **تُسمّى كذلك** فلا يُنسب إلى الكشف انتهاءٌ كاذب.
+    # ③ وبلا `n_pages` تُصاغ الحقيقةُ بما هو معلوم: **أقصى صفحةٍ فيها سطورٌ مقروءة** — وهي صادقةٌ
+    #    في الحالين (وتمريرُ `n_pages` من الموضع الذي يعرف عددَ الصفحات تحسينٌ مُعلَن، لا شرطٌ للصدق).
     beyond = [p for p in pages_in(q) if max_page is not None and p > max_page]
     if beyond:
         named = "، ".join(str(p) for p in beyond)
-        return Scope(
-            "no_such_data", f"صفحة خارج الملف ({named})",
-            f"{REFUSAL} — الكشف ينتهي عند صفحة {max_page}، فلا صفحة {named} فيه.")
+        if n_pages is not None and any(p > n_pages for p in beyond):
+            return Scope(
+                "no_such_data", f"صفحة خارج الملف ({named})",
+                f"{REFUSAL} — الكشف ينتهي عند صفحة {n_pages}، فلا صفحة {named} فيه.")
+        why = (f"{REFUSAL} — الصفحةُ {named} **داخلةٌ في الكشف** ({n_pages} صفحة) لكن **سطورُها لم "
+               f"تُقرأ** بعد ⇒ فلا أُجيب عمّا لم أقرأه."
+               if n_pages is not None else
+               f"{REFUSAL} — **أقصى صفحةٍ فيها سطورٌ مقروءة هي {max_page}**، ولم تُقرأ سطورُ {named} "
+               f"بعد ⇒ فلا أُجيب عمّا لم أقرأه.")
+        return Scope("no_such_data", f"صفحةٌ لم تُقرأ سطورُها ({named})", why)
 
     # 5) an amount no row carries — and ONLY when the question asks about the
     #    existence of that amount. «الحركات التي تتجاوز ٥٠٠» names a threshold,

@@ -229,3 +229,19 @@ def test_the_coverage_tool_reads_replies_when_the_file_has_them_and_declares_a_f
     assert (src1, calls1) == ("observed-replies", {"q1": 7, "q2": 3}), (src1, calls1)
     assert (src2, calls2) == ("floor-tools-plus-one", {"q1": 2, "q2": 3}), (src2, calls2)
     assert calls2["q1"] < calls1["q1"], "الأرضيةُ ليست أدنى من العدد ⇒ فالفرضُ عن الأرضية خاطئ"
+
+
+def test_a_cost_below_the_list_floor_is_priced_at_the_floor_and_declared():
+    """**R116-1 (P3 · مراجعة ١١٦):** الرتبةُ الوسطى (‏`provider-cost+list-floor`) كانت **بلا ضابط**
+    فتمرّ طفرتُها. وتُقاس هنا: `cost` **أدنى** من «الرموز × القائمة» ⇒ يُؤخذ **الأكبر** (القائمة)
+    **ويُسمّى المصدرُ**، فلا ينقص المُنفَقُ إن أُرسل `cost` أقلَّ من الواقع.
+    """
+    from tools import eval_questions as m
+
+    got = m.billed_reply_cost(1_000_000, 0, 0.10, 0.30, 0.30, (0.225, 1.60))
+    assert got is not None
+    cost, src = got
+    assert src == "provider-cost+list-floor", got
+    assert cost == pytest.approx(0.30), cost          # القائمةُ (حدٌّ أدنى) لا الـ0.10 المُرسَل
+    hi = m.billed_reply_cost(1_000_000, 0, 0.90, 0.30, 0.30, (0.225, 1.60))
+    assert hi[0] == pytest.approx(0.90) and hi[1] == "provider-cost"
