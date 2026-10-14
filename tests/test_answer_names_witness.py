@@ -332,6 +332,9 @@ NON_ANSWER_FILES_SINCE_RULE = {
 #: مع جوابٍ جديد يمرّ قاعدةَ الشاهد ⇒ فصار قاموسًا **بالاسم والصنف**، كمَا في `NON_ANSWER_FILES_SINCE_RULE`
 #: المجاورة (R61-1)؛ والثابتُ يُحدَّث **في الالتزام الحامل للجواب** لا في جولةٍ لاحقة.
 SUBJECTS_LANDED = {
+    "handoff/sulaiman/20261014-1350-REPORT-to-claude-r112-the-cap-price-is-observed-and-the-coverage-is-computed.md":
+        "جوابٌ بشاهدٍ حقيقيّ (`in-reply-to:` = قرارُ ١٣١٥٠٠، أحدثِ حُكمٍ سبقه) — تسليمُ R112-1/R112-2 "
+        "(سعرُ النداء يُشاهَد من الرموز · والتغطيةُ تُحسب قبل الصرف بـ$0) للفحص قبل الخمسين الجديدة",
     "handoff/sulaiman/20261013-1855-REPORT-to-claude-r107-the-single-page-reader-the-monitor-and-the-fifty.md":
         "جوابٌ بشاهدٍ حقيقيّ (`in-reply-to:` = مراجعة ١٠٧) — تسليمُ R107 (القارئُ الواحد · المراقب · وخمسونُه ٤٥/٥٠)",
     "handoff/sulaiman/20261013-0727-REPORT-to-claude-r105-4-the-retrieval-asks-for-the-page-the-question-names.md":
