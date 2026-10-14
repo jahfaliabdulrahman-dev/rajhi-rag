@@ -208,7 +208,17 @@ def effective_model(model_name: str | None = None) -> str:
     return model_name or os.environ.get("OPENROUTER_MODEL", DEFAULT_MODEL)
 
 
-def build_llm(model_name: str | None = None, *, callbacks: list | None = None):
+#: **حدُّ سعر المزوّد المُرسَل مع كلّ طلب** (بالدولار لكلّ مليون رمز · `provider.max_price`).
+#: **والقيمةُ مُعلَنةٌ بسببها** (قرار 20261014-184500 §٢: «يُطبع كم مضيفًا تحتها»): قِيس من قائمة
+#: المضيفين العامّة في 2026-10-14 أنّ **٣٣ مضيفًا** يخدمون النموذج، المدخلُ بين **$0.0342** و**$0.225**
+#: للمليون والمخرجُ بين **$0.145** و**$1.60** ⇒ **$0.12/$0.60 يُبقي الأغلبيّةَ تحت الحدّ**، ويطبع
+#: `tools/eval_questions.py` العدَّ الحيّ عند كلّ جولة. ومن لم يبقَ له مضيفٌ تحت الحدّ **يُفشَل طلبُه
+#: ظاهرًا** بدل أن يُدفَع أكثر — وهذا هو الضمان (حدُّ المزوّد لا حاجزٌ يتنبّأ).
+PROVIDER_MAX_PRICE = {"prompt": 0.12, "completion": 0.60}
+
+
+def build_llm(model_name: str | None = None, *, callbacks: list | None = None,
+              api_key: str | None = None, max_price: dict | None = None):
     """ChatOpenAI pointed at OpenRouter (key from env / ~/.hermes/.env).
 
     **و`callbacks` اختياريّةٌ مُضافةٌ في موضعها (R112-1):** تُمرَّر إلى عميل النموذج نفسه —
@@ -220,12 +230,17 @@ def build_llm(model_name: str | None = None, *, callbacks: list | None = None):
 
     from statement_qa.api_key import get_api_key
 
-    key = get_api_key()
+    key = api_key or get_api_key()
     model = effective_model(model_name)
+    # **حدُّ السعر يُرسَل مع كلّ طلب** (`provider.max_price` · قرار 20261014-184500 §٢): لا يُشترى
+    # نداءٌ من مضيفٍ أغلى منه ⇒ **الضمانُ من المزوّد لا من حاجزٍ يتنبّأ**، وطلبٌ لا مضيفَ تحت حدّه
+    # **يفشل ظاهرًا** (سلوكُ OpenRouter الموثّق) بدل أن يُدفَع أكثر.
+    body = {"provider": {"max_price": dict(max_price or PROVIDER_MAX_PRICE)}}
     return ChatOpenAI(
         model=model,
         base_url="https://openrouter.ai/api/v1",
         api_key=key,
+        model_kwargs=body,
         temperature=0,
         # **مهلةٌ حقيقيّةٌ على الطلب نفسه، وإعادةُ محاولةٍ واحدة** (R109-1): كان الطلبُ بلا مهلة
         # ⇒ فسؤالٌ عالقٌ ينفق إلى ما لا نهاية. والحدُّ يُناديها المكتبةُ فلا يُبنى بديلٌ يدويّ.

@@ -389,6 +389,35 @@ def check_abstention(q: dict, c: Corpus, pack: dict) -> tuple[bool, str]:
     return False, f"سببٌ مجهول: {r}"
 
 
+#: **اسمُ متغيّر مفتاح القياس** (قرارُ 20261014-184500 §٢): مفتاحٌ مستقلٌّ عن مفتاح التطبيق،
+#: **يُنشئه المالك** في OpenRouter بحدِّ صرفٍ بالدولار (‏Credit limit)، وحدُّه **هو ميزانيةُ القياس
+#: التي أذن بها** ⇒ فكلمتُه على كلّ قياسٍ تصير حدَّ المفتاح نفسه، **والمزوّدُ هو من يفرضه** لا حاجزٌ
+#: يتنبّأ. ويُوضع سطرًا في `~/.hermes/.env` (أو `.env`) **بلا لصقٍ في محادثةٍ ولا في المستودع**.
+EVAL_KEY_ENV = "RAJHI_EVAL_OPENROUTER_KEY"
+
+
+def eval_key() -> str | None:
+    """مفتاحُ القياس من `EVAL_KEY_ENV` (بيئةً ثمّ ملفَّي `.env`) — **وهو الوحيدُ الذي يشتري به القياس**.
+
+    **ولا سقوطَ إلى مفتاح التطبيق** (وهو الفرقُ الذي يجعل الحدَّ ضمانًا): قياسٌ بلا مفتاحِ قياسٍ
+    **يتوقّف مُسمّى** قبل أيّ نداءٍ مدفوع، فلا يُفرَغ رصيدُ التطبيق بجولةِ قياس.
+    """
+    import os
+    val = os.environ.get(EVAL_KEY_ENV)
+    if val:
+        return val.strip() or None
+    here = pathlib.Path(__file__).resolve().parent.parent
+    for cand in (here / ".env", pathlib.Path.home() / ".hermes" / ".env"):
+        try:
+            for line in cand.read_text(encoding="utf-8").splitlines():
+                k, _, v = line.strip().partition("=")
+                if k.strip() == EVAL_KEY_ENV:
+                    return v.strip().strip("\"'") or None
+        except OSError:
+            continue
+    return None
+
+
 def _key_usage() -> dict | None:
     """**الكلفةُ الفعليّة من المزوّد** (لا عدّادُنا): رصيدُ المفتاح قبل وبعد — والفرقُ هو الكلفة.
 
@@ -397,9 +426,8 @@ def _key_usage() -> dict | None:
     import urllib.request
     try:
         sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
-        from statement_qa.api_key import get_api_key
         req = urllib.request.Request("https://openrouter.ai/api/v1/key",
-                                     headers={"Authorization": f"Bearer {get_api_key()}"})
+                                     headers={"Authorization": f"Bearer {eval_key() or ''}"})
         with urllib.request.urlopen(req, timeout=20) as r:
             d = json.loads(r.read().decode())["data"]
         return {"usage": d.get("usage"), "limit": d.get("limit"), "limit_remaining": d.get("limit_remaining")}
@@ -559,6 +587,88 @@ def finish_log():
             self.reasons.extend(finish_reasons_from(response))
 
     return _FinishLog()
+
+
+def host_prices(model_id: str) -> list[tuple[float, float]]:
+    """أسعارُ المضيفين الذين يخدمون النموذج (مدخل, مخرج بالمليون) — قراءةٌ واحدةٌ مُخزَّنة.
+
+    **وهي أساسُ إعلان حدِّ السعر** (قرار 20261014-184500 §٢): يُطبع كم مضيفًا تحت الحدّ، **فلا
+    يُختار رقمٌ بلا أثرٍ معروف**؛ وبلا قراءةٍ تُعاد قائمةٌ فارغة (والحدُّ يبقى القيمةَ المُعلَنة).
+    """
+    import urllib.request                                    # noqa: PLC0415
+    if model_id in _HOST_PRICES:
+        return _HOST_PRICES[model_id]
+    out: list[tuple[float, float]] = []
+    try:
+        req = urllib.request.Request(f"https://openrouter.ai/api/v1/models/{model_id}/endpoints",
+                                     headers={"User-Agent": "rajhi-rag/1.0"})
+        with urllib.request.urlopen(req, timeout=20) as r:      # noqa: S310 — URLٌ ثابتٌ لا يكتب
+            data = json.loads(r.read().decode())
+        for ep in (data.get("data") or {}).get("endpoints") or []:
+            pr = ep.get("pricing") or {}
+            out.append((float(pr.get("prompt") or 0.0) * 1e6, float(pr.get("completion") or 0.0) * 1e6))
+    except Exception:                                            # noqa: BLE001 — بلا قراءةٍ لا عدَّ
+        out = []
+    _HOST_PRICES[model_id] = out
+    return out
+
+
+#: ذاكرةُ أسعار المضيفين (قراءةٌ واحدةٌ لكلّ نموذج).
+_HOST_PRICES: dict[str, list[tuple[float, float]]] = {}
+
+
+def provider_max_price(model_id: str) -> dict:
+    """حدُّ السعر المُرسَل مع كلّ طلب — **من `statement_qa.qa.PROVIDER_MAX_PRICE`** (مصدرٌ واحد).
+
+    القيمةُ مُعلَنةٌ في موضعها بسببها، **وهذا يُعيدها كما هي** فيبقى التطبيقُ والقياسُ على حدٍّ واحد
+    (سطحٌ واحد لا نسختان — فإن غيّر المالكُ القيمةَ تغيّرت في الموضعين).
+    """
+    from statement_qa.qa import PROVIDER_MAX_PRICE                  # noqa: PLC0415
+    return dict(PROVIDER_MAX_PRICE)
+
+
+def hosts_total(model_id: str) -> int:
+    """عددُ المضيفين الذين يخدمون النموذج (٠ = القائمةُ غيرُ مقروءة — تُعلن ولا تُخمَّن)."""
+    return len(host_prices(model_id))
+
+
+def hosts_under(model_id: str, maxp: dict) -> int:
+    """كم مضيفًا سعّرته **تحت الحدّ** في المدخل والمخرج معًا — وهو «أثرُ الرقم» الذي يُطبع."""
+    return sum(1 for pin, pout in host_prices(model_id)
+               if pin <= maxp["prompt"] and pout <= maxp["completion"])
+
+
+def last_billed_run() -> tuple[float, int, int] | None:
+    """(المُنفَقُ المُحاسَب, عددُ الردود, عددُ الأسئلة) من **آخر جولةٍ محفوظةٍ تحمل الحقل**.
+
+    **للعلم لا للحكم** (قرار 20261014-184500 §٢): يُقرأ من ملفّات الأجوبة (`cost_billed_usd` ·
+    `replies_observed`) **ولا يُقدَّر بلا ملفّ** ⇒ فالتقديرُ المنشور **من قياسٍ سابق** لا من رأي.
+    """
+    best: tuple[float, float, int, int] | None = None
+    for f in sorted((pack_io.data_root() / "data" / "eval_pack").glob("answers-r*.json")):
+        try:
+            d = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        rows = [r for r in d.get("results", []) if r.get("cost_billed_usd") is not None]
+        if not rows:
+            continue
+        best = (float(f.stat().st_mtime), sum(float(r["cost_billed_usd"]) for r in rows),
+                sum(int(r.get("replies_observed") or 0) for r in rows), len(rows))
+    return None if best is None else (best[1], best[2], best[3])
+
+
+def simple_estimate(n_questions: int) -> float | None:
+    """تقديرٌ بسيطٌ قبل القياس: **صرفُ الجولة السابقة المُحاسَب × (أسئلةُ هذه ÷ أسئلتِها)**.
+
+    **وبيانُه:** الجولةُ السابقةُ أنفقت `total` على `n_prev` سؤالًا ⇒ فنصيبُ السؤال = `total/n_prev`
+    ⇒ والتقديرُ = نصيبُ السؤال × أسئلةُ هذه الجولة. **ولا يُخترع رقمٌ بلا ملفّ** (`None` ⇒ لا سطر).
+    """
+    prev = last_billed_run()
+    if prev is None or not prev[2]:
+        return None
+    total, _replies, n_prev = prev
+    return total / n_prev * max(1, n_questions)
 
 
 def tokens_in(usage: dict | None) -> int:
@@ -1106,8 +1216,18 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     usage = UsageMetadataCallbackHandler()
     finishes = finish_log()
     costs = cost_log()                      # **كلفةُ كلّ ردّ كما يرسلها المزوّد** (R115-1)
-    llm = build_llm(a.model, callbacks=[usage, finishes, costs])
+    # **والقياسُ يشتري بمفتاحِ القياس وحدَه** (قرار 20261014-184500 §٢): حدُّ صرفٍ يفرضه المزوّد
+    # على المفتاح ⇒ فميزانيةُ القياس هي حدُّ المفتاح نفسه، ولا يُفرَغ رصيدُ التطبيق.
     model_id = effective_model(a.model)     # **المعرّفُ الفعليّ** — به يُقرأ سعرُه ويُكتب في الدليل
+    if a.budget and not eval_key():
+        print(f"\n⛔ **لا مفتاحَ قياس** ({EVAL_KEY_ENV} غيرُ موجودٍ في البيئة ولا في `.env`) ⇒ "
+              f"**لا نداءَ مدفوعًا** · رمزُ الخروج 5.", flush=True)
+        return 5
+    maxp = provider_max_price(model_id)
+    print(f"      حدُّ سعر المزوّد: مدخلًا ${maxp['prompt']:.4f}/M · مخرجًا ${maxp['completion']:.4f}/M "
+          f"⇒ **{hosts_under(model_id, maxp)} مضيفًا** يخدمون تحت الحدّ (من {hosts_total(model_id)})",
+          flush=True)
+    llm = build_llm(a.model, callbacks=[usage, finishes, costs], api_key=eval_key(), max_price=maxp)
     # **وأعلى سعر مضيفٍ يُقرأ مرّةً ويُعلَن** (R115-1): البديلُ حين لا يرسل المزوّدُ `cost`،
     # ولا يُستعمل سعرُ القائمة وحدَه حدًّا (فهو **حدٌّ أدنى**: ٣٣ مضيفًا بأسعارٍ تصل ستّةَ أضعافها).
     host_high = host_max_price(model_id)
@@ -1153,6 +1273,10 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
         want = {x.strip() for x in a.only.split(",") if x.strip()}
         todo = [q for q in qs if q["id"] in want]
         done = {k: v for k, v in done.items() if k not in want}
+    est = simple_estimate(len(todo))
+    if est is not None:
+        print(f"      تقديرٌ للعلم (لا للحكم): من كلفة الجولة السابقة المُحاسَبة ⇒ "
+              f"**${est:.4f}** لـ{len(todo)} سؤالًا", flush=True)
     print(f"[3/4] طرحُ الأسئلة ({len(todo)} من {len(qs)} · ومحفوظٌ سابقاً {len(done)}) "
           f"على {a.model or 'الافتراضيّ'} …\n", flush=True)
 
@@ -1248,16 +1372,12 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
             # **توقّفٌ استباقيّ بسقف السؤال القادم** (مراجعة ٥١ · البند ٤ · **وجذرُه أُصلح في R109-1
             # ثمّ صار سعرُه مشهودًا في R112-1**): الحدُّ الحقيقيّ في التطبيق (حدُّ نداءاتٍ في الوكيل)،
             # وسعرُ النداء يُقرأ من الرموز ⇒ فالرقمُ المعلَن أدناه قابلٌ لإعادة الحساب من الدليل.
+            # **والحجزُ الاستباقيُّ لأسوأ سؤالٍ حُذف** (قرار 20261014-184500 §٢): كان يعيد صنعَ ما
+            # يقدّمه المزوّد (حدُّ سعرٍ لكلّ طلب) ويرفع السقفَ المطلوب إلى $0.29. **والحكمُ الآن على
+            # المُنفَق المُحاسَب وحدَه:** لا يتوقّف إلا إذا بلغ الصرفُ السقف، أو رفضَ المزوّدُ طلبًا
+            # (حدُّ المفتاح/السعر) — **وضمانُ الكلفة من المزوّد لا من حاجزٍ يتنبّأ.**
             if verdict == "anticipatory":
-                meter_txt = "—" if meter_before_i is None else f"${meter_before_i:.4f}"
-                print(f"\n⛔ **توقّفٌ استباقيّ**: المُنفَق {spent_tokens:.4f} + **سقفُ السؤال القادم** "
-                      f"{bound:.4f} يتجاوز السقف {float(a.budget):.4f} ⇒ لا يُطرح السؤال {i}. "
-                      f"(← سقفُ السؤال = `question_ceiling` من بنية المسار × ${price:.6f} **لسعر نداءٍ "
-                      f"مشهود من الرموز** × هامش {PER_CALL_MARGIN} · ومصدرُه {source} · ورصيدُ الحساب "
-                      f"للعلم: {meter_txt}) · **التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** · "
-                      f"رمزُ الخروج 3.", flush=True)
-                halt = 3
-                break
+                pass                    # مُعلَنٌ ومُزاح عن الحكم (يبقى الحسابُ للعرض في السجلّ)
         u_before = usage_snapshot(usage)
         r_before = len(finishes.reasons)
         replies_before = finishes.ends          # **عدّادُ الردود** (مقسومُ سعر النداء · R113-1)
@@ -1273,6 +1393,17 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                       "scope": msg.get("scope"),
                       "refused": msg.get("refused")}) if "answer" in msg else None
         ans = msg["answer"].strip() if res else f"<{msg.get('error')}>"
+        # **ورفضُ المزوّد عند بلوغ حدِّ المفتاح توقّفٌ مُسمّى لا أخطاءُ أجوبة** (قرارُ 184500 §٢):
+        # حين يبلغ الصرفُ حدَّ مفتاح القياس (‏`Credit limit` في OpenRouter ⇒ 402) تُرفض الطلباتُ
+        # ⇒ فلا يُسجَّل السؤالُ جوابًا خاطئًا ولا تُنسب إليه كلفة، **وتُعلَن التغطيةُ ورمزُ الخروج 6**.
+        _err = str(msg.get("error") or "").lower()
+        if res is None and any(k in _err for k in ("402", "credit", "insufficient", "key limit", "quota")):
+            print(f"\n⛔ **المزوّدُ رفض الطلب** (حدُّ المفتاح أو الرصيد): {msg.get('error')} "
+                  f"⇒ توقّفٌ مُسمّى قبل إتمام السؤال {i} · **التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** "
+                  f"· والمُنفَقُ المُحاسَب حتى الآن ${spent_tokens:.4f} · رمزُ الخروج 6.", flush=True)
+            done.pop(q["id"], None)          # **السؤالُ الباقي ليس جوابًا خاطئًا**
+            halt = 6
+            break
         ok, why = (score_answer(q, truth_val, ans, res, rows) if res
                    else (False, f"عطبٌ/مهلة: {msg.get('error')}"))
         # **مصدرٌ واحدٌ للحقول الثلاثة** (مراجعة ٥٢ · R52-3): كان `used_row_nos` و`trace_len` و
