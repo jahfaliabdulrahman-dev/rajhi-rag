@@ -1,0 +1,509 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "المكوّنات والحدود — مُدقّق كشوف الراجحي",
+    "locale": "ar",
+    "output": ".archify/architecture-rajhi-rtl-20261013-2355/rajhi-rag-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/jahfaliabdulrahman-dev/rajhi-rag.git",
+      "provider": "github",
+      "revision": "6350289e311bb8f8e642db4ff4cbdd851d6246ab"
+    },
+    "subtitle": "من المسح الضوئي إلى جوابٍ موثّق"
+  },
+  "components": [
+    {
+      "id": "owner",
+      "type": "external",
+      "label": "المالكُ ومتصفّحه",
+      "sublabel": "الجلسةُ المحلية",
+      "icon": "person",
+      "pos": [
+        828,
+        200
+      ],
+      "size": [
+        120,
+        58
+      ],
+      "sources": [
+        {
+          "path": "docs/WHO_IS_THIS_FOR.md",
+          "line": 1,
+          "end_line": 4,
+          "label": "لمن بُني هذا"
+        }
+      ]
+    },
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "واجهةُ Gradio",
+      "sublabel": "عربي RTL · :7860",
+      "pos": [
+        618,
+        200
+      ],
+      "size": [
+        130,
+        62
+      ],
+      "sources": [
+        {
+          "path": "app.py",
+          "line": 1302,
+          "end_line": 1302,
+          "label": "كتلة الواجهة"
+        },
+        {
+          "path": "app.py",
+          "line": 1415,
+          "end_line": 1415,
+          "label": "الإطلاق على المنفذ"
+        }
+      ]
+    },
+    {
+      "id": "intake",
+      "type": "backend",
+      "label": "الاستقبالُ والتقطيع",
+      "sublabel": "تشغيلةٌ واحدة بقفل",
+      "pos": [
+        418,
+        200
+      ],
+      "size": [
+        130,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/statement_qa/intake.py",
+          "line": 36,
+          "end_line": 66,
+          "label": "Intake والفحص المحلي"
+        },
+        {
+          "path": "src/statement_qa/job_lock.py",
+          "line": 30,
+          "end_line": 30,
+          "label": "قفل التشغيلة"
+        }
+      ]
+    },
+    {
+      "id": "chain",
+      "type": "security",
+      "label": "السلسلةُ الرصيدية",
+      "sublabel": "أوراكلُ الفوتر",
+      "pos": [
+        218,
+        200
+      ],
+      "size": [
+        130,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/statement_qa/verification.py",
+          "line": 15,
+          "end_line": 15,
+          "label": "verify_statement"
+        },
+        {
+          "path": "src/statement_qa/page_footers.py",
+          "line": 32,
+          "end_line": 32,
+          "label": "الإجماليات المطبوعة"
+        },
+        {
+          "path": "src/statement_qa/footer_oracle.py",
+          "line": 198,
+          "end_line": 198,
+          "label": "check_page_footer"
+        }
+      ]
+    },
+    {
+      "id": "ledger",
+      "type": "database",
+      "label": "سجلُّ الحركات",
+      "sublabel": "الصفوفُ الموثّقة · دفترُ SQLite",
+      "pos": [
+        18,
+        200
+      ],
+      "size": [
+        130,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/statement_qa/ledger.py",
+          "line": 324,
+          "end_line": 324,
+          "label": "فتح السجل"
+        },
+        {
+          "path": "src/statement_qa/ledger.py",
+          "line": 384,
+          "end_line": 384,
+          "label": "ingest"
+        },
+        {
+          "path": "src/statement_qa/ledger.py",
+          "line": 505,
+          "end_line": 546,
+          "label": "answer · pages_of"
+        }
+      ]
+    },
+    {
+      "id": "provider",
+      "type": "cloud",
+      "label": "مزوّدُ النموذج",
+      "sublabel": "OpenRouter — قراءةٌ وجواب",
+      "pos": [
+        218,
+        40
+      ],
+      "size": [
+        130,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/statement_qa/vlm_reader.py",
+          "line": 183,
+          "end_line": 211,
+          "label": "نداء VLM"
+        },
+        {
+          "path": "src/statement_qa/qa.py",
+          "line": 121,
+          "end_line": 135,
+          "label": "build_llm"
+        }
+      ]
+    },
+    {
+      "id": "svc",
+      "type": "backend",
+      "label": "خدمةٌ محروسة",
+      "sublabel": "launchd · ‏:7867 يُحوِّل",
+      "pos": [
+        818,
+        380
+      ],
+      "size": [
+        130,
+        62
+      ],
+      "sources": [
+        {
+          "path": "tools/health_check.py",
+          "line": 73,
+          "end_line": 96,
+          "label": "health_check"
+        },
+        {
+          "path": "tools/launchd/com.jahfali.rajhi-rag.plist.tpl",
+          "line": 1,
+          "end_line": 1,
+          "label": "خدمة launchd"
+        },
+        {
+          "path": "tools/redirect_7867.py",
+          "line": 22,
+          "end_line": 24,
+          "label": "تحويلُ 302"
+        }
+      ]
+    },
+    {
+      "id": "faiss",
+      "type": "database",
+      "label": "فهرسٌ عربي",
+      "sublabel": "FAISS + e5-small",
+      "pos": [
+        618,
+        380
+      ],
+      "size": [
+        130,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/statement_qa/retriever.py",
+          "line": 12,
+          "end_line": 12,
+          "label": "نموذج التضمين"
+        },
+        {
+          "path": "src/statement_qa/retriever.py",
+          "line": 18,
+          "end_line": 29,
+          "label": "build_index"
+        },
+        {
+          "path": "src/statement_qa/chunking.py",
+          "line": 48,
+          "end_line": 48,
+          "label": "chunk_rows"
+        }
+      ]
+    },
+    {
+      "id": "agent",
+      "type": "backend",
+      "label": "الوكيلُ المُقيَّد",
+      "sublabel": "بوّابتا النطاق والجواب",
+      "pos": [
+        418,
+        380
+      ],
+      "size": [
+        130,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/statement_qa/qa.py",
+          "line": 434,
+          "end_line": 438,
+          "label": "create_agent · invoke"
+        },
+        {
+          "path": "src/statement_qa/qa.py",
+          "line": 645,
+          "end_line": 645,
+          "label": "بوّابةُ النطاق قبل النموذج"
+        },
+        {
+          "path": "src/statement_qa/qa.py",
+          "line": 558,
+          "end_line": 558,
+          "label": "مبلغٌ بلا أداة"
+        }
+      ]
+    },
+    {
+      "id": "tools",
+      "type": "backend",
+      "label": "أدواتٌ حتمية",
+      "sublabel": "الحسابُ هنا",
+      "pos": [
+        218,
+        380
+      ],
+      "size": [
+        130,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/statement_qa/qa_tools.py",
+          "line": 161,
+          "end_line": 161,
+          "label": "make_qa_tools"
+        },
+        {
+          "path": "src/statement_qa/qa_tools.py",
+          "line": 260,
+          "end_line": 261,
+          "label": "sum_movements"
+        },
+        {
+          "path": "src/statement_qa/qa_tools.py",
+          "line": 346,
+          "end_line": 356,
+          "label": "page_footer · page_rows"
+        }
+      ]
+    },
+    {
+      "id": "xlsx",
+      "type": "backend",
+      "label": "تصديرُ Excel",
+      "sublabel": "سبعُ أوراق",
+      "pos": [
+        18,
+        380
+      ],
+      "size": [
+        130,
+        62
+      ],
+      "sources": [
+        {
+          "path": "tools/to_xlsx.py",
+          "line": 778,
+          "end_line": 1016,
+          "label": "سبع أوراق"
+        },
+        {
+          "path": "tools/to_xlsx.py",
+          "line": 37,
+          "end_line": 39,
+          "label": "openpyxl"
+        },
+        {
+          "path": "tools/to_xlsx.py",
+          "line": 390,
+          "end_line": 390,
+          "label": "ورقة الملخّص"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "على الجهاز: القراءةُ والتحقّق",
+      "wraps": [
+        "ui",
+        "intake",
+        "chain",
+        "ledger"
+      ],
+      "pad": 18
+    },
+    {
+      "kind": "security-group",
+      "label": "على الجهاز: السؤالُ والجواب والتصدير",
+      "wraps": [
+        "svc",
+        "faiss",
+        "agent",
+        "tools",
+        "xlsx"
+      ],
+      "pad": 18
+    },
+    {
+      "kind": "security-group",
+      "label": "خروجُ البيانات الوحيد",
+      "wraps": [
+        "provider"
+      ],
+      "pad": 16
+    }
+  ],
+  "connections": [
+    {
+      "from": "owner",
+      "to": "ui",
+      "label": "سؤال"
+    },
+    {
+      "from": "ui",
+      "to": "intake",
+      "label": "ملف PDF"
+    },
+    {
+      "from": "chain",
+      "to": "ledger",
+      "label": "تُقيَّد",
+      "variant": "emphasis"
+    },
+    {
+      "from": "provider",
+      "to": "chain",
+      "label": "صفوفٌ مقروءة",
+      "variant": "dashed",
+      "toSide": "top",
+      "fromSide": "bottom"
+    },
+    {
+      "from": "intake",
+      "to": "provider",
+      "label": "صفحاتٌ",
+      "variant": "dashed",
+      "toSide": "right"
+    },
+    {
+      "from": "agent",
+      "to": "provider",
+      "label": "نداءُ نموذج",
+      "variant": "dashed"
+    },
+    {
+      "from": "ui",
+      "to": "agent",
+      "label": "سؤالُ المالك",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "orthogonal-v",
+      "via": [
+        [
+          683,
+          350
+        ],
+        [
+          483,
+          350
+        ]
+      ]
+    },
+    {
+      "from": "faiss",
+      "to": "agent",
+      "label": "استرجاع"
+    },
+    {
+      "from": "agent",
+      "to": "tools",
+      "label": "نداء"
+    },
+    {
+      "from": "tools",
+      "to": "ledger",
+      "label": "قراءةُ صفوف",
+      "variant": "emphasis"
+    },
+    {
+      "from": "ledger",
+      "to": "xlsx",
+      "label": "يُصدَّر"
+    },
+    {
+      "from": "svc",
+      "to": "ui",
+      "label": "يُشغّلها ويُبقيها"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "قاعدةُ الأمانة",
+      "items": [
+        "النموذجُ يصوغ ولا يحسب: رقمٌ بلا نداءِ أداةٍ يُوسَم ولا يُعتمد",
+        "الاتجاهُ يُستنتج من فرق الرصيدين — لا يُخمَّن",
+        "أوراكل الفوتر يطابق الإجماليات المطبوعة بصفحتها"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "حدودٌ مُعلَنة",
+      "items": [
+        "سؤالٌ خارج نطاق الكشف يُردّ قبل أن يبلغ النموذج",
+        "صفرُ بيانات حقيقية في git: العيناتُ الحقيقية خارج المستودع",
+        "تشغيلةٌ واحدة في كل مرة يحرسها قفلُ عمل",
+        "نموذجُ التضمين يُنزَّل من Hugging Face: ملفّاتُ نموذجٍ لا بياناتُ كشف"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "ما يُسلَّم",
+      "items": [
+        "Excel بسبع أوراق، كلُّها من أدلة التشغيل لا من إعادة حساب",
+        "ورقةُ «ما لم يُثبت» تسمّي كل صفحةٍ لم تُطابق باسمها وسببها",
+        ":7860 يخدم، و:7867 يُحوّل إليه، ومراقبٌ يكتب نبضه في السجل"
+      ]
+    }
+  ]
+}
