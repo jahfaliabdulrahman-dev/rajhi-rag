@@ -943,6 +943,12 @@ def cap_verdict(spent: float | None, cap: float) -> str:
 
 
 _NUMTOK = re.compile(r"[\d٠-٩۰-۹][\d٠-٩۰-۹,٬،٫.]*")
+# **قائمتا العبارات — للقديم وحده (قرار المالك `20261014-231500` · R118-2):** كانتا تحكمان
+# بالامتناع والتعادل، **وقد خرج الحكمُ من مطابقة النصّ إلى إشارةٍ مُهيكلةٍ يحملها الجواب**
+# (`Answer.kind` · `statement_qa.qa.AnswerKind`) ⇒ فلم يبقَ لهما قارئٌ إلا **`score_answer_by_text`
+# وحدَه** الذي يُطبع في السطر المقارِن «بالجديد X · وبالقديم Y». **ولا تُضاف إليهما عبارةٌ جديدة**
+# (القائمتان لا تصلحان شاهدًا — قِيس أنّ `abs-05` امتنع بـ«لا يظهر» فحُسب خطأً)، وضابطٌ يسقط إن
+# عادتا تحكمان في المصحِّح المعمول به.
 _ABSENCE = ("غير موجود", "لا يوجد", "غير متوف", "لا تتوفر", "لا يمكن", "غير مطبوع", "لا أعلم",
             "لا تتضمّن", "لا تتضمن", "لا بيانات", "خارج", "لا سند")
 _AMBIG = ("تعادل", "متساو", "مبلغان", "مبلغين", "أكثر من مبلغ", "لا يمكن الجزم", "لا يمكن تحديد")
@@ -1015,11 +1021,17 @@ def _declares_tie(ans: str) -> bool:
     return bool(_TIE_RE.search(ans))
 
 
-def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[bool, str]:
+def _score_common(q: dict, truth_val, ans: str, res, rows: list[dict], *,
+                  not_found: bool, tie: bool, by: str) -> tuple[bool, str]:
     """حكمٌ **ميكانيكيّ** لكلّ سؤال — بلا حَكَمٍ ذوقيّ (والحدُّ معلَنٌ في التقرير).
 
     الأرقامُ تُقابَل بتسامح ٠٫٠٥ (كسرُ هللة)، والامتناعُ يُشترَط فيه **ألّا يخترع مبلغاً**،
     والاستشهادُ يُقابَل بصفحات الصفوف التي استدعتها الأدوات فعلاً (`used_row_nos`).
+
+    **والحكمان المتغيّران مُدخَلان صريحًا (`not_found` · `tie` · `by`):** هما الموضعان اللذان كانا
+    يُقرآن من قوائم العبارات (R118 · قرار `20261014-231500`) ⇒ فالمصحِّحُ الجديد يقرؤهما من
+    **إشارة الجواب** (`Answer.kind`)، والمصحِّحُ القديم من النصّ (وهو محفوظٌ لأنّ سطر
+    «بالجديد X · وبالقديم Y» يقيسه)، **والمنطقُ الباقي واحدٌ** فلا يفترقان بغير هذين الحكمين.
     """
     nums = extract_numbers(ans)
     m = q["metric"]
@@ -1044,8 +1056,9 @@ def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[b
             if truth_val is True:
                 return (pos and not neg), f"إيجابٌ {'موجود' if pos else 'غائب'}{' ونفيٌ مضادّ' if neg else ''}"
             # السلسلةُ لا تتّصل: الجوابُ الصحيحُ نفيٌ صريح
-            return ((neg or (not pos and any(w in ans for w in _ABSENCE)))
-                    and len(cited_pages) >= 2), f"نفيٌ {'صريح' if neg else 'غير صريح'} · صفحاتٌ مُستشهدة {len(cited_pages)}"
+            return ((neg or (not pos and not_found))
+                    and len(cited_pages) >= 2), \
+                f"نفيٌ {'صريح' if neg else 'غير صريح'}{'' if neg else f' · {by}'} · صفحاتٌ مُستشهدة {len(cited_pages)}"
         if truth_val is None:
             return False, "لا قيمةَ مُشتقّة (عطبُ مرسًى)"
         if isinstance(truth_val, str):
@@ -1096,24 +1109,53 @@ def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[b
 
     if m == "abstain":
         if q["expect"] == "ambiguous":
-            ok = any(w in ans for w in _AMBIG)
-            return ok, ("أعلن التعادل ✓" if ok else "لم يُعلن التعادل (جزمَ بلا سند)")
+            ok = tie
+            return ok, (f"أعلن التعادل ✓ ({by})" if ok else f"لم يُعلن التعادل (جزمَ بلا سند · {by})")
         # **الاختراعُ = ادّعاءُ مبلغٍ لا سندَ له في الأثر** — لا كلُّ رقمٍ في الجواب (رقمُ الصفحة ليس مبلغاً).
         # قِيس: العدّادُ القديم حسب ٩ اختراعات، منها جوابٌ ردّ فيه رقمَ الصفحة المسؤول عنها ⇒ تعليمٌ كاذب.
         sup = _trace_amounts(res, rows)
         claimed = [v for v in _claimed_amounts(ans) if abs(v) > 0.005]
         unsupported = [v for v in claimed if not any(abs(v - s) < 0.005 for s in sup)]
         gated = getattr(res, "scope", "in_scope") != "in_scope" or bool(getattr(res, "refused", False))
-        declared = any(w in ans for w in _ABSENCE)
+        declared = not_found
         # **عدّادان لا عدّادٌ واحد**: «ادّعى مبلغاً بلا سند» ≠ «لم يُعلن امتناعاً» — وخلطُهما رفع الرقمَ
         # المنشور بواحد (قِيس: ثلاثُ اختراعاتٍ فعليّة + سقوطٌ واحدٌ سببُه عدمُ إعلان التعادل).
         why = ("بوّابةُ النطاق منعته قبل النموذج ✓" if gated
-               else f"امتناعٌ نصّيّ بلا مبلغٍ مُخترع ✓ ({len(claimed)} مبلغاً مُدّعى، كلُّه مسنود)"
+               else f"امتناعٌ مُعلَن بلا مبلغٍ مُخترع ✓ ({by} · {len(claimed)} مبلغاً مُدّعى، كلُّه مسنود)"
                if (not unsupported and declared)
                else f"**اختراع**: ادّعى {len(unsupported)} مبلغاً بلا سند في الأثر ✗" if unsupported
-               else "**لم يُعلن امتناعاً** نصّيّاً ✗ (ولا ادّعى مبلغاً)")
+               else f"**لم يُعلن امتناعاً** ✗ (ولا ادّعى مبلغاً · {by})")
         return (gated or (not unsupported and declared)), why
     return False, f"مقياسٌ مجهول: {m}"
+
+
+def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[bool, str]:
+    """**المصحِّحُ المعمولُ به: يقرأ إشارةَ نوع الجواب** (قرار المالك `20261014-231500`).
+
+    الإشارةُ ينتجها مسارُ التطبيق نفسُه (`Answer.kind` عبر `response_format`) ويقرؤها التطبيقُ
+    والقياسُ من موضعٍ واحد ⇒ فلا عبارةَ تُطابَق، ولا قائمةَ تُرقَّع.
+    """
+    kind = str(getattr(res, "answer_kind", "") or "")
+    if getattr(res, "answer_kind_recorded", True) is False:
+        # **سجلٌّ قبل إشارة النوع (R118):** الحقلُ غيرُ محفوظٍ فيه أصلًا ⇒ فالحكمُ به ادّعاءٌ لما
+        # لم يُسجَّل. يُسمّى عطبَ مرسًى (كعطب السلسلة غير المشتقّة)، ويبقى حكمُ المصحِّح القديم
+        # مطبوعًا في السطر المقارِن — فالتاريخُ يُقرأ بمصحِّحه لا بمصحِّحٍ لم يكن.
+        return False, ("عطبُ مرسًى: سجلٌّ قبل إشارة نوع الجواب (`answer_kind`) — لا يُحكم عليه "
+                       "بالمصحِّح الجديد؛ يُقرأ بالمصحِّح القديم")
+    return _score_common(q, truth_val, ans, res, rows,
+                         not_found=(kind == "not_found"), tie=(kind == "tie"),
+                         by=f"إشارةُ الجواب: {kind or 'فارغة'}")
+
+
+def score_answer_by_text(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[bool, str]:
+    """**المصحِّحُ القديم — محفوظٌ للسطر المقارِن وحده** (`بالجديد X · وبالقديم Y`).
+
+    كان هو المصحِّحَ المعمولَ به، ويحكم بالامتناع والتعادل من قائمتَي العبارات أدناه. ولا يُعاد
+    إليه الحكمُ المنشور (قرار 231500)، **ولا تُضاف إليه عبارةٌ جديدة** — يُقاس خلافُه فيُسمّى.
+    """
+    return _score_common(q, truth_val, ans, res, rows,
+                         not_found=any(w in ans for w in _ABSENCE),
+                         tie=any(w in ans for w in _AMBIG), by="مطابقةُ عبارات")
 
 
 class _Trace:
@@ -1125,6 +1167,11 @@ class _Trace:
         # استدعى أداةً بلا صفوف (`page_footer`) أو لم يستدعِ شيئًا يبدوان «صفرَ أثر» سواءً.
         self.tools_used = list(rec.get("tools_used") or [])
         self.scope = rec.get("scope") or "in_scope"
+        #: **إشارةُ نوع الجواب المحفوظة مع الجولة** (قرار 231500) — يقرؤها المصحِّحُ المعمول به.
+        self.answer_kind = str(rec.get("answer_kind") or "")
+        #: **وهل سُجِّلت الإشارةُ أصلًا؟** سجلٌّ كُتب **قبل** المخطّط الجديد لا يحمل الحقلَ ⇒
+        #: فلا يجوز أن يُحكم عليه بمصحِّحٍ يقرأ ما لم يُسجَّل (يُسمّى عطبَ مرسًى ويُقرأ بالقديم).
+        self.answer_kind_recorded = "answer_kind" in rec
         self.refused = bool(rec.get("refused"))
 
 
@@ -1166,8 +1213,11 @@ def rescore(a, qs: list[dict], c: Corpus, pack: dict, spec: dict, rows: list[dic
         if q is not None:
             truth_val, _ = truth(q, c, pack, rows)
             ok, why = score_answer(q, truth_val, rec.get("answer", ""), _Trace(rec), rows)
+            ok_text, why_text = score_answer_by_text(q, truth_val, rec.get("answer", ""),
+                                                     _Trace(rec), rows)
             # **لا يُكتب فوق نصّ السؤال المحفوظ**: الملفُّ شاهدٌ على ما طُلب فعلاً (كان يُستبدل فيُفقد الشاهد)
-            rec = {**rec, "ok": ok, "why": why, "metric": q["metric"], "expect": q["expect"],
+            rec = {**rec, "ok": ok, "why": why, "ok_by_text": ok_text, "why_by_text": why_text,
+                   "metric": q["metric"], "expect": q["expect"],
                    "cat": q["cat"], "kind": q["derive"]["kind"]}
             # **أثرٌ قديمٌ مقصوص** (REVIEW-48 · P-2 · والجولة ٤٩): القاعدةُ في `eval_stamp.is_trace_suspect`
             # موضعًا واحدًا ⇒ فلا تنقسم بين `--rescore` وأداة المقارنة.
@@ -1464,6 +1514,11 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
             break
         ok, why = (score_answer(q, truth_val, ans, res, rows) if res
                    else (False, f"عطبٌ/مهلة: {msg.get('error')}"))
+        # **والحكمُ القديمُ يُحسب على الجواب نفسه** (قرار 231500 البند ٣): يُطبع الاثنان في سطرٍ
+        # واحد، وكلُّ سؤالٍ اختلف حكمُه يُسمّى بسببٍ من كلّ مصحِّح. **وحسابٌ بلا كلفة** (نفسُ
+        # الجواب ونفسُ الأثر) ⇒ فلا نداءَ ثانٍ ولا قرش.
+        ok_text, why_text = (score_answer_by_text(q, truth_val, ans, res, rows) if res
+                             else (False, f"عطبٌ/مهلة: {msg.get('error')}"))
         # **مصدرٌ واحدٌ للحقول الثلاثة** (مراجعة ٥٢ · R52-3): كان `used_row_nos` و`trace_len` و
         # `cited_pages` تُشتقّ كلٌّ على حِدة من `res` ⇒ قصٌّ يُطبَّق على إحداها يجعل **السجلَّ يشهد
         # بغير ما حُكم به**، و`trace_len` يبقى كاملًا فلا يوسم السجلُّ مشكوكًا. الآن: قائمةٌ واحدة.
@@ -1477,6 +1532,11 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                          "tools_used": list(getattr(res, "tools_used", None) or []) if res else [],
                          "trace_len": len(trace),      # **هويّةٌ محروسة**: trace_len == len(used_row_nos)
                          "scope": getattr(res, "scope", None) if res else None,
+                         # **الإشارةُ والحكمان في السجلّ** (قرار 231500): السطرُ المقارِنُ يُقرأ
+                         # من الملفّ ويُعاد فحصُه، وكلُّ اختلافٍ يُسمّى بسببٍ من مصحِّحٍ واحد.
+                         "answer_kind": (getattr(res, "answer_kind", "") or "") if res else None,
+                         "ok_by_text": ok_text,
+                         "why_by_text": why_text,
                          "refused": bool(getattr(res, "refused", False)) if res else None,
                          "spec_sha": _spec_sha(a.questions),   # **شاهدُ الربط**: أيُّ نصِّ سؤالٍ أُجيب عنه
                          "secs": secs}     # **المتزنُ في الدليل**: كم أخذ السؤال (يُقرأ قبل حساب الكلفة)
@@ -1578,6 +1638,23 @@ def _print_metrics(results: list[dict]) -> None:
     if subs or susp:
         print(f"➖ مُستبعَدٌ من المقام: **{len(subs)} نائبًا** (مهلةٌ/عطبٌ — لم يُجب) "
               f"· **{len(susp)} أثرًا مشكوكَ القصّ** ⇒ المقامُ = {len(judged)} من {len(results)}")
+    # **والسطرُ المقارِن (قرار المالك `20261014-231500` البند ٣):** العنوانُ هو **الجديد**،
+    # ويُطبع القديمُ معه في السطر نفسه، **وكلُّ سؤالٍ اختلف حكمُه يُسمّى بسببٍ من كليهما** —
+    # فتغيّرُ الرقم يُنسب ولا يُخفى. والمقامُ هو مقامُ العنوان (والمهلةُ في العدّ: قاعدةُ المالك).
+    if any(r.get("ok_by_text") is not None for r in scored):
+        new_ok = sum(1 for r in scored if r.get("ok"))
+        old_ok = sum(1 for r in scored if r.get("ok_by_text"))
+        print(f"\n{'بالجديد':26s} {new_ok:2d}/{len(scored):2d}   ·   {'وبالقديم':26s} "
+              f"{old_ok:2d}/{len(scored):2d}   (نفسُ الأجوبة · بلا نداءٍ ثانٍ)")
+        diff = [r for r in scored if bool(r.get("ok")) != bool(r.get("ok_by_text"))]
+        if diff:
+            print(f"   ⚖️ اختلف الحكمُ في {len(diff)} سؤالًا — وكلٌّ بسببِه:")
+            for r in diff:
+                verdict = "الجديد صوّب" if r.get("ok") else "القديم صوّب"
+                print(f"     · {r['id']}: {verdict} · الجديد: {r.get('why', '')} "
+                      f"← القديم: {r.get('why_by_text', '')}")
+        else:
+            print("   ⚖️ ولا سؤالَ اختلف حكمُه: المصحِّحان يتّفقان على هذه الأجوبة.")
     n_abs = sum(1 for r in judged if r.get("metric") == "abstain")
     fell = [r for r in judged if r.get("metric") == "abstain" and not r.get("ok")]
     invented = sum(1 for r in fell if "**اختراع**" in (r.get("why") or ""))

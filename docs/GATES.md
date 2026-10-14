@@ -102,6 +102,13 @@ tests/test_scope_one_home.py
 tests/test_app_excel_button.py
 tests/test_money_unit.py
 tests/test_money_string_fields.py
+tests/test_the_price_limit_reaches_the_request.py
+tests/test_the_refusal_is_read_from_its_type.py
+tests/test_the_scope_gate_speaks_only_what_it_read.py
+tests/test_the_tools_refuse_unknown_inputs.py
+tests/test_the_compound_split_is_measured_not_assumed.py
+tests/test_the_estimate_reads_the_newest_run.py
+tests/test_the_guards_do_not_need_the_owners_key.py
 ```
 
 **وحدُ الإدراج مُعلَنٌ بالقياس (R72-1 · مراجعة ٧٢ · شقّاها معًا):** حرّاسُ جولة البيان الخمسة صاروا في

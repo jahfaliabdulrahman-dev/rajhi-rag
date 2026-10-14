@@ -5,6 +5,12 @@
 قِيس بأداةٍ مصغّرة على المكتبة نفسها: `{"side": "مدين", "foo": 1}` نُفِّذ وأعاد الجوابَ ذاته
 كأنّ `foo` لم تُذكر ⇒ **مدخلٌ مجهولٌ يُنتج رقمًا** بدل أن يُرفض.
 
+**ونصُّ الرفض كان يُفرَغ قبل أن يصل النموذج (R118-1 · مراجعة ١١٨):** مسبارُ هذه الجولة بنموذجٍ
+مُبرمَج عبر `answer_question` قرأ في `ToolMessage`: `"… with error:\n \n Please fix the error…"`
+— **بلا اسم الخانة** — لأنّ مُحقِّقًا يدويًّا فوق `extra="forbid"` يرفع خطأً على مستوى النموذج
+(بلا `loc`) تُسقِطه مرشّحةُ `ToolNode`. فالنموذجُ لا يعرف ما يُصلح، **والضابطُ هنا يقيس ما يراه هو**
+لا ما يُرفع في `.invoke` المباشر.
+
 **والمدخلُ لم يكن يُسجَّل في الأثر:** `_record` كان يكتب `{"tool", "row_nos"}` **وإذا اختارت
 الأداةُ صفرًا لا يكتب شيئًا** ⇒ فالمحاسبُ يقرأ أثرًا ناقصًا ولا يرى ما طُلب.
 """
@@ -45,13 +51,76 @@ def _by_name(tools):
 
 # ── ① المدخلُ المجهول يُرفض ولا يُنفَّذ ───────────────────────────────────────────────────
 def test_an_unknown_argument_is_refused_not_ignored():
+    """**والرسالةُ تسمّي الخانةَ — من المكتبة لا من طبقةٍ يدويّة (R118-1 · مراجعة ١١٨):**
+    كانت فوق `extra="forbid"` طبقةُ `@model_validator(mode="before")` ترفع خطأً على مستوى النموذج
+    كلّه (بلا `loc`) ⇒ فتُسقطه مرشّحةُ `ToolNode` ويصل النموذجَ **نصٌّ فارغ**. والطبقةُ أُزيلت،
+    والمكتبةُ تسمّي الخانةَ (`foo: Extra inputs are not permitted`)."""
     tools = _by_name(_tools())
     with pytest.raises(_VE()) as err:
         tools["sum_movements"].invoke({"side": "مدين", "foo": 1})
     text = str(err.value)
-    assert "مدخلٌ مجهول" in text and "foo" in text, \
+    assert "foo" in text and "extra_forbidden" in text, \
         f"الرفضُ لا يسمّي المدخلَ المجهول: {text[:200]}"
-    assert "side" in text, "الرفضُ لا يسمّي الوسائطَ المقبولة"
+    assert "side" in str(tools["sum_movements"].args_schema.model_fields), \
+        "المخطّطُ المرسَل لا يعلن الوسائطَ المقبولة (فلا يعرف النموذجُ ما يُصلح)"
+
+
+class _ScriptedUnknownCall:
+    """نموذجٌ مُبرمَج: يطلب `count_movements(page=9)` (خانةٌ لا تعرفها الأداة) ثمّ يجيب."""
+
+    def __init__(self):
+        self.tool_texts: list[str] = []
+
+    def build(self):
+        from langchain_core.language_models.chat_models import BaseChatModel
+        from langchain_core.messages import AIMessage, ToolMessage
+        from langchain_core.outputs import ChatGeneration, ChatResult
+
+        outer = self
+
+        class _Scripted(BaseChatModel):
+            def _generate(self, messages, stop=None, run_manager=None, **kw):
+                seen = [m for m in messages if isinstance(m, ToolMessage)]
+                if seen:
+                    outer.tool_texts = [str(m.content) for m in seen]
+                    return ChatResult(generations=[ChatGeneration(message=AIMessage("ok"))])
+                call = {"name": "count_movements", "args": {"page": 9}, "id": "c1",
+                        "type": "tool_call"}
+                return ChatResult(generations=[ChatGeneration(message=AIMessage("", tool_calls=[call]))])
+
+            def bind_tools(self, tools, **kw):
+                return self
+
+            def with_structured_output(self, schema, **kw):
+                return self
+
+            @property
+            def _llm_type(self):
+                return "scripted-r118"
+
+        return _Scripted()
+
+
+def test_the_refusal_reaches_the_model_with_the_field_name():
+    """**القبولُ بنصّه (R118-1):** نموذجٌ مُبرمَج عبر `answer_question` ⇒ الـ`ToolMessage` يسمّي
+    الخانة. قِيس على الرأس `13fb534` **فارغًا** (`"… with error:\n \n Please fix…"`)."""
+    pytest.importorskip("langchain")
+    pytest.importorskip("langgraph")
+    from statement_qa.qa import answer_question
+
+    class _NoStore:
+        def similarity_search_with_score(self, *_a, **_k):
+            return []
+
+    rows = [{"page": 1, "row": 1, "page_row": 1, "date": "2026-01-02", "movement": "100.00",
+             "balance": "4,321.00", "debit": "100.00", "credit": None, "description": "رسوم",
+             "desc": "رسوم", "kind": "txn"}]
+    script = _ScriptedUnknownCall()
+    answer_question(_NoStore(), "كم حركةً في الكشف؟", rows=rows, llm=script.build())
+    assert script.tool_texts, "لم يُلتقط ToolMessage — والمسبارُ نفسه مشكوكٌ فيه"
+    text = script.tool_texts[0]
+    assert "page" in text or "foo" in text, f"الرسالةُ لا تسمّي الخانةَ المرفوضة: {text!r}"
+    assert "with error:\n \n" not in text, f"نصُّ الخطأ فارغٌ كما كان (R118-1): {text!r}"
 
 
 def test_the_same_call_without_the_unknown_key_still_runs():

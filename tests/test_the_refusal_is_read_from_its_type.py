@@ -58,6 +58,33 @@ def test_the_documented_shapes_are_named_by_their_type():
     assert provider_errors.classify(_Err(503)) == provider_errors.NO_HOST_UNDER_PRICE
 
 
+def test_a_403_is_named_by_its_limit_source_not_by_its_code():
+    """**R118-4 · مراجعة ١١٨:** كانت **كلُّ** ٤٠٣ تُسمّى «حدَّ المفتاح» فيُقال للمستخدم
+    «بلغ المفتاحُ حدَّ صرفه» على حجبِ حارسٍ أو نقصِ صلاحيّات — نصٌّ كاذبٌ في مسارٍ نادر.
+    ووثائقُ OpenRouter: الميزانيّاتُ وحدَها تحمل `limit_source`."""
+    assert provider_errors.classify(_Err(403, KEY_LIMIT_BODY)) == provider_errors.KEY_LIMIT
+    guard = {"error": {"message": "Guardrail triggered", "code": 403,
+                       "metadata": {"limit_source": "openrouter_guardrail_budget"}}}
+    assert provider_errors.classify(_Err(403, guard)) == provider_errors.BUDGET_LIMIT
+    assert provider_errors.classify(_Err(403)) == provider_errors.FORBIDDEN, \
+        "٤٠٣ بلا `limit_source` تُسمّى حدَّ مفتاحٍ ⇒ ادّعاءُ حدِّ صرفٍ بلا سند"
+
+
+def test_a_403_without_a_source_never_claims_a_spend_limit():
+    """**القبولُ بنصّه:** ٤٠٣ رقابةٍ مُقلَّد ⇒ **لا تُذكر «حدَّ صرفه»**."""
+    text = provider_errors.answer_text(provider_errors.FORBIDDEN, _Err(403))
+    for claim in ("حدَّ صرفه", "ارفع حدَّ المفتاح", "رصيدَ المفتاح"):
+        assert claim not in text, f"ادّعاءُ حدِّ صرفٍ في ٤٠٣ بلا `limit_source` ({claim}): {text}"
+    assert "403" in text and "صلاحيّات" in text, "الرسالةُ لا تسمّي ما تعرفه (الرمزُ والاحتمال)"
+    # **وميزانيّةُ الحارس تُسمّى بمصدرها** (لا بحدّ المفتاح):
+    guard = {"error": {"message": "Guardrail triggered", "code": 403,
+                       "metadata": {"limit_source": "openrouter_guardrail_budget"}}}
+    gtext = provider_errors.answer_text(provider_errors.BUDGET_LIMIT, _Err(403, guard))
+    assert "openrouter_guardrail_budget" in gtext, gtext
+    for claim in ("حدَّ صرفه", "ارفع حدَّ المفتاح"):
+        assert claim not in gtext, f"ميزانيّةُ الحارس تُقرأ حدَّ مفتاح: {gtext}"
+
+
 def test_a_non_documented_failure_is_not_swallowed():
     """**ونقيضُه:** ما ليس رفضًا موثَّقًا **يُعاد رفعُه** ولا يُسمّى باسمٍ لا يخصّه."""
     assert provider_errors.classify(_Err(500)) is None
@@ -171,10 +198,18 @@ ROWS = [
     (403, KEY_LIMIT_BODY, provider_errors.KEY_LIMIT),
     (503, {"error": {"message": "No available model provider meets your routing requirements",
                      "code": 503}}, provider_errors.NO_HOST_UNDER_PRICE),
+    (403, {"error": {"message": "Forbidden", "code": 403}}, provider_errors.FORBIDDEN),
+    (403, {"error": {"message": "Guardrail triggered", "code": 403,
+                     "metadata": {"limit_source": "openrouter_guardrail_budget"}}},
+     provider_errors.BUDGET_LIMIT),
 ])
 def test_the_app_path_names_the_refusal_instead_of_raising(monkeypatch, status, body, kind):
     """**مسارُ التطبيق نفسه** (`llm=None` ⇒ `build_llm()`): كان الاستثناءُ يصعد إلى Gradio،
-    وكان القياسُ يسجّل السؤالَ جوابًا خاطئًا. والآن يعود **نتيجةٌ مُسمّاةٌ برسالةٍ عربيّة**."""
+    وكان القياسُ يسجّل السؤالَ جوابًا خاطئًا. والآن يعود **نتيجةٌ مُسمّاةٌ برسالةٍ عربيّة**.
+
+    **والبيتُ مزيّف (R118-3):** مفتاحٌ مزيّفٌ في البيئة يُقرأ قبل ملفّات `.env` ⇒ فلا يسحب
+    الضابطُ مفتاحَ المالك، ويمرّ في بيتٍ نظيف."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
     pytest.importorskip("openai")
     pytest.importorskip("langchain_openai")
     seen = _transport(monkeypatch, status, body)

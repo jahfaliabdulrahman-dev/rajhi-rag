@@ -175,8 +175,16 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
 
     **وكلُّ أداةٍ ترفض المدخلَ المجهول (R109-3 · مراجعة ١١٧):** كان مخطّطُ المكتبة
     يتجاهل الخانةَ الزائدة **صامتًا** (قِيس: نداءٌ بـ`foo=1` ينفّذ ويعيد جوابًا كأنّ لا
-    شيءَ زائدًا) ⇒ فصار المخطّطُ يُبنى من التوقيع نفسه **بـ`extra="forbid"`** ورسالةٍ
-    عربيّةٍ تُسمّي المدخلَ المجهولَ والمقبولَ معًا.
+    شيءَ زائدًا) ⇒ فصار المخطّطُ يُبنى من التوقيع نفسه **بـ`extra="forbid"`**.
+
+    **والطبقةُ اليدويّة أُزيلت (R118-1 · مراجعة ١١٨):** كانت فوق `forbid` مُحقِّقًا
+    (`@model_validator(mode="before")`) يرفع خطأً **على مستوى النموذج كلّه بلا `loc`**،
+    ومرشّحةُ `ToolNode` (`_filter_validation_errors`) تُسقِط ما ليس على وسيطٍ يتحكّم به
+    النموذج ⇒ **فرسالتُه تصل النموذجَ فارغة**: قِيس عبر `answer_question` بنموذجٍ مُبرمَج
+    `"… with error:\n \n Please fix the error and try again."` — بلا اسمِ الخانة، فلا يعرف
+    النموذجُ ما يُصلح (وهو صنفُ سقوط `cit-02` في جولاتٍ سابقة). والمكتبةُ تسمّي الخانةَ
+    بنفسها (`page: Extra inputs are not permitted`) **والوسائطُ المقبولةُ معلَنةٌ في مخطّط
+    الأداة المرسَل** ⇒ فلا طبقةَ يدويّةً تُفرِغ الرسالة (ومكوّنُ المكتبة أولى — قاعدةُ المالك).
     """
     from langchain_core.tools import tool
 
@@ -185,26 +193,17 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
                  and r.get("movement") is not None]
 
     def _strict_args(fn):
-        """مخطّطُ وسائط الأداة: من **التوقيع نفسه** + منعُ المدخل المجهول (R109-3)."""
+        """مخطّطُ وسائط الأداة: من **التوقيع نفسه** + منعُ المدخل المجهول (R109-3 · R118-1)."""
         from langchain_core.tools.base import create_schema_from_function    # noqa: PLC0415
-        from pydantic import ConfigDict, model_validator                    # noqa: PLC0415
+        from pydantic import ConfigDict                                     # noqa: PLC0415
 
         base = create_schema_from_function(fn.__name__, fn)
 
         class StrictArgs(base):                     # pylint: disable=too-few-public-methods
+            # **ولا مُحقِّقَ يدويًّا فوقه (R118-1):** خطأُ `extra_forbidden` من المكتبة
+            # يحمل `loc=('page',)` فيمرّ إلى النموذج باسم الخانة، وخطأُ المُحقِّق اليدويّ
+            # على مستوى النموذج (بلا `loc`) تُسقِطه مرشّحةُ `ToolNode` ⇒ نصٌّ فارغ.
             model_config = ConfigDict(extra="forbid")
-
-            @model_validator(mode="before")
-            @classmethod
-            def _reject_unknown(cls, data):
-                if isinstance(data, dict):
-                    unknown = [k for k in data if k not in cls.model_fields]
-                    if unknown:
-                        raise ValueError(
-                            "مدخلٌ مجهول — " + "، ".join(str(k) for k in unknown)
-                            + " | الوسائطُ المقبولة في هذه الأداة: "
-                            + "، ".join(cls.model_fields))
-                return data
 
         return StrictArgs
 

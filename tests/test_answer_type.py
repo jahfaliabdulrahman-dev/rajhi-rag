@@ -76,12 +76,15 @@ def _patch_agent(monkeypatch, payload, *, reject_kwargs=False):
 
 
 def test_the_answer_type_declares_its_citations():
-    """النوعُ يُصرّح: نصٌّ + أرقامُ صفوفٍ صحيحة + امتناعٌ صريح."""
-    a = q.Answer(answer="المجموع ١٠٠", cited_row_ids=[5, 7])
-    assert a.cited_row_ids == [5, 7] and a.refused is False
-    b = q.Answer(answer="لا أستطيع", cited_row_ids=["3"])   # نصٌّ رقميّ يُقيَّد عددًا
-    assert b.cited_row_ids == [3]
-    assert set(q.Answer.model_fields) >= {"answer", "cited_row_ids", "refused"}
+    """النوعُ يُصرّح: نصٌّ + أرقامُ صفوفٍ صحيحة + **نوعُ الجواب** (بدل `refused` المُخزَّن)."""
+    a = q.Answer(kind="figure", answer="المجموع ١٠٠", cited_row_ids=[5, 7])
+    assert a.cited_row_ids == [5, 7] and a.kind == q.AnswerKind.FIGURE
+    b = q.Answer(kind="not_found", answer="لا أستطيع", cited_row_ids=["3"])   # نصٌّ رقميّ يُقيَّد عددًا
+    assert b.cited_row_ids == [3] and b.kind == "not_found"
+    assert set(q.Answer.model_fields) >= {"kind", "answer", "cited_row_ids"}
+    # **والنوعُ مطلوب:** تركُه لا يمرّ (وهو الفرقُ عن `refused` الافتراضيّ الذي لم يُملأ قطّ)
+    with pytest.raises(Exception):
+        q.Answer(answer="بلا نوع", cited_row_ids=[])
 
 
 def test_a_citation_without_a_witness_is_named():
@@ -108,7 +111,7 @@ def test_the_agent_is_built_with_the_type_and_the_downgrade_is_declared(monkeypa
 
 def test_the_typed_field_wins_over_the_prose(monkeypatch):
     """**«النوعُ يُصلح الاستخراج»:** النصُّ يقول شيئًا والكائنُ يقول غيرَه ⇒ الكائنُ يُعتمد."""
-    payload = {"structured_response": q.Answer(answer="من النوع: ١٢٣", cited_row_ids=[3]),
+    payload = {"structured_response": q.Answer(kind="figure", answer="من النوع: ١٢٣", cited_row_ids=[3]),
                "messages": [_Msg("من النثر: ٩٩٩")]}
     _patch_agent(monkeypatch, payload)
     text, parsed, mode = q._run_agent(object(), [], "s", "u", response_format=q.Answer)
@@ -136,7 +139,7 @@ def test_the_whole_answer_carries_the_typed_citations(monkeypatch):
              "movement": "10.00", "side": "debit", "balance": "10.00", "printed_movement": "10.00",
              "printed_balance": "10.00", "counted": 1, "row_state": "عادي", "source": "طباعة"}
             for i in range(1, 6)]
-    payload = {"structured_response": q.Answer(answer="المجموع ١٠٫٠٠", cited_row_ids=[1, 4]),
+    payload = {"structured_response": q.Answer(kind="figure", answer="المجموع ١٠٫٠٠", cited_row_ids=[1, 4]),
                "messages": [_Msg("نثرٌ لا يهمّ")]}
     _patch_agent(monkeypatch, payload)
     # الأدواتُ تُبنى من الصفوف نفسِها ⇒ فالشاهدُ يأتي من أثرٍ حقيقيّ حين تُستدعى
@@ -151,7 +154,7 @@ def test_the_whole_answer_carries_the_typed_citations(monkeypatch):
     # **وبسؤالٍ وصفيٍّ يصل الجوابُ المُقيَّد باستشهاداته** — بشرط ألّا يحمل الجوابُ **مبلغًا** (فالبوّابةُ
     # تقرأ الجوابَ منذ R104-1: مبلغٌ بلا نداءِ أداةٍ يُرفض ولو كان السؤالُ وصفيًّا — ويقاس أدناه).
     _patch_agent(monkeypatch, {"structured_response":
-                               q.Answer(answer="الصفوف ١ و٤ فيها رسوم حوالة", cited_row_ids=[1, 4]),
+                               q.Answer(kind="figure", answer="الصفوف ١ و٤ فيها رسوم حوالة", cited_row_ids=[1, 4]),
                                "messages": [_Msg("نثرٌ لا يهمّ")]})
     res2 = q._answer_one(store=_Store(), question="بيّن الصفوف التي فيها رسوم حوالة", rows=rows,
                          chunks=None, llm=object(), k=2, footers=None)
@@ -179,7 +182,7 @@ def test_a_money_answer_without_a_tool_call_is_refused_even_when_the_question_is
             for i in range(1, 6)]
     # سؤالٌ **بلا** كلمةٍ رقميّة («هل…؟») وجوابٌ يحمل مبالغَ بلا أيّ أداة
     _patch_agent(monkeypatch, {"structured_response":
-                               q.Answer(answer="لا يتّصل: رصيد 242.00 مقابل 236.00", cited_row_ids=[]),
+                               q.Answer(kind="figure", answer="لا يتّصل: رصيد 242.00 مقابل 236.00", cited_row_ids=[]),
                                "messages": [_Msg("نثرٌ لا يهمّ")]})
     res = q._answer_one(store=_Store(), question="هل يتّصل رصيد الصفحة الثانية برصيد الأولى؟",
                         rows=rows, chunks=None, llm=object(), k=2, footers=None)
@@ -198,7 +201,7 @@ def test_a_numeric_answer_without_money_is_not_refused_by_the_new_branch(monkeyp
              "printed_balance": "10.00", "counted": 1, "row_state": "عادي", "source": "طباعة"}
             for i in range(1, 6)]
     _patch_agent(monkeypatch, {"structured_response":
-                               q.Answer(answer="الصفحة 628 فيها الصفوف 12 و34", cited_row_ids=[]),
+                               q.Answer(kind="figure", answer="الصفحة 628 فيها الصفوف 12 و34", cited_row_ids=[]),
                                "messages": [_Msg("نثرٌ لا يهمّ")]})
     res = q._answer_one(store=_Store(), question="بيّن الصفوف التي فيها رسوم حوالة", rows=rows,
                         chunks=None, llm=object(), k=2, footers=None)
@@ -237,33 +240,30 @@ def test_a_failed_tool_path_carries_no_type_and_no_citation(monkeypatch):
     assert res.unsupported_citations == []
 
 
-def test_a_compound_question_carries_its_parts_tool_names(monkeypatch):
-    """**R104-1 · P1 (قاسه مقعدا المواصفة والبنية):** جمعُ الأجزاء كان يبني `QAResult` المُدمَج
-    بـ`used_row_nos` وحدَها **ويُسقِط `tools_used`** ⇒ فسؤالٌ مركّبٌ (وهو **٥ من ٥٠** في الحزمة، ومنها
-    `chn-03` و`chn-04` في تجربة R104) يُسجَّل «بلا أدوات» أيًّا كان ما استدعاه النموذج — وهو **عينُ ما
-    وُلد الحقلُ لفصله** («صفرُ صفوف» ≠ «لا نداء»).
-
-    **وR105-7 (مراجعة ١٠٥):** الدمجُ صار **بالترتيب** (`sorted({…})` ⇐ امتدادٌ بترتيب الأجزاء وتكرارها)
-    فلا يضيع العددُ ولا الترتيب؛ **والضابطُ يفصّل عن الترتيب** (`sorted(...)`) فيقيس الوجودَ لا الصيغة.
-
-    **وما يقيسه:** سؤالٌ مركّبٌ جزآن، كلٌّ استدعى أداةً ⇒ الأسماءُ تجتمع في النتيجة المُدمَجة. ولو أُسقِط
-    الدمجُ لسقط الضابط (وهو نقصٌ مُثبتٌ في شجرة R104 قبل الإصلاح).
+def test_a_compound_question_is_asked_once_not_in_parts(monkeypatch):
+    """**R118-2 · مراجعة ١١٨ — الحذفُ يُقاس من النداء لا من النيّة:** كان السؤالُ المركّبُ يُطرح
+    مرّتين (`split_compound`) وتُدمج النتيجتان — وهو الدمجُ الذي كان يُسقِط `tools_used` (R104-1)
+    وترتيبَه (R105-7). وبعد الحذف **طرحٌ واحد** لكلّ سؤال: `_answer_one` تُنادى مرّة، وتُعاد
+    نتيجةُ الوكيل كما هي بلا دمج. فإن عاد التقسيمُ من بابٍ آخر سقط هذا الضابط بعدد النداءات
+    (وهو ما لا يُقاس بقراءة النصّ).
     """
     rows = [{"row_no": i, "page": 1, "printed_page": 1, "desc": f"سطر {i}", "date": "2026-01-01",
              "movement": "10.00", "side": "debit", "balance": "10.00", "printed_movement": "10.00",
              "printed_balance": "10.00", "counted": 1, "row_state": "عادي", "source": "طباعة"}
             for i in range(1, 6)]
-    calls = {"n": 0}
+    calls = {"n": 0, "questions": []}
 
-    def fake(store, part, rows_, chunks, llm, k, footers=None, thread_id=None, scope=""):
+    def fake(store, question, rows_, chunks, llm, k, footers=None, thread_id=None, scope=""):
         calls["n"] += 1
-        return q.QAResult(answer=f"جزءٌ {calls['n']}", sources=[], used_row_nos=[calls["n"]],
-                         tools_used=["row_chain"] if calls["n"] == 1 else ["page_footer"])
+        calls["questions"].append(question)
+        return q.QAResult(answer="جواب", sources=[], used_row_nos=[1], tools_used=["row_chain"])
 
     monkeypatch.setattr(q, "_answer_one", fake)
-    assert len(q.split_compound("هل يتّصل الرصيد؟ وما مجموع المدين؟")) > 1, "المِثالُ ليس مركّبًا"
-    res = q.answer_question(store=_Store(), question="هل يتّصل الرصيد؟ وما مجموع المدين؟", rows=rows,
+    compound = "هل يتّصل الرصيد؟ وما مجموع المدين؟"
+    res = q.answer_question(store=_Store(), question=compound, rows=rows,
                             chunks=None, llm=object(), k=2, footers=None)
-    assert sorted(res.tools_used) == ["page_footer", "row_chain"], \
-        f"أسماءُ أجزاء السؤال المركّب غابت أو ضاعت: {res.tools_used}"
-    assert res.used_row_nos == [1, 2], res.used_row_nos
+    assert calls["n"] == 1, f"السؤالُ المركّب طُلب {calls['n']} مرّات ⇒ تقسيمٌ عاد (R118-2)"
+    assert calls["questions"] == [compound], \
+        f"النصُّ الذي وصل الوكيلَ ليس السؤالَ كاملًا: {calls['questions']}"
+    assert res.tools_used == ["row_chain"] and res.answer == "جواب", (
+        f"نتيجةُ الطرح الواحد لا تمرّ كما هي: {res.tools_used} · {res.answer!r}")

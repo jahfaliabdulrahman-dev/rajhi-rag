@@ -55,9 +55,12 @@ class _Recorder(BaseChatModel):
         text = (f"المجموع {REFUSED}" if any(h in asked for h in _NUMERIC_HINT)
                 else f"الجواب رقم {len(self.calls)}")
         if "Answer" in self.bound:
+            # **والمخطّطُ يحمل إشارةَ النوع (قرار `20261014-231500`):** كانت `refused` الافتراضيّة
+            # تُترك فلا تُملأ؛ والآن `kind` **مطلوب** ⇒ فالنموذجُ البديلُ يُعلنه كما يُعلنه الحقيقيّ،
+            # وإلّا رُفض المخرَجُ المُقيَّد وأعاد الوكيلُ المحاولةَ حتى حَدّ النداءات (وهو ما قِيس).
             msg = AIMessage(content="", tool_calls=[{
                 "name": "Answer", "id": f"c{len(self.calls)}",
-                "args": {"answer": text, "cited_row_ids": [], "refused": False}}])
+                "args": {"kind": "figure", "answer": text, "cited_row_ids": []}}])
         else:
             msg = AIMessage(content=text)
         return ChatResult(generations=[ChatGeneration(message=msg)])

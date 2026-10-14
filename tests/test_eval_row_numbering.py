@@ -96,7 +96,7 @@ def test_a_correct_answer_built_with_the_tools_passes(tmp_path):
     ans = f"أكبر مبلغ 9.00 ريال في {qa_tools._ref(top)} (الحركةُ دائنة)"
     c = eq.Corpus(run, [])
     tv, _ = eq.truth(_argmax_q(3), c, {}, _chain(run))
-    ok, why = eq.score_answer(_argmax_q(3), tv, ans, eq._Trace({"used_row_nos": [5]}), chain)
+    ok, why = eq.score_answer(_argmax_q(3), tv, ans, eq._Trace({"used_row_nos": [5], "answer_kind": "figure"}), chain)
     assert ok, why
 
 
@@ -106,7 +106,7 @@ def test_the_row_before_the_top_is_rejected(tmp_path):
     c = eq.Corpus(run, [])
     tv, _ = eq.truth(_argmax_q(3), c, {}, _chain(run))
     ok, why = eq.score_answer(_argmax_q(3), tv, "أكبر مبلغ 9.00 ريال في (صفحة 3، صف 4)",
-                              eq._Trace({"used_row_nos": [4]}), [{"row_no": 4, "page": 3, "movement": 900.0}])
+                              eq._Trace({"used_row_nos": [4], "answer_kind": "figure"}), [{"row_no": 4, "page": 3, "movement": 900.0}])
     assert not ok, why
 
 
@@ -120,5 +120,5 @@ def test_trace_maps_to_pages_with_the_system_numbering(tmp_path):
     c = eq.Corpus(run, [])
     tv, _ = eq.truth(_argmax_q(3), c, {}, _chain(run))
     ans = "أكبر مبلغ 9.00 ريال في (صفحة 3، صف 5)"
-    ok, why = eq.score_answer(_argmax_q(3), tv, ans, eq._Trace({"used_row_nos": [5]}), chain)
+    ok, why = eq.score_answer(_argmax_q(3), tv, ans, eq._Trace({"used_row_nos": [5], "answer_kind": "figure"}), chain)
     assert ok and "3" in why, why

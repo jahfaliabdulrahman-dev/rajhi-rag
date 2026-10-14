@@ -1,0 +1,186 @@
+"""**قرار المالك `20261014-231500` — المصحِّحُ يقرأ نوعَ الجواب لا عباراتِه.**
+
+**العطبُ المقيس (مراجعة ١١٨ · بلا كلفة):** كان الحكمُ بالامتناع والتعادل يُقرأ من **قائمتَي عبارات**
+في أداة القياس (`_ABSENCE` · `_AMBIG`) ⇒ فقِيس أنّ `abs-05` في `answers-r108-03.json`
+**امتنع بـ«لا يظهر» فحُسب خطأً**، وأنّ `abs-05` نفسه حمل `refused=False` (الحقلُ المُهيكلُ الذي
+وُجد لهذا، ولم يملؤه النموذجُ لأنّه **افتراضيّ**). ⇒ والقائمةُ لا تصلح شاهدًا، **والإصلاحُ ليس
+إضافةَ عبارةٍ إليها** (وذلك ترقيعٌ).
+
+**والثوابتُ (قرار المالك):** ① الإشارةُ **مُهيكلةٌ** يحملها الجواب (`Answer.kind` من تعدادٍ صريح)
+② ومصدرُها **واحدٌ** في التطبيق والقياس (نفسُ مسار `answer_question`) ③ والخمسون تُصحَّح
+بالمصحِّحَين ويُطبعان في سطرٍ واحد، ويُسمّى كلُّ اختلافٍ بسببِه ④ والانقلابُ في الرقم يُعلَن
+⑤ وتغييرُ المخطّط/التلقين يُرجع الخليّة إلى **«قيد إعادة التأهيل»** (`docs/product-journey.md` §٦).
+
+**والأحمرُ أوّلًا:** ضابطٌ ١ و٢ و٣ أدناه **يُسقطه المصحِّحُ القديمُ على `13fb534`** (ويُقاس في
+الجولة بأمرٍ واحد: `git stash` للوحدة ثمّ تشغيلُ هذا الملفّ).
+"""
+from __future__ import annotations
+
+import ast
+import pathlib
+import sys
+
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
+
+from tools import eval_questions as ev  # noqa: E402
+
+
+def _trace(**kw) -> ev._Trace:
+    """أثرُ جوابٍ محفوظ — الشكلُ الذي يقرؤه المصحِّحُ (بلا نداءِ نموذج)."""
+    rec = {"used_row_nos": [], "tools_used": [], "scope": "in_scope", "answer_kind": ""}
+    rec.update(kw)
+    return ev._Trace(rec)
+
+
+def _q(metric="abstain", expect="abstain", **kw) -> dict:
+    q = {"id": "abs-05", "cat": "امتناع", "metric": metric, "expect": expect,
+         "derive": {"kind": "x"}}
+    q.update(kw)
+    return q
+
+
+ROWS: list[dict] = []
+
+
+# ── ① امتناعٌ بعبارةٍ ليست في أيّ قائمة، ويحمل الإشارة ⇒ صحيح ─────────────────────────────
+def test_a_novel_abstention_phrase_with_the_signal_is_correct():
+    ans = "لا يَظهر في الكشف رقمُ هوية للمستفيد، ولن أخترع رقمًا."
+    assert not any(w in ans for w in ev._ABSENCE), "المِثالُ يحمل عبارةً من القائمة ⇒ لا يقيس الجديد"
+    ok, why = ev.score_answer(_q(), None, ans, _trace(answer_kind="not_found"), ROWS)
+    assert ok, f"امتناعٌ مُعلَنٌ بالإشارة حُسب خطأً: {why}"
+    assert "not_found" in why, "الحكمُ لا يسمّي الإشارة التي قرأها"
+    # **والنقيضُ الذي يعضّ:** المصحِّحُ القديمُ على الجواب نفسِه يُسقطه (وهو عطبُ مراجعة ١١٨)
+    ok_old, _why_old = ev.score_answer_by_text(_q(), None, ans, _trace(answer_kind="not_found"), ROWS)
+    assert not ok_old, "المصحِّحُ القديم لم يُسقط الامتناعَ بعبارةٍ جديدة ⇒ فالضابطُ لا يعضّ"
+
+
+# ── ② عبارةٌ في القائمة والإشارةُ تقول «رقم» ⇒ الإشارةُ هي الحاكمة ───────────────────────
+def test_the_list_phrase_does_not_override_the_signal():
+    ans = "غير موجود في الكشف"
+    assert any(w in ans for w in ev._ABSENCE), "المِثالُ ليس من عبارات القائمة ⇒ لا يقيس النقيض"
+    ok_new, why_new = ev.score_answer(_q(), None, ans, _trace(answer_kind="figure"), ROWS)
+    ok_old, _ = ev.score_answer_by_text(_q(), None, ans, _trace(answer_kind="figure"), ROWS)
+    assert not ok_new, f"عبارةُ القائمة غلبت الإشارة ⇒ الحكمُ ما زال نصّيًّا: {why_new}"
+    assert ok_old, "القديمُ يجب أن يمرّ على العبارة (وهو ما يقيس السطرَ المقارِن)"
+
+
+# ── ③ تعادلٌ مُعلَنٌ بالإشارة ⇒ صحيح · وجزمٌ بصفٍّ واحدٍ ⇒ خطأ ──────────────────────────
+def test_a_declared_tie_is_read_from_the_signal():
+    ans = "أكبرُ مبلغٍ في الصفحة ٢ هو 2,468.02 في الصف 12."      # بلا ألفاظ التعادل
+    q = _q(expect="ambiguous")
+    ok, why = ev.score_answer(q, None, ans, _trace(answer_kind="tie"), ROWS)
+    assert ok, f"تعادلٌ مُعلَنٌ بالإشارة حُسب خطأً: {why}"
+    ok_old, _ = ev.score_answer_by_text(q, None, ans, _trace(answer_kind="tie"), ROWS)
+    assert not ok_old, "القديمُ ما زال يقرأ النصّ ⇒ الضابطُ يقيس فرقًا حقيقيًّا"
+    # **والنقيض:** جزمٌ بصفٍّ واحد (بلا إشارة تعادل) ⇒ خطأ كما كان
+    ok_bad, why_bad = ev.score_answer(q, None, ans, _trace(answer_kind="figure"), ROWS)
+    assert not ok_bad and "التعادل" in why_bad, why_bad
+
+
+# ── ④ ادّعاءُ مبلغٍ بلا سندٍ ⇒ خطأٌ كما كان ──────────────────────────────────────────────
+def test_a_claim_without_evidence_is_still_wrong():
+    ans = "المبلغُ 2,468.02 في الصف 12."
+    ok, why = ev.score_answer(_q(), None, ans, _trace(answer_kind="figure"), ROWS)
+    assert not ok and "اختراع" in why, why
+    assert "بلا سند" in why, why
+
+
+# ── ⑤ لا حكمَ يقرأ القائمتين — والقراءةُ الوحيدةُ في القديم ───────────────────────────────
+def _enclosing(src: str, name: str) -> set[str]:
+    tree = ast.parse(src)
+    found: set[str] = set()
+    for fn in [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Name) and node.id == name:
+                found.add(fn.name)
+    return found
+
+
+def test_no_verdict_reads_the_phrase_lists():
+    src = pathlib.Path(ev.__file__).read_text(encoding="utf-8")
+    for name in ("_ABSENCE", "_AMBIG"):
+        readers = _enclosing(src, name)
+        assert readers == {"score_answer_by_text"}, (
+            f"`{name}` تُقرأ في {sorted(readers)} — والحكمُ المنشورُ لا يقرأ قائمةَ عبارات "
+            "(قرار 231500؛ والقديمُ وحدَه يقيسها في السطر المقارِن)")
+        assert name not in _enclosing(src, name).union(
+            {f.name for f in ast.walk(ast.parse(src)) if isinstance(f, ast.FunctionDef)
+             and f.name == "score_answer"}), f"`{name}` عادت إلى الحكم المعمول به"
+
+
+# ── ⑥ الإشارةُ مطلوبةٌ في المخطّط (فلا يتركها النموذجُ فارغة) ─────────────────────────────
+def test_the_signal_is_required_by_the_answer_schema():
+    from statement_qa.qa import Answer
+
+    assert "kind" in Answer.model_fields, "لم يبقَ حقلُ النوع في مخطّط الجواب"
+    assert Answer.model_fields["kind"].is_required(), (
+        "النوعُ افتراضيّ ⇒ يُترك فارغًا كما كان `refused` (وهو عطبُ r108-03)")
+    schema = Answer.model_json_schema()
+    kinds = str(schema)
+    for value in ("figure", "not_found", "tie"):
+        assert value in kinds, f"التعدادُ لا يعرض `{value}` للنموذج"
+
+
+def test_the_refusal_boolean_is_derived_not_stored_twice():
+    """**مصدرٌ واحدٌ للإشارة (قرار 231500 البند ٢):** لا حقلَ `refused` يُخزَّن إلى جانب النوع."""
+    import dataclasses
+
+    from statement_qa.qa import QAResult
+
+    fields = {f.name for f in dataclasses.fields(QAResult)}
+    assert "answer_kind" in fields and "refused" not in fields, (
+        f"حقلان لنفس المعنى: {sorted(fields)}")
+    assert QAResult(answer="x", sources=[], answer_kind="not_found").refused is True
+    assert QAResult(answer="x", sources=[], answer_kind="figure").refused is False
+
+
+# ── ⑦ السطرُ المقارِنُ يُطبع (وكلُّ اختلافٍ يُسمّى بسببِه) ────────────────────────────────
+def test_the_comparator_line_is_printed_with_reasons():
+    src = pathlib.Path(ev.__file__).read_text(encoding="utf-8")
+    assert "بالجديد" in src and "وبالقديم" in src, "لا سطرَ مقارِنًا للمصحِّحَين (قرار 231500)"
+    assert "why_by_text" in src, "الاختلافُ لا يُسمّى بسببٍ من القديم"
+    assert "why_by_text" in src.split("def _print_metrics")[1][:4000], \
+        "السطرُ المقارِنُ في الطباعة لا يسمّي سببَ الاختلاف"
+
+
+# ── ⑧ السطرُ المقارِنُ يُقاس بمخرَجه لا بقراءة نصّه ────────────────────────────────────────
+def test_the_comparator_line_reports_both_and_names_the_reason(capsys):
+    """**القبولُ البند ٣:** يُطبعان في سطرٍ واحد، **وكلُّ سؤالٍ اختلف حكمُه يُسمّى بسببه**."""
+    def rec(qid, metric, ok, ok_text, why, why_text):
+        return {"id": qid, "metric": metric, "expect": "number", "kind": "footer",
+                "ok": ok, "ok_by_text": ok_text, "why": why, "why_by_text": why_text}
+
+    rows = [rec("num-01", "number", True, True, "المتوقَّع وُجد", "المتوقَّع وُجد"),
+            rec("cit-01", "citation", True, True, "أصابت الصفحة", "أصابت الصفحة"),
+            rec("abs-05", "abstain", True, False,
+                "امتناعٌ مُعلَن بلا مبلغٍ مُخترع ✓ (إشارةُ الجواب: not_found)",
+                "**لم يُعلن امتناعاً** ✗ (ولا ادّعى مبلغاً · مطابقةُ عبارات)")]
+    ev._print_metrics(rows)
+    out = capsys.readouterr().out
+    line = next((ln for ln in out.splitlines() if "بالجديد" in ln), "")
+    assert line, f"لا سطرَ مقارِنًا للمصحِّحَين: {out[-400:]}"
+    assert "وبالقديم" in line, f"السطرُ لا يحمل القديم: {line!r}"
+    assert "3/ 3" in line and "2/ 3" in line, (
+        f"العددان في السطر نفسِه غائبان (الجديد ٣/٣ والقديم ٢/٣): {line!r}")
+    tail = out.split("اختلف الحكم", 1)[-1]
+    assert "abs-05" in tail, f"السؤالُ المختلف لم يُسمَّ: {tail[:200]}"
+    assert "إشارةُ الجواب" in tail and "مطابقةُ عبارات" in tail, \
+        f"السببُ من كلّ مصحِّح غائب: {tail[:300]}"
+    assert "num-01" not in tail and "cit-01" not in tail, \
+        "سؤالٌ متّفقٌ عليه دخل قائمةَ الاختلاف (والقائمةُ تُقرأ عددًا)"
+
+
+# ── ⑨ سجلٌّ قبل المخطّط الجديد لا يُحكم عليه بالإشارة (بل يُسمّى عطبَ مرسًى) ───────────────
+def test_a_record_from_before_the_schema_is_not_judged_by_the_signal():
+    """سجلُّ r93..r108 لا يحمل `answer_kind` ⇒ فحكمُه بالمصحِّح الجديد ادّعاءٌ لما لم يُسجَّل."""
+    old_record = {"used_row_nos": [], "tools_used": [], "scope": "in_scope"}      # بلا الحقل
+    res = ev._Trace(old_record)
+    assert res.answer_kind_recorded is False
+    ok, why = ev.score_answer(_q(), None, "لا يظهر في الكشف", res, ROWS)
+    assert not ok and "عطبُ مرسًى" in why and "قبل إشارة" in why, why
+    # **والجديدُ يحمل الحقل ⇒ يُحكم:** الفرقُ بين «فارغةٍ معلَنة» و«غيرِ محفوظةٍ أصلًا»
+    fresh = ev._Trace({"used_row_nos": [], "tools_used": [], "scope": "in_scope", "answer_kind": ""})
+    assert fresh.answer_kind_recorded is True

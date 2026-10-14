@@ -22,8 +22,8 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
 
 from statement_qa import render
-from statement_qa.qa import (MODEL_CALL_LIMIT, REQUEST_TIMEOUT_S, STEP_LIMIT, _run_agent,
-                             answer_question, question_ceiling)
+from statement_qa.qa import (MAX_ATTEMPTS_PER_PART, MODEL_CALL_LIMIT, REQUEST_TIMEOUT_S,
+                             STEP_LIMIT, _run_agent, answer_question, question_ceiling)
 
 SAVED = Path("data/eval_pack")
 
@@ -121,19 +121,19 @@ def test_the_user_never_sees_the_librarys_english_note():
 
 
 def test_the_question_ceiling_is_derived_from_the_path_not_written_by_hand():
-    """**R110-1 · العاملُ يُشتقّ من بنية المسار:** طرحان لكلّ جزءٍ (طرحٌ ثمّ تنبيه) + نداءُ الاحتياط
-    ⇒ `الحدُّ × ٣ × الأجزاء`. فالحدُّ يُقرأ من الكود، ليس رقمًا يكتبه المراجع بيده.
-    """
-    from statement_qa.qa import split_compound
+    """**R110-1 · العاملُ يُشتقّ من بنية المسار:** طرحان لكلّ طرحٍ (طرحٌ ثمّ تنبيه) + نداءُ
+    الاحتياط ⇒ `الحدُّ × (٢ + ١)`. فالحدُّ يُقرأ من الكود، ليس رقمًا يكتبه المراجع بيده.
 
+    **ودون ضربٍ في عدد الأجزاء (R118-2 · مراجعة ١١٨):** كان المركّبُ ضعفَ البسيط لأنّ
+    `split_compound` كان يطرحه طرحين؛ وبعد حذفه **طرحٌ واحدٌ لكلّ سؤال**، والحدُّ واحدٌ
+    للبسيط والمركّب — **وهو خفضٌ للسقف لا رفع** (والطرحُ الثاني للتنبيه باقٍ في الحدّ).
+    """
     one = "ما إجماليُ الحركات في الصفحة ١؟"
     two = ("هل يساوي رصيدُ آخر صفٍّ مطبوعٍ في الصفحة ١ رصيدَ أوّل صفٍّ مطبوعٍ في الصفحة ٢؟ "
            "وما الفرقُ بينهما بالمبلغ؟")
-    assert len(split_compound(two)) == 2, split_compound(two)
-
-    assert question_ceiling(one) == MODEL_CALL_LIMIT * 3 * 1
-    assert question_ceiling(two) == MODEL_CALL_LIMIT * 3 * len(split_compound(two))
-    assert question_ceiling(two) > question_ceiling(one), "المركّبُ ليس أكبرَ من البسيط"
+    assert question_ceiling(one) == MODEL_CALL_LIMIT * (MAX_ATTEMPTS_PER_PART + 1)
+    assert question_ceiling(two) == question_ceiling(one), \
+        "المركّبُ ما زال يُضاعف السقفَ ⇒ أثرُ التقسيم باقٍ في حساب الحدّ"
 
 
 def test_the_step_ceiling_is_ours_not_the_library_default():
@@ -163,8 +163,7 @@ def test_the_model_carries_a_request_timeout_and_an_output_ceiling(monkeypatch):
             captured.update(kw)
 
     monkeypatch.setitem(sys.modules, "langchain_openai", types.SimpleNamespace(ChatOpenAI=_Captured))
-    monkeypatch.setattr("statement_qa.api_key.get_api_key", lambda: "test-key")
-    qa.build_llm("x/y")
+    qa.build_llm("x/y", api_key="test-key")
 
     assert captured.get("timeout") == REQUEST_TIMEOUT_S, captured
     assert captured.get("max_retries") == 1, captured

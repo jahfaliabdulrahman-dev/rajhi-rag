@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
+from enum import Enum
 
 # **والاستيرادُ متسامحٌ عن قصد (قِيس):** كان `from pydantic import …` في الرأس ⇒ فصارت الوحدةُ
 # تحتاج pydantic **لتُستورَد**، فنقص جمعُ البيئة الخفيفة (بلا langchain/pydantic) بلا رسالة.
@@ -115,7 +116,11 @@ AGENT_SYSTEM_PROMPT = """أنت محاسب مدقق تعمل على كشف حس�
 3. للأسئلة الوصفية استعن بالقطع المرفقة في هذه التعليمات.
 4. إن لم تكفِ الأدوات والقطع قل حرفياً: "غير موجود في الكشف" — لا تخمّن.
 5. ألزم كل رقم بمصدره (صفحة/صف). أجب بالعربية بإيجاز.
-6. الاتجاه (مدين/دائن) يصف اتجاه الحركة فقط وليس نوعها: «مدين» ≠ «سحب صراف آلي».
+6. **أعلِن نوعَ جوابك في حقل `kind`** — إشارةٌ تُقرأ ولا تُترك: `figure` إن حمل الجوابُ رقمًا أو
+   مقارنةً **من الكشف** · `not_found` إن لم يحمله الكشف (وهو الامتناعُ المُعلَن — ولا تخمّن) ·
+   `tie` إن تساوى مرشّحان أو أكثر (تعادلٌ مُعلَن، لا جزمَ بصفٍّ واحد). **و`not_found` هي الحالةُ
+   التي تعني «لا سند» فلا تكتبها مع رقمٍ محسوب** (وهو ما يقرؤه المحاسبُ والمصحِّح).
+7. الاتجاه (مدين/دائن) يصف اتجاه الحركة فقط وليس نوعها: «مدين» ≠ «سحب صراف آلي».
    لأسئلة النوع (سحوبات صراف آلي، تحويلات، إيداعات، نقاط بيع، سداد) استخدم tx_type،
    وللمبلغ المحدد استخدم amount معه (مثال «سحب بـ1000» ⇒ tx_type="سحب صراف آلي", amount=1000)،
    وإن ظهر المبلغ نفسه بأنواع أخرى فاذكر ذلك صراحةً في الجواب."""
@@ -182,20 +187,23 @@ def _limit_errors() -> tuple:
 _LIMIT_ERRORS = _limit_errors()
 
 # **أقصى نداءاتِ نموذجٍ لسؤالٍ واحد — مشتقٌّ من بنية المسار لا مكتوبٌ بيد** (R110-1): كلُّ جزءٍ
-# (`split_compound`) يُطرح مرّةً، **ويُعاد طرحُه مرّةً واحدةً بتنبيه** إن غاب الأثرُ الحسابيّ،
-# و`_answer_plain` نداءٌ ثالثٌ إن بقي بلا جواب ⇒ **الحدُّ (١٢) × ٣ × عددِ الأجزاء**. والمركّبُ ضعفُ
-# البسيط — وهو ما قاسه المدقّق (٢٤ نداءً للبسيط حين أعاد الطرح، والمركّبُ مثلاه).
+# يُطرح مرّةً، **ويُعاد طرحُه مرّةً واحدةً بتنبيه** إن غاب الأثرُ الحسابيّ،
+# و`_answer_plain` نداءٌ ثالثٌ إن بقي بلا جواب ⇒ **الحدُّ (١٢) × ٣**. **والمركّبُ لم يبقَ ضعفَه
+# (R118-2): لا تقسيمَ بعد اليوم** — وهذا يخفض السقفَ لا يرفعه (حدُّ البسيط هو حدُّ الكلّ).
 MAX_ATTEMPTS_PER_PART = 2
 FALLBACK_CALLS_PER_PART = 1
 
 
-def question_ceiling(question: str) -> int:
+def question_ceiling(_question: str = "") -> int:
     """أقصى عددِ نداءاتِ نموذجٍ يمكن أن يكلّفها سؤالٌ واحد — **حدُّ الميزانيّة لا تقديرُها**.
 
     ويُضرب في كلفة النداء الأعلى (تُقاس في أداة القياس) ⇒ **سقفُ السؤال معروفٌ قبل أن يُطرح**.
+
+    **وبلا ضربٍ في عدد الأجزاء (R118-2 · مراجعة ١١٨):** كان ×٢ للمركّب لأنّ `split_compound` كان
+    يطرحه مرّتين؛ وبعد حذفه **سؤالٌ واحدٌ وطرحٌ واحد** ⇒ فالحدُّ واحد، **والوسيطُ باقٍ بتوقيعه**
+    الذي يناديه به المُستهلكون، ولا يُقرأ منه شيء (يُعلَن ذلك هنا بدل أن يُضمَر).
     """
-    parts = split_compound(question)
-    return MODEL_CALL_LIMIT * (MAX_ATTEMPTS_PER_PART + FALLBACK_CALLS_PER_PART) * max(1, len(parts))
+    return MODEL_CALL_LIMIT * (MAX_ATTEMPTS_PER_PART + FALLBACK_CALLS_PER_PART)
 
 
 #: **النموذجُ الافتراضيّ — موضعٌ واحد** (R112-1): يستهلكه بناءُ العميل **وسعرُ الرمز** في أداة
@@ -280,17 +288,42 @@ def _text(content) -> str:
     return str(content)
 
 
+class AnswerKind(str, Enum):
+    """**نوعُ الجواب — إشارةٌ مُهيكلةٌ يحملها الردّ نفسه (قرار المالك `20261014-231500`).**
+
+    **والعِلّةُ المقيسة:** كان الحكمُ بالامتناع والتعادل يُقرأ من **قوائم عبارات** في أداة القياس
+    (`_ABSENCE` · `_AMBIG`) ⇒ فجوابٌ يمتنع بعبارةٍ ليست في القائمة يُحسب خطأً (قِيس: `abs-05`
+    «لا يظهر» امتناعٌ صحيحٌ حُسب خطأً)، وقائمةُ الكلمات لا تصلح شاهدًا. **والنوعُ يُعلنه المُنتِج**:
+    إشارةٌ واحدةٌ يقرؤها التطبيقُ والمصحِّحُ معًا، ولا عبارةَ تُضاف إلى أيّ قائمة.
+    """
+
+    #: رقمٌ (أو مقارنةٌ) محسوبٌ من الكشف — الشكلُ الغالب.
+    FIGURE = "figure"
+    #: الكشفُ لا يحمله ⇒ **امتناعٌ مُعلَن** (وهو ما يُسمّى `refused` في النتيجة).
+    NOT_FOUND = "not_found"
+    #: تعدّدَ المرشّحون بالتساوي ⇒ **تعادلٌ مُعلَن** (لا جزمَ بصفٍّ واحد).
+    TIE = "tie"
+
+
 class Answer(BaseModel):
     """**جوابٌ مُقيَّدٌ نوعًا (بوّابةُ أ-٤):** الاستشهادُ يُسلَّم هنا — لا يُقصّ من النثر.
 
     **والعِلّة:** كان الجوابُ نصًّا ثمّ تُستخرَج أرقامُ الصفوف منه بتعبيرٍ نمطيّ ⇒ فالاستشهادُ
     **مُستنتَجٌ** من نصٍّ حرّ، ولا شيءَ يمنع نموذجًا من كتابة رقمٍ بلا شاهد. والنوعُ يقلب الاتّجاه:
     `cited_row_ids` يُطلب صراحةً، **ويُقابَل بالأثر** (`citation_truth`) ⇒ فما لا شاهدَ له يُسمّى.
+
+    **ونوعُ الجواب (`kind`) صار مطلوبًا لا افتراضيًّا (قرار `20261014-231500`):** كان
+    `refused: bool = False` افتراضيًّا فلم يملؤه النموذجُ حيث يجب (قِيس: `abs-05` في r108-03
+    امتنع بالكلام و`refused=False`) ⇒ فالمصحِّحُ كان يُكمل النقصَ بمطابقة عبارات. الآن **حقلٌ
+    مطلوبٌ من تعدادٍ صريح** يُقرأ في التطبيق والقياس من **موضعٍ واحد**، وتغييرُه تغييرٌ في بصمة
+    الخليّة (‏`docs/product-journey.md` §٦ ⇒ «قيد إعادة التأهيل»).
     """
+    kind: AnswerKind = Field(
+        description=("نوعُ الجواب: `figure` رقمٌ/مقارنةٌ من الكشف · `not_found` الكشفُ لا "
+                     "يحمله (امتناعٌ مُعلَن) · `tie` تساوى مرشّحان أو أكثر (تعادلٌ)"))
     answer: str = Field(description="الجوابُ بالعربية، بأرقامٍ حقيقيةٍ من الكشف")
     cited_row_ids: list[int] = Field(
         default_factory=list, description="أرقامُ الصفوف العامة التي استُشهد بها (وما لا شاهدَ له يُعلَن)")
-    refused: bool = Field(default=False, description="True إن امتنع: لا شاهدَ يحمل الجواب")
 
 
 # ── ذاكرةُ الحوار بمكوّن LangChain (قرار 98ب) ─────────────────────────────────
@@ -648,7 +681,10 @@ class QAResult:
     # backbone). None/[] when the answer came from prose (no tools ran).
     used_row_nos: list[int] | None = None
     tools_failed: bool = False
-    refused: bool = False
+    #: **إشارةُ نوع الجواب** كما أعلنها النموذجُ في `Answer.kind` (قرار `20261014-231500`):
+    #: `figure` · `not_found` · `tie` — وهي **ما يقرؤه المصحِّحُ** بدل مطابقة عبارات.
+    #: فارغةٌ حين لم يبلغ السؤالُ النموذج (حاجزُ النطاق · رفضُ المزوّد) ⇒ فيُعلَن ذلك ولا يُخمَّن.
+    answer_kind: str = ""
     scope: str = "in_scope"
     # A NUMERIC question answered without a single tool call. Not a failure —
     # a recollection, and it must be labelled as one (Gate 4, case F).
@@ -665,13 +701,19 @@ class QAResult:
     citation_mode: str = "prose"          # typed | prose — يُعلَن ولا يُخمَّن
     unsupported_citations: list[int] = field(default_factory=list)
 
+    @property
+    def refused(self) -> bool:
+        """**الامتناعُ يُقرأ ولا يُخزَّن ثانيًا (قرار `20261014-231500`):** إشارةُ الجواب
+        (`not_found`) أو حاجزُ النطاق — **مصدرٌ واحد** فلا يتناقض حقلان (وكان حقلًا يُكتب من
+        موضعين، وأحدُهما لا يُملأ)."""
+        return self.answer_kind == AnswerKind.NOT_FOUND.value or self.scope == "out_of_scope"
+
     def __str__(self) -> str:
         src = "; ".join(f"صفحة {s['page']} ص{s['row_start']}–{s['row_end']}"
                         for s in self.sources)
         return f"{self.answer}\n[المصادر: {src}]"
 
 
-_INTERROGATIVE = ("كم", "هل", "ما ", "ماذا", "أي ", "ما هي", "ما هو")
 _NUMERIC_HINT = ("كم", "مجموع", "إجمالي", "اجمالي", "عدد", "نسبة", "متوسط")
 
 
@@ -702,45 +744,12 @@ def _money_shaped(text: str) -> bool:
     return bool(_MONEY_IN_TEXT.search(text or ""))
 
 
-def split_compound(question: str) -> list[str]:
-    """Split a two-part question — but only where splitting is safe.
-
-    Splitting on every «و» would cut «المدين والدائن» in half; requiring an
-    interrogative word on BOTH sides of a separator keeps the split honest.
-    Measured case F: one half existed in the statement and one did not, and the
-    compound question was answered from prose without a single tool call.
-
-    **R105-5 · القياسُ بلا كلفةٍ وقع قبل أيّ حذف (مراجعة ١١٧ · ٢٠٢٦-١٠-١٤):** قُرِئت الجولةُ
-    المحفوظةُ الأخيرة (`answers-r108-03.json`) والحزمةُ، **بلا نداءِ نموذج**:
-    - `split_compound` يفصل **٥ من ٥٠ سؤالًا** (`chn-01..04` · `cit-02`) — والباقي لا يُمَسّ.
-    - **والخمسةُ كلُّها صحيحةٌ في تلك الجولة (٥/٥)**، وأربعتُها (عائلةُ السلسلة) يشترط مصحِّحُها
-      **النصفَين**: نفيًا صريحًا **و** ذكرَ الفرق.
-    - **والأثرُ يشهد أنّ الفصلَ هو ما أسند النصفين:** كلُّ سؤالِ سلسلةٍ استدعى `page_rows`
-      **مرّتين** (نداءً لكلّ نصف) ⇒ فالنصفُ الثاني «ما الفرق؟» لم يُترك للحظّ.
-    - **وثمنُه مقيس:** الردودُ المشهودة ٣ · ٣ · ٣ · ٣ · ٦ (وسيط ٣) مقابل **وسيط ٢ وأقصى ٢**
-      للأسئلة المفردة ⇒ **+٨ ردودٍ** على الخمسة (≈$0.006 بسعر الردّ المقيس $0.000734).
-    **ولذلك لا يُحذف ولا يُستبدل في هذه الجولة:** الحذفُ وتغييرُ «تمرير النصف الأول سياقًا»
-    **تغييران في المسار المقيس** لا يقرّرهما قياسٌ بلا كلفة — ويُقاسان بتجربة ذراعين مدفوعة
-    (~٢ سنت) تُسجَّل بندًا تاليًا. **وقرارُ الكلفة للمالك.**
-    """
-    q = (question or "").strip()
-    if not q:
-        return []
-    def _clean(part: str) -> str:
-        p = part.strip(" ؟?.")
-        for pref in ("وكم", "وهل", "وما", "وماذا"):   # the conjunction, not a word
-            if p.startswith(pref):
-                return p[1:]
-        return p
-
-    for sep in ("،", " و", "؟"):
-        parts = [_clean(p) for p in q.split(sep)]
-        parts = [p for p in parts if p]
-        if len(parts) < 2:
-            continue
-        if all(any(m in p for m in _INTERROGATIVE) for p in parts):
-            return parts
-    return [q]
+# **وحُذف `split_compound` (R118-2 · مراجعة ١١٨):** الحكمُ سأل هل تحرس البوّابةُ الحالةَ F،
+# والقياسُ بلا كلفة أجاب: النصفُ الثاني الذي يصنعه التقسيم **لا تُصيبه البوّابةُ بالبناء**
+# (`needs_tools` = False على «ما الفرقُ بينهما بالمبلغ» · وجوابُه ليس مبلغًا)، **والتقسيمُ نفسُه
+# هو ما أنتج الطلبَ الكاذب** (`ebf18e19` في ٤/٤ من عائلة السلاسل في `answers-r108-03.json`).
+# وسؤالٌ يُطرح كاملًا يحمل مرجعَه، ويُحرس بمبلغٍ في الجواب بلا أداة. **ولا قائمةَ كلماتٍ بديلة**
+# (سُحبت بمعيار المالك في `20261010-023343`)، والإشارةُ المُهيكلةُ لامتناعٍ كلاميّ هي `Answer.kind`.
 
 
 def needs_tools(question: str) -> bool:
@@ -829,53 +838,26 @@ def _answer_question(store, question: str, rows=None, chunks=None,
                         n_pages=n_pages, pages_read=_pages_read)
         if gate.kind != "in_scope":
             return QAResult(answer=gate.answer, sources=[], used_row_nos=[],
-                            refused=gate.kind == "out_of_scope",
                             scope=gate.kind)
 
 
     llm = llm or build_llm()
 
-    # A compound question is TWO questions, and the second half is where the
-    # routing went wrong: measured case F asked for a sum that exists and a
-    # count that does not, and got prose for both. Each half is answered — and
-    # grounded — on its own.
-    parts = split_compound(question)
-    if len(parts) > 1:
-        results = [_answer_one(store, part, rows, chunks, llm, k, footers,
-                               thread_id=thread_id, scope=scope)
-                   for part in parts]
-        merged_used = [n for r in results for n in (r.used_row_nos or [])]
-        hits = retrieve(store, question, k=k, pages=pages_for(question, chunks))
-        body = "\n\n".join(f"• {r.answer}" for r in results)
-        # **والنوعُ يُدمَج مع الأجزاء (مقعدُ أ-٤ P2 · مُثبت):** كان ينبني بلا `cited_row_ids`
-        # ولا `citation_mode` ⇒ فسؤالٌ مركّبٌ جزءُه مُقيَّدٌ يعود `prose` باستشهادٍ فارغ،
-        # **فلا تُطبَّق البوّابةُ على المركّب** — وهو **٥ من ٥٠** في الحزمة (R105-7: كان «نصفَ الأسئلة
-        # الحقيقيّة» بلا سند، والمقيسُ ٥).
-        merged_cited = sorted({n for r in results for n in (r.cited_row_ids or [])})
-        merged_unsup = sorted({n for r in results for n in (r.unsupported_citations or [])})
-        merged_mode = ("typed" if any(r.citation_mode == "typed" for r in results)
-                       else "prose")
-        res = QAResult(
-            answer=body,
-            sources=[{k2: h[k2] for k2 in
-                      ("chunk_id", "page", "row_start", "row_end")} for h in hits],
-            used_row_nos=merged_used or None,
-            # **والأسماءُ تُدمَج كما تُدمَج الصفوف (R104-1 · قاسه مقعدا المواصفة والبنية):** كان الحقلُ
-            # يُسقَط هنا ⇒ فسؤالٌ مركّبٌ (**٥ من ٥٠** في الحزمة، ومنها `chn-03`/`chn-04` في تجربة R104)
-            # يُسجَّل `tools_used: []` أيًّا كان ما استدعاه النموذج ⇒ **فالحقلُ لا يفصل الحالتين إلا إن دُمج**.
-            # **ودمجٌ بالترتيب لا بالمجموعة (R105-7 · مراجعة ١٠٥):** `sorted({…})` كان يُسقِط العددَ
-            # والترتيب (وقد كان `num-04` في السؤال البسيط `page_summary,page_rows,page_summary`) ⇒ فالحقلُ
-            # الواحدُ يعني شيئين بحسب صيغة السؤال (درسُ R104-2 نفسُه) ⇒ فصار امتدادًا بترتيب الأجزاء وتكرارها.
-            tools_used=[n for r in results for n in (r.tools_used or [])],
-            tools_failed=all(r.tools_failed for r in results),
-            ungrounded=any(r.ungrounded for r in results),
-            limit_hit=any(r.limit_hit for r in results),
-            cited_row_ids=merged_cited,
-            citation_mode=merged_mode,
-            unsupported_citations=merged_unsup)
-    else:
-        res = _answer_one(store, question, rows, chunks, llm, k, footers,
-                          thread_id=thread_id, scope=scope)
+    # **ولا تقسيمَ لسؤالٍ مركّب (R118-2 · مراجعة ١١٨ · حكمُ `20261010-023343` §٤):** كان
+    # `split_compound` يقطع «هل يساوي …؟ وما الفرقُ بينهما بالمبلغ؟» نصفين فيُسأل النصفُ الثاني
+    # وحدَه ⇒ **فيُولد سؤالُ الفرق بلا مرجعه**. وقِيس في أحدث جولة (`answers-r108-03.json`، بلا
+    # كلفة): النصفُ الثاني في `chn-01..04` كلِّها **نصٌّ واحدٌ متطابق (بصمة `ebf18e19` · ٢٣٥ حرفًا)**
+    # «السؤال غير محدد المرجع: لم يُذكر بين أيّ شيئين يُطلب الفرق بالمبلغ… أرجو تحديد الطرفين»
+    # — **والمستخدمُ سأل سؤالًا كاملًا يسمّي الطرفين**، ثمّ يُطلب منه توضيحُه.
+    # **والحكمُ سأل: هل تحرس البوّابةُ (قراءةُ الجواب + النطاق) الحالةَ F؟** والقياسُ بلا كلفة:
+    #   • على الجزء «ما الفرقُ بينهما بالمبلغ»: `needs_tools` = **False** (لا كلمةَ عددٍ فيه)
+    #     وجوابُه ليس مبلغًا (`_money_shaped` = False) ⇒ **البوّابةُ عمياءُ عنه بالبناء**؛
+    #   • وعلى السؤال **كاملًا**: مبلغٌ في الجواب بلا نداءِ أداةٍ يُشعل البوّابة (توجيهٌ ثمّ رفض)،
+    #     والمسألةُ التي لا وجودَ لها في الكشف يحكمها **الحاجزُ قبل النموذج** أو **إشارةُ نوع الجواب**.
+    # ⇒ فالتقسيمُ **هو ما يُعطّل الحرسَ ويصنع الطلبَ الكاذب** ⇒ يُحذف، ويصل السؤالُ الوكيلَ كاملًا
+    # (فالمرجعُ حاضِر، والكودُ اليدويُّ أقلّ). **وعلامةُ ما بعده تُقرأ في الخمسين: غيابُ `ebf18e19`.**
+    res = _answer_one(store, question, rows, chunks, llm, k, footers,
+                      thread_id=thread_id, scope=scope)
     # **والذاكرةُ هنا للقراءة وحدها:** تُمرَّر `thread_id` فيقرأ الوكيلُ الدورات السابقة (وبوّابةُ
     # النطاق تسبق كلَّ نداء)، **ولا كتابةَ فيها** — الكتابةُ الوحيدةُ `remember`، تُناديها الواجهةُ
     # بما **عرضته** للمستخدم (`app.ask_followup`). ولماذا هناك لا هنا: `res.answer` نصُّ الجواب،
@@ -903,7 +885,7 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
     limit_hit = False
     parsed = None
     mode = "prose"
-    refused = False
+    answer_kind = ""
     if rows:
         try:
             answer, trace, parsed, mode = _answer_with_tools(llm, rows, context, question,
@@ -980,13 +962,16 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
 
     cited = list(getattr(parsed, "cited_row_ids", []) or []) if parsed is not None else []
     truth = citation_truth(cited, trace if rows and not tools_failed else [])
-    if parsed is not None and getattr(parsed, "refused", False):
-        refused = True
+    # **والإشارةُ تُقرأ من الجواب المُنوَّع كما أعلنها النموذج** (قرار 231500): نصٌّ صريحٌ من
+    # تعداد `AnswerKind` — لا استنتاجٌ من عبارات. وإن لم يعد كائنٌ مُقيَّد (سقوطٌ إلى النثر)
+    # تبقى الإشارةُ فارغةً ويُعلَن ذلك (`prose`)، فلا يُنسب امتناعٌ إلى جوابٍ لم يُعلنه.
+    if parsed is not None:
+        answer_kind = str(getattr(parsed, "kind", "") or "")
     return QAResult(answer=answer,
+                    answer_kind=answer_kind,
                     cited_row_ids=truth["cited"],
                     citation_mode=mode,
                     unsupported_citations=truth["unsupported"],
-                    refused=refused,
                     sources=[{k2: h[k2] for k2 in
                               ("chunk_id", "page", "row_start", "row_end")}
                              for h in hits],

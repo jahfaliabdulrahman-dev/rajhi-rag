@@ -25,11 +25,17 @@ eq = _load()
 
 
 class _Trace:
-    """أثرٌ مصطنع: ما استُشهد به فعلاً (نفسُ عقد `_Trace` في الأداة)."""
+    """أثرٌ مصطنع: ما استُشهد به فعلاً (نفسُ عقد `_Trace` في الأداة).
 
-    def __init__(self, used=(), scope="in_scope", refused=False):
+    **و`kind` إشارةُ نوع الجواب** (قرار `20261014-231500`): `figure` · `not_found` · `tie` —
+    وهي ما يقرؤه المصحِّحُ المعمول به بدل مطابقة العبارات. وضوابطُ الامتناع هنا **تُعلنها**
+    كما يفعل الجوابُ الحقيقيّ، وإلّا قِيس غيرُ ما يُشترط.
+    """
+
+    def __init__(self, used=(), scope="in_scope", refused=False, kind=""):
         self.used_row_nos = list(used)
         self.scope = scope
+        self.answer_kind = kind
         self.refused = refused
 
 
@@ -111,15 +117,21 @@ def _abs_q():
 
 
 def test_abstention_with_unsupported_amount_fails():
-    ok, why = eq.score_answer(_abs_q(), None, "لا يوجد؛ أقربُ رقمٍ 1,234.56", _Trace(used=[1]), ROWS)
+    # **والجوابُ ادّعى رقمًا ⇒ إشارتُه `figure`** (والاختراعُ يُقاس كما كان: بلا سندٍ في الأثر)
+    ok, why = eq.score_answer(_abs_q(), None, "لا يوجد؛ أقربُ رقمٍ 2,468.02",
+                              _Trace(used=[1], kind="figure"), ROWS)
     assert not ok and "بلا سند" in why
 
 
 def test_abstention_echoing_a_page_number_is_not_an_invention():
     """**الانحدارُ المقيس**: جوابٌ ردّ رقمَ الصفحة المسؤول عنها فحُسب «مخترعاً» (العدّادُ القديم)."""
     ok, why = eq.score_answer(_abs_q(), None, "الصفحة 700 غير موجودة في الكشف (لا توجد بيانات)",
-                              _Trace(used=[]), ROWS)
+                              _Trace(used=[], kind="not_found"), ROWS)
     assert ok, why
+    # **والنقيض:** النصُّ نفسه بإشارة «رقم» لا يُعدّ امتناعًا (فالإشارةُ هي الحاكمة لا العبارة)
+    ok_fig, _ = eq.score_answer(_abs_q(), None, "الصفحة 700 غير موجودة في الكشف (لا توجد بيانات)",
+                                _Trace(used=[], kind="figure"), ROWS)
+    assert not ok_fig, "العبارةُ غلبت الإشارة ⇒ الحكمُ ما زال نصّيًّا (قرار 231500)"
 
 
 def test_abstention_scope_gate_counts_as_pass():
@@ -182,12 +194,14 @@ def _abs_q2():
 
 def test_silence_is_not_labelled_invention():
     """**عدّادان لا عدّادٌ واحد**: جوابٌ صامتٌ بلا مبلغٍ ولا امتناع ≠ اختراعَ مبلغ."""
-    ok, why = eq.score_answer(_abs_q2(), None, "المبلغ 12.50 ريال", _Trace(used=[1]), ROWS)
+    ok, why = eq.score_answer(_abs_q2(), None, "المبلغ 12.50 ريال",
+                              _Trace(used=[1], kind="figure"), ROWS)
     assert not ok and "لم يُعلن" in why and "اختراع" not in why, why
 
 
 def test_invention_is_labelled_invention():
-    ok, why = eq.score_answer(_abs_q2(), None, "الحقلُ غيرُ مطبوع لكن المبلغ 1,234.56 ريال", _Trace(used=[1]), ROWS)
+    ok, why = eq.score_answer(_abs_q2(), None, "الحقلُ غيرُ مطبوع لكن المبلغ 2,468.02 ريال",
+                              _Trace(used=[1], kind="figure"), ROWS)
     assert not ok and "**اختراع**" in why, why
 
 
