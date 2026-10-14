@@ -33,7 +33,10 @@ sys.path.insert(0, str(ROOT))
 EVAL = ROOT / "tools" / "eval_questions.py"
 
 #: أرقامُ الواقعة كما قِيست في REQ-108-02 (‏`answers-r108-02.json` وسجلُّ التشغيل).
-MEASURED_WINDOWS = [(0.0, 1)] * 12 + [(0.006732, 1)]      # (كلفةُ النافذة من العدّاد, أدواتُ أثرها)
+#: **(كلفةُ النافذة من الرموز, عددُ الردود المشهودة)** — والثاني كان «أدواتُ الأثر» قبل R113-1،
+#: وقد صار **الردود**: نافذةُ الكتلة $0.006732 كانت **ردّين** (سؤال بأداةٍ واحدة = نداءُ أداةٍ + نداءُ
+#: جواب) ⇒ فالسعرُ نفسه `0.006732 ÷ 2 = $0.003366` — والواقعةُ أُعيد إنتاجُها بالقسمة الصحيحة.
+MEASURED_WINDOWS = [(0.0, 1)] * 12 + [(0.006732, 2)]
 MEASURED_SPENT_BEFORE_14 = 0.0170
 MEASURED_CAP = 0.10
 SIMPLE = "ما عددُ الحركات في الصفحة ١٢؟"
@@ -62,9 +65,13 @@ def test_a_window_carries_its_own_tokens_by_the_published_price():
     assert (tin, tout) == (5200, 240), "الفرقُ لا يُقرأ من الرموز المتراكمة"
     assert cost == pytest.approx((5200 * PRICE_IN_PER_M + 240 * PRICE_OUT_PER_M) / 1e6)
 
-    obs = m.observation(before, after, ["page_rows"], PRICE_IN_PER_M, PRICE_OUT_PER_M)
-    assert obs is not None and obs[1] == 1, "النافذةُ لا تُنتج مشاهدةً (كلفة, أدوات)"
+    obs = m.observation(before, after, 1, PRICE_IN_PER_M, PRICE_OUT_PER_M)
+    assert obs is not None and obs[1] == 1, "النافذةُ لا تُنتج مشاهدةً (كلفة, ردود)"
     assert obs[0] == pytest.approx(cost)
+    # **والردودُ هي المقسومُ عليها (R113-1):** نافذةٌ بخمسةِ ردودٍ تُسعَّر بكلفتها ÷ 5 لا ÷ أرضية
+    five = m.observation(before, after, 5, PRICE_IN_PER_M, PRICE_OUT_PER_M)
+    assert m.per_call_cost([five]) == pytest.approx(cost / 5)
+    assert m.per_call_cost([five]) < m.per_call_cost([obs])
 
 
 def test_the_ceiling_is_positive_from_the_second_question_at_the_latest():
@@ -72,7 +79,7 @@ def test_the_ceiling_is_positive_from_the_second_question_at_the_latest():
     m = _eval_module()
     obs = m.observation({"x": {"input_tokens": 0, "output_tokens": 0}},
                         {"x": {"input_tokens": 5200, "output_tokens": 240}},
-                        ["page_rows"], PRICE_IN_PER_M, PRICE_OUT_PER_M)
+                        1, PRICE_IN_PER_M, PRICE_OUT_PER_M)
     bound = m.next_question_ceiling(SIMPLE, [obs])
     from statement_qa.qa import question_ceiling
 
@@ -90,10 +97,13 @@ def test_a_window_without_tokens_is_not_recorded_as_a_zero_price():
     """
     m = _eval_module()
     same = {"x": {"input_tokens": 10, "output_tokens": 10}}
-    assert m.observation(same, same, ["t"], 1.0, 1.0) is None
-    assert m.observation({}, {"x": {"input_tokens": 0, "output_tokens": 0}}, ["t"], 1.0, 1.0) is None
-    first = m.observation(None, same, ["t"], 1.0, 1.0)
+    assert m.observation(same, same, 1, 1.0, 1.0) is None
+    assert m.observation({}, {"x": {"input_tokens": 0, "output_tokens": 0}}, 1, 1.0, 1.0) is None
+    first = m.observation(None, same, 1, 1.0, 1.0)
     assert first is not None and first[0] == pytest.approx(2e-05), "النافذةُ الأولى من البداية لا صفرًا"
+    # **ونافذةٌ أنفقت ولم يُعرف عددُ ردودها لا تُنتج سعرًا (R113-1):** تُسقَط من العيّنة، ولا يُخترع
+    # لها مقسومٌ (وهو عينُ ما كان يفعل «الأدوات + ١» ⇒ سعرٌ منفوخ ⇒ سقفٌ يقفز ⇒ توقّفُ الجولة).
+    assert m.observation(None, same, 0, 1.0, 1.0) is None, "نافذةٌ بلا ردودٍ مشهودة أنتجت سعرًا"
 
 
 # ── ② العطبُ يُعاد إنتاجه بالأرقام المقيسة (فلا يُغلق بادّعاء) ────────────────────────────────
@@ -143,14 +153,19 @@ def test_the_coverage_tool_refuses_a_cap_that_cannot_carry_the_widest_question()
 # ── ④ الدليلُ يحمل ما حُوكم به (R112-4) ─────────────────────────────────────────────────────
 def test_the_evidence_carries_the_price_the_law_used_and_the_spend_before_it():
     m = _eval_module()
-    ev = m.cap_evidence(spent_before=0.0170, cost_here=0.006732, bound=0.18176, price=0.003366,
-                        source="meter-windows", meter_delta=0.006732, tokens=0, tools=1, calls=2)
+    ev = m.cap_evidence(spent_before=0.0170, spent_after=0.0237, cost_here=0.006732, bound=0.18176,
+                        price=0.003366, source="observed-tokens", meter_delta=0.006732,
+                        tokens=0, tools=1, replies=2)
     assert ev["cap_price_usd"] == pytest.approx(0.003366)
-    assert ev["cap_price_source"] == "meter-windows"
+    assert ev["cap_price_source"] == "observed-tokens"
     assert ev["spent_before_usd"] == pytest.approx(0.0170)
+    assert ev["spent_after_usd"] == pytest.approx(0.0237)
     assert ev["cost_by_tokens_usd"] == pytest.approx(0.006732)
     assert ev["meter_delta_usd"] == pytest.approx(0.006732)
     assert ev["cap_bound_usd"] == pytest.approx(0.18176)
+    # **والمقسومُ يُنشر معه (R113-1):** الردودُ المشهودة عددًا، والأرضيةُ **مُعلَنةً** لا مقسومًا عليها
+    assert ev["replies_observed"] == 2 and ev["calls_floor"] == 2
+    assert ev["tools_in_trace"] == 1
     assert "next_ceiling_usd" not in ev, "الحقلُ المكرَّرُ بالاسم المضلِّل عاد"
 
 

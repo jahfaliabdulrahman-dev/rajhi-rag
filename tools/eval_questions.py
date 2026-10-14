@@ -518,18 +518,28 @@ def tokens_cost(usage: dict | None, price_in_per_m: float, price_out_per_m: floa
     return (tin * price_in_per_m + tout * price_out_per_m) / 1e6, tin, tout
 
 
-def observation(before: dict | None, after: dict | None, tools_used: list | None,
+def observation(before: dict | None, after: dict | None, replies: int,
                 price_in_per_m: float, price_out_per_m: float) -> tuple[float, int] | None:
-    """مشاهدةُ نافذةٍ واحدة: **(كلفةُ رموزها, عددُ نداءات أثرها)** — أو `None` إن لم تُبلّغ رموزًا.
+    """مشاهدةُ نافذةٍ واحدة: **(كلفةُ رموزها, عددُ الردود التي أنتجتها)** — أو `None`.
 
-    **والأثرُ (`tools_used`) أدنى حدٍّ لنداءات النموذج** (كلُّ نداءِ أداةٍ سبقه نداءُ نموذج، وفوقها
-    نداءُ الجواب) ⇒ فالقسمةُ على `النداءات + ١` **تعلو الكلفةَ الحقيقيّةَ للنداء** فلا تُصغّر الحدّ.
-    **ونافذةٌ بلا رموزٍ لا تُنتج صفرًا** — الصفرُ سعرٌ يُقبل ويُعمي الحاجز (وقد فعله ١٢ مرّة).
+    **والقسمةُ على الردود لا على أرضيةِ «الأدوات + ١» (R113-1 · مراجعة ١١٣):** الأثرُ **أرضيةٌ**
+    (كلُّ نداءِ أداةٍ سبقه نداءُ نموذج)، ونداءاتُ إعادةِ الطرح/الاحتياط لا أثرَ لها ⇒ فأرضيةٌ يُقسَم
+    عليها **تُعلّي السعرَ** بنسبة الفعليّ إلى الأرضيّ، و`max` يحمله إلى كلّ سقفٍ بعده.
+    **وأسوأُ حالاتها سؤالٌ تنتهي مهلتُه:** أثرُه فارغٌ ⇒ أرضيةٌ ١ ⇒ تُسعَّر نافذتُه كلُّها سعرًا لنداءٍ
+    واحد (قِيس: نافذةُ $7.50 ⇒ سقفُ السؤال القادم **$405**) ⇒ فتتوقّف الجولةُ بلا سبب — وقع ذلك في
+    **خمسينَين من آخر أربع جولات**. **والردودُ عددٌ مشهود** (`finish_log().ends`: نداءٌ = ردّ) ⇒
+    فسعرُ النداء = كلفةُ النافذة ÷ عددِ ردودها.
+
+    **ونافذةٌ لا يُعرف عددُ ردودها لا تُنتج سعرًا** (`None`) كما لا تُنتجه نافذةٌ بلا رموز: الصفرُ
+    سعرٌ يُقبل ويُعمي الحاجز (وقد فعله ١٢ مرّة). والقانونُ يمضي بسعرٍ موثوقٍ سابق، **وإن لم يبقَ سعرٌ
+    أصلًا توقّف بـ`rc=5`** (سقفٌ لا يُحسب لا يُفرض).
     """
+    if int(replies or 0) <= 0:
+        return None
     cost, _tin, _tout = tokens_cost(usage_delta(before, after), price_in_per_m, price_out_per_m)
     if cost <= 0:
         return None
-    return cost, len(tools_used or [])
+    return cost, int(replies)
 
 
 def finish_reasons_from(response) -> list[str]:
@@ -562,31 +572,36 @@ def finish_log():
         def __init__(self) -> None:
             super().__init__()
             self.reasons: list[str] = []
+            self.ends: int = 0        # **عددُ الردود** (نداءٌ = ردّ) — وهو مقسومُ سعر النداء (R113-1)
 
         def on_llm_end(self, response, **kwargs) -> None:          # noqa: ANN001 · D102
+            self.ends += 1
             self.reasons.extend(finish_reasons_from(response))
 
     return _FinishLog()
 
 
-def cap_evidence(*, spent_before: float, cost_here: float, bound: float, price: float, source: str,
-                 meter_delta: float | None, tokens: int, tools: int, calls: int) -> dict:
+def cap_evidence(*, spent_before: float, spent_after: float, cost_here: float, bound: float, price: float,
+                 source: str, meter_delta: float | None, tokens: int, tools: int, replies: int) -> dict:
     """ما حُوكم به لكلّ سؤال — **بلا تكرار**: حقلٌ واحد لكلّ معنى (R112-4).
 
-    `cap_price_usd` سعرُ النداء المستعمل · `cap_price_source` مصدرُه · `spent_before_usd` المُنفَق
-    قبل القرار (**من الرموز، لحظيّ**) · `cap_bound_usd` السقفُ الذي قُورن به · و`meter_delta_usd`
-    شاهدُ رصيد الحساب لنفس النافذة (يُنشر ولا يحكم) ⇒ فالقانونُ يُعاد تشغيلُه من الملفّ
-    (شرطُ البند ٣ في مراجعة ١١٢).
+    `cap_price_usd` سعرُ النداء المستعمل · `cap_price_source` مصدرُه · `spent_before_usd`/`spent_after_usd`
+    المُنفَقُ التراكميّ **قبل** القرار و**بعده** (من عدّاد المكتبة، فيُقابَل مجموعُ النوافذ بالتراكمي)
+    · `cap_bound_usd` السقفُ الذي قُورن به · `replies_observed` **مقسومُ السعر** (R113-1) ·
+    `calls_floor` أرضيةٌ مُعلَنة (الأدوات + ١) **لم تعد مقسومًا عليها** · و`meter_delta_usd` شاهدُ
+    رصيد الحساب لنفس النافذة (يُنشر ولا يحكم) ⇒ فالقانونُ يُعاد تشغيلُه من الملفّ (شرطُ مراجعة ١١٢).
     """
     return {
         "cost_by_tokens_usd": round(cost_here, 6),
         "spent_before_usd": round(spent_before, 6),
+        "spent_after_usd": round(spent_after, 6),
         "cap_price_usd": round(price, 6),
         "cap_price_source": source,
         "cap_bound_usd": round(bound, 6),
         "tokens_observed": int(tokens),
         "tools_in_trace": int(tools),
-        "calls_floor": int(calls),
+        "calls_floor": int(tools) + 1,        # **أرضيةٌ مُعلَنة** — تُنشر ولا تُقسَم عليها (R113-1)
+        "replies_observed": int(replies),
         "meter_delta_usd": None if meter_delta is None else round(meter_delta, 6),
     }
 
@@ -601,15 +616,28 @@ def cap_evidence(*, spent_before: float, cost_here: float, bound: float, price: 
 # + مهلةُ طلبٍ حقيقيّة ⇒ **لا يبلغ سؤالٌ واحدٌ أكثرَ من حدِّ نداءاتٍ معروف**، فصار أسوأُ كلفةٍ للسؤال
 # **قابلًا للحساب قبل الطرح** لا للتقدير.
 def per_call_cost(pairs: list[tuple[float, int]]) -> float:
-    """أعلى كلفةِ **نداءِ نموذجٍ** مُشاهَدة = كلفةُ السؤال ÷ (نداءاتُ أثرِه + ١).
+    """أعلى كلفةِ **نداءِ نموذجٍ** مُشاهَدة = كلفةُ النافذة ÷ **عددِ ردودها المشهودة** (R113-1).
 
-    **والمدخَلُ الآن رموزٌ مشهودة** (`observation`: رموزُ نافذة السؤال × سعرِ الرمز المنشور) — لا
-    دلتا رصيدٍ متأخّرة (R112-1). والأثرُ (`tools_used`) **أدنى حدٍّ** لنداءات النموذج (كلُّ نداءِ
-    أداةٍ سبقه نداءُ نموذج، وفوقها نداءُ الجواب) ⇒ فالقسمةُ على `النداءات + ١` **تعلو الكلفةَ
-    الحقيقيّةَ للنداء** فلا تُصغّر الحدّ. وبلا عيّنة ⇒ **صفر** (لا يُخترع عدد).
+    **والمدخَلُ رموزٌ مشهودة** (`observation`: رموزُ نافذة السؤال × سعرِ الرمز المنشور) — لا دلتا
+    رصيدٍ متأخّرة (R112-1). **والمقسومُ عليه الردودُ** (واحدٌ لكلّ نداء نموذج) لا أرضيةُ «الأدوات + ١»:
+    الأرضيةُ تُعلّي السعرَ في كلّ نافذةٍ فيها نداءاتٌ بلا أداة، **وتنفجر في نافذةٍ انتهت مهلتُها**
+    (أثرٌ فارغ ⇒ ١) فتُسعَّر النافذةُ كلُّها سعرًا لنداءٍ واحد (R113-1 · مراجعة ١١٣). وبلا عيّنة ⇒
+    **صفر** (لا يُخترع عدد).
     """
-    vals = [c / (n + 1) for c, n in pairs if c is not None and c > 0]
+    vals = [c / n for c, n in pairs if c is not None and c > 0 and (n or 0) > 0]
     return max(vals) if vals else 0.0
+
+
+def run_spend(handler, price_in_per_m: float, price_out_per_m: float) -> tuple[float, int]:
+    """**المُنفَقُ التراكميّ** من عدّاد المكتبة منذ بدء الجولة: (الكلفةُ, الرموز) — لا مجموعَ النوافذ.
+
+    (R113-1 · الوجهُ الثاني) رموزُ خيطٍ مُتخلّى عنه تصل **بعد إغلاق نافذته** ⇒ فمجموعُ فروق النوافذ
+    يُسقطها من المُنفَق كلِّه، والتراكميُّ يحملها عند القرار التالي. والعدّادُ
+    (`UsageMetadataCallbackHandler`) تراكميٌّ بطبيعته ⇒ فهو **المرجعُ الواحد للمُنفَق**، والنوافذُ تُقرأ
+    **للسعر** لا للمجموع.
+    """
+    cost, tin, tout = tokens_cost(usage_snapshot(handler), price_in_per_m, price_out_per_m)
+    return cost, tin + tout
 
 
 #: **هامشٌ مُعلَن على كلفة النداء الأعلى (R110-1 · وسَببُه تغيّر في R112-1):**
@@ -1020,17 +1048,29 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     price_in, price_out = price_pair or (0.0, 0.0)
     meter_here: float | None = None
     for i, q in enumerate(todo, 1):
-        # **قرارُ الشراء بحدِّ السؤال القادم (R110-1) × سعرِ نداءٍ مشهود (R112-1):** كان السعرُ
-        # يُستنتَج من **رصيد حسابٍ متأخّر** ⇒ ١٢ نافذةً صفرًا ثمّ كتلةٌ واحدة نُسبت إلى سؤالٍ بأداةٍ
-        # واحدة ⇒ سقفٌ **$0.18176** أكبرُ من السقف كلِّه ⇒ توقّفٌ عند ١٣ من ٥٠. والآن السعرُ من
-        # **رموز الردود نفسِها** ⇒ موجبٌ من السؤال الثاني على الأكثر، ومنسوبٌ إلى نداءاته.
+        # **قرارُ الشراء بحدِّ السؤال القادم (R110-1) × سعرِ نداءٍ مشهود (R112-1) × ومقسومٍ على الردود
+        # (R113-1):** كان السعرُ يُستنتَج من **رصيد حسابٍ متأخّر** ⇒ ١٢ نافذةً صفرًا ثمّ كتلةٌ واحدة
+        # نُسبت إلى سؤالٍ بأداةٍ واحدة ⇒ سقفٌ **$0.18176** أكبرُ من السقف كلِّه ⇒ توقّفٌ عند ١٣ من ٥٠.
+        # ثمّ صار من **رموز الردود**، **والقسمةُ على عدد الردود** لا على أرضية «الأدوات + ١»: أرضيةٌ
+        # تُعلّي السعرَ، **وتنفجر في سؤالٍ انتهت مهلتُه** (أثرٌ فارغ ⇒ ١ ⇒ سقفٌ $405) فتقف الجولة.
+        # **والمُنفَقُ تراكميٌّ من العدّاد** (لا مجموعَ النوافذ) فلا تسقط رموزُ ما بين النافذتين.
         bound = next_question_ceiling(q["q"], observations)
         price = per_call_cost(observations)
         source = "observed-tokens" if observations else "none-observation"
+        if a.budget and i > 1 and not observations:
+            # **سقفٌ لا يُحسب لا يُفرض** (بندُ R112-1 نفسُه، من جهة الحلقة): بلا سعرٍ مشهودٍ بعد سؤالٍ
+            # يصير `bound = 0` ⇒ فلا يتوقّف شيءٌ أبدًا ⇒ الصمتُ سقفٌ معطَّلٌ يُنشر كأنّه يعمل.
+            print(f"\n⛔ **لا سعرَ مشهودًا بعد سؤالٍ** (الردودُ لم تُرصد ولا مرّة) ⇒ لا سقفَ يُحسب "
+                  f"⇒ توقّفٌ مُسمّى قبل السؤال {i} (fail-closed) · رمزُ الخروج 5.", flush=True)
+            halt = 5
+            break
         meter_before_i: float | None = None
         if a.budget:                   # **المقياسُ قبل الطلب** (S-2) · والرصيدُ **شاهدٌ على المجموع**
             cur_u = _key_usage()
             meter_before_i = _spent_since(before, cur_u)
+            # **والمُنفَقُ التراكميُّ يُقرأ هنا** — عند القرار، لا عند إغلاق النافذة السابقة ⇒ فرموزٌ
+            # وصلت بين النافذتين تدخل الحساب (R113-1).
+            spent_tokens = run_spend(usage, price_in, price_out)[0]
             if meter_before_i is not None and meter_before_i < 0:
                 # **توقّفٌ مُسمّى عند عدّادٍ تراجعيّ** (مراجعة ٥٠ · مقعد Spec · P1): عدّادٌ ينقص يعني أنّ ما
                 # يُقاس ليس ما يزيد بالصرف ⇒ لا سقفَ يُوثق به؛ والصمتُ هنا سقفٌ معطَّلٌ يُنشر كأنّه يعمل.
@@ -1071,6 +1111,7 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                 break
         u_before = usage_snapshot(usage)
         r_before = len(finishes.reasons)
+        replies_before = finishes.ends          # **عدّادُ الردود** (مقسومُ سعر النداء · R113-1)
         t0 = time.monotonic()
         truth_val, _ = truth(q, c, pack, rows)
         box: dict = {}
@@ -1109,21 +1150,25 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
         delta = usage_delta(u_before, u_after)
         cost_here, tok_in, tok_out = tokens_cost(delta, price_in, price_out)
         tools_now = list(getattr(res, "tools_used", None) or []) if res else []
-        observed = observation(u_before, u_after, tools_now, price_in, price_out)
+        replies_here = finishes.ends - replies_before      # **كلُّ ردٍّ = نداءُ نموذج** (R113-1)
+        observed = observation(u_before, u_after, replies_here, price_in, price_out)
         reasons = finishes.reasons[r_before:]
         if a.budget:
             if meter_before_i is not None:
                 meter_after_i = _spent_since(before, _key_usage())
                 meter_here = (None if meter_after_i is None
                               else round(max(0.0, meter_after_i - meter_before_i), 6))
-            done[q["id"]].update(cap_evidence(spent_before=spent_tokens, cost_here=cost_here,
-                                              bound=bound, price=price, source=source,
+            # **والتراكميُّ بعد السؤال** يُسجَّل مع النافذة ⇒ فيُقابَل مجموعُ الأجزاء بالمُنفَق الكامل
+            # (وما بين النوافذ يظهر فرقًا مُعلَنًا لا مقبولًا).
+            spent_after = run_spend(usage, price_in, price_out)[0]
+            done[q["id"]].update(cap_evidence(spent_before=spent_tokens, spent_after=spent_after,
+                                              cost_here=cost_here, bound=bound, price=price, source=source,
                                               meter_delta=meter_here, tokens=tok_in + tok_out,
-                                              tools=len(tools_now), calls=len(tools_now) + 1))
+                                              tools=len(tools_now), replies=replies_here))
             done[q["id"]]["finish_reasons"] = reasons
             if observed is not None:
                 observations.append(observed)
-            spent_tokens += cost_here
+            spent_tokens = spent_after     # **مصدرٌ واحدٌ للمُنفَق**: التراكميُّ من العدّاد (R113-1)
         merged = {**prev_all, **done}      # النائبُ يبقى ما لم يُجَب عنه فعلاً
         out.write_text(json.dumps({"model": a.model or "افتراضيّ", "model_id": model_id,
                                    "spec_sha": _spec_sha(a.questions),

@@ -13,6 +13,7 @@
 
 import importlib.util
 import json
+import threading
 
 import pytest
 import pathlib
@@ -50,6 +51,38 @@ class _Ans:
     answer, used_row_nos, scope, refused = "جوابٌ مُحاكى", [1], "ok", False
 
 
+class _Reply:
+    """ردُّ نموذجٍ مُحاكى **بالشكل الذي يقرأه `finish_reasons_from`**: `generations` ثمّ `llm_output`.
+
+    و`ردٌّ = نداءٌ واحد` — وهو العدُّ الذي صار يحمل السعر (R113-1) بدل أرضية «الأدوات + ١».
+    """
+
+    def __init__(self, reason: str = "stop") -> None:
+        self.generations = [[types.SimpleNamespace(generation_info={"finish_reason": reason})]]
+        self.llm_output = {"finish_reason": reason}
+
+
+class _ExpiredThread:
+    """خيطٌ **يعمل فعلًا ثمّ يُعلن نفسَه حيًّا**: النداءاتُ وقعت (فالرموزُ تُحتسب) والمهلةُ انتهت قبل جمعها.
+
+    لماذا لا `time.sleep`: النومُ يجعل الضابطَ رهينةَ الزمن وسباقًا على القراءة، وهذا يحمل المعنى نفسه
+    بحتميّة: **كلُّ نداءٍ وقع وبُرمج عليه**، والنتيجةُ تُقرأ «انتهت المهلة» (`res = None` ⇒ أثرٌ فارغ)
+    — وهو بالحرف سيناريو مراجعة ١١٣.
+    """
+
+    def __init__(self, target=None, args: tuple = (), kwargs=None, daemon=None) -> None:   # noqa: ANN001
+        self._t, self._a, self._k = target, tuple(args), kwargs or {}
+
+    def start(self) -> None:
+        self._t(*self._a, **self._k)
+
+    def join(self, timeout=None) -> None:                                         # noqa: ANN001
+        return None
+
+    def is_alive(self) -> bool:
+        return True
+
+
 def _questions_file(tmp_path) -> pathlib.Path:
     """ملفُّ أسئلةٍ صغيرٌ في `tmp` — فلا يُتخطّى الضابطُ أبدًا (ضابطٌ متخطّى ثقب، لا ضابط)."""
     p = tmp_path / "questions.json"
@@ -61,7 +94,13 @@ def _questions_file(tmp_path) -> pathlib.Path:
 
 
 def _run(tmp_path, monkeypatch, meter: _Meter, budget: float, n: int = 8,
-         rows_n: int = 1, used: list[int] | None = None):
+         rows_n: int = 1, used: list[int] | None = None, calls_for: dict[str, int] | None = None,
+         tools_for: dict[str, int] | None = None, expire_on: set[str] | None = None,
+         late: tuple[int, int] | None = None, no_replies: bool = False):
+    """تشغيلُ `run_questions` بمزوّدٍ مُحاكى. و`calls_for` = نداءاتُ سؤالٍ بعينه (والافتراضُ نداءٌ واحد)،
+    و`tools_for` = أدواتُ أثرِه · و`expire_on` = أسئلةٌ **تنتهي مهلتُها** (خيطٌ يعمل ثمّ يُعلن نفسَه حيًّا)،
+    و`late = (بعدَ أيّ سؤال, كم نداءً)** = رموزٌ تصل **بين النافذتين** (خيطٌ مُتخلّى عنه يردّ متأخّرًا).
+    """
     m = _load("evalq_cap_loop", "tools/eval_questions.py")
     import tools.refusal_test as rt
     from statement_qa import chunking, qa, retriever
@@ -70,33 +109,70 @@ def _run(tmp_path, monkeypatch, meter: _Meter, budget: float, n: int = 8,
                         lambda run: ([{"row_no": i + 1, "text": "س", "page": 1} for i in range(rows_n)], 1))
     monkeypatch.setattr(chunking, "chunk_rows", lambda rows: [{"text": "س", "row_no": 1}])
     monkeypatch.setattr(retriever, "build_index", lambda chunks: object())
-    monkeypatch.setattr(qa, "build_llm", lambda model=None, callbacks=None: None)
-    # **ورموزُ المزوّد المُحاكى (R112-1):** كلُّ سؤالٍ يُضيف **مليونَ رمزٍ مدخلًا**، وبسعرٍ مُعلَن
-    # `$0.30/M` تصير كلفةُ نافذته **$0.30** — وهي نفسُ «كلفة النداء» التي كان العدّادُ يُستنتج منها.
-    # ⇒ فالضوابطُ تقيس **السلوكَ نفسَه** (التوقّفُ والرموزُ والتغطية) وراءَ إشارةٍ جديدة: الرموزُ
-    # المشهودة، لا رصيدُ الحساب. **ولا شبكة:** `usage_snapshot` مُستبدَلة، والسعرُ من سطر الأمر.
-    monkeypatch.setattr(m, "usage_snapshot",
-                        lambda _h: {"mock": {"input_tokens": meter.calls * 1_000_000, "output_tokens": 0}})
+    # **ومراكنبُ المكتبة تُرصَد فعلًا (R113-1):** `build_llm` يُخزّن ما مُرِّر إليه من `callbacks`،
+    # وكلُّ نداءٍ مُحاكى يُطلق `on_llm_end` مرّةً واحدة ⇒ فيُعدّ سجلُّ الانتهاء **الردودَ** كما يفعل
+    # في المسار الحقيقيّ (مسباري: طلبان ⇒ مدخلان)، لا أرضيةَ الأدوات.
+    seen: dict = {"cbs": []}
+
+    def _build_llm(model=None, callbacks=None):
+        seen["cbs"] = list(callbacks or [])
+        return None
+
+    monkeypatch.setattr(qa, "build_llm", _build_llm)
+
+    def _fire(reason: str = "stop", times: int = 1) -> None:
+        if no_replies:            # **مراقبٌ غيرُ موصول**: النداءاتُ تقع ولا يُرصد لها ردّ (R113-1)
+            return
+        for _ in range(times):
+            for cb in seen["cbs"]:
+                cb.on_llm_end(_Reply(reason))
+
+    # **ورموزُ المزوّد المُحاكى (R112-1):** كلُّ نداءٍ يُضيف **مليونَ رمزٍ مدخلًا**، وبسعرٍ مُعلَن
+    # `$0.30/M` تصير كلفةُ النافذة **$0.30 لكلّ نداء** — وعددُ نداءات السؤال يُضبط بـ`calls_for`.
+    snap = {"n": 0}
+
+    def _snap(_h):
+        snap["n"] += 1
+        if late and snap["n"] == 2 * late[0] + 1:   # نافذةُ السؤال التالي تُفتح: الرموزُ المتأخّرة تصل هنا
+            meter.calls += late[1]
+            _fire("stop", late[1])
+        return {"mock": {"input_tokens": meter.calls * 1_000_000, "output_tokens": 0}}
+
+    monkeypatch.setattr(m, "usage_snapshot", _snap)
     if used is not None:                     # أثرٌ بحجمٍ محدَّد (لضابط القصّ) — يُرجَع تلقائيًّا
         monkeypatch.setattr(_Ans, "used_row_nos", list(used))
 
     def _answer(store, qtext, rows=None, chunks=None, llm=None, footers=None, scope=None):
-        meter.calls += 1                     # الكلفةُ تُحتسب عند النداء — كما يفعل المزوّد
-        return _Ans()
+        k = int((calls_for or {}).get(qtext, 1))
+        meter.calls += k                      # الكلفةُ تُحتسب عند النداء — كما يفعل المزوّد
+        _fire("tool_calls" if k > 1 else "stop", k)
+        t = int((tools_for or {}).get(qtext, 0))     # أثرُ السؤال: ٢٤ أداةً لسؤالٍ بـ٢٥ نداءً مُجاب
+        return types.SimpleNamespace(answer=_Ans.answer,
+                                     used_row_nos=list(used) if used is not None else list(_Ans.used_row_nos),
+                                     scope=_Ans.scope, refused=_Ans.refused,
+                                     tools_used=[f"tool{j}" for j in range(t)])
 
     monkeypatch.setattr(qa, "answer_question", _answer)
     monkeypatch.setattr(m, "_key_usage", meter.read)
     monkeypatch.setattr(m, "truth", lambda q, c, pack, rows: ({"kind": "مُحاكى"}, "مُحاكى"))
     monkeypatch.setattr(m, "score_answer", lambda q, t, ans, res, rows: (True, "ok"))
+    if expire_on:                        # خيطٌ يعمل ثمّ يُعلن نفسَه حيًّا ⇒ النتيجةُ «انتهت المهلة»
+        class _T(_ExpiredThread):        # **ولا يُتخلّى إلا عن الأسئلة المسمّاة** (غيرُها يجمع نتيجته)
+            def is_alive(self) -> bool:
+                return self._a[0] in expire_on
+
+        # `eval_questions` تستورد `threading` **داخل الدالّة** ⇒ الرَقْمُ يجري على الوحدة نفسِها
+        # (‏`sys.modules`) لا على صفةٍ في وحدة الأداة (أوّلُ فرضٍ سقط بالقياس: `no attribute 'threading'`).
+        monkeypatch.setattr(threading, "Thread", _T)
     qs = [{"id": f"q{i:02d}", "q": f"س{i}", "type": "count_rows", "cat": "count", "metric": "مُحاكى",
            "expect": "…", "derive": {"kind": "mock"}} for i in range(1, n + 1)]
     a = types.SimpleNamespace(
         run=ROOT / "data/local_sample/slice_629p", model=None, out=tmp_path / "answers.json",
         budget=budget, timeout=5, only=None, questions=_questions_file(tmp_path), rescore=False,
         execute=False,
-        # **والسعرُ صريحٌ من سطر الأمر (R112-1):** $0.30 للمليون مدخلًا ومخرجًا ⇒ فكلفةُ نافذةِ
-        # كلّ سؤالٍ (مليونُ رمزٍ من المُحاكي) = $0.30 بالضبط. **وبلا سطرِ الأمر يُقرأ السعرُ من قائمة
-        # النماذج العامّة** — والضابطُ لا يمسّ الشبكة بحال.
+        # **والسعرُ صريحٌ من سطر الأمر (R112-1):** $0.30 للمليون مدخلًا ومخرجًا ⇒ فكلفةُ نداءٍ
+        # واحدٍ $0.30 بالضبط. **وبلا سطرِ الأمر يُقرأ السعرُ من قائمة النماذج العامّة** — والضابطُ
+        # لا يمسّ الشبكة بحال.
         price_in_per_m=0.30, price_out_per_m=0.30)
     rc = m.run_questions(a, qs, None, {}, {})
     out = tmp_path / "answers.json"
@@ -211,3 +287,85 @@ def test_the_anticipatory_stop_decides_by_the_next_questions_ceiling(tmp_path, m
     assert rich[1]["cap_price_usd"] == pytest.approx(0.30, rel=1e-6), rich[1]
     assert rich[1]["cap_price_source"] == "observed-tokens", rich[1]
     assert "next_ceiling_usd" not in rich[1], "الحقلُ المكرَّرُ عاد إلى السجلّ"
+
+
+def test_a_timed_out_question_prices_its_calls_not_its_window(tmp_path, monkeypatch):
+    """**R113-1 · أحمرُ أوّلًا: سؤالٌ تنتهي مهلتُه يُسعَّر نداؤه بنافذته كلِّها فتتوقّف الجولة.**
+
+    الآليّة (مراجعة ١١٣، من الكود): عند المهلة `res = None` ⇒ أثرٌ فارغ ⇒ أرضيةُ النداءات **١**
+    ⇒ `per_call = كلفةُ النافذة كلِّها` ⇒ `× 36 × 1.5` = سقفٌ أكبرُ من أيّ ميزانية معقولة.
+
+    **وهذا الضابطُ هو سيناريو المراجعة نفسُه بمقياس هذا الملفّ:** السؤالُ الثالث ينادي النموذجَ **٢٥
+    مرّة** (‏$7.50 برموز المُحاكي) **ثمّ تنتهي مهلتُه** — والسؤالُ الذي أُجيب بـ٢٥ نداءً يُقارَن به.
+
+    | | التغطية | سعرُ النداء بعده | التوقّف |
+    | :--- | :--- | :--- | :--- |
+    | **قبل الإصلاح** | **٣ من ٦** | نافذةُ المهلة كلُّها ($7.50) | سقفُ السؤال الرابع **$405** ⇒ توقّفٌ مُسمّى (رمز ٣) |
+    | **بعد الإصلاح** | **٦ من ٦** | **$0.30 كحالِ الجواب** | **لا توقّفَ بالسقف** — ورمزُ الخروج **١** لأنّ جوابَ السؤال نفسه سقط بمهلته (وهو غيرُ التوقّف) |
+
+    ⇒ فالرموزُ نفسُها والنداءاتُ نفسُها، **والفرقُ الوحيد أنّ الأداةَ تخلّت عن السؤال** — فلا يجوز أن
+    يغيّر ذلك السعر. والمهلةُ وقعت في **خمسينَين من آخر أربع جولات** (‏`r105` السؤال ٤ · `r108` السؤال ٣٠)
+    ⇒ فلا يُدفع قبل هذا الإصلاح.
+    """
+    d = tmp_path / "expired"
+    d.mkdir(exist_ok=True)
+    rc, results = _run(d, monkeypatch, _Meter(0.30), 25.0, n=6,
+                       calls_for={"س3": 25}, expire_on={"س3"})
+    assert rc != 3, (f"توقّفَت الجولةُ بالسقف بعد سؤالٍ انتهت مهلتُه (رمز {rc} · تغطية {len(results)} "
+                     f"من 6) ⇒ سعرُ النداء صار كلفةَ نافذته كلَّها")
+    assert rc == 1, f"المتوقَّعُ ١ (جوابٌ سقط بمهلته) لا {rc}"
+    assert len(results) == 6, f"التغطيةُ {len(results)} من 6 بعد مهلةِ سؤالٍ"
+    timed_out = results[2]
+    assert timed_out["why"].startswith("عطبٌ/مهلة"), timed_out["why"]
+    assert timed_out["replies_observed"] == 25, timed_out
+    assert timed_out["tools_in_trace"] == 0, "الأثرُ فارغٌ عند المهلة (وهو مصدرُ العطب)"
+    # **والمُهِمُّ: السعرُ لم يقفز** — سعرُ القرار الرابع كسعر القرار الثاني (كلاهما نداءٌ بـ$0.30).
+    assert results[3]["cap_price_usd"] == pytest.approx(results[1]["cap_price_usd"], rel=1e-9), (
+        results[1]["cap_price_usd"], results[3]["cap_price_usd"])
+    assert results[3]["cap_price_usd"] == pytest.approx(0.30, rel=1e-6), results[3]["cap_price_usd"]
+
+
+def test_a_question_that_answers_with_the_same_calls_prices_the_same(tmp_path, monkeypatch):
+    """**والضابطُ المضادّ (حتى لا يمرّ الإصلاحُ بإلغاء السعر):** السؤالُ نفسُه بـ٢٥ نداءً **مُجابًا**
+    يُنتج السعرَ نفسَه — فلا يكون «لا توقّف» أثرَ سعرٍ صفريّ، بل سعرٌ صحيحٌ في الحالين.
+    """
+    d = tmp_path / "answered"
+    d.mkdir(exist_ok=True)
+    rc, results = _run(d, monkeypatch, _Meter(0.30), 25.0, n=6,
+                       calls_for={"س3": 25}, tools_for={"س3": 24})
+    assert (rc, len(results)) == (0, 6), f"الحالُ المُجابة: رمز {rc} وتغطية {len(results)} من 6"
+    assert results[2]["replies_observed"] == 25, results[2]
+    assert results[3]["cap_price_usd"] == pytest.approx(0.30, rel=1e-6), results[3]["cap_price_usd"]
+
+
+def test_a_run_whose_replies_are_never_counted_stops_instead_of_being_uncapped(tmp_path, monkeypatch):
+    """**وسقفٌ لا يُحسب لا يُفرض (R113-1):** لو لم تُرصد الردودُ (مراقبٌ غيرُ موصول) لصار السعرُ صفرًا
+    والسقفُ صفرًا ⇒ **فلا يوقف شيءٌ الصرفَ أبدًا** — وهو الصمتُ الذي يُنشر كأنّه سقفٌ يعمل.
+
+    فهذه الحالُ **تتوقّف مُسمّاةً برمز ٥** بعد السؤال الأوّل (fail-closed) بدل أن تمضي بلا حدّ.
+    """
+    d = tmp_path / "no-replies"
+    d.mkdir(exist_ok=True)
+    rc, results = _run(d, monkeypatch, _Meter(0.30), 25.0, n=6, no_replies=True)
+    assert rc == 5, f"مراقبٌ غيرُ موصول ⇒ المتوقَّعُ توقّفٌ مُسمّى (5) لا {rc} بتغطية {len(results)}"
+    assert len(results) == 1, f"التوقّفُ يجب أن يقع بعد السؤال الأوّل لا بعد {len(results)}"
+
+
+def test_tokens_that_land_between_windows_still_enter_the_spend(tmp_path, monkeypatch):
+    """**R113-1 · الوجهُ الثاني: رموزٌ تصل بين نافذتين لا تسقط من المُنفَق.**
+
+    خيطُ سؤالٍ مُتخلّى عنه يواصل الإنفاق بعد إغلاق نافذته ⇒ برموزِ النوافذ (مجموعِ الفروق) تسقط
+    تلك الرموزُ من المُنفَق كلَّه ولو بُرمج عليها. والمُنفَقُ الآن **تراكميٌّ من عدّاد المكتبة** ⇒
+    يدخلها عند القرار التالي.
+
+    الأرقام: ثلاثةُ أسئلة (‏$0.90)، ثمّ **نداءان متأخّران** (‏$0.60) يصلان بين نافذة الثالث والرابع
+    ⇒ فمُنفَقُ القرار الرابع **$1.50** (لا $0.90).
+    """
+    d = tmp_path / "late"
+    d.mkdir(exist_ok=True)
+    rc, results = _run(d, monkeypatch, _Meter(0.30), 25.0, n=6, late=(3, 2))
+    assert (rc, len(results)) == (0, 6), f"رمز {rc} وتغطية {len(results)}"
+    assert results[3]["spent_before_usd"] == pytest.approx(1.50, rel=1e-6), (
+        f"رموزٌ وقعت بين النافذتين لم تدخل المُنفَق: {results[3]['spent_before_usd']} بدل 1.50")
+    assert results[1]["spent_before_usd"] == pytest.approx(0.30, rel=1e-6), results[1]
+

@@ -45,14 +45,19 @@ def question_ceiling(question: str) -> int:
     return _qc(question)
 
 
-def calls_from_answers(path: pathlib.Path) -> dict[str, int]:
-    """أرضيةُ النداءات لكلّ سؤال من جولةٍ محفوظة: **أثرُه + ١** (كلُّ نداءِ أداةٍ سبقه نداءُ نموذج).
+def calls_from_answers(path: pathlib.Path) -> tuple[dict[str, int], str]:
+    """عددُ النداءات لكلّ سؤال من جولةٍ محفوظة — **ومعه إعلانُ مصدره** (R113-1).
 
-    **وهي أرضيةٌ لا عدد:** النداءاتُ الوسيطةُ بلا أداةٍ لا تُسجَّل ⇒ فالكلفةُ المتوقَّعةُ أدنى من الواقع
-    (يُعلن، ويُصحّح بـ`--default-calls` أو بمعدّلٍ من القياس).
+    **المصدرُ الأوّلُ الردودُ المشهودة** (`replies_observed` · ملفّاتُ R113 فصاعدًا): عددٌ لا أرضية
+    ⇒ فالسعرُ والتغطيةُ محسوبان بما **قِيس** فعلًا. **وبلا حقل الردود** (ملفّاتٌ أقدم) تُستعمل أرضيةُ
+    «أثرُه + ١» **وتُعلَن أرضيةً**: النداءاتُ الوسيطةُ بلا أداةٍ لا تُسجَّل ⇒ فالكلفةُ المتوقَّعةُ أدنى
+    من الواقع **والتغطيةُ متفائلةٌ بالنسبة نفسِها** — فالإعلانُ يمنع قراءةَ الأرضية كعدد.
     """
     d = json.loads(path.read_text())
-    return {r["id"]: len(r.get("tools_used") or []) + 1 for r in d.get("results", []) if r.get("id")}
+    rows = [r for r in d.get("results", []) if r.get("id")]
+    if rows and all("replies_observed" in r for r in rows):
+        return {r["id"]: max(1, int(r["replies_observed"])) for r in rows}, "observed-replies"
+    return {r["id"]: len(r.get("tools_used") or []) + 1 for r in rows}, "floor-tools-plus-one"
 
 
 def simulate(questions: list[dict], *, cap: float, price_per_call: float,
@@ -77,7 +82,9 @@ def simulate(questions: list[dict], *, cap: float, price_per_call: float,
         calls = max(1, int(calls_by_id.get(q["id"], default_calls)))
         q_cost = calls * price_per_call
         spent += q_cost
-        observations.append((q_cost, calls - 1))
+        # **والزوجُ (كلفة, ردود)** — والردودُ هي المقسومُ عليها في `per_call_cost` (R113-1): كانت
+        # الأرضيةَ «الأدوات + ١» وهي تُعلّي السعرَ، وتنفجر في سؤالٍ انتهت مهلتُه.
+        observations.append((q_cost, calls))
     return {"stopped_before": None, "coverage": len(questions), "spent": round(spent, 6),
             "cap": cap, "price_per_call": price_per_call, "bound_at_stop": None,
             "verdict": "covered", "stopped_at": None,
@@ -129,15 +136,21 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
 
     qs = json.loads(a.questions.read_text())["questions"]
-    calls = calls_from_answers(a.from_answers) if a.from_answers else {}
+    calls: dict[str, int] = {}
+    src = "بلا سجلّ"
+    if a.from_answers:
+        calls, src = calls_from_answers(a.from_answers)
     sim = simulate(qs, cap=a.cap, price_per_call=a.price_per_call, calls_by_id=calls,
                    default_calls=a.default_calls)
     gate = check_cap_can_carry(qs, cap=a.cap, price_per_call=a.price_per_call)
 
     print(f"الأسئلة: {len(qs)} · السقف: ${a.cap:.4f} · سعرُ النداء: ${a.price_per_call:.6f}"
           f" · الهامش: {PER_CALL_MARGIN}")
-    print(f"مصدرُ النداءات: {'أرضيةٌ من ' + str(a.from_answers) if calls else 'افتراضٌ مُعلَن'} "
-          f"(بلا سجلّ: {a.default_calls} نداءً)")
+    print(f"مصدرُ النداءات: {src} ({a.from_answers}) " if a.from_answers else
+          f"مصدرُ النداءات: {src} (افتراضٌ مُعلَن: {a.default_calls} نداءً)")
+    if src == "floor-tools-plus-one":
+        print("⚠️ الملفُّ لا يحمل `replies_observed` ⇒ النداءاتُ **أرضيةٌ** (أثرُه + ١) لا عددًا: "
+              "فالكلفةُ أدنى من الواقع والتغطيةُ متفائلةٌ بالنسبة نفسِها (R113-1).")
     print(f"**التغطيةُ المتوقَّعة: {sim['coverage']} من {len(qs)}**"
           + (f" · التوقّفُ قبل السؤال {sim['stopped_before']} ({sim['stopped_at']})"
              f" بحكم «{sim['verdict']}» وسقفِ سؤالٍ ${sim['bound_at_stop']:.4f}"

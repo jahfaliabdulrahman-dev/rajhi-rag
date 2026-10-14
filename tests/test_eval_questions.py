@@ -191,7 +191,7 @@ def test_the_bound_is_the_next_questions_ceiling_not_the_highest_seen():
     from tools.eval_questions import (PER_CALL_MARGIN, cap_verdict, next_question_ceiling,
                                       per_call_cost)
 
-    saw = [(0.02, 2), (0.04, 4)]                    # (كلفةُ السؤال, نداءاتُ أثره)
+    saw = [(0.02, 3), (0.04, 5)]                    # (كلفةُ السؤال, **عددُ ردودِه**) — R113-1
     seen_only = max(c for c, _ in saw)
     bound = next_question_ceiling("سؤالٌ بسيط", saw)
     ceiling = question_ceiling("سؤالٌ بسيط")
@@ -203,10 +203,13 @@ def test_the_bound_is_the_next_questions_ceiling_not_the_highest_seen():
     assert bound > seen_only, "الحدُّ لا يتجاوز المُلاحَظ ⇒ فالسقفُ ما زال يُقدَّر بالماضي"
     assert cap_verdict(0.05, 0.10, seen_only) == "go", "العطبُ لم يُعَد إنتاجه ⇒ الضابطُ لا يعضّ"
     assert cap_verdict(0.05, 0.10, bound) == "anticipatory"
-    # **وحدُّه المُعلَن:** بلا عيّنةٍ ⇒ صفر (لا سندَ يُضرب، والثقبُ مُعلَن)، والأثرُ أدنى حدٍّ للنداءات
+    # **وحدُّه المُعلَن:** بلا عيّنةٍ ⇒ صفر (لا سندَ يُضرب، والثقبُ مُعلَن). **والمقسومُ عليه الردودُ
+    # المشهودة** (R113-1): نافذةٌ بلا ردودٍ معروفة **لا تُنتج سعرًا** — ولا يُنسب لها مقسومٌ مصنوع
+    # («أرضيةُ الأدوات + ١» كانت تفعل، وهي التي أطلقت سقفَ $405 في سؤالٍ انتهت مهلتُه).
     assert next_question_ceiling("سؤالٌ بسيط", []) == 0.0
     assert per_call_cost([]) == 0.0 and per_call_cost([(0.0, 3)]) == 0.0
-    assert per_call_cost([(0.003, 0)]) == pytest.approx(0.003)
+    assert per_call_cost([(0.003, 0)]) == 0.0, "نافذةٌ بلا ردودٍ أنتجت سعرًا (أرضيةٌ مصنوعة)"
+    assert per_call_cost([(0.003, 1)]) == pytest.approx(0.003)
     assert cap_verdict(None, 0.10, 1.0) == "unknown"
     assert cap_verdict(0.10, 0.10, 0.0) == "at-cap"
 
