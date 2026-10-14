@@ -169,13 +169,16 @@ def amounts_in(q: str) -> list[Decimal]:
 
 
 def classify(question: str, years=(), max_page: int | None = None,
-             amounts=frozenset(), *, n_pages: int | None = None) -> Scope:
+             amounts=frozenset(), *, n_pages: int | None = None,
+             pages_read=frozenset()) -> Scope:
     """Decide the question's scope from its text and the data. No model, no luck.
 
     `years` = the years the statement actually covers; `max_page` = the last page
-    number present; `amounts` = every riyal figure the rows carry. Pass None/empty
-    when the caller has no data (RAG-only mode) — the gate then stays open, which
-    is the honest default: it can only refuse what it can prove.
+    number present; `amounts` = every riyal figure the rows carry; `pages_read` =
+    the pages that actually produced rows; `n_pages` = the document's page count
+    (the only fact the rows cannot tell). Pass None/empty when the caller has no
+    data (RAG-only mode) — the gate then stays open, which is the honest default:
+    it can only refuse what it can prove.
     """
     q = question or ""
 
@@ -211,30 +214,49 @@ def classify(question: str, years=(), max_page: int | None = None,
                     f"{REFUSAL} — لا توجد حركات في سنة {y}؛ فترة هذا الكشف "
                     f"{span}. لم أعرض أي مبلغ لأن لا شيء يسنده.")
 
-    # 4) any page past the last one — **كلُّ صفحةٍ مسمّاةٍ، لا الأولى وحدَها** (بوّابةُ المُنتِج ·
-    #    R105-4): كان الفحصُ يقرأ أوّلَ صفحةٍ بقارئٍ أضيقَ من قارئ الاسترجاع ⇒ فسؤالٌ يقول
-    #    «كم عدد الحركات في صفحة ٧٠٠؟» (بلا «ال») **يمرّ إلى النموذج** والاسترجاعُ يعرف أنّها
-    #    غيرُ موجودة. والقارئُ اليوم واحدٌ (`pages_in`) فالحكمان لا يفترقان.
-    # **(R115-7 · مراجعةُ ١١٥): لا يُدَّعى عن الكشف ما لم يُقرأ.** `max_page` = **أقصى صفحةٍ فيها
-    # سطورٌ مقروءة**، لا عددَ صفحات المستند ⇒ فقولُ «الكشف ينتهي عند ٦٢٨» كان **كلامًا غيرَ صحيحٍ
-    # أمام المستخدم** (الكشفُ ٦٢٩ صفحة، وفيها ثلاثُ صفحاتٍ بلا سطور مقروءة). والقاعدةُ الآن:
-    # ① صفحةٌ تفوق **عددَ صفحات المستند** (`n_pages`، إن مُرِّر) ⇒ «خارج الملف» بحقّ.
-    # ② صفحةٌ داخلةٌ فيه ولم تُقرأ سطورُها ⇒ **تُسمّى كذلك** فلا يُنسب إلى الكشف انتهاءٌ كاذب.
-    # ③ وبلا `n_pages` تُصاغ الحقيقةُ بما هو معلوم: **أقصى صفحةٍ فيها سطورٌ مقروءة** — وهي صادقةٌ
-    #    في الحالين (وتمريرُ `n_pages` من الموضع الذي يعرف عددَ الصفحات تحسينٌ مُعلَن، لا شرطٌ للصدق).
-    beyond = [p for p in pages_in(q) if max_page is not None and p > max_page]
-    if beyond:
-        named = "، ".join(str(p) for p in beyond)
-        if n_pages is not None and any(p > n_pages for p in beyond):
+    # 4) أيُّ صفحةٍ لا سطورَ لها — **ثلاثةُ أصنافٍ مُسمّاة، ولكلٍّ قولُه الصادقُ وحدَه**
+    #    (بوّابةُ المُنتِج · R105-4 · ثمّ R115-7 · ثمّ R117-2): كان الفحصُ يقرأ أوّلَ صفحةٍ بقارئٍ
+    #    أضيقَ من قارئ الاسترجاع ⇒ فسؤالٌ يقول «كم عدد الحركات في صفحة ٧٠٠؟» (بلا «ال») **يمرّ إلى
+    #    النموذج**؛ والقارئُ اليوم واحدٌ (`pages_in`) فالحكمان لا يفترقان.
+    #
+    #    **(R115-7 · مراجعة ١١٥ · ثمّ R117-2 · مراجعة ١١٧): لا يُدَّعى عن الكشف ما لم يُقرأ،
+    #    ولا يُقال عن صفحةٍ موجودةٍ إنّها غيرُ موجودة.** والقاعدةُ ثلاثيّة:
+    #      ① صفحةٌ تفوق **عددَ صفحات المستند** (`n_pages`) ⇒ «خارج الملف» بحقّ، ويُعلَن انتهاؤه.
+    #      ② صفحةٌ **داخلةٌ فيه** ولا سطورَ لها **فوق أقصى صفحةٍ فيها سطورٌ** (`max_page`) ⇒
+    #         تُسمّى داخلةً ولم تُقرأ سطورُها في الجدول — **ولا تُسمّى غيرَ موجودة**.
+    #      ③ صفحةٌ داخلةٌ **في مدى ما قُرئ** (`max_page`) وبلا سطورٍ (`pages_read`) ⇒ تُسمّى كذلك،
+    #         **ولا يُقال إنّ الكشف خلا منها** (الجدولُ هو ما لا سطورَ فيه، لا المستند).
+    #    و`pages_read` = الصفحاتُ التي أنتجت صفوفًا فعلًا؛ و`n_pages` لا يُشتقّ من الصفوف بل
+    #    **يمرّره من يعرفه** (التطبيقُ من الملفّ · والقياسُ من `build_rows`) — وبهذا صار عدُّ
+    #    الصفحات **شرطًا للصدق لا تحسينًا مُعلَنًا** (كان هذا القولَ في هذا الموضع، وهو تضييقٌ
+    #    لمعنى بند القرار — سُحِب في مراجعة ١١٧ بتاريخه).
+    named = pages_in(q)
+    if named:
+        outside = [p for p in named if n_pages is not None and p > n_pages]
+        if outside:
+            listed = "، ".join(str(p) for p in outside)
             return Scope(
-                "no_such_data", f"صفحة خارج الملف ({named})",
-                f"{REFUSAL} — الكشف ينتهي عند صفحة {n_pages}، فلا صفحة {named} فيه.")
-        why = (f"{REFUSAL} — الصفحةُ {named} **داخلةٌ في الكشف** ({n_pages} صفحة) لكن **سطورُها لم "
-               f"تُقرأ** بعد ⇒ فلا أُجيب عمّا لم أقرأه."
-               if n_pages is not None else
-               f"{REFUSAL} — **أقصى صفحةٍ فيها سطورٌ مقروءة هي {max_page}**، ولم تُقرأ سطورُ {named} "
-               f"بعد ⇒ فلا أُجيب عمّا لم أقرأه.")
-        return Scope("no_such_data", f"صفحةٌ لم تُقرأ سطورُها ({named})", why)
+                "no_such_data", f"صفحة خارج الملف ({listed})",
+                f"{REFUSAL} — الكشف ينتهي عند صفحة {n_pages}، فلا صفحة {listed} فيه.")
+        unread = [p for p in named
+                  if (max_page is not None and p > max_page)
+                  or (pages_read and p not in pages_read)]
+        if unread:
+            listed = "، ".join(str(p) for p in unread)
+            if n_pages is not None:
+                head = (f"**الصفحةُ {listed} داخلةٌ في الكشف** ({n_pages} صفحة)"
+                        + (f"، وأقصى صفحةٍ فيها سطورٌ في الجدول الذي أعمل عليه {max_page}."
+                           if max_page is not None else "."))
+            elif max_page is not None:
+                head = (f"**الصفحةُ {listed}** لا سطورَ لها في الجدول الذي أعمل عليه "
+                        f"(أقصى صفحةٍ فيه سطورٌ {max_page})، وعددُ صفحات المستند غيرُ مُعلَن.")
+            else:
+                head = f"**الصفحةُ {listed}** لا سطورَ لها في الجدول الذي أعمل عليه."
+            return Scope(
+                "no_such_data", f"صفحةٌ لا سطورَ مقروءةً لها ({listed})",
+                f"{head} لم تُقرأ سطورُها فيه بعد ⇒ فلا أُجيب عمّا لا سطرَ لي فيه، "
+                f"ولا أُعلن انتهاءَ الكشف من غياب سطورِها.")
+
 
     # 5) an amount no row carries — and ONLY when the question asks about the
     #    existence of that amount. «الحركات التي تتجاوز ٥٠٠» names a threshold,

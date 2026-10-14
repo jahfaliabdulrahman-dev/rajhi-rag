@@ -156,7 +156,13 @@ def _run(tmp_path, monkeypatch, meter: _Meter, budget: float, n: int = 8,
     if used is not None:                     # أثرٌ بحجمٍ محدَّد (لضابط القصّ) — يُرجَع تلقائيًّا
         monkeypatch.setattr(_Ans, "used_row_nos", list(used))
 
-    def _answer(store, qtext, rows=None, chunks=None, llm=None, footers=None, scope=None):
+    def _answer(store, qtext, rows=None, chunks=None, llm=None, footers=None, scope=None,
+                n_pages=None):
+        # **وعددُ صفحات المستند جزءٌ من العقد (R117-2):** البديلُ يطلبه صراحةً **بلا `**kwargs`**
+        # ⇒ فوسيطٌ جديدٌ في `answer_question` يُسقط الضابطَ بنصّه بدل أن يُبتلع صامتًا
+        # (هكذا أمسك هذا البديلُ تمريرَ `n_pages` لحظةَ كتابته).
+        assert isinstance(n_pages, int) and n_pages > 0, \
+            f"النداءُ لا يمرّر عددَ صفحات المستند ({n_pages!r}) — R117-2"
         if qtext in (local_for or set()):
             # **سؤالٌ يجيبه الحاجزُ محلّيًّا: بلا نداءِ نموذجٍ وبلا صرف** (كما يقع في المسار الحقيقيّ:
             # ٨ أسئلةٍ في REQ-108-03 بصفرِ نداء) — ولا يُرصد له ردٌّ ⇒ فلا سعرَ من نافذته (R114-1).
@@ -211,15 +217,13 @@ def _run(tmp_path, monkeypatch, meter: _Meter, budget: float, n: int = 8,
     return rc, saved.get("results", [])
 
 
-def test_the_cap_stops_the_loop_with_an_instant_meter(tmp_path, monkeypatch):
-    """**والأرقامُ أُعيدت في R110-1 لأنّ قاعدةَ القرار تغيّرت:** صار الإيقافُ الاستباقيُّ يقارن
-    **سقفَ السؤال التالي** (حدُّ نداءاته من بنية المسار × كلفةِ النداء × الهامش = ٠٫٣٠ × ٣٦ × ١٫٥
-    = **١٦٫٢**) لا أعلى ما رُئي. فالسقفُ الماليُّ الذي يسمح بسؤالين صار **١٦٫٥٠** (١٦٫٢ + ٠٫٣٠)،
-    وبـ٠٫٦٠ كان القياسُ يتوقّف قبل السؤال الثاني بحقّ — **وليس ذلك عطبًا بل شرطُ القرار**:
-    «سقفٌ لا يُخترق ولو قلّت التغطية».
+def test_the_cap_stops_the_loop_by_the_billed_spend(tmp_path, monkeypatch):
+    """**والأرقامُ أُعيدت في R110-1 ثمّ حُسمت في R117-4:** كان الإيقافُ الاستباقيُّ يقارن
+    **سقفَ السؤال التالي** (٠٫٣٠ × ٣٦ × ١٫٥ = **١٦٫٢**) فيتوقّف بميزانية ٠٫٦٠ قبل السؤال الثاني.
+    **وقرارُ 184500 حذف الحجز، وR117-4 أزال الفرعَ نفسَه** ⇒ فالسقفُ الآن **يُقاس بالمُنفَق
+    المُحاسَب وحدَه**: بميزانيةٍ لا يبلغها صرفُ ثمانية أسئلة ($2.40) تُكمل الجولة، وبميزانية
+    سؤالين بالضبط تتوقّف عند السؤال الثالث — **والفرقُ عن الماضي أنّ التوقّفَ من الصرف لا من تقدير.**
     """
-    # **والحجزُ الاستباقيُّ حُذف** (قرار 20261014-184500 §٢): السقفُ الآن **يُقاس بالمُنفَق
-    # المُحاسَب** وحده ⇒ بميزانيةٍ لا يبلغها صرفُ ثمانية أسئلة ($2.40) تُكمل الجولة.
     rc, results = _run(tmp_path, monkeypatch, _Meter(0.30), 16.50)
     assert (rc, len(results)) == (0, 8), f"بقايا حجزٍ استباقيّ: رمز {rc} وتغطية {len(results)}"
     d2 = tmp_path / "atcap"
@@ -294,15 +298,15 @@ def test_the_stored_record_carries_the_whole_trace_and_its_length(tmp_path, monk
     assert rec["cited_pages"] == [1], f"الصفحاتُ المستشهدة ليست من الأثر: {rec['cited_pages']}"
 
 
-def test_the_anticipatory_stop_decides_by_the_next_questions_ceiling(tmp_path, monkeypatch):
-    """**R110-1 · القرارُ بالحدّ لا بالماضي — ويُقاس باتّجاهين بمزوّدٍ واحد:**
-    نفسُ المزوّد ونفسُ الأسئلة، والفرقُ في متسع الميزانية فقط ⇒ **سؤالان** إن غطّى السقفُ الماليُّ
-    سقفَ السؤال التالي، و**واحدٌ** إن لم يغطّه. ولو كان القرارُ بأعلى ما رُئي (وهو ٠٫٣٠ في الحالين)
-    لحُوكم الحالان حكمًا واحدًا — فالضابطُ يفصل القاعدتين.
+def test_the_next_questions_ceiling_is_no_longer_a_bound(tmp_path, monkeypatch):
+    """**R117-4 · وما تبقّى من R110-1:** نفسُ المزوّد ونفسُ الأسئلة، والفرقُ في متسع الميزانية
+    وحده ⇒ **الميزانيّتان تُكملان الآن** (لا حجزَ استباقيًّا بسقف السؤال القادم)، **والسقفُ
+    يُقاس بالمُنفَق المُحاسَب** وحده. والضابطُ يمنع عودةَ الحجز من بابين: لا حقلَ `cap_bound_usd`
+    في السجلّ، ولا فرعَ `anticipatory` في الشرط — ويُقاس الاتّجاهان بميزانيتين متجاورتين.
     """
     from statement_qa.qa import question_ceiling
 
-    ceiling_next = 0.30 * question_ceiling("س1") * 1.5          # كلفةُ النداء × حدُّ السؤال × الهامش
+    ceiling_next = 0.30 * question_ceiling("س1") * 1.5          # الرقمُ الاستشاريُّ (لا يحكم)
     assert question_ceiling("س1") == 36, question_ceiling("س1")
 
     # **وشاهدٌ منفصلٌ لكلّ حال** (ضابطٌ يعيد استعمال المجلّد يستأنف أجوبةَ الضابط السابق — قِيس في R52-4)
@@ -314,16 +318,14 @@ def test_the_anticipatory_stop_decides_by_the_next_questions_ceiling(tmp_path, m
     rc_rich, rich = _run(d_rich, monkeypatch, _Meter(0.30), ceiling_next + 0.30 + 0.10)
     rc_poor, poor = _run(d_poor, monkeypatch, _Meter(0.30), ceiling_next + 0.30 - 0.10)
 
-    # **وحُذف الفصلُ بالحجز الاستباقيّ** (قرارُ 184500 §٢): الميزانيّتان تُكملان الآن، **والسقفُ
-    # يُحسب ويُسجَّل للعرض** (`cap_bound_usd`) **ولا يحكم** — والحكمُ للمُنفَق المُحاسَب.
     assert (rc_rich, len(rich)) == (0, 8), f"ميزانيةٌ واسعة: رمز {rc_rich} وتغطية {len(rich)}"
     assert (rc_poor, len(poor)) == (0, 8), f"ميزانيةٌ ضيّقة: رمز {rc_poor} وتغطية {len(poor)}"
-    # **والسقفُ يُسجَّل كما حُوكم به:** السؤالُ الثاني حُكم بسقفٍ = ما حسبته هذه الملفّ من الكود،
-    # **وبالسعر المشهود من الرموز** (R112-4: حقلٌ واحد لكلّ معنى — والحقلُ المكرَّرُ `next_ceiling_usd`
-    # أُزيل لأنّه كان يُحسب من الوسائط نفسِها في الدورة نفسِها).
-    assert rich[1]["cap_bound_usd"] == pytest.approx(ceiling_next, rel=1e-6), rich[1]
+    # **والدليلُ يحمل ما حُكم به:** السعرُ المشهود، والصرفُ قبل/بعد — **ولا سقفَ سؤالٍ يُسجَّل**
+    # (‏`cap_bound_usd` أُزيل: كان يُقرأ كأنّه حدّ ولا يحكم — R117-4).
     assert rich[1]["cap_price_usd"] == pytest.approx(0.30, rel=1e-6), rich[1]
     assert rich[1]["cap_price_source"] == "observed-billed", rich[1]
+    assert "cap_bound_usd" not in rich[1], "الحقلُ الذي كان يُسجَّل كأنّه حدّ عاد (R117-4)"
+    assert rich[1]["spent_before_usd"] > 0 and rich[1]["spent_after_usd"] > rich[1]["spent_before_usd"]
     assert "next_ceiling_usd" not in rich[1], "الحقلُ المكرَّرُ عاد إلى السجلّ"
 
 

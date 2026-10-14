@@ -180,63 +180,72 @@ def test_a_suspect_record_is_excluded_from_the_headline_not_counted_in_it(capsys
 
 
 # ── R110-1: القرارُ بسقف السؤال التالي — حدٌّ مشتقٌّ من بنية المسار لا من الماضي ──────────────
-def test_the_bound_is_the_next_questions_ceiling_not_the_highest_seen():
-    """**R110-1 · أرقامُها من الواقعة:** سقفٌ 0.10، وصرفٌ بلغ 0.09 قبل سؤالٍ أنفق ≈٣٠ سنتًا —
-    **لأنّ الحاجزَ كان يقارن بأعلى كلفةٍ رُئيت**، وكلُّ ما رُئي قبلَه أجزاءُ سنت (عينُ عطب ما قبل
-    R108-6). والسقفُ الآن **يُفرض بالحدّ**: `سقفُ السؤال = حدُّ نداءاته × أعلى كلفةِ نداء × الهامش`.
+def test_the_verdict_reads_the_billed_spend_and_never_reserves_ahead():
+    """**R117-4 · ما بقي من R110-1 بعد إزالة الحجز الاستباقيّ (مراجعة ١١٧):**
 
-    والنقيضان عبر الأداة نفسِها: بالمُلاحَظ وحدَه «go» (وهو العطب)، وبسقف السؤال «anticipatory».
+    العطبُ الأوّل (‏R110-1) كان الحاجزَ يقارن **أعلى كلفةٍ رُئيت** ⇒ فسؤالٌ بلغ ≈٣٠ سنتًا مرّ.
+    ثمّ صار يقارن **سقفَ السؤال القادم** (الحدُّ البنيويُّ × أعلى سعر × الهامش) — وهو **إعادةُ صنعٍ
+    لما يقدّمه المزوّد**، ورفع السقفَ المطلوب إلى $0.29. **فأُزيل الفرعُ (R117-4)** وبقي الرقمُ
+    البنيويُّ **استشاريًّا** (`check_cap_can_carry`) لا verdictًا. **والنقيضان هنا:** مُنفَقٌ دون
+    السقف ⇒ «go» ولو كان السقفُ الاستشاريُّ أكبرَ من السقف الماليّ؛ وبلوغُ المُنفَق السقفَ ⇒ «at-cap».
     """
     from statement_qa.qa import MODEL_CALL_LIMIT, question_ceiling
-    from tools.eval_questions import (PER_CALL_MARGIN, cap_verdict, next_question_ceiling,
-                                      per_call_cost)
+    from tools.eval_questions import PER_CALL_MARGIN, cap_verdict, per_call_cost
 
     saw = [(0.02, 3), (0.04, 5)]                    # (كلفةُ السؤال, **عددُ ردودِه**) — R113-1
     seen_only = max(c for c, _ in saw)
-    bound = next_question_ceiling("سؤالٌ بسيط", saw)
     ceiling = question_ceiling("سؤالٌ بسيط")
     phases = ceiling // MODEL_CALL_LIMIT           # الطورُ (طرحٌ · تنبيهٌ · احتياط) مشتقٌّ من المسار
 
     assert per_call_cost(saw) == pytest.approx(0.008), per_call_cost(saw)     # 0.04 ÷ 5
     assert phases == 3, f"حدُّ السؤال ليس ثلاثةَ أطوارٍ بل {phases}"
-    assert bound == pytest.approx(0.008 * ceiling * PER_CALL_MARGIN), bound
-    assert bound > seen_only, "الحدُّ لا يتجاوز المُلاحَظ ⇒ فالسقفُ ما زال يُقدَّر بالماضي"
-    assert cap_verdict(0.05, 0.10, seen_only) == "go", "العطبُ لم يُعَد إنتاجه ⇒ الضابطُ لا يعضّ"
-    assert cap_verdict(0.05, 0.10, bound) == "anticipatory"
-    # **وحدُّه المُعلَن:** بلا عيّنةٍ ⇒ صفر (لا سندَ يُضرب، والثقبُ مُعلَن). **والمقسومُ عليه الردودُ
-    # المشهودة** (R113-1): نافذةٌ بلا ردودٍ معروفة **لا تُنتج سعرًا** — ولا يُنسب لها مقسومٌ مصنوع
-    # («أرضيةُ الأدوات + ١» كانت تفعل، وهي التي أطلقت سقفَ $405 في سؤالٍ انتهت مهلتُه).
-    assert next_question_ceiling("سؤالٌ بسيط", []) == 0.0
+    advisory = per_call_cost(saw) * ceiling * PER_CALL_MARGIN
+    assert advisory > seen_only, "الحدُّ البنيويُّ لا يتجاوز المُلاحَظ ⇒ الرقمُ الاستشاريُّ بلا معنى"
+    assert advisory > 0.10, "الرقمُ الاستشاريُّ يجب أن يكون أكبرَ من السقف في هذه الواقعة"
+    assert cap_verdict(0.05, 0.10) == "go", \
+        "الرقمُ الاستشاريُّ يحكم ⇒ الحجزُ الاستباقيُّ عاد (R117-4)"
+    assert cap_verdict(0.10, 0.10) == "at-cap"
+    assert cap_verdict(0.11, 0.10) == "at-cap"
+    # **وحدُّه المُعلَن:** المقسومُ عليه الردودُ المشهودة (R113-1): نافذةٌ بلا ردودٍ معروفة
+    # **لا تُنتج سعرًا** — ولا يُنسب لها مقسومٌ مصنوع (أرضيةُ «الأدوات + ١» أطلقت سقفَ $405).
     assert per_call_cost([]) == 0.0 and per_call_cost([(0.0, 3)]) == 0.0
     assert per_call_cost([(0.003, 0)]) == 0.0, "نافذةٌ بلا ردودٍ أنتجت سعرًا (أرضيةٌ مصنوعة)"
     assert per_call_cost([(0.003, 1)]) == pytest.approx(0.003)
-    assert cap_verdict(None, 0.10, 1.0) == "unknown"
-    assert cap_verdict(0.10, 0.10, 0.0) == "at-cap"
+    assert cap_verdict(None, 0.10) == "unknown"
 
 
-def test_the_loop_decides_by_the_ceiling_and_records_it():
-    """**توصيلٌ لا تعريف:** أن تُستهلك الدالّةُ في الحلقة نفسِها (`run_questions` · بالـAST)،
-    **وألّا يبقى التقديرُ الكاذبُ** (`cost_rate_per_s` على المهلة)، **ولا تعريفٌ بلا نادٍ**
-    (`worst_case_cost` أُزيل حين صار القرارُ بالسقف) — ويُسجَّل لكلّ سؤالٍ ما حُوكم به
-    (`next_ceiling_usd`) وأعلى ما رُئي (`cap_seen_usd`) وكلفتُه (`cost_usd`).
+def test_the_loop_decides_by_the_billed_spend_and_records_it():
+    """**توصيلٌ لا تعريف:** أن تُستهلك `cap_verdict` في الحلقة نفسِها (`run_questions` · بالـAST)،
+    **وألّا يبقى التقديرُ الكاذبُ** (`cost_rate_per_s` على المهلة)، **ولا تعريفٌ بلا نادٍ**،
+    **ولا حجزٌ استباقيٌّ** (`next_question_ceiling` · `bound_at_stop` · `cap_bound_usd` أُزيلت في
+    R117-4) — ويُسجَّل لكلّ سؤالٍ ما حُوكم به (`spent_before_usd`/`spent_after_usd`) وكلفتُه.
     """
     import ast
 
     src = ROOT / "tools" / "eval_questions.py"
     text = src.read_text(encoding="utf-8")
     for gone, why in (("cost_rate_per_s", "معدّلُ الكلفة لكلّ ثانية على المهلة"),
-                      ("worst_case_cost", "تعريفٌ لم يبقَ له نادٍ بعد أن صار القرارُ بالسقف")):
+                      ("worst_case_cost", "تعريفٌ لم يبقَ له نادٍ"),
+                      ('"anticipatory"', "الفرعُ الاستباقيُّ أُزيل بقرار 184500 وأُقفل في R117-4"),
+                      ('"cap_bound_usd"', "حقلٌ كان يُسجَّل كأنّه حدٌّ ولا يحكم (R117-4)"),
+                      ("next_question_ceiling", "الدالّةُ التي كانت تبني الحجزَ الاستباقيّ")):
         assert gone not in text, f"{gone} باقٍ ({why})"
+    # **والسحبُ يُروى ولا يُمحى:** الاسمان يبقيان في **نصّ التوثيق** حيث يُشرح سببُ إزالتهما
+    for told in ("anticipatory", "cap_bound_usd"):
+        assert told in text, f"أثرُ السحب ({told}) مُحي ⇒ صار السجلُّ يقول إنّه لم يكن"
+    for gone in ("next_question_ceiling", "bound_at_stop"):
+        assert gone not in (ROOT / "tools" / "expected_coverage.py").read_text(encoding="utf-8"), \
+            f"{gone} باقٍ في أداة التغطية — فهي تُعيد تشغيل القانون فيجب أن تطابقه (R117-4)"
 
     fn = next(n for n in ast.parse(text).body
               if isinstance(n, ast.FunctionDef) and n.name == "run_questions")
     called = {getattr(c.func, "id", "") for c in ast.walk(fn) if isinstance(c, ast.Call)}
-    assert {"next_question_ceiling", "cap_verdict"} <= called, sorted(c for c in called if c)
+    assert "cap_verdict" in called, sorted(c for c in called if c)
     names = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)}
     assert "hi_cost" not in names, "التقديرُ القديم (أعلى مُلاحَظ وحدَه) عاد إلى الحلقة"
 
-    for field in ('"cost_by_tokens_usd"', '"spent_before_usd"', '"cap_price_usd"',
-                  '"cap_price_source"', '"cap_bound_usd"'):
+    for field in ('"cost_by_tokens_usd"', '"spent_before_usd"', '"spent_after_usd"',
+                  '"cap_price_usd"', '"cap_price_source"'):
         assert field in text, f"{field} غيرُ مسجَّل"
     # **وبلا تكرار (R112-4):** `next_ceiling_usd` كان نسخةً ثانيةً لحقلٍ واحد باسمٍ مضلِّل
     # (يُحسب من الوسائط نفسِها في الدورة نفسِها) ⇒ أُزيل، **والدليلُ يحمل ما حُوكم به فعلًا**.

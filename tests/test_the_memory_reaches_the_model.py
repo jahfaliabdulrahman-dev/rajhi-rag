@@ -195,16 +195,30 @@ def test_the_model_is_asked_the_question_it_was_given(monkeypatch) -> None:
 
 
 def test_the_whole_chain_forwards_the_two_arguments() -> None:
-    """**والسلسلةُ تمرّر (AST):** `answer_question` تُعلن المُفتاحَ والنطاق **وتمرّرهما** إلى `_answer_one`."""
+    """**والسلسلةُ تمرّر (AST):** `answer_question` (الغلافُ الذي يُسمّي رفضَ المزوّد) تُعلن
+    المُفتاحَ والنطاق **وتُمرّرهما** إلى `_answer_question`، وهي تُمرّرهما إلى `_answer_one`.
+    **و(‏R117-2) عددُ صفحات المستند يمرّ في السلسلة نفسِها** — فحاجزُ النطاق لا يُصدق بلا مُدخَل.
+    """
     tree = ast.parse(QA_SRC.read_text(encoding="utf-8"))
-    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "answer_question")
-    names = {a.arg for a in fn.args.args}
-    assert {"thread_id", "scope"} <= names, f"answer_question لا تُعلنهما: {sorted(names)}"
-    calls = [n for n in ast.walk(fn) if isinstance(n, ast.Call)
-             and getattr(n.func, "id", "") == "_answer_one"]
-    assert calls, "لا نداءَ لـ`_answer_one` — السلسلةُ انقطعت"
-    kw = set().union(*({k.arg for k in c.keywords} for c in calls))
-    assert {"thread_id", "scope"} <= kw, f"السلسلةُ لا تمرّرهما: {sorted(kw)}"
+
+    def _fn(name):
+        return next(n for n in tree.body
+                    if isinstance(n, ast.FunctionDef) and n.name == name)
+
+    def _kwargs_into(caller, callee: str) -> set:
+        calls = [n for n in ast.walk(caller) if isinstance(n, ast.Call)
+                 and getattr(n.func, "id", "") == callee]
+        assert calls, f"لا نداءَ لـ`{callee}` من `{caller.name}` — السلسلةُ انقطعت"
+        return set().union(*({k.arg for k in c.keywords} for c in calls))
+
+    outer, inner = _fn("answer_question"), _fn("_answer_question")
+    for fn in (outer, inner):
+        names = {a.arg for a in fn.args.args}
+        assert {"thread_id", "scope"} <= names, f"{fn.name} لا تُعلنهما: {sorted(names)}"
+    assert {"thread_id", "scope", "n_pages"} <= _kwargs_into(outer, "_answer_question"), \
+        "الغلافُ لا يُمرّر المفتاحَ والنطاق وعددَ الصفحات"
+    assert {"thread_id", "scope"} <= _kwargs_into(inner, "_answer_one"), \
+        "`_answer_question` لا تُمرّرهما إلى `_answer_one`"
 
 
 def test_the_questions_chunks_reach_the_model_and_not_the_human_turn() -> None:

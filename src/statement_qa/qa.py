@@ -210,10 +210,15 @@ def effective_model(model_name: str | None = None) -> str:
 
 #: **حدُّ سعر المزوّد المُرسَل مع كلّ طلب** (بالدولار لكلّ مليون رمز · `provider.max_price`).
 #: **والقيمةُ مُعلَنةٌ بسببها** (قرار 20261014-184500 §٢: «يُطبع كم مضيفًا تحتها»): قِيس من قائمة
-#: المضيفين العامّة في 2026-10-14 أنّ **٣٣ مضيفًا** يخدمون النموذج، المدخلُ بين **$0.0342** و**$0.225**
-#: للمليون والمخرجُ بين **$0.145** و**$1.60** ⇒ **$0.12/$0.60 يُبقي الأغلبيّةَ تحت الحدّ**، ويطبع
-#: `tools/eval_questions.py` العدَّ الحيّ عند كلّ جولة. ومن لم يبقَ له مضيفٌ تحت الحدّ **يُفشَل طلبُه
-#: ظاهرًا** بدل أن يُدفَع أكثر — وهذا هو الضمان (حدُّ المزوّد لا حاجزٌ يتنبّأ).
+#: المضيفين العامّة في 2026-10-14 أنّ **٣٣ مضيفًا** يخدمون النموذج، المدخلُ بين **$0.036** و**$0.225**
+#: للمليون والمخرجُ بين **$0.145** و**$1.60** ⇒ **و$0.12/$0.60 يُبقي ١٣ منهم تحت الحدّ (٣٩٪)**،
+#: **و`tools/eval_questions.py` يطبع العدَّ الحيّ عند كلّ جولة** (الأمرُ الذي أنتج الرقم:
+#: `hosts_under(effective_model(None), {"prompt":0.12,"completion":0.60})` ⇒ 13 من 33).
+#: **وسُحِب «الأغلبيّة» من هذا التعليق في R117-5 (مراجعة ١١٧):** كان يقول «يُبقي الأغلبيّةَ تحت
+#: الحدّ» والمقيسُ **١٣ من ٣٣ = ٣٩٪** ⇒ فالقيمةُ تُعلَن بعددها لا بوصفٍ عامّ، والرقمُ المنشور
+#: في التقرير هو ما يُقرأ من `hosts_under` لحظةَ الجولة لا ما في هذا السطر.
+#: ومن لم يبقَ له مضيفٌ تحت الحدّ **يُفشَل طلبُه ظاهرًا** بدل أن يُدفَع أكثر — وهذا هو الضمان
+#: (حدُّ المزوّد لا حاجزٌ يتنبّأ).
 PROVIDER_MAX_PRICE = {"prompt": 0.12, "completion": 0.60}
 
 
@@ -235,12 +240,17 @@ def build_llm(model_name: str | None = None, *, callbacks: list | None = None,
     # **حدُّ السعر يُرسَل مع كلّ طلب** (`provider.max_price` · قرار 20261014-184500 §٢): لا يُشترى
     # نداءٌ من مضيفٍ أغلى منه ⇒ **الضمانُ من المزوّد لا من حاجزٍ يتنبّأ**، وطلبٌ لا مضيفَ تحت حدّه
     # **يفشل ظاهرًا** (سلوكُ OpenRouter الموثّق) بدل أن يُدفَع أكثر.
+    # **و`extra_body` هي الخانةُ التي تصل** (R117-1 · مراجعة ١١٧ · P1): كان الحدُّ يُمرَّر في
+    # `model_kwargs`، وهي بنصّ المكتبة «معاملاتٌ صالحةٌ لِنداء `create`» ⇒ فتُفكّ وسائطَ مسمّاةً في
+    # `Completions.create()` التي لا تعرف `provider` ⇒ **`TypeError` قبل أيّ طلب**، وقِيس: صفرُ طلبٍ
+    # يصل الخادمَ المُقلَّد، بينما `extra_body` حملت الحدَّ في طلبَي الوكيل (الردُّ وردُّ الأداة).
+    # وقاعدةُ المكتبة نصًّا: «Always use `extra_body` for custom parameters, **not** `model_kwargs`.»
     body = {"provider": {"max_price": dict(max_price or PROVIDER_MAX_PRICE)}}
     return ChatOpenAI(
         model=model,
         base_url="https://openrouter.ai/api/v1",
         api_key=key,
-        model_kwargs=body,
+        extra_body=body,
         temperature=0,
         # **مهلةٌ حقيقيّةٌ على الطلب نفسه، وإعادةُ محاولةٍ واحدة** (R109-1): كان الطلبُ بلا مهلة
         # ⇒ فسؤالٌ عالقٌ ينفق إلى ما لا نهاية. والحدُّ يُناديها المكتبةُ فلا يُبنى بديلٌ يدويّ.
@@ -699,6 +709,19 @@ def split_compound(question: str) -> list[str]:
     interrogative word on BOTH sides of a separator keeps the split honest.
     Measured case F: one half existed in the statement and one did not, and the
     compound question was answered from prose without a single tool call.
+
+    **R105-5 · القياسُ بلا كلفةٍ وقع قبل أيّ حذف (مراجعة ١١٧ · ٢٠٢٦-١٠-١٤):** قُرِئت الجولةُ
+    المحفوظةُ الأخيرة (`answers-r108-03.json`) والحزمةُ، **بلا نداءِ نموذج**:
+    - `split_compound` يفصل **٥ من ٥٠ سؤالًا** (`chn-01..04` · `cit-02`) — والباقي لا يُمَسّ.
+    - **والخمسةُ كلُّها صحيحةٌ في تلك الجولة (٥/٥)**، وأربعتُها (عائلةُ السلسلة) يشترط مصحِّحُها
+      **النصفَين**: نفيًا صريحًا **و** ذكرَ الفرق.
+    - **والأثرُ يشهد أنّ الفصلَ هو ما أسند النصفين:** كلُّ سؤالِ سلسلةٍ استدعى `page_rows`
+      **مرّتين** (نداءً لكلّ نصف) ⇒ فالنصفُ الثاني «ما الفرق؟» لم يُترك للحظّ.
+    - **وثمنُه مقيس:** الردودُ المشهودة ٣ · ٣ · ٣ · ٣ · ٦ (وسيط ٣) مقابل **وسيط ٢ وأقصى ٢**
+      للأسئلة المفردة ⇒ **+٨ ردودٍ** على الخمسة (≈$0.006 بسعر الردّ المقيس $0.000734).
+    **ولذلك لا يُحذف ولا يُستبدل في هذه الجولة:** الحذفُ وتغييرُ «تمرير النصف الأول سياقًا»
+    **تغييران في المسار المقيس** لا يقرّرهما قياسٌ بلا كلفة — ويُقاسان بتجربة ذراعين مدفوعة
+    (~٢ سنت) تُسجَّل بندًا تاليًا. **وقرارُ الكلفة للمالك.**
     """
     q = (question or "").strip()
     if not q:
@@ -725,15 +748,19 @@ def needs_tools(question: str) -> bool:
     return any(m in (question or "") for m in _NUMERIC_HINT)
 
 
-def _data_facts(rows) -> tuple[set, int | None, frozenset]:
-    """What the statement itself proves: its years, its last page, its amounts.
+def _data_facts(rows) -> tuple[set, int | None, frozenset, set]:
+    """What the statement itself proves: its years, its last page, its amounts,
+    **and which pages actually produced rows** (R115-7).
 
     Computed once per question from the rows the caller passes. Empty input
     returns empties, and the gate then stays open — it may only refuse what it
-    can prove.
+    can prove. `pages_read` is what lets the gate tell «هذه الصفحةُ ليست في
+    الكشف» apart from «هي فيه ولم تُقرأ سطورُها» — and from «فيها سطورٌ لم تُقرأ
+    داخل المدى». ولا يُشتقّ عددُ صفحات المستند من الصفوف (لا يعرفه): يُمرَّر.
     """
     years: set[int] = set()
     max_page: int | None = None
+    pages_read: set[int] = set()
     amounts: set[Decimal] = set()
     from statement_qa.ordering import parse_gregorian
 
@@ -744,6 +771,7 @@ def _data_facts(rows) -> tuple[set, int | None, frozenset]:
         page = r.get("page")
         if isinstance(page, int):
             max_page = page if max_page is None else max(max_page, page)
+            pages_read.add(page)
         for value in (r.get("movement"), r.get("balance")):
             if value is None:
                 continue
@@ -751,18 +779,44 @@ def _data_facts(rows) -> tuple[set, int | None, frozenset]:
                 amounts.add(Decimal(str(value)).quantize(Decimal("0.01")))
             except Exception:  # noqa: BLE001
                 continue
-    return years, max_page, frozenset(amounts)
+    return years, max_page, frozenset(amounts), pages_read
 
 
 def answer_question(store, question: str, rows=None, chunks=None,
                     llm=None, k: int = 4, footers=None, thread_id: str | None = None,
-                    scope: str = "") -> QAResult:
+                    scope: str = "", n_pages: int | None = None) -> QAResult:
     """Agent-with-tools answer when rows exist; strict RAG fallback otherwise.
 
     `chunks` (optional): the run's chunks — used ONLY to name the last page for
     closing-balance questions (see pages_for).
     `footers` (optional): the page's **printed** footer totals + verdict — the
-    external referee, made answerable (R77). Absent ⇒ the tool says so."""
+    external referee, made answerable (R77). Absent ⇒ the tool says so.
+    `n_pages` (optional · **R115-7/R117-2**): عددُ صفحات المستند — يمرّره من **يعرفه**
+    (التطبيقُ من الملفّ، والقياسُ من `build_rows`) فلا يُدّعى عن الكشف ما لم يُقرأ.
+
+    **ورفضُ المزوّد (٤٠٢/٤٠٣/٥٠٣) حالةٌ مُسمّاةٌ في النتيجة لا استثناءٌ يصعد (R117-3/R117-8):**
+    كان يصعد إلى Gradio بلا رسالةٍ عربيّة، وإلى القياس نصًّا يُسجَّل جوابًا خاطئًا ⇒ **واحدٌ من
+    اثنين لا يقرأ نوعَه**. والقراءةُ الآن من `provider_errors` (موضعٌ واحد يقرأ `status_code`
+    و`body`)، والمستهلكانِ (الواجهةُ والقياس) يقرآن الحالةَ نفسَها.
+    """
+    from statement_qa import provider_errors
+
+    try:
+        return _answer_question(store, question, rows=rows, chunks=chunks, llm=llm, k=k,
+                                footers=footers, thread_id=thread_id, scope=scope,
+                                n_pages=n_pages)
+    except Exception as exc:                      # noqa: BLE001 — يُصنَّف ثمّ يُعاد رفعُه إن لم يُعرف
+        kind = provider_errors.classify(exc)
+        if kind is None:
+            raise
+        return QAResult(answer=provider_errors.answer_text(kind, exc), sources=[],
+                        used_row_nos=[], scope=kind)
+
+
+def _answer_question(store, question: str, rows=None, chunks=None,
+                     llm=None, k: int = 4, footers=None, thread_id: str | None = None,
+                     scope: str = "", n_pages: int | None = None) -> QAResult:
+    """جسمُ `answer_question` — مفصولًا ليُغلَّف بصنفِ رفض المزوّد في موضعٍ واحد."""
     # THE GATE RUNS BEFORE THE MODEL. Three measured defects (Gate 4) came from
     # handing a model with tools a question whose premise sits outside the
     # document: it refused once and answered the same question the next time.
@@ -770,12 +824,14 @@ def answer_question(store, question: str, rows=None, chunks=None,
     from statement_qa.scope import classify
 
     if rows:
-        _years, _max_page, _amounts = _data_facts(rows)
-        gate = classify(question, _years, _max_page, _amounts)
+        _years, _max_page, _amounts, _pages_read = _data_facts(rows)
+        gate = classify(question, _years, _max_page, _amounts,
+                        n_pages=n_pages, pages_read=_pages_read)
         if gate.kind != "in_scope":
             return QAResult(answer=gate.answer, sources=[], used_row_nos=[],
                             refused=gate.kind == "out_of_scope",
                             scope=gate.kind)
+
 
     llm = llm or build_llm()
 
@@ -897,7 +953,13 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
             used, tools_used = [], []
             answer = ("لم أصل إلى جوابٍ ضمن حدّ الخطوات المسموح لهذا السؤال، "
                       "ولن أعرض رقمًا لم يُحسَب — أعد صياغة السؤال أو جزّئه.")
-        except Exception:
+        except Exception as exc:
+            # **ورفضُ المزوّد لا يُتابَع بنداءٍ ثانٍ يفشل بنفسه** (R117-3): كان السقوطُ إلى
+            # `_answer_plain` يشتري محاولةً أخرى تُرفض بالخطأ نفسه، قبل أن يُسمّى الصنفُ في
+            # `answer_question` (موضعٌ واحد). فيُعاد رفعُه هنا كما هو ليُصنَّف هناك.
+            from statement_qa import provider_errors
+            if provider_errors.classify(exc) is not None:
+                raise
             # The SILENT part was the problem, not the fallback itself: a
             # provider timeout used to hand back a prose answer with an empty
             # trace and no hint that nothing had been computed, while the

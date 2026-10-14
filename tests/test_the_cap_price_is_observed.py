@@ -75,18 +75,21 @@ def test_a_window_carries_its_own_tokens_by_the_published_price():
                          PRICE_IN_PER_M, PRICE_OUT_PER_M)[0] == pytest.approx(
         (5200 * PRICE_IN_PER_M + 240 * PRICE_OUT_PER_M) / 1e6)
 
-def test_the_ceiling_is_positive_from_the_second_question_at_the_latest():
-    """**القبولُ المنصوص:** بسعرٍ مشهودٍ يصير سقفُ السؤال التالي موجبًا — لا صفرًا كما قِيس."""
+def test_the_price_is_positive_and_the_advisory_ceiling_is_not_a_verdict():
+    """**القبولُ المنصوص:** بسعرٍ مشهودٍ يصير سعرُ النداء موجبًا (لا صفرًا كما قِيس)،
+    و**سقفُ السؤال البنيويُّ رقمٌ استشاريّ لا حكم** (أُزيل الفرعُ الاستباقيُّ في R117-4)."""
     m = _eval_module()
     w = m.billed_window([(5200, 240, 0.0009)], PRICE_IN_PER_M, PRICE_OUT_PER_M, (0.225, 1.60))
-    obs = (w[0], w[2])                     # (كلفةٌ محاسَبة, ردودٌ) — زوجُ `next_question_ceiling`
-    bound = m.next_question_ceiling(SIMPLE, [obs])
+    obs = (w[0], w[2])                     # (كلفةٌ محاسَبة, ردودٌ) — المقسومُ عليه في `per_call_cost`
     from statement_qa.qa import question_ceiling
 
-    assert bound > 0, "سقفٌ صفرٌ بعد نافذةٍ مشهودة ⇒ الحاجزُ ما زال أعمى"
-    assert bound == pytest.approx(m.per_call_cost([obs]) * question_ceiling(SIMPLE) * m.PER_CALL_MARGIN)
+    assert m.per_call_cost([obs]) > 0, "سعرٌ صفرٌ بعد نافذةٍ مشهودة ⇒ الحاجزُ ما زال أعمى"
+    advisory = m.per_call_cost([obs]) * question_ceiling(SIMPLE) * m.PER_CALL_MARGIN
+    assert advisory > 0
+    # **والنقيض:** مُنفَقٌ دون السقف ⇒ «go» ولو كان الرقمُ الاستشاريُّ فوقه (لا حجزَ استباقيًّا)
+    assert m.cap_verdict(0.01, 0.02) == "go"
     # وبلا مشاهدةٍ يبقى الحدُّ المُعلَن: صفر (لا سندَ يُضرب) — لم يتغيّر
-    assert m.next_question_ceiling(SIMPLE, []) == 0.0
+    assert m.per_call_cost([]) == 0.0
 
 
 def test_a_window_without_tokens_is_not_recorded_as_a_zero_price():
@@ -106,14 +109,19 @@ def test_a_window_without_tokens_is_not_recorded_as_a_zero_price():
 
 
 # ── ② العطبُ يُعاد إنتاجه بالأرقام المقيسة (فلا يُغلق بادّعاء) ────────────────────────────────
-def test_the_measured_meter_windows_reproduce_an_eighteen_cent_bound():
-    """**بالعدّاد وحدَه:** الكتلةُ على سؤالٍ بأداةٍ واحدة ⇒ `0.003366 × 36 × 1.5 = $0.18176`."""
+def test_the_measured_meter_windows_reproduce_the_price_the_old_reservation_used():
+    """**الواقعةُ بأرقامها:** الكتلةُ على سؤالٍ بأداةٍ واحدة ⇒ `per_call = 0.003366`، وحدُّ السؤال
+    البنيويُّ ٣٦ نداءً × الهامش = **$0.18176 أكبرُ من السقف كلِّه** — وهو الرقمُ الذي كان يُوقف
+    الجولةَ في الحجز الاستباقيّ. **ولم يبقَ له حكم:** `cap_verdict` تُقرأ بالمُنفَق المحاسَب وحدَه
+    ⇒ فمُنفَقُ ١٫٧ سنت مقابل سقف ١٠ سنتات ⇒ **«go»**، ولا يُحجز استباقيًّا (R117-4).
+    """
     m = _eval_module()
     assert m.per_call_cost(MEASURED_WINDOWS) == pytest.approx(0.003366, abs=5e-7)
-    bound = m.next_question_ceiling(SIMPLE, MEASURED_WINDOWS)
-    assert bound == pytest.approx(0.18176, abs=5e-4)
-    assert bound > MEASURED_CAP, "السقفُ ما زال قابلًا للمرور ⇒ الواقعةُ لم تُعَد إنتاجها"
-    assert m.cap_verdict(MEASURED_SPENT_BEFORE_14, MEASURED_CAP, bound) == "anticipatory"
+    advisory = m.per_call_cost(MEASURED_WINDOWS) * 36 * m.PER_CALL_MARGIN
+    assert advisory == pytest.approx(0.18176, abs=5e-4)
+    assert advisory > MEASURED_CAP, "السقفُ ما زال قابلًا للمرور ⇒ الواقعةُ لم تُعَد إنتاجها"
+    assert m.cap_verdict(MEASURED_SPENT_BEFORE_14, MEASURED_CAP) == "go", \
+        "الرقمُ الاستشاريُّ يحكم من جديد ⇒ الحجزُ الاستباقيُّ عاد (R117-4)"
 
 
 # ── ③ التغطيةُ محسوبةٌ قبل الصرف (R112-2) ────────────────────────────────────────────────────
@@ -124,18 +132,23 @@ def _questions_texts() -> list[dict]:
     return spec["questions"]
 
 
-def test_the_fifty_does_not_stop_at_fourteen_when_the_price_is_observed():
-    """**القبولُ المنصوص:** بسعرٍ مشهود وبسقف المالك ($0.15) تُغطّي الجولةُ ٥٠/٥٠،
-    وبسقف العشرة لا تتوقّف عند ١٤ (وهو ما توقّف عنده العدّاد)."""
+def test_the_coverage_tool_mirrors_the_law_it_predicts():
+    """**أداةُ التغطية تُعيد تشغيل القانون نفسِه:** بسقف العشرة تُغطّى الحزمةُ كاملةً الآن
+    (مجموعُ الصرف المقيس $0.0675 < $0.10)، وبسقفٍ أدنى من مجموعها **يتوقّف العملُ عند المُنفَق
+    المُحاسَب** لا عند تقدير — ولا حجزَ استباقيًّا (R117-4 · مراجعة ١١٧).
+    """
     from tools import expected_coverage as ec
 
-    price = 0.000633      # المُنفَق المستقرّ ($0.01772722) ÷ ٢٨ نداءً على الأقلّ — سعرُ الجولة المقيس
+    price = 0.000633      # سعرُ النداء المشهود (المُنفَق المستقرّ ÷ نداءاته — R112-1)
     qs = _questions_texts()
 
     at_15 = ec.simulate(qs, cap=0.15, price_per_call=price)
     assert at_15["coverage"] == len(qs), at_15
     at_10 = ec.simulate(qs, cap=0.10, price_per_call=price)
-    assert at_10["stopped_before"] > 14, f"توقّفَ عند ١٤ أو قبله: {at_10}"
+    assert at_10["coverage"] == len(qs), f"السقفُ توقّف بلا أن يبلغه الصرفُ: {at_10}"
+    low = ec.simulate(qs, cap=0.02, price_per_call=price)
+    assert low["stopped_before"] and low["verdict"] == "at-cap", low
+    assert low["spent"] >= 0.02 - 0.005, f"التوقّفُ ليس عند الصرف: {low}"
 
 
 def test_the_coverage_tool_refuses_a_cap_that_cannot_carry_the_widest_question():
@@ -154,7 +167,7 @@ def test_the_evidence_carries_the_price_the_law_used_and_the_spend_before_it():
     m = _eval_module()
     ev = m.cap_evidence(spent_before=0.0170, spent_after=0.0237, cost_here=0.006732,
                         cost_by_tokens=0.004200, cost_source="provider-cost",
-                        bound=0.075063, price=0.001061, source="observed-billed",
+                        price=0.001061, source="observed-billed",
                         meter_delta=0.006732, tokens=0, tools=1, replies=2)
     assert ev["cost_billed_usd"] == pytest.approx(0.006732)      # **حدُّ ما يُحاسَب عليه**
     assert ev["cost_by_tokens_usd"] == pytest.approx(0.004200)   # **حدٌّ أدنى للعرض** (كان يُظنُّ أعلى)
@@ -164,7 +177,7 @@ def test_the_evidence_carries_the_price_the_law_used_and_the_spend_before_it():
     assert ev["spent_before_usd"] == pytest.approx(0.0170)
     assert ev["spent_after_usd"] == pytest.approx(0.0237)
     assert ev["meter_delta_usd"] == pytest.approx(0.006732)
-    assert ev["cap_bound_usd"] == pytest.approx(0.075063)
+    assert "cap_bound_usd" not in ev, "الحقلُ الذي كان يُسجَّل كأنّه حدّ عاد (R117-4)"
     # **والمقسومُ يُنشر معه:** الردودُ عددًا، و«الأدوات + ١» **حدٌّ أعلى للنداءات** لا «أرضية» (R115-5)
     assert ev["replies_observed"] == 2 and ev["tools_plus_one"] == 2 and ev["tools_in_trace"] == 1
     assert "calls_floor" not in ev, "الاسمُ القديم (أرضية) عاد — وهو حدٌّ أعلى للنداءات لا أرضية"
@@ -178,7 +191,7 @@ def test_the_loop_reads_the_observed_price_and_records_it():
     fn = next(n for n in ast.parse(text).body
               if isinstance(n, ast.FunctionDef) and n.name == "run_questions")
     called = {getattr(c.func, "id", "") for c in ast.walk(fn) if isinstance(c, ast.Call)}
-    assert {"next_question_ceiling", "cap_verdict", "billed_window", "cap_evidence",
+    assert {"cap_verdict", "billed_window", "cap_evidence",
             "cost_log", "host_max_price"} <= called, sorted(called)
     # والاستيرادُ الثقيلُ ليس على مستوى الوحدة (يُقاس: أوّلُ 120 سطرًا بلا langchain)
     head = "\n".join(text.splitlines()[:120])

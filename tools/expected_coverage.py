@@ -8,7 +8,9 @@
 ## ما تفعله بالحرف
 
 تُعيد تشغيل **القانون نفسه** الذي تحكم به الحلقةُ المدفوعة — لا نسخةً ثانيةً منه:
-`question_ceiling` من التطبيق (`statement_qa.qa`) · `next_question_ceiling` و`cap_verdict` من `tools/eval_questions`.
+`cap_verdict` من `tools/eval_questions` (وحدَه: **المُنفَقُ المُحاسَب مقابل السقف** — والحجزُ
+الاستباقيُّ أُزيل في R117-4)، و`question_ceiling` من التطبيق (`statement_qa.qa`) للرقم **الاستشاريّ**
+الذي تقيسه بوّابةُ `check_cap_can_carry` (هل يحمل السقفُ أوسعَ سؤال أصلًا).
 وتُغذّى بعددِ نداءاتٍ لكلّ سؤال **من آخر جولةٍ محفوظة** (أرضيةٌ: أثرُه + ١)
 وبسعرِ نداءٍ **مشهود** (من الجولة السابقة أو من سطر الأمر) — **وبلا أيّ نداءِ نموذج ⇒ $0**.
 
@@ -32,7 +34,6 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from tools.eval_questions import (  # noqa: E402
     PER_CALL_MARGIN,
     cap_verdict,
-    next_question_ceiling,
 )
 
 QUESTIONS = pathlib.Path(__file__).resolve().parent.parent / "docs" / "eval_pack" / "questions.json"
@@ -61,32 +62,26 @@ def calls_from_answers(path: pathlib.Path) -> tuple[dict[str, int], str]:
 
 
 def simulate(questions: list[dict], *, cap: float, price_per_call: float,
-             calls_by_id: dict[str, int] | None = None, default_calls: int = 2,
-             margin: float = PER_CALL_MARGIN) -> dict:
+             calls_by_id: dict[str, int] | None = None, default_calls: int = 2) -> dict:
     """إعادةُ تشغيل القانون بلا كلفة: أين يقف، وما التغطيةُ، وما الصرفُ المتوقَّع.
 
-    **والنمطُ مطابقٌ للحلقة:** سقفُ السؤال القادم = `next_question_ceiling` (حدُّ البنية × سعرِ نداءٍ
-    مشهود × الهامش)، والقرارُ = `cap_verdict`، والصرفُ يتراكم بكلفة كلّ سؤال.
+    **والنمطُ مطابقٌ للحلقة بعد R117-4:** القرارُ = `cap_verdict(spent, cap)` **وحدَه** — لا حجزَ
+    استباقيًّا بسقف السؤال القادم (أُزيل: كان يعيد صنعَ ما يقدّمه المزوّد)، والصرفُ يتراكم بكلفة
+    كلّ سؤال ⇒ فيتوقّف القانونُ عند **بلوغ المُنفَق السقف** قبل السؤال التالي.
     """
     calls_by_id = calls_by_id or {}
     spent = 0.0
-    observations: list[tuple[float, int]] = []
     for i, q in enumerate(questions, 1):
-        bound = next_question_ceiling(q["q"], observations, margin)
-        verdict = cap_verdict(spent, cap, bound)
-        if verdict in ("at-cap", "anticipatory"):
+        verdict = cap_verdict(spent, cap)
+        if verdict == "at-cap":
             return {"stopped_before": i, "coverage": i - 1, "spent": round(spent, 6),
-                    "cap": cap, "price_per_call": price_per_call, "bound_at_stop": round(bound, 6),
+                    "cap": cap, "price_per_call": price_per_call,
                     "verdict": verdict, "stopped_at": q["id"],
                     "widest_ceiling": max(question_ceiling(x["q"]) for x in questions)}
         calls = max(1, int(calls_by_id.get(q["id"], default_calls)))
-        q_cost = calls * price_per_call
-        spent += q_cost
-        # **والزوجُ (كلفة, ردود)** — والردودُ هي المقسومُ عليها في `per_call_cost` (R113-1): كانت
-        # الأرضيةَ «الأدوات + ١» وهي تُعلّي السعرَ، وتنفجر في سؤالٍ انتهت مهلتُه.
-        observations.append((q_cost, calls))
+        spent += calls * price_per_call
     return {"stopped_before": None, "coverage": len(questions), "spent": round(spent, 6),
-            "cap": cap, "price_per_call": price_per_call, "bound_at_stop": None,
+            "cap": cap, "price_per_call": price_per_call,
             "verdict": "covered", "stopped_at": None,
             "widest_ceiling": max(question_ceiling(x["q"]) for x in questions)}
 
@@ -108,15 +103,14 @@ def check_cap_can_carry(questions: list[dict], *, cap: float, price_per_call: fl
 
 
 def smallest_cap_for(questions: list[dict], *, price_per_call: float,
-                     calls_by_id: dict[str, int] | None = None, default_calls: int = 2,
-                     margin: float = PER_CALL_MARGIN) -> float:
+                     calls_by_id: dict[str, int] | None = None, default_calls: int = 2) -> float:
     """أصغرُ سقفٍ يغطّي الحزمةَ كاملة — بالبحث لا بالتقدير (والدالّةُ رتيبةٌ في السقف)."""
     lo = price_per_call
     hi = max(1.0, price_per_call * 100)
     while hi - lo > 1e-6:
         mid = (lo + hi) / 2
         if simulate(questions, cap=mid, price_per_call=price_per_call, calls_by_id=calls_by_id,
-                    default_calls=default_calls, margin=margin)["coverage"] == len(questions):
+                    default_calls=default_calls)["coverage"] == len(questions):
             hi = mid
         else:
             lo = mid
@@ -153,7 +147,7 @@ def main(argv=None) -> int:
               "فالكلفةُ أدنى من الواقع والتغطيةُ متفائلةٌ بالنسبة نفسِها (R113-1).")
     print(f"**التغطيةُ المتوقَّعة: {sim['coverage']} من {len(qs)}**"
           + (f" · التوقّفُ قبل السؤال {sim['stopped_before']} ({sim['stopped_at']})"
-             f" بحكم «{sim['verdict']}» وسقفِ سؤالٍ ${sim['bound_at_stop']:.4f}"
+             f" بحكم «{sim['verdict']}» عند مُنفَقٍ ${sim['spent']:.4f}"
              if sim["stopped_before"] else " · ولا توقّف"))
     print(f"الصرفُ المتوقَّع: ${sim['spent']:.4f} من ${a.cap:.4f}")
     print(f"أوسعُ سؤال: {sim['widest_ceiling']} نداءً")

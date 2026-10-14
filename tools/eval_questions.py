@@ -29,7 +29,7 @@ import time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from tools import eval_stamp, pack_io  # noqa: E402
-from tools.spend import at_or_over, would_exceed  # noqa: E402
+from tools.spend import at_or_over  # noqa: E402
 
 ARABIC_INDIC = "٠١٢٣٤٥٦٧٨٩"
 PERSIAN = "۰۱۲۳۴۵۶۷۸۹"
@@ -638,37 +638,61 @@ def hosts_under(model_id: str, maxp: dict) -> int:
                if pin <= maxp["prompt"] and pout <= maxp["completion"])
 
 
-def last_billed_run() -> tuple[float, int, int] | None:
-    """(المُنفَقُ المُحاسَب, عددُ الردود, عددُ الأسئلة) من **آخر جولةٍ محفوظةٍ تحمل الحقل**.
+def last_billed_run() -> dict | None:
+    """المُنفَقُ المُحاسَب لآخر جولةٍ محفوظة: `{file, field, spent, replies, questions}`.
 
-    **للعلم لا للحكم** (قرار 20261014-184500 §٢): يُقرأ من ملفّات الأجوبة (`cost_billed_usd` ·
-    `replies_observed`) **ولا يُقدَّر بلا ملفّ** ⇒ فالتقديرُ المنشور **من قياسٍ سابق** لا من رأي.
+    **للعلم لا للحكم** (قرار 20261014-184500 §٢): يُقرأ من ملفّات الأجوبة **ولا يُقدَّر بلا ملفّ**
+    ⇒ فالتقديرُ المنشور **من قياسٍ سابق** لا من رأي. **وفيه ثابتان صارا صريحَين (R117-7):**
+
+    ① **الاختيارُ بأحدث تعديلٍ لا بترتيب الأسماء.** كان `sorted(glob(...))` يختار **آخرَ اسم**
+       في القائمة، وقِيس أنّ `answers-r108.json` يأتي **بعد** `answers-r108-03.json` ترتيبًا
+       وإن كان **أقدمَ منه بالساعات** ⇒ فالتقديرُ يُبنى على جولةٍ ليست السابقة. و`st_mtime` كان
+       **يُحفظ ولا يُقارَن** (يُكتَب في كُلٍّ ثمّ يُقرأ `[1:]` وحدَه).
+    ② **والحقلُ يُسمّى ولا يُفترض:** `cost_billed_usd` مجموعُ كلفة الردود لكلّ سؤال؛ فإن لم تحمله
+       الجولةُ — وكلُّ جولات اليوم لا تحمله (قِيس: **٠ من ٤٣٦ سجلًّا في خمسة ملفّات**) — يُقرأ
+       **أقصى `spent_after_usd`** = المُنفَقُ التراكميّ عند آخر سؤال، **وهو الكميّةُ نفسُها** التي
+       يقارنها القانونُ بالسقف (R115-1) ⇒ فالاسمُ يُعاد مع الرقم ليُقرأ مصدرُه.
+       **وحدُّ الاتّجاه مُعلَن:** في جولاتٍ سبقت R115-1 كان `spent_after_usd` يسعّر **الرموزَ
+       بسعر القائمة** (وهو **حدٌّ أدنى**) لا كلفةَ المزوّد ⇒ فالتقديرُ منها **أدنى من الواقع**
+       (قِيس على `answers-r108-03.json`: أقصاه **$0.042059** = مجموعُ `cost_by_tokens_usd`
+       فيه (0.042058)، والمُنفَقُ المحاسَبُ للجولة نفسِها **$0.067499** ⇒ نقصٌ ≈٣٨٪).
+       **ومن الجولة القادمة يُكتب `cost_billed_usd` في كلّ سجلّ ⇒ التقديرُ يصير حدًّا أعلى مطابقًا.**
     """
-    best: tuple[float, float, int, int] | None = None
-    for f in sorted((pack_io.data_root() / "data" / "eval_pack").glob("answers-r*.json")):
+    best: tuple[float, dict] | None = None
+    for f in (pack_io.data_root() / "data" / "eval_pack").glob("answers-r*.json"):
         try:
             d = json.loads(f.read_text())
+            mtime = f.stat().st_mtime
         except (OSError, ValueError):
             continue
-        rows = [r for r in d.get("results", []) if r.get("cost_billed_usd") is not None]
-        if not rows:
-            continue
-        best = (float(f.stat().st_mtime), sum(float(r["cost_billed_usd"]) for r in rows),
-                sum(int(r.get("replies_observed") or 0) for r in rows), len(rows))
-    return None if best is None else (best[1], best[2], best[3])
+        rows = d.get("results") or []
+        per = [float(r["cost_billed_usd"]) for r in rows if r.get("cost_billed_usd") is not None]
+        if per:
+            spent, field = sum(per), "cost_billed_usd"
+        else:
+            cum = [float(r["spent_after_usd"]) for r in rows if r.get("spent_after_usd") is not None]
+            if not cum:
+                continue
+            spent, field = max(cum), "spent_after_usd"
+        cand = {"file": f.name, "field": field, "spent": spent,
+                "replies": sum(int(r.get("replies_observed") or 0) for r in rows),
+                "questions": len(rows)}
+        if best is None or mtime > best[0]:
+            best = (mtime, cand)
+    return None if best is None else best[1]
 
 
 def simple_estimate(n_questions: int) -> float | None:
     """تقديرٌ بسيطٌ قبل القياس: **صرفُ الجولة السابقة المُحاسَب × (أسئلةُ هذه ÷ أسئلتِها)**.
 
-    **وبيانُه:** الجولةُ السابقةُ أنفقت `total` على `n_prev` سؤالًا ⇒ فنصيبُ السؤال = `total/n_prev`
-    ⇒ والتقديرُ = نصيبُ السؤال × أسئلةُ هذه الجولة. **ولا يُخترع رقمٌ بلا ملفّ** (`None` ⇒ لا سطر).
+    **وبيانُه:** الجولةُ السابقةُ أنفقت `spent` على `questions` سؤالًا ⇒ فنصيبُ السؤال =
+    `spent/questions` ⇒ والتقديرُ = نصيبُ السؤال × أسئلةُ هذه الجولة. **ولا يُخترع رقمٌ بلا ملفّ**
+    (`None` ⇒ لا سطر).
     """
     prev = last_billed_run()
-    if prev is None or not prev[2]:
+    if prev is None or not prev["questions"]:
         return None
-    total, _replies, n_prev = prev
-    return total / n_prev * max(1, n_questions)
+    return prev["spent"] / prev["questions"] * max(1, n_questions)
 
 
 def tokens_in(usage: dict | None) -> int:
@@ -827,15 +851,19 @@ def billed_window(replies: list[tuple[int, int, float | None]], price_in_per_m: 
 
 
 def cap_evidence(*, spent_before: float, spent_after: float, cost_here: float, cost_by_tokens: float,
-                 cost_source: str, bound: float, price: float, source: str, meter_delta: float | None,
+                 cost_source: str, price: float, source: str, meter_delta: float | None,
                  tokens: int, tools: int, replies: int) -> dict:
     """ما حُوكم به لكلّ سؤال — **بلا تكرار**: حقلٌ واحد لكلّ معنى (R112-4).
 
     `cap_price_usd` سعرُ النداء المستعمل · `cap_price_source` مصدرُه · `spent_before_usd`/`spent_after_usd`
     المُنفَقُ التراكميّ **قبل** القرار و**بعده** (من عدّاد المكتبة، فيُقابَل مجموعُ النوافذ بالتراكمي)
-    · `cap_bound_usd` السقفُ الذي قُورن به · `replies_observed` **مقسومُ السعر** (R113-1) ·
-    `calls_floor` أرضيةٌ مُعلَنة (الأدوات + ١) **لم تعد مقسومًا عليها** · و`meter_delta_usd` شاهدُ
-    رصيد الحساب لنفس النافذة (يُنشر ولا يحكم) ⇒ فالقانونُ يُعاد تشغيلُه من الملفّ (شرطُ مراجعة ١١٢).
+    · `replies_observed` **مقسومُ السعر** (R113-1) · `calls_floor` أرضيةٌ مُعلَنة (الأدوات + ١) **لم
+    تعد مقسومًا عليها** · و`meter_delta_usd` شاهدُ رصيد الحساب لنفس النافذة (يُنشر ولا يحكم) ⇒
+    فالقانونُ يُعاد تشغيلُه من الملفّ (شرطُ مراجعة ١١٢).
+
+    **و`cap_bound_usd` أُزيل (R117-4 · مراجعة ١١٧):** كان يُسجَّل **كأنّه حدٌّ** وهو سقفُ سؤالٍ
+    قادمٍ لا يحكم شيئًا بعد إزالة الفرع الاستباقيّ ⇒ فحقلٌ باسمٍ يوهم أسوأُ من غيابه. والقانونُ
+    اليوم: **المُنفَقُ المُحاسَب مقابل السقف** — وهو المُسجَّل في `spent_before_usd`/`spent_after_usd`.
     """
     return {
         "cost_billed_usd": round(cost_here, 6),      # **حدُّ ما يُحاسَب عليه** (المصدرُ الأوّل · R115-1)
@@ -845,7 +873,6 @@ def cap_evidence(*, spent_before: float, spent_after: float, cost_here: float, c
         "spent_after_usd": round(spent_after, 6),
         "cap_price_usd": round(price, 6),
         "cap_price_source": source,
-        "cap_bound_usd": round(bound, 6),
         "tokens_observed": int(tokens),
         "tools_in_trace": int(tools),
         # **`الأدوات + ١` لا «أرضية»:** قِيس أداةٌ في ردٍّ واحد (`num-04`: ردّان و٣ أدوات ⇒ المدخَلُ
@@ -878,42 +905,34 @@ def per_call_cost(pairs: list[tuple[float, int]]) -> float:
     return max(vals) if vals else 0.0
 
 
-
-
 #: **هامشٌ مُعلَن على كلفة النداء الأعلى (R110-1 · وسَببُه تغيّر في R112-1):**
 #: كان سببُه **تأخّرَ عدّاد الحساب ≈١٢٠ ث** (فسؤالٌ يُقاس في ذيله قد لا يحمل كلفتَه كاملةً) — **وقد
 #: سقط هذا السبب**: الرموزُ تُقرأ **لحظيًّا** لكلّ ردّ. **والباقي مُقاس:** سعرُ النداء **يتشتّت داخل
 #: السلسلة** (النداءاتُ اللاحقة تحمل سياقًا أطول)، والقانون يضرب **أعلى** سعرٍ رُئي × هذا الهامش ⇒
 #: فالهامشُ غطاءُ نموٍّ لا تعويضَ تأخّر، **ويُنشر مع كلّ جولة تشتُّتٌ المقيس** (`price_per_call_usd`
 #: لكلّ نافذة في ملفّ الأجوبة ⇒ p50/p95/الأعلى قابلةٌ لإعادة الحساب من الدليل).
+#: **ومستهلكُه اليوم بوّابةُ التغطية** (`tools/expected_coverage.check_cap_can_carry`) — تقديرٌ
+#: استشاريّ **لا حكم**: هل يحمل السقفُ أوسعَ سؤال (وإلّا فهو مسرح). **ولم يبقَ للهامش حكمٌ في الحلقة**
+#: (R117-4: الفرعُ الاستباقيُّ أُزيل).
 PER_CALL_MARGIN = 1.5
 
 
-def next_question_ceiling(question: str, pairs: list[tuple[float, int]],
-                          margin: float = PER_CALL_MARGIN) -> float:
-    """سقفُ السؤال التالي: **حدُّ نداءاته × أعلى كلفةِ نداءٍ مُشاهَدة × الهامش** — حدٌّ أعلى لا وسط.
+def cap_verdict(spent: float | None, cap: float) -> str:
+    """قرارُ الصرف **قبل** طرح السؤال: `"go"` أو `"at-cap"` أو `"unknown"`.
 
-    **والحدُّ مشتقٌّ من بنية المسار** (`statement_qa.qa.question_ceiling`: طرحان لكلّ جزء + الاحتياط)
-    لا من رقمٍ يكتبه أحدٌ بيده في أداة القياس. وبلا عيّنةٍ ⇒ **صفر**: لا سندَ يُضرب، **والثقبُ مُعلَن**
-    (والحدُّ الحقيقيّ في التطبيق يبقى قائمًا).
-    """
-    from statement_qa.qa import question_ceiling
+    دالّةٌ خالصةٌ تحمل القاعدةَ كلَّها (`tools/spend` بالسنّات) ⇒ تُقاس بسمٍّ بلا إنفاق.
 
-    return per_call_cost(pairs) * question_ceiling(question) * margin
-
-
-def cap_verdict(spent: float | None, cap: float, bound: float) -> str:
-    """قرارُ الصرف **قبل** طرح السؤال: `"go"` أو `"at-cap"` أو `"anticipatory"` أو `"unknown"`.
-
-    دالّةٌ خالصةٌ تحمل القاعدةَ كلَّها (`tools/spend` بالسنّات) ⇒ تُقاس بسمٍّ بلا إنفاق:
-    بلوغُ السقف، أو تقديرٌ يُوصِل الصرفَ بعد السؤال فوقه.
+    **والحكمُ على المُنفَق المُحاسَب وحدَه** — **ولا verdictَ استباقيًّا** (قرار 20261014-184500 §٢ ·
+    وقُفل في R117-4 · مراجعة ١١٧): كان الفرعُ `anticipatory` يقارن **سقفَ السؤال القادم** (٧٢ نداءً
+    × أعلى سعر × ١٫٥) — وهو **إعادةُ صنعٍ لما يقدّمه المزوّد** (`provider.max_price`)، وهو ما رفع
+    السقفَ المطلوبَ إلى $0.29. وبقي الفرعُ `pass` **و`cap_bound_usd` يُحسب ويُسجَّل كأنّه حدّ** ⇒
+    فالاسمُ يوهم والرقمُ لا يحكم. **فأُزيل الثلاثة:** الفرعُ، والحقلُ، وحسابُه في الحلقة (وشاهدُه
+    `tools/expected_coverage.py` — يُعيد تشغيل القانون نفسِه بلا كلفة، فطابَقَه بعد الإزالة).
     """
     if spent is None:
-        return "unknown"                     # لا قياسَ ⇒ لا حكم (ويُعلن الفرع التقديريّ المُعلَن)
+        return "unknown"                     # لا قياسَ ⇒ لا حكم
     if at_or_over(spent, cap):
         return "at-cap"
-    if bound and would_exceed(spent + bound, cap):
-        return "anticipatory"
     return "go"
 
 
@@ -1178,12 +1197,44 @@ def rescore(a, qs: list[dict], c: Corpus, pack: dict, spec: dict, rows: list[dic
     return 0
 
 
+def refusal_of(msg: dict, res, kinds) -> str | None:
+    """اسمُ رفض المزوّد — من **الحالة المُسمّاة** في النتيجة، أو من **نوع** الاستثناء.
+
+    **ولا يُطابَق نصُّ خطأ** (R117-3): القائمةُ الكلميّةُ كانت تُخطئ ٤٠٣ (`limit_source`) و٥٠٣.
+    و`kinds` مُدخَلٌ لأنّ الأسماءَ مصدرُها `statement_qa.provider_errors` (يُستورَد وقت الحلقة)
+    ⇒ فالدالّةُ **خالصةٌ تُقاس بلا استيرادٍ ثقيل**.
+    """
+    scope = getattr(res, "scope", None) if res is not None else None
+    if scope in kinds:
+        return scope
+    kind = (msg or {}).get("error_refusal")
+    return kind if kind in kinds else None
+
+
+def _refusal_note(msg: dict) -> str:
+    """سطرُ الدليل: `limit_source` إن رُئي، ونصُّ الخطأ كما وصل — **يُطبع ولا يحكم**."""
+    src = (msg or {}).get("error_limit_source")
+    err = (msg or {}).get("error")
+    return ("".join([f" · limit_source={src}"] if src else [])
+            + (f" · {err}" if err else ""))
+
+
 def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     """تشغيلُ الأسئلة على سلسلة السؤال الحقيقيّة — **مدفوع**، ويُقاس بأمرٍ صريح."""
+    # **والمقياسُ لا يشتري إلا بمفتاح القياس — أيًّا كانت الأعلام، وقبل أيّ عملٍ آخر** (R117-3 ·
+    # مراجعة ١١٧ · P2): كان الشرطُ `if a.budget and not eval_key()` ⇒ **بلا `--budget`** يُبنى
+    # العميلُ بـ`api_key=None` فيكمل `build_llm` بـ`api_key or get_api_key()` = **مفتاحُ التطبيق**
+    # (قِيس: ٨/٨ سؤالًا طُرحت و`api_key_passed=None`) ⇒ فالضمانُ كان **مشروطًا بعَلَم**.
+    # والقرارُ جعل حدَّ المفتاح هو الضمان ⇒ فيُشترط دائمًا، **ويُفشَل مُغلقًا قبل أن يُقرأ شيء**.
+    if not eval_key():
+        print(f"\n⛔ **لا مفتاحَ قياس** ({EVAL_KEY_ENV} غيرُ موجودٍ في البيئة ولا في `.env`) ⇒ "
+              f"**لا نداءَ مدفوعًا — ولا يُشترى القياسُ بمفتاح التطبيق** · رمزُ الخروج 5.", flush=True)
+        return 5
     src = pathlib.Path(__file__).resolve().parent.parent / "src"
     sys.path.insert(0, str(src))
     from tools.refusal_test import build_footers, build_rows      # noqa: PLC0415
     from statement_qa.chunking import chunk_rows                  # noqa: PLC0415
+    from statement_qa import provider_errors                      # noqa: PLC0415
     from statement_qa.qa import answer_question, build_llm, effective_model   # noqa: PLC0415
     from statement_qa.retriever import build_index                # noqa: PLC0415
 
@@ -1219,10 +1270,6 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     # **والقياسُ يشتري بمفتاحِ القياس وحدَه** (قرار 20261014-184500 §٢): حدُّ صرفٍ يفرضه المزوّد
     # على المفتاح ⇒ فميزانيةُ القياس هي حدُّ المفتاح نفسه، ولا يُفرَغ رصيدُ التطبيق.
     model_id = effective_model(a.model)     # **المعرّفُ الفعليّ** — به يُقرأ سعرُه ويُكتب في الدليل
-    if a.budget and not eval_key():
-        print(f"\n⛔ **لا مفتاحَ قياس** ({EVAL_KEY_ENV} غيرُ موجودٍ في البيئة ولا في `.env`) ⇒ "
-              f"**لا نداءَ مدفوعًا** · رمزُ الخروج 5.", flush=True)
-        return 5
     maxp = provider_max_price(model_id)
     print(f"      حدُّ سعر المزوّد: مدخلًا ${maxp['prompt']:.4f}/M · مخرجًا ${maxp['completion']:.4f}/M "
           f"⇒ **{hosts_under(model_id, maxp)} مضيفًا** يخدمون تحت الحدّ (من {hosts_total(model_id)})",
@@ -1275,8 +1322,15 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
         done = {k: v for k, v in done.items() if k not in want}
     est = simple_estimate(len(todo))
     if est is not None:
-        print(f"      تقديرٌ للعلم (لا للحكم): من كلفة الجولة السابقة المُحاسَبة ⇒ "
-              f"**${est:.4f}** لـ{len(todo)} سؤالًا", flush=True)
+        # **والمصدرُ يُطبع باسمه (R117-7):** أيُّ ملفٍّ وأيُّ حقل — فلا يُقرأ الرقمُ بلا شاهدِه.
+        prev = last_billed_run() or {}
+        direction = ("" if prev.get("field") == "cost_billed_usd" else
+                     " ⚠ الحقلُ ليس `cost_billed_usd`: في هذه الجولة يسعّر الرموزَ بسعر القائمة"
+                     " (حدٌّ أدنى) ⇒ **التقديرُ أدنى من الواقع**")
+        print(f"      تقديرٌ للعلم (لا للحكم): من جولة **{prev.get('file')}** "
+              f"(`{prev.get('field')}` = ${prev.get('spent', 0.0):.6f} على "
+              f"{prev.get('questions')} سؤالًا · {prev.get('replies')} ردًّا) "
+              f"⇒ **${est:.4f}** لـ{len(todo)} سؤالًا{direction}", flush=True)
     print(f"[3/4] طرحُ الأسئلة ({len(todo)} من {len(qs)} · ومحفوظٌ سابقاً {len(done)}) "
           f"على {a.model or 'الافتراضيّ'} …\n", flush=True)
 
@@ -1294,18 +1348,23 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
             # **والسجلُّ فارغٌ بالبناء:** الحزمةُ تطرح كلَّ سؤالٍ في دورةٍ مستقلّة ⇒ فالرقمُ يصف
             # **الدورةَ الأولى** في جلسةٍ جديدة، ولا يُدَّعى أنّه يصف سؤالًا تابعًا.
             r = answer_question(store, qtext, rows=rows, chunks=chunks, llm=llm,
-                                footers=footers, scope=_pack_scope(rows, a.run, n_pages))
+                                footers=footers, scope=_pack_scope(rows, a.run, n_pages),
+                                n_pages=n_pages)
             out_box.update({"answer": r.answer or "", "used": list(getattr(r, "used_row_nos", None) or []),
                             "tools_used": list(getattr(r, "tools_used", None) or []),
                             "scope": getattr(r, "scope", None), "refused": bool(getattr(r, "refused", False))})
         except Exception as e:                                   # noqa: BLE001 — عطبٌ يُسمّى لا يُسقط الجولة
             out_box["error"] = f"{type(e).__name__}: {e}"
+            # **ورفضُ المزوّد يُصنَّف من نوعه هنا أيضًا (R117-3):** فلو تسرّب استثناءٌ من طبقةٍ
+            # غيرِ `answer_question` يبقى الحكمُ بالسمة (‏`status_code` و`body`) لا بقائمة كلماتٍ
+            # على النصّ — وهي التي أخطأت ٤٠٣ (`limit_source`) و٥٠٣ في مراجعة ١١٧.
+            out_box["error_refusal"] = provider_errors.classify(e)
+            out_box["error_limit_source"] = provider_errors.limit_source(e)
 
     halt = 0                       # **رمزُ التوقّف المُسمّى** (مراجعة ٥١ · البند ٥): 0 = لا توقّفَ بالسقف،
     # 3 = بلوغُ السقف، 4 = عدّادٌ تراجعيّ. كان `break` يُكمل إلى `return 0/1` ⇒ أتمتةٌ تقرأ توقّفًا
     # مُعلَنًا «نجاحًا». والتوقّفُ ليس حكمًا على الأجوبة ⇒ لا يجوز أن يُصبح رمزَ نجاح.
     observations: list[tuple[float, int]] = []     # (كلفةُ نافذةٍ محاسَبة, عددُ ردودها) — R115-1
-    bound = 0.0                                    # سقفُ السؤال القادم — وهو الذي يقارَن بالسقف الماليّ
     spent_tokens = 0.0                             # المُنفَقُ من الرموز × السعر — **لحظيّ، وهو ما يحكم**
     price_in, price_out = price_pair or (0.0, 0.0)
     meter_here: float | None = None
@@ -1316,14 +1375,17 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
         # ثمّ صار من **رموز الردود**، **والقسمةُ على عدد الردود** لا على أرضية «الأدوات + ١»: أرضيةٌ
         # تُعلّي السعرَ، **وتنفجر في سؤالٍ انتهت مهلتُه** (أثرٌ فارغ ⇒ ١ ⇒ سقفٌ $405) فتقف الجولة.
         # **والمُنفَقُ تراكميٌّ من العدّاد** (لا مجموعَ النوافذ) فلا تسقط رموزُ ما بين النافذتين.
-        bound = next_question_ceiling(q["q"], observations)
+        # **والحكمُ على المُنفَق المُحاسَب وحدَه** (R115-1 · وحُذف الفرعُ الاستباقيُّ في R117-4):
+        # لا سقفَ سؤالٍ يُقارَن هنا — فالمزوّدُ هو من يفرض السعرَ والحدّ، والحلقةُ تقارن ما
+        # **حُوسب** به السقفَ الماليّ. و`price` (أعلى سعرٍ مشهود لكلّ ردّ) يبقى **للدليل** لا للحكم.
         price = per_call_cost(observations)
         source = "observed-billed" if observations else "none-observation"
         if a.budget and i > 1 and not observations and tokens_in(usage_snapshot(usage)) > 0:
-            # **سقفٌ لا يُحسب لا يُفرض** (بندُ R112-1 نفسُه، من جهة الحلقة): بلا سعرٍ مشهودٍ بعد سؤالٍ
-            # يصير `bound = 0` ⇒ فلا يتوقّف شيءٌ أبدًا ⇒ الصمتُ سقفٌ معطَّلٌ يُنشر كأنّه يعمل.
-            # **وشرطُ الرموز يُفرّق بين الحالين** (R114-1): سؤالٌ يجيبه الحاجزُ محلّيًّا بلا نداءٍ
-            # لا يُسقط الجولة (ولا صرفَ فيه يُسعَّر)، **ونداءٌ وقع ولا سعرَ له يُسقطها** (fail-closed).
+            # **سعرٌ لا يُشاهَد لا يُفرض به سقف** (بندُ R112-1 نفسُه، من جهة الحلقة): بلا سعرٍ مشهودٍ
+            # بعد سؤالٍ **يظلّ `spent_tokens = 0`** ⇒ فلا يتوقّف شيءٌ أبدًا ⇒ الصمتُ سقفٌ معطَّلٌ
+            # يُنشر كأنّه يعمل. **وشرطُ الرموز يُفرّق بين الحالين** (R114-1): سؤالٌ يجيبه الحاجزُ
+            # محلّيًّا بلا نداءٍ لا يُسقط الجولة (ولا صرفَ فيه يُسعَّر)، **ونداءٌ وقع ولا سعرَ له
+            # يُسقطها** (fail-closed).
             print(f"\n⛔ **لا سعرَ مشهودًا بعد سؤالٍ** (الردودُ لم تُرصد ولا مرّة) ⇒ لا سقفَ يُحسب "
                   f"⇒ توقّفٌ مُسمّى قبل السؤال {i} (fail-closed) · رمزُ الخروج 5.", flush=True)
             halt = 5
@@ -1361,23 +1423,16 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                 halt = 3
                 break
             # **قرارُ الصرف في موضعٍ واحد** (`cap_verdict` دالّةٌ خالصةٌ تُقاس بسمّ بلا إنفاق):
-            # البابُ البعديّ (بلغ الصرفُ السقف) والبابُ الاستباقيّ (سقفُ السؤال القادم يُوصِل فوقه).
-            verdict = cap_verdict(spent_tokens, float(a.budget), bound)
+            # **وبابٌ واحدٌ فقط: بلوغُ المُنفَق المُحاسَب للسقف.** (والبابُ الاستباقيُّ بسقف السؤال
+            # القادم **أُزيل** في R117-4 بعد أن صار مُعلَّقًا بـ`pass` في R115-1: كان يعيد صنعَ ما
+            # يقدّمه المزوّد — حدُّ سعرٍ لكلّ طلب — وهو ما رفع السقفَ المطلوب إلى $0.29.)
+            verdict = cap_verdict(spent_tokens, float(a.budget))
             if verdict == "at-cap":
                 print(f"\n⛔ السقفُ **المقيس** بلغ {spent_tokens:.4f} من {float(a.budget):.4f} "
                       f"(من الرموز × سعرِ الرمز) ⇒ التوقّف قبل السؤال {i}. "
                       f"**التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** · رمزُ الخروج 3.", flush=True)
                 halt = 3
                 break
-            # **توقّفٌ استباقيّ بسقف السؤال القادم** (مراجعة ٥١ · البند ٤ · **وجذرُه أُصلح في R109-1
-            # ثمّ صار سعرُه مشهودًا في R112-1**): الحدُّ الحقيقيّ في التطبيق (حدُّ نداءاتٍ في الوكيل)،
-            # وسعرُ النداء يُقرأ من الرموز ⇒ فالرقمُ المعلَن أدناه قابلٌ لإعادة الحساب من الدليل.
-            # **والحجزُ الاستباقيُّ لأسوأ سؤالٍ حُذف** (قرار 20261014-184500 §٢): كان يعيد صنعَ ما
-            # يقدّمه المزوّد (حدُّ سعرٍ لكلّ طلب) ويرفع السقفَ المطلوب إلى $0.29. **والحكمُ الآن على
-            # المُنفَق المُحاسَب وحدَه:** لا يتوقّف إلا إذا بلغ الصرفُ السقف، أو رفضَ المزوّدُ طلبًا
-            # (حدُّ المفتاح/السعر) — **وضمانُ الكلفة من المزوّد لا من حاجزٍ يتنبّأ.**
-            if verdict == "anticipatory":
-                pass                    # مُعلَنٌ ومُزاح عن الحكم (يبقى الحسابُ للعرض في السجلّ)
         u_before = usage_snapshot(usage)
         r_before = len(finishes.reasons)
         replies_before = finishes.ends          # **عدّادُ الردود** (مقسومُ سعر النداء · R113-1)
@@ -1393,14 +1448,17 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                       "scope": msg.get("scope"),
                       "refused": msg.get("refused")}) if "answer" in msg else None
         ans = msg["answer"].strip() if res else f"<{msg.get('error')}>"
-        # **ورفضُ المزوّد عند بلوغ حدِّ المفتاح توقّفٌ مُسمّى لا أخطاءُ أجوبة** (قرارُ 184500 §٢):
-        # حين يبلغ الصرفُ حدَّ مفتاح القياس (‏`Credit limit` في OpenRouter ⇒ 402) تُرفض الطلباتُ
-        # ⇒ فلا يُسجَّل السؤالُ جوابًا خاطئًا ولا تُنسب إليه كلفة، **وتُعلَن التغطيةُ ورمزُ الخروج 6**.
-        _err = str(msg.get("error") or "").lower()
-        if res is None and any(k in _err for k in ("402", "credit", "insufficient", "key limit", "quota")):
-            print(f"\n⛔ **المزوّدُ رفض الطلب** (حدُّ المفتاح أو الرصيد): {msg.get('error')} "
-                  f"⇒ توقّفٌ مُسمّى قبل إتمام السؤال {i} · **التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** "
-                  f"· والمُنفَقُ المُحاسَب حتى الآن ${spent_tokens:.4f} · رمزُ الخروج 6.", flush=True)
+        # **ورفضُ المزوّد توقّفٌ مُسمّى لا أخطاءُ أجوبة** (قرارُ 184500 §٢ · **وأُعيد بناؤه في R117-3**):
+        # كان الكاشفُ **قائمةَ كلماتٍ على نصّ الخطأ**، وقِيس أنّها تُخطئ شكلين موثَّقين (٤٠٣ حدُّ المفتاح
+        # بـ`limit_source`، و٥٠٣ لا مضيفَ تحت الحدّ) ⇒ فيُسجَّل السؤالُ **جوابًا خاطئًا** بدل التوقّف.
+        # **والحكمُ الآن من الحالة المُسمّاة** (`scope` من `answer_question`) **أو من نوع الاستثناء**
+        # (`status_code`/`body` في `provider_errors`) — والاثنان من **موضعٍ واحد**، ولا نصَّ يُطابَق.
+        _refusal = refusal_of(msg, res, provider_errors.PROVIDER_REFUSALS)
+        if _refusal:
+            print(f"\n⛔ **المزوّدُ رفض الطلب — حالةٌ مُسمّاة: `{_refusal}`**"
+                  f"{_refusal_note(msg)} ⇒ توقّفٌ مُسمّى قبل إتمام السؤال {i} · "
+                  f"**التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** · والمُنفَقُ المُحاسَب حتى الآن "
+                  f"${spent_tokens:.4f} · رمزُ الخروج 6.", flush=True)
             done.pop(q["id"], None)          # **السؤالُ الباقي ليس جوابًا خاطئًا**
             halt = 6
             break
@@ -1449,7 +1507,7 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                                               cost_here=(0.0 if window is None else window[0]),
                                               cost_by_tokens=cost_list,
                                               cost_source=("no-reply" if window is None else window[1]),
-                                              bound=bound, price=price, source=source,
+                                              price=price, source=source,
                                               meter_delta=meter_here, tokens=tok_in + tok_out,
                                               tools=len(tools_now), replies=replies_here))
             done[q["id"]]["finish_reasons"] = reasons
