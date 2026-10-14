@@ -259,14 +259,24 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
 
     @tool
     def sum_movements(side: str = "الكل", keyword: str = "", tx_type: str = "",
-                      amount: float | None = None) -> str:
+                      amount: float | None = None, *,
+                      page: int | None = None) -> str:
         """اجمع مبالغ الحركات. side: الاتجاه فقط — "مدين" أو "دائن" أو "الكل".
         tx_type: نوع العملية — "سحب صراف آلي" / "تحويل صادر" / "تحويل وارد" /
         "إيداع نقدي (صراف آلي)" / "مشتريات (نقاط بيع)" / "فواتير ومدفوعات سداد".
         keyword: جزء من الوصف. amount: مبلغ محدد بالريال (مثال: 1000).
+        page: صفحةٌ واحدة — جمعُ حركاتِها وحدَها (مثال: sum_movements(page=486)).
         تنبيه: «مدين» تعني أي حركة صادرة وليست «سحب صراف آلي» — للأنواع استخدم tx_type.
-        مثال: sum_movements(tx_type="تحويل صادر") أو sum_movements(tx_type="سحب صراف آلي", amount=1000)."""
-        sel = _filtered(side, keyword, tx_type, amount)
+        مثال: sum_movements(tx_type="تحويل صادر") أو sum_movements(tx_type="سحب صراف آلي", amount=1000).
+
+        **و`page` معامَلٌ لفظيٌّ وحدَه** (`page=`) — فالنداءُ الموضعيُّ القديم لا يتغيّر معناه (كما في
+        `search_rows`). **وسببُ وجوده (R108-1):** القاعدةُ ٢ تمنع النموذجَ من الجمع بيده، ولم تكن
+        أداةٌ تُخرج **مجموعَ صفحةٍ واحدة** ⇒ فكلُّ جوابٍ صحيحٍ في هذا الصنف كان يُجمع في الرأس (قِيس:
+        ١٦ جوابًا في خمس قياسات حملت مجموعًا لا وجودَ له في مخرَج أيّ أداة)، وفي r107 التزم النموذجُ
+        القاعدةَ فخسر `num-08`. **و`page_summary` لا تُغني:** تُخرج إجماليَّ المدين وإجماليَّ الدائن
+        **منفصلين**، والمطلوبُ مجموعهما.
+        """
+        sel = _filtered(side, keyword, tx_type, amount, page)
         _record("sum_movements", sel)
         if not sel:
             return "لا توجد حركات مطابقة لهذا الفلتر في الكشف."

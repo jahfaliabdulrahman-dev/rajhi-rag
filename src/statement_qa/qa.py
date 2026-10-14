@@ -108,6 +108,9 @@ AGENT_SYSTEM_PROMPT = """أنت محاسب مدقق تعمل على كشف حس�
    **غير مطابق** فاذكره، وإن كان **بلا تذييل** فقل ذلك ولا تخمّن.
    و**أيُّ سؤالٍ عن صفٍّ بعينه داخل صفحة** («أكبر حركةٍ في الصفحة N» · «صفوفُ الصفحة N» · «آخرُ حركةٍ فيها»)
    ⇒ `page_rows(page=N)` تُسرَد الصفوفَ بأرقامها (على مستوى الكشف لا من ١ داخل الصفحة) ومنها يُقرأ الأكبرُ/الأخير.
+   و**أيُّ سؤالٍ عن مجموع حركات صفحةٍ واحدة** («مجموعُ مبالغ الحركات في الصفحة N» · «إجماليُّ حركات الصفحة N»)
+   ⇒ `sum_movements(page=N)` تجمع **بالكود** وتُخرج المجموعَ وعددَ الحركات — **ولا تجمعه أنت**؛
+   و`page_summary(page=N)` تُخرج إجماليَّ المدين وإجماليَّ الدائن **منفصلين** فلا تجمعهما لتجيب عن المجموع.
 2. انقل الأرقام من مخرجات الأدوات حرفياً — لا تُجرِ أي جمع أو طرح بنفسك أبداً.
 3. للأسئلة الوصفية استعن بالقطع المرفقة في هذه التعليمات.
 4. إن لم تكفِ الأدوات والقطع قل حرفياً: "غير موجود في الكشف" — لا تخمّن.
@@ -118,19 +121,118 @@ AGENT_SYSTEM_PROMPT = """أنت محاسب مدقق تعمل على كشف حس�
    وإن ظهر المبلغ نفسه بأنواع أخرى فاذكر ذلك صراحةً في الجواب."""
 
 
-def build_llm(model_name: str | None = None):
-    """ChatOpenAI pointed at OpenRouter (key from env / ~/.hermes/.env)."""
+# ── حدُّ السؤال الواحد (R109-1) ────────────────────────────────────────────────
+# **قِيس الجذرُ قبل أن يوضع الحدّ:** `ChatOpenAI` بلا `timeout` ولا `max_tokens`، و`agent.invoke`
+# بلا `config` ⇒ حدُّ الخطوات افتراضيُّ langgraph 1.2.11 (`DEFAULT_RECURSION_LIMIT = 10007`،
+# مقيسٌ بالاستيراد)؛ ومهلةُ أداة القياس تُوقف **الانتظار لا الطلب**، فيبقى السؤالُ ينفق بعدها.
+# **والمقيسُ على نموذجٍ وهميّ يطلب أداةً إلى الأبد: ٥٠٠٠ نداءِ نموذجٍ ثمّ `GraphRecursionError`**
+# — مقابل **٣ نداءاتٍ** بحدٍّ مضبوط. **وحدُّ النداءات يجعل الكلفةَ معروفةً قبل الطرح**
+# (أسوأُ كلفةٍ للسؤال = الحدُّ × كلفةُ النداء الأعلى)؛ وأكثرُ ما احتاجه سؤالٌ في r105/r107/r108
+# خمسةُ نداءاتِ أدوات ⇒ **١٢ هامشٌ واسعٌ لا يمسّ جوابًا واحدًا**.
+MODEL_CALL_LIMIT = 12
+# **وحدُّ الخطوات يعلو حدَّ النداءات فلا يسبقه** (قِيس: ٢٨ خطوةً تبلغ ٦ نداءاتٍ فقط ⇒ **≈٤٫٧ خطوةً
+# لكلّ نداء**؛ فحدٌّ بـ٢٨ كان يسبق حدَّ النداءات ويرفع `GraphRecursionError` بدل الانتهاء المهذّب).
+# ومعه: حدُّ النداءات هو السقفُ الحقيقيّ، وهذا الاحتياطيُّ **لا يسقط** مع أيّ نسخة.
+STEP_LIMIT = 6 * MODEL_CALL_LIMIT + 8
+REQUEST_TIMEOUT_S = 60.0                # مهلةُ **الطلب** الواحد — تُوقف الطلبَ نفسَه
+MODEL_MAX_RETRIES = 1
+# **وحدُّ المخرجات (R110-1):** بلا `max_tokens` لا حدَّ أعلى لرموز النداء ⇒ فتصير كلفةُ النداء
+# غيرَ محدودةٍ من فوق، ويبقى «أسوأُ كلفةٍ للسؤال» بلا سند. والجوابُ النموذجيّ أقصرُ من هذا بكثير
+# (أسئلةُ الكشف تُجاب بفقرةٍ قصيرة)، فالحاجةُ هنا سقفٌ لا حجب.
+MAX_ANSWER_TOKENS = 3000
+
+
+def _call_limits():
+    """حدُّ نداءات النموذج والأدوات في الدور الواحد — **مكوّنُ المكتبة** لا بناءٌ يدويّ (R109-1).
+
+    و`exit_behavior="error"` ⇒ **يرفع استثناءً مُسمًّى** (`ModelCallLimitExceededError`) يلتقطه
+    `_answer_one` بنوعه فيُترجَم إلى رسالةٍ عربيّة (R110-2) — **لا نصَّ المكتبة الإنجليزيّ إلى الشاشة**.
+    **وحدُّ `recursion_limit` في النداء أدناه لا يسقط مع أيّ نسخة**، فالحدُّ قائمٌ حتى لو لم تعرف
+    النسخةُ `middleware`.
+    """
+    from langchain.agents.middleware import ModelCallLimitMiddleware, ToolCallLimitMiddleware
+
+    return [
+        # **و`exit_behavior="error"` لا `"end"` (R110-2):** بـ`"end"` يُنهي الوسيطُ الرسمَ برسالةٍ
+        # يكتبها بنفسه («Model call limits exceeded…») فتصل **نصًّا إنجليزيًّا خامًّا** إلى الشاشة.
+        # و`"error"` يرفع `ModelCallLimitExceededError` **يُلتقط بنوعه** فيُترجَم إلى رسالةٍ عربيّة.
+        ModelCallLimitMiddleware(run_limit=MODEL_CALL_LIMIT, exit_behavior="error"),
+        ToolCallLimitMiddleware(run_limit=MODEL_CALL_LIMIT, exit_behavior="error"),
+    ]
+
+
+def _limit_errors() -> tuple:
+    """أنواعُ خطأ بلوغ الحدّ — **تُقرأ من المكتبة، ولا يُطابَق نصٌّ إنجليزيّ** (R110-2).
+
+    **ومن وحداتها الفرعيّة لا من حزمة الوسائط:** الأسماءُ ليست مُصدَّرةً في `middleware/__init__`
+    (قِيس: `from langchain.agents.middleware import ModelCallLimitExceededError` ⇒ `ImportError`)،
+    وهي في `…middleware.model_call_limit` و`…middleware.tool_call_limit`. **وكلُّ اسمٍ في حرسٍ
+    منفصل** فلا يُسقِط غيابُ أحدِهما الآخر — **وأنّ القائمةَ غيرُ فارغةٍ يُقاس في ضابط** (R110-2).
+    """
+    out: list = []
+    for mod, name in (("langchain.agents.middleware.model_call_limit", "ModelCallLimitExceededError"),
+                      ("langchain.agents.middleware.tool_call_limit", "ToolCallLimitExceededError")):
+        try:
+            out.append(getattr(__import__(mod, fromlist=[name]), name))
+        except Exception:      # نسخةٌ لا تعرف الاسم ⇒ يبقى الفرعُ العامّ، ويُقاس ما بقي في ضابط
+            continue
+    return tuple(out)
+
+
+_LIMIT_ERRORS = _limit_errors()
+
+# **أقصى نداءاتِ نموذجٍ لسؤالٍ واحد — مشتقٌّ من بنية المسار لا مكتوبٌ بيد** (R110-1): كلُّ جزءٍ
+# (`split_compound`) يُطرح مرّةً، **ويُعاد طرحُه مرّةً واحدةً بتنبيه** إن غاب الأثرُ الحسابيّ،
+# و`_answer_plain` نداءٌ ثالثٌ إن بقي بلا جواب ⇒ **الحدُّ (١٢) × ٣ × عددِ الأجزاء**. والمركّبُ ضعفُ
+# البسيط — وهو ما قاسه المدقّق (٢٤ نداءً للبسيط حين أعاد الطرح، والمركّبُ مثلاه).
+MAX_ATTEMPTS_PER_PART = 2
+FALLBACK_CALLS_PER_PART = 1
+
+
+def question_ceiling(question: str) -> int:
+    """أقصى عددِ نداءاتِ نموذجٍ يمكن أن يكلّفها سؤالٌ واحد — **حدُّ الميزانيّة لا تقديرُها**.
+
+    ويُضرب في كلفة النداء الأعلى (تُقاس في أداة القياس) ⇒ **سقفُ السؤال معروفٌ قبل أن يُطرح**.
+    """
+    parts = split_compound(question)
+    return MODEL_CALL_LIMIT * (MAX_ATTEMPTS_PER_PART + FALLBACK_CALLS_PER_PART) * max(1, len(parts))
+
+
+#: **النموذجُ الافتراضيّ — موضعٌ واحد** (R112-1): يستهلكه بناءُ العميل **وسعرُ الرمز** في أداة
+#: القياس (تُقرأ أسعارُه من قائمة النماذج العامّة بالمعرّف نفسه) ⇒ فلا نسخةَ ثانيةً تنحرف عنه.
+DEFAULT_MODEL = "z-ai/glm-5.3-flash"
+
+
+def effective_model(model_name: str | None = None) -> str:
+    """معرّفُ النموذج الفعليّ (وسيطٌ صريح، ثمّ `OPENROUTER_MODEL`، ثمّ الافتراضيّ)."""
+    return model_name or os.environ.get("OPENROUTER_MODEL", DEFAULT_MODEL)
+
+
+def build_llm(model_name: str | None = None, *, callbacks: list | None = None):
+    """ChatOpenAI pointed at OpenRouter (key from env / ~/.hermes/.env).
+
+    **و`callbacks` اختياريّةٌ مُضافةٌ في موضعها (R112-1):** تُمرَّر إلى عميل النموذج نفسه —
+    وبها يُجمَع `usage_metadata` لكلّ ردٍّ لحظةَ وصوله (`UsageMetadataCallbackHandler`) ⇒
+    **سعرُ النداء يُشاهَد ولا يُقدَّر** — **ولا يُلمَس `invoke`** (ضابطُ «النداءُ بلا حالةِ رسمٍ»
+    يقيس `invoke` بلا `config`، ويبقى صادقًا). وبلا وسائطَ تبقى السلوكُ كما هو بالحرف.
+    """
     from langchain_openai import ChatOpenAI
 
     from statement_qa.api_key import get_api_key
 
     key = get_api_key()
-    model = model_name or os.environ.get("OPENROUTER_MODEL", "z-ai/glm-5.3-flash")
+    model = effective_model(model_name)
     return ChatOpenAI(
         model=model,
         base_url="https://openrouter.ai/api/v1",
         api_key=key,
         temperature=0,
+        # **مهلةٌ حقيقيّةٌ على الطلب نفسه، وإعادةُ محاولةٍ واحدة** (R109-1): كان الطلبُ بلا مهلة
+        # ⇒ فسؤالٌ عالقٌ ينفق إلى ما لا نهاية. والحدُّ يُناديها المكتبةُ فلا يُبنى بديلٌ يدويّ.
+        timeout=REQUEST_TIMEOUT_S,
+        max_retries=MODEL_MAX_RETRIES,
+        max_tokens=MAX_ANSWER_TOKENS,
+        **({"callbacks": list(callbacks)} if callbacks else {}),
     )
 
 
@@ -404,6 +506,12 @@ def _run_agent(llm, tools, system_prompt: str, user_content: str,
  ضابطٍ بلا استرجاع)، و`chunks=""` ⇒ **لا سياجَ ولا كتلة** (لا سياجَ على فراغ — وصفُ `_with_context`)،
  ويبقى سطرُ «استخدم الأدوات» وحدَه (R102-1: كان هذا السطرُ يَعِد بسياجٍ لا يضعه الكود).
 
+    **وحدُّ السؤال الواحد (R109-1):** الوكيلُ يُبنى بـ`middleware=[ModelCallLimitMiddleware(…)`,
+    `ToolCallLimitMiddleware(…)]`، **و`recursion_limit` يُمرَّر صريحًا في النداء** — والثاني **لا يسقط
+    مع أيّ نسخة** (مقيس: بلا أيّ حدٍّ يبلغ النموذجُ الوهميُّ ٥٠٠٠ نداءٍ ثمّ `GraphRecursionError`،
+    وبالحدّ يقف عند العدد المطلوب بانتهاءٍ مهذّب). ونسخةٌ لا تعرف `middleware` ⇒ يُبنى بلا نوعٍ
+    **ويُعلَن** أنّ الجواب نصّيّ، ويبقى حدُّ `recursion_limit` قائمًا.
+
     **ولا انحدارَ صامت:** نسخةٌ لا تعرف الوسيط ترفع `TypeError` ⇒ يُبنى بلا نوعٍ **ويُعلَن**
     أنّ الجواب نصّيّ (`prose`)، فلا يُقرأ لاحقًا كأنّ استشهادَه مُصرَّحٌ به. وكذلك مسارُ
     `create_react_agent` الاحتياطيّ ⇒ `prose` **ويحمل القطعَ في تلقينه** (`_with_context`).
@@ -431,11 +539,14 @@ def _run_agent(llm, tools, system_prompt: str, user_content: str,
         if typed:
             kw["response_format"] = response_format
         try:
-            agent = create_agent(**kw)
-        except TypeError:      # نسخةٌ لا تعرف `response_format` ⇒ بلا نوع، ويُعلَن ذلك
+            agent = create_agent(**kw, middleware=_call_limits())
+        except TypeError:      # نسخةٌ لا تعرف `response_format` أو `middleware` ⇒ بلا نوع، ويُعلَن
             agent = create_agent(model=llm, tools=tools, system_prompt=prompt)
             typed = False
-    res = agent.invoke({"messages": [*kept, {"role": "user", "content": user_content}]})
+    # **وحدُّ الخطوات في النداء نفسِه (R109-1):** افتراضيُّ langgraph خطواتٌ بالآلاف (مقيس)،
+    # فيُمرَّر صريحًا — **وهو الحدُّ الذي لا يسقط** مع أيّ نسخة (بخلاف `middleware`).
+    res = agent.invoke({"messages": [*kept, {"role": "user", "content": user_content}]},
+                       config={"recursion_limit": STEP_LIMIT})
     parsed = res.get("structured_response") if isinstance(res, dict) else None
     if typed and parsed is not None and getattr(parsed, "answer", None):
         answer, mode = str(parsed.answer).strip(), "typed"
@@ -517,6 +628,9 @@ class QAResult:
     # A NUMERIC question answered without a single tool call. Not a failure —
     # a recollection, and it must be labelled as one (Gate 4, case F).
     ungrounded: bool = False
+    # **بلوغُ حدِّ النداءات حالةٌ مُسمّاةٌ في النتيجة (R110-2)** — تتولّاها طبقةُ العرض برسالةٍ
+    # عربيّة، فلا يُطابَق نصٌّ ولا تُعرض جملةُ المكتبة الإنجليزيّة.
+    limit_hit: bool = False
     # **أسماءُ الأدوات المستدعاة** (R104-1 · البند ③): `used_row_nos` تعدّ الصفوفَ لا النداءات، فسؤالٌ
     # يستدعي `page_footer` (بلا صفوف) أو يُرفض كان يُقرأ «صفر أثر» بلا تمييز ⇒ وهذا الحقلُ يفصل الحالتين،
     # وهو ما تحتاجه مقابلةُ الذراعين في تجربة R104.
@@ -684,6 +798,7 @@ def answer_question(store, question: str, rows=None, chunks=None,
             tools_used=[n for r in results for n in (r.tools_used or [])],
             tools_failed=all(r.tools_failed for r in results),
             ungrounded=any(r.ungrounded for r in results),
+            limit_hit=any(r.limit_hit for r in results),
             cited_row_ids=merged_cited,
             citation_mode=merged_mode,
             unsupported_citations=merged_unsup)
@@ -706,7 +821,7 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
     السؤالُ المركّبُ. ولو كتبت لأصبح لسؤالٍ واحدٍ دورتان ولبلغ الرقمُ المرفوضُ السؤالَ التالي.
     فالكتابةُ في بوّابة السؤال (`answer_question`) وحدَها، وهي التبادلُ المقبولُ وحدَه.
 
-    `footers` (R77): التذييلاتُ المطبوعةُ لكلّ صفحة — تُمرَّر إلى الأدوات فيُجيب `page_footer` عنها."""
+    `footers` (R77): التذييلاتُ المطبوعاتُ لكلّ صفحة — تُمرَّر إلى الأدوات فيُجيب `page_footer` عنها."""
     hits = retrieve(store, question, k=k, pages=pages_for(question, chunks))
     context = format_hits(hits)
     answer = ""
@@ -714,6 +829,7 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
     tools_used: list[str] = []
     tools_failed = False
     ungrounded = False
+    limit_hit = False
     parsed = None
     mode = "prose"
     refused = False
@@ -739,7 +855,7 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
                 answer2, trace2, parsed2, mode2 = _answer_with_tools(
                     llm, rows, context,
                     question + "\n\n(استخدم أداة حسابية واحدة على الأقل قبل "
-                               "الجواب، ولا تحسب بنفسك.)",
+                           "الجواب، ولا تحسب بنفسك.)",
                     footers=footers, thread_id=thread_id, scope=scope)
                 used2 = used_rows_from_trace(trace2)
                 if used2 or _tool_was_used(trace2):
@@ -757,6 +873,15 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
                     answer = ("لم أستطع حساب هذا الرقم من الكشف: لا استدعاء "
                               "لأي أداة حسابية. ولن أعرض رقماً لم يُحسَب — "
                               "أعد صياغة السؤال بصيغةٍ تُسمّي ما تريده.")
+        except _LIMIT_ERRORS:
+            # **بلوغُ الحدّ (R110-2):** يُقرأ **نوعُ** الاستثناء لا نصُّه، ويُترجَم إلى رسالةٍ
+            # عربيّةٍ صادقة ⇒ **صفرُ نصٍّ إنجليزيٍّ على الشاشة**.
+            limit_hit = True
+            tools_failed = True
+            parsed, mode = None, "prose"
+            used, tools_used = [], []
+            answer = ("لم أصل إلى جوابٍ ضمن حدّ الخطوات المسموح لهذا السؤال، "
+                      "ولن أعرض رقمًا لم يُحسَب — أعد صياغة السؤال أو جزّئه.")
         except Exception:
             # The SILENT part was the problem, not the fallback itself: a
             # provider timeout used to hand back a prose answer with an empty
@@ -791,4 +916,5 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
                     used_row_nos=used,
                     tools_used=tools_used,
                     tools_failed=tools_failed,
-                    ungrounded=ungrounded)
+                    ungrounded=ungrounded,
+                    limit_hit=limit_hit)
