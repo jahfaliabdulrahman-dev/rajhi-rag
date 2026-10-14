@@ -1018,7 +1018,6 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     bound = 0.0                                    # سقفُ السؤال القادم — وهو الذي يقارَن بالسقف الماليّ
     spent_tokens = 0.0                             # المُنفَقُ من الرموز × السعر — **لحظيّ، وهو ما يحكم**
     price_in, price_out = price_pair or (0.0, 0.0)
-    finish_seen = 0
     meter_here: float | None = None
     for i, q in enumerate(todo, 1):
         # **قرارُ الشراء بحدِّ السؤال القادم (R110-1) × سعرِ نداءٍ مشهود (R112-1):** كان السعرُ
@@ -1112,7 +1111,6 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
         tools_now = list(getattr(res, "tools_used", None) or []) if res else []
         observed = observation(u_before, u_after, tools_now, price_in, price_out)
         reasons = finishes.reasons[r_before:]
-        finish_seen = len(finishes.reasons)
         if a.budget:
             if meter_before_i is not None:
                 meter_after_i = _spent_since(before, _key_usage())

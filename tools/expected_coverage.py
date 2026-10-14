@@ -8,8 +8,8 @@
 ## ما تفعله بالحرف
 
 تُعيد تشغيل **القانون نفسه** الذي تحكم به الحلقةُ المدفوعة — لا نسخةً ثانيةً منه:
-`question_ceiling` من التطبيق (`statement_qa.qa`) · `next_question_ceiling` و`cap_verdict` و`per_call_cost`
-من `tools/eval_questions`. وتُغذّى بعددِ نداءاتٍ لكلّ سؤال **من آخر جولةٍ محفوظة** (أرضيةٌ: أثرُه + ١)
+`question_ceiling` من التطبيق (`statement_qa.qa`) · `next_question_ceiling` و`cap_verdict` من `tools/eval_questions`.
+وتُغذّى بعددِ نداءاتٍ لكلّ سؤال **من آخر جولةٍ محفوظة** (أرضيةٌ: أثرُه + ١)
 وبسعرِ نداءٍ **مشهود** (من الجولة السابقة أو من سطر الأمر) — **وبلا أيّ نداءِ نموذج ⇒ $0**.
 
 ## الاستعمال
@@ -33,7 +33,6 @@ from tools.eval_questions import (  # noqa: E402
     PER_CALL_MARGIN,
     cap_verdict,
     next_question_ceiling,
-    per_call_cost,
 )
 
 QUESTIONS = pathlib.Path(__file__).resolve().parent.parent / "docs" / "eval_pack" / "questions.json"
