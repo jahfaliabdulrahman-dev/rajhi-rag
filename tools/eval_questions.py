@@ -442,18 +442,24 @@ def per_call_cost(pairs: list[tuple[float, int]]) -> float:
     return max(vals) if vals else 0.0
 
 
-def worst_case_cost(observed: list[float], pairs: list[tuple[float, int]],
-                    ceiling_calls: int = 0) -> float:
-    """أسوأُ كلفةٍ لسؤالٍ واحد: **الأكبرُ من أعلى مُلاحَظ ومن (حدِّ النداءات × أعلى كلفةِ نداء)**.
+#: **هامشٌ مُعلَن على كلفة النداء الأعلى (R110-1):** الكلفةُ تُقاس من عدّادٍ **متأخّرٍ ≈١٢٠ ث**
+#: (نصُّ REQ-105-01)، فسؤالٌ يُقاس في ذيله قد لا يحمل كلفتَه كاملةً في فرق العدّاد بعده ⇒ فالمقاسُ
+#: **حدٌّ أدنى**. والهامشُ يرفعه حدًّا أعلى بلا ادّعاء دقّة. ومع `max_tokens` في التطبيق صارت كلفةُ
+#: النداء محدودةً من فوق أصلًا، فالهَامِشُ هنا احتياطٌ للتأخّر لا تعويضًا عن حدٍّ غائب.
+PER_CALL_MARGIN = 1.5
 
-    و`ceiling_calls = 0` ⇒ يُقرأ الحدُّ من `statement_qa.qa.MODEL_CALL_LIMIT` (مصدرٌ واحد)؛ ولا عيّنةَ
-    نداءاتٍ ⇒ **المُلاحَظُ وحدَه**، والثقبُ يُعلَن (`ceiling_bound_usd = 0` تعني «لا سند»، لا «لا خطر»).
+
+def next_question_ceiling(question: str, pairs: list[tuple[float, int]],
+                          margin: float = PER_CALL_MARGIN) -> float:
+    """سقفُ السؤال التالي: **حدُّ نداءاته × أعلى كلفةِ نداءٍ مُشاهَدة × الهامش** — حدٌّ أعلى لا وسط.
+
+    **والحدُّ مشتقٌّ من بنية المسار** (`statement_qa.qa.question_ceiling`: طرحان لكلّ جزء + الاحتياط)
+    لا من رقمٍ يكتبه أحدٌ بيده في أداة القياس. وبلا عيّنةٍ ⇒ **صفر**: لا سندَ يُضرب، **والثقبُ مُعلَن**
+    (والحدُّ الحقيقيّ في التطبيق يبقى قائمًا).
     """
-    if not ceiling_calls:
-        from statement_qa.qa import MODEL_CALL_LIMIT
-        ceiling_calls = MODEL_CALL_LIMIT
-    seen = max(observed) if observed else 0.0
-    return max(seen, per_call_cost(pairs) * max(0, ceiling_calls))
+    from statement_qa.qa import question_ceiling
+
+    return per_call_cost(pairs) * question_ceiling(question) * margin
 
 
 def cap_verdict(spent: float | None, cap: float, bound: float) -> str:
@@ -822,12 +828,12 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     spent = None
     for i, q in enumerate(todo, 1):
         spent_before_i: float | None = None
-        # **قرارُ الشراء يعتمد ما رُئي، والحدُّ يُسجَّل ولا يُدخَل في القرار** (R109-1): لو حُوكم
-        # السؤالُ بأسوأ حالاته (حدُّ النداءات × أعلى كلفةِ نداء) لَما طُرح سؤالٌ يستطيع دفعَ ثمنه
-        # (قِيس على مُزوّدٍ مُحاكى: سقفٌ ٠٫٦٠ وسؤالٌ بـ٠٫٣٠ ⇒ توقّفٌ عند **صفر** أسئلة) — فالسقفُ
-        # يُفرض بـ**الحدِّ الحقيقيّ في التطبيق**، والرقمُ هنا **يُعلَن** ليعرف القارئُ سقفَ الخطر.
-        bound = max(obs_costs) if obs_costs else 0.0
-        ceiling_bound = worst_case_cost(obs_costs, obs_pairs)
+        # **قرارُ الشراء بحدِّ السؤال التالي لا بماضيه (R110-1 · شرطُ قرار المالك):** السقفُ
+        # «يُفرض **بالحدّ** لا بالتقدير» ⇒ `bound` = سقفُ السؤال التالي (حدُّ نداءاته من بنية المسار
+        # × كلفةُ النداء الأعلى × الهامش). و«أعلى ما رُئي» **يُطبع للعلم ولا يحكم** — وقد كان يحكم
+        # فمرّ منه سؤالٌ بلغ ≈٣٠ سنتًا، وهو عينُ عطب ما قبل R108-6.
+        bound = next_question_ceiling(q["q"], obs_pairs)
+        seen_high = max(obs_costs) if obs_costs else 0.0
         if a.budget:                        # **المقياسُ قبل الطلب** (S-2 · أُعيد ٢٠٢٦-٠٩-٢٤ بعد مراجعة ٥٠)
             cur_u = _key_usage()
             spent = _spent_since(before, cur_u)
@@ -853,11 +859,11 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
             # لا يقف عند المهلة). والآن الحدُّ الحقيقيّ **في التطبيق** (حدُّ نداءاتٍ في الوكيل)،
             # والرقمُ المعلَن هنا أسوأُ حالاته.
             if verdict == "anticipatory":
-                print(f"\n⛔ **توقّفٌ استباقيّ**: المُنفَق {spent:.4f} + **أعلى كلفةِ سؤالٍ رُئي** {bound:.4f} "
+                print(f"\n⛔ **توقّفٌ استباقيّ**: المُنفَق {spent:.4f} + **سقفُ السؤال التالي** {bound:.4f} "
                       f"يتجاوز السقف {float(a.budget):.4f} ⇒ لا يُطرح السؤال {i}. "
-                      f"(**وأسوأُ حالاته بنصّ الحدّ الحقيقيّ**: ${ceiling_bound:.4f} = "
-                      f"حدُّ النداءات × ${per_call_cost(obs_pairs):.6f} للنداء — يُعلَن ولا يُدخَل في "
-                      f"القرار) · **التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** · رمزُ الخروج 3.", flush=True)
+                      f"(← سقفُ السؤال = `question_ceiling` من بنية المسار × ${per_call_cost(obs_pairs):.6f} "
+                      f"لأعلى كلفةِ نداء × هامش {PER_CALL_MARGIN} · **وأعلى ما رُئي للعلم**: ${seen_high:.4f}) · "
+                      f"**التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** · رمزُ الخروج 3.", flush=True)
                 halt = 3
                 break
             if spent is None and i > 1 and (i - 1) > int(float(a.budget) / 0.05):
@@ -903,8 +909,10 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                 q_cost = max(0.0, spent_after_i - spent_before_i)
                 done[q["id"]]["cost_usd"] = round(q_cost, 6)
                 done[q["id"]]["cap_bound_usd"] = round(bound, 6)
-                # **وأسوأُ كلفةٍ بنصّ الحدّ** (R109-1): يُسجَّل لكلّ سؤالٍ فيُقتبَس سقفُ الخطر من الدليل.
-                done[q["id"]]["ceiling_bound_usd"] = round(worst_case_cost(obs_costs, obs_pairs), 6)
+                # **وسقفُ السؤال التالي يُسجَّل لكلّ سؤال** (R110-1): فيُقتبَس من الدليل ما حُوكم به،
+                # **وأعلى ما رُئي** يُسجَّل بجانبه للعلم.
+                done[q["id"]]["next_ceiling_usd"] = round(next_question_ceiling(q["q"], obs_pairs), 6)
+                done[q["id"]]["cap_seen_usd"] = round(max(obs_costs) if obs_costs else 0.0, 6)
                 obs_costs.append(q_cost)
                 obs_pairs.append((q_cost, len(getattr(res, "tools_used", None) or [])))
         merged = {**prev_all, **done}      # النائبُ يبقى ما لم يُجَب عنه فعلاً

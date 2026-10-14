@@ -179,56 +179,58 @@ def test_a_suspect_record_is_excluded_from_the_headline_not_counted_in_it(capsys
     assert "أثرًا مشكوكَ القصّ" in out
 
 
-# ── R109-1: الكلفةُ بحدٍّ حقيقيٍّ — **والمهلةُ لا تُقدّر إنفاقًا لا يقف عندها** ──────────────
-def test_the_bound_comes_from_the_real_call_ceiling_not_from_a_timeout():
-    """**R109-1 · أرقامُها من الواقعة (2026-10-13):** سقفٌ 0.10، وصرفٌ بلغ 0.09 قبل السؤال الذي مات
-    بالمهلة، **والعدّادُ زاد 0.078 بعد أن انتهت العمليّة** ⇒ *الإنفاقُ لا يقف عند المهلة*، فتقديرُ
-    R108-6 (المهلة × معدّلِ الثانية) بُني على مفترَضٍ كاذب. **والحدُّ الآن من حدِّ نداءاتٍ حقيقيّ في
-    الكود** ⇒ `أسوأُ كلفة = الحدُّ × أعلى كلفةِ نداءٍ مُشاهَدة`، **معروفٌ قبل الطرح لا مُقدَّر**.
+# ── R110-1: القرارُ بسقف السؤال التالي — حدٌّ مشتقٌّ من بنية المسار لا من الماضي ──────────────
+def test_the_bound_is_the_next_questions_ceiling_not_the_highest_seen():
+    """**R110-1 · أرقامُها من الواقعة:** سقفٌ 0.10، وصرفٌ بلغ 0.09 قبل سؤالٍ أنفق ≈٣٠ سنتًا —
+    **لأنّ الحاجزَ كان يقارن بأعلى كلفةٍ رُئيت**، وكلُّ ما رُئي قبلَه أجزاءُ سنت (عينُ عطب ما قبل
+    R108-6). والسقفُ الآن **يُفرض بالحدّ**: `سقفُ السؤال = حدُّ نداءاته × أعلى كلفةِ نداء × الهامش`.
 
-    والنقيضان عبر الأداة نفسِها: بالمُلاحَظ وحدَه «go» (وهو العطب)، وبحدِّ النداءات «anticipatory».
+    والنقيضان عبر الأداة نفسِها: بالمُلاحَظ وحدَه «go» (وهو العطب)، وبسقف السؤال «anticipatory».
     """
-    from statement_qa.qa import MODEL_CALL_LIMIT
-    from tools.eval_questions import cap_verdict, per_call_cost, worst_case_cost
+    from statement_qa.qa import MODEL_CALL_LIMIT, question_ceiling
+    from tools.eval_questions import (PER_CALL_MARGIN, cap_verdict, next_question_ceiling,
+                                      per_call_cost)
 
-    saw = [(0.02, 2), (0.04, 4)]                   # (كلفةُ السؤال, نداءاتُ أثره)
-    seen_only = max(c for c, _ in saw)             # ما يُقارَن به السقف (أعلى مُلاحَظ)
-    bound = worst_case_cost([c for c, _ in saw], saw)
+    saw = [(0.02, 2), (0.04, 4)]                    # (كلفةُ السؤال, نداءاتُ أثره)
+    seen_only = max(c for c, _ in saw)
+    bound = next_question_ceiling("سؤالٌ بسيط", saw)
+    ceiling = question_ceiling("سؤالٌ بسيط")
+    phases = ceiling // MODEL_CALL_LIMIT           # الطورُ (طرحٌ · تنبيهٌ · احتياط) مشتقٌّ من المسار
 
-    assert per_call_cost(saw) == pytest.approx(0.008), per_call_cost(saw)    # 0.04 ÷ 5
-    assert bound == pytest.approx(MODEL_CALL_LIMIT * 0.008), bound           # الحدُّ × كلفةِ النداء
-    assert bound > seen_only, "الحدُّ لا يتجاوز المُلاحَظ ⇒ فحدُّ النداءات لا يدخل الحساب"
+    assert per_call_cost(saw) == pytest.approx(0.008), per_call_cost(saw)     # 0.04 ÷ 5
+    assert phases == 3, f"حدُّ السؤال ليس ثلاثةَ أطوارٍ بل {phases}"
+    assert bound == pytest.approx(0.008 * ceiling * PER_CALL_MARGIN), bound
+    assert bound > seen_only, "الحدُّ لا يتجاوز المُلاحَظ ⇒ فالسقفُ ما زال يُقدَّر بالماضي"
     assert cap_verdict(0.05, 0.10, seen_only) == "go", "العطبُ لم يُعَد إنتاجه ⇒ الضابطُ لا يعضّ"
     assert cap_verdict(0.05, 0.10, bound) == "anticipatory"
-    # **وحدُّه المُعلَن:** لا يقلّ عن المُلاحَظ أبدًا (فما رُئي حقيقة)، وبلا عيّنةٍ يبقى المُلاحَظُ وحدَه
-    assert worst_case_cost([0.005], []) == pytest.approx(0.005)
+    # **وحدُّه المُعلَن:** بلا عيّنةٍ ⇒ صفر (لا سندَ يُضرب، والثقبُ مُعلَن)، والأثرُ أدنى حدٍّ للنداءات
+    assert next_question_ceiling("سؤالٌ بسيط", []) == 0.0
     assert per_call_cost([]) == 0.0 and per_call_cost([(0.0, 3)]) == 0.0
-    assert worst_case_cost([], []) == 0.0
-    # **والأثرُ أدنى حدٍّ لنداءات النموذج** (لا نداءَ أداةٍ ⇏ نداءُ نموذجٍ واحدٌ على الأقلّ) ⇒ فالحدُّ يعلو
     assert per_call_cost([(0.003, 0)]) == pytest.approx(0.003)
-    assert worst_case_cost([0.003], [(0.003, 0)]) == pytest.approx(MODEL_CALL_LIMIT * 0.003)
     assert cap_verdict(None, 0.10, 1.0) == "unknown"
     assert cap_verdict(0.10, 0.10, 0.0) == "at-cap"
 
 
-def test_the_false_premise_is_gone_and_the_loop_records_both_numbers():
-    """**توصيلٌ لا تعريف:** أوّلًا ألّا يبقى التقديرُ الكاذبُ في الشجرة أصلًا (معدّلُ الثانية سقط
-    لأنّ الإنفاقَ لا يقف عند المهلة)، وثانيًا أن تُستهلك الدالّتان في الحلقة نفسِها (`run_questions`)
-    — **يُقاس بالـAST** — وأن يُسجَّل الرقمان: ما يُقارَن به السقف (`cap_bound_usd`) وسقفُ الخطر
-    بنصّ الحدّ (`ceiling_bound_usd`). وبلا تسجيلٍ لا تُنسب زيادةُ العدّاد إلى سؤالٍ بعينه.
+def test_the_loop_decides_by_the_ceiling_and_records_it():
+    """**توصيلٌ لا تعريف:** أن تُستهلك الدالّةُ في الحلقة نفسِها (`run_questions` · بالـAST)،
+    **وألّا يبقى التقديرُ الكاذبُ** (`cost_rate_per_s` على المهلة)، **ولا تعريفٌ بلا نادٍ**
+    (`worst_case_cost` أُزيل حين صار القرارُ بالسقف) — ويُسجَّل لكلّ سؤالٍ ما حُوكم به
+    (`next_ceiling_usd`) وأعلى ما رُئي (`cap_seen_usd`) وكلفتُه (`cost_usd`).
     """
     import ast
 
     src = ROOT / "tools" / "eval_questions.py"
     text = src.read_text(encoding="utf-8")
-    assert "cost_rate_per_s" not in text, "معدّلُ الكلفة لكلّ ثانية عاد ⇒ التقديرُ على المهلة عاد"
+    for gone, why in (("cost_rate_per_s", "معدّلُ الكلفة لكلّ ثانية على المهلة"),
+                      ("worst_case_cost", "تعريفٌ لم يبقَ له نادٍ بعد أن صار القرارُ بالسقف")):
+        assert gone not in text, f"{gone} باقٍ ({why})"
 
     fn = next(n for n in ast.parse(text).body
               if isinstance(n, ast.FunctionDef) and n.name == "run_questions")
     called = {getattr(c.func, "id", "") for c in ast.walk(fn) if isinstance(c, ast.Call)}
-    assert {"worst_case_cost", "cap_verdict"} <= called, sorted(c for c in called if c)
+    assert {"next_question_ceiling", "cap_verdict"} <= called, sorted(c for c in called if c)
     names = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)}
     assert "hi_cost" not in names, "التقديرُ القديم (أعلى مُلاحَظ وحدَه) عاد إلى الحلقة"
 
-    for field in ('"cost_usd"', '"cap_bound_usd"', '"ceiling_bound_usd"'):
+    for field in ('"cost_usd"', '"next_ceiling_usd"', '"cap_seen_usd"'):
         assert field in text, f"{field} غيرُ مسجَّل"

@@ -13,6 +13,8 @@
 
 import importlib.util
 import json
+
+import pytest
 import pathlib
 import types
 
@@ -92,16 +94,21 @@ def _run(tmp_path, monkeypatch, meter: _Meter, budget: float, n: int = 8,
 
 
 def test_the_cap_stops_the_loop_with_an_instant_meter(tmp_path, monkeypatch):
-    """$0.60 بـ$0.30/السؤال ⇒ **سؤالان لا أكثر**، ورمزُ خروجٍ غيرُ صفريّ (3)."""
-    rc, results = _run(tmp_path, monkeypatch, _Meter(0.30), 0.60)
+    """**والأرقامُ أُعيدت في R110-1 لأنّ قاعدةَ القرار تغيّرت:** صار الإيقافُ الاستباقيُّ يقارن
+    **سقفَ السؤال التالي** (حدُّ نداءاته من بنية المسار × كلفةِ النداء × الهامش = ٠٫٣٠ × ٣٦ × ١٫٥
+    = **١٦٫٢**) لا أعلى ما رُئي. فالسقفُ الماليُّ الذي يسمح بسؤالين صار **١٦٫٥٠** (١٦٫٢ + ٠٫٣٠)،
+    وبـ٠٫٦٠ كان القياسُ يتوقّف قبل السؤال الثاني بحقّ — **وليس ذلك عطبًا بل شرطُ القرار**:
+    «سقفٌ لا يُخترق ولو قلّت التغطية».
+    """
+    rc, results = _run(tmp_path, monkeypatch, _Meter(0.30), 16.50)
     assert len(results) == 2, f"لم تتوقّف الحلقة عند السقف: طُرح {len(results)} سؤالاً"
     assert rc == 3, f"التوقّفُ بالسقف يجب أن يُقرأ رمزًا غيرَ صفريّ لا {rc}"
 
 
 def test_the_cap_bound_with_a_lagging_meter_is_the_declared_one(tmp_path, monkeypatch):
-    """عدّادٌ متأخّرٌ نداءً واحدًا ⇒ **ثلاثةُ نداءات** (٠٫٩٠ من ٠٫٦٠) — وهذا **الحدُّ المُعلَن**:
-    التجاوزُ الأقصى = (التأخّر + ١) نداءً. الاختبارُ يقيسه ليَرسُب لو انفتح السقف (كان ٨) أو انسدّ تمامًا."""
-    rc, results = _run(tmp_path, monkeypatch, _Meter(0.30, lag=1), 0.60)
+    """عدّادٌ متأخّرٌ نداءً واحدًا ⇒ **ثلاثةٌ** بدل اثنين على الميزانية نفسها (١٦٫٥٠) — وهذا
+    **الحدُّ المُعلَن**: التجاوزُ الأقصى = (التأخّر + ١) نداءً. والضابطُ يرسُب لو انفتح السقف أو انسدّ."""
+    rc, results = _run(tmp_path, monkeypatch, _Meter(0.30, lag=1), 16.50)
     assert len(results) == 3, f"التأخّرُ نداءً واحدًا يجب أن يسمح بنداءٍ زائدٍ واحدٍ لا {len(results)}"
     assert rc == 3, f"رمزُ الخروج {rc}: التوقّفُ يجب أن يُعلَن"
 
@@ -132,7 +139,7 @@ def test_a_nonzero_meter_baseline_gives_the_same_coverage(tmp_path, monkeypatch)
         # السابق (`done` من `answers.json`) فيقرأ تغطيةً مركّبة — قِيس: ٤ بدل ٢. لا يُقاس ضابطان بيتٌ واحد.
         d = tmp_path / f"base_{base}"
         d.mkdir(exist_ok=True)
-        rc, results = _run(d, monkeypatch, _Meter(0.30, base=base), 0.60)
+        rc, results = _run(d, monkeypatch, _Meter(0.30, base=base), 16.50)
         assert (rc, len(results)) == (3, 2), f"رصيد {base}: رمز {rc} وتغطية {len(results)} بدل 3/2"
 
 
@@ -151,3 +158,29 @@ def test_the_stored_record_carries_the_whole_trace_and_its_length(tmp_path, monk
     assert len(rec["used_row_nos"]) == 45, f"السجلُّ مقصوص: {len(rec['used_row_nos'])} من ٤٥"
     assert rec["trace_len"] == len(rec["used_row_nos"]) == 45, "هويّةُ trace_len انكسرت"
     assert rec["cited_pages"] == [1], f"الصفحاتُ المستشهدة ليست من الأثر: {rec['cited_pages']}"
+
+
+def test_the_anticipatory_stop_decides_by_the_next_questions_ceiling(tmp_path, monkeypatch):
+    """**R110-1 · القرارُ بالحدّ لا بالماضي — ويُقاس باتّجاهين بمزوّدٍ واحد:**
+    نفسُ المزوّد ونفسُ الأسئلة، والفرقُ في متسع الميزانية فقط ⇒ **سؤالان** إن غطّى السقفُ الماليُّ
+    سقفَ السؤال التالي، و**واحدٌ** إن لم يغطّه. ولو كان القرارُ بأعلى ما رُئي (وهو ٠٫٣٠ في الحالين)
+    لحُوكم الحالان حكمًا واحدًا — فالضابطُ يفصل القاعدتين.
+    """
+    from statement_qa.qa import question_ceiling
+
+    ceiling_next = 0.30 * question_ceiling("س1") * 1.5          # كلفةُ النداء × حدُّ السؤال × الهامش
+    assert question_ceiling("س1") == 36, question_ceiling("س1")
+
+    # **وشاهدٌ منفصلٌ لكلّ حال** (ضابطٌ يعيد استعمال المجلّد يستأنف أجوبةَ الضابط السابق — قِيس في R52-4)
+    d_rich, d_poor = tmp_path / "rich", tmp_path / "poor"
+    d_rich.mkdir(exist_ok=True)
+    d_poor.mkdir(exist_ok=True)
+    # **والفارقُ عشرةُ سنتاتٍ لا جزءٌ من مليار:** المقارنةُ بالسنتات بتسامحٍ مُعلَن (≤٠٫٥ سنت في
+    # `tools/spend`)، ففرقٌ أدقُّ منها يُقرأ «مساويًا» ولا يفصل القاعدتين.
+    rc_rich, rich = _run(d_rich, monkeypatch, _Meter(0.30), ceiling_next + 0.30 + 0.10)
+    rc_poor, poor = _run(d_poor, monkeypatch, _Meter(0.30), ceiling_next + 0.30 - 0.10)
+
+    assert (rc_rich, len(rich)) == (3, 2), f"ميزانيةٌ تغطّي السقفَ يجب أن تطرح سؤالين لا {len(rich)}"
+    assert (rc_poor, len(poor)) == (3, 1), f"ميزانيةٌ لا تغطّيه يجب أن تتوقّف بعد سؤالٍ لا {len(poor)}"
+    # **والسقفُ يُسجَّل كما حُوكم به:** السؤالُ الثاني حُكم بسقفٍ = ما حسبته هذه الملفّ من الكود.
+    assert rich[1]["next_ceiling_usd"] == pytest.approx(ceiling_next, rel=1e-6), rich[1]
