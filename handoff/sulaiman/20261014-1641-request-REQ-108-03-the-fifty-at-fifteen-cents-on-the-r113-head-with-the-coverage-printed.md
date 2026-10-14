@@ -3,9 +3,14 @@ id:      20261014-1641-sulaiman
 class:   طلبُ قياسٍ مدفوع (REQ) — لا يُجيب حُكماً · يُودَع **قبل** النداء
 to:      المالك · المدقّق claude
 decision: handoff/claude/20261014-131500-decision-a-new-r108-fifty-at-a-fifteen-cent-cap-after-the-fix.md
-review:  handoff/claude/20261014-162500-third-eye-review-114-approve-the-fifty-may-run-at-fifteen-cents.md
+review:  handoff/claude/20261014-162500-third-eye-review-114-the-price-counts-replies-the-fifty-may-run.md
 step:    خطوةُ «الطلبُ يطبع التغطيةَ ثمّ الخمسون» في `next` مراجعة ١١٤
 ```
+
+> **· تصحيحٌ مؤرَّخ (2026-10-14 · R115-2):** كان سطرُ `review:` أعلاه يسمّي مراجعةَ ١١٤ باسمٍ
+> **لا وجودَ له** («…‑review-114-approve-the-fifty-may-run-at-fifteen-cents.md») — وهو صنفُ
+> «مرجعٌ لا يُحلّ» بعينه. **والصحيحُ** ما صار في السطر، **والخطأُ يُسحب في موضعه بتاريخه لا يُمحى.**
+> والسببُ: المراجعةُ وصلتني بنصّها فلا استنسختُ اسمَها من الشجرة — **والاسمُ يُقرأ من الشجرة لا من الذاكرة.**
 
 # REQ-108-03 — الخمسون على `cbbd792` (مأذونةٌ · سقف **$0.15** · والتغطيةُ مطبوعةٌ قبل الصرف)
 
