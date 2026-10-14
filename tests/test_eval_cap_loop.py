@@ -70,7 +70,13 @@ def _run(tmp_path, monkeypatch, meter: _Meter, budget: float, n: int = 8,
                         lambda run: ([{"row_no": i + 1, "text": "س", "page": 1} for i in range(rows_n)], 1))
     monkeypatch.setattr(chunking, "chunk_rows", lambda rows: [{"text": "س", "row_no": 1}])
     monkeypatch.setattr(retriever, "build_index", lambda chunks: object())
-    monkeypatch.setattr(qa, "build_llm", lambda model=None: None)
+    monkeypatch.setattr(qa, "build_llm", lambda model=None, callbacks=None: None)
+    # **ورموزُ المزوّد المُحاكى (R112-1):** كلُّ سؤالٍ يُضيف **مليونَ رمزٍ مدخلًا**، وبسعرٍ مُعلَن
+    # `$0.30/M` تصير كلفةُ نافذته **$0.30** — وهي نفسُ «كلفة النداء» التي كان العدّادُ يُستنتج منها.
+    # ⇒ فالضوابطُ تقيس **السلوكَ نفسَه** (التوقّفُ والرموزُ والتغطية) وراءَ إشارةٍ جديدة: الرموزُ
+    # المشهودة، لا رصيدُ الحساب. **ولا شبكة:** `usage_snapshot` مُستبدَلة، والسعرُ من سطر الأمر.
+    monkeypatch.setattr(m, "usage_snapshot",
+                        lambda _h: {"mock": {"input_tokens": meter.calls * 1_000_000, "output_tokens": 0}})
     if used is not None:                     # أثرٌ بحجمٍ محدَّد (لضابط القصّ) — يُرجَع تلقائيًّا
         monkeypatch.setattr(_Ans, "used_row_nos", list(used))
 
@@ -86,7 +92,12 @@ def _run(tmp_path, monkeypatch, meter: _Meter, budget: float, n: int = 8,
            "expect": "…", "derive": {"kind": "mock"}} for i in range(1, n + 1)]
     a = types.SimpleNamespace(
         run=ROOT / "data/local_sample/slice_629p", model=None, out=tmp_path / "answers.json",
-        budget=budget, timeout=5, only=None, questions=_questions_file(tmp_path), rescore=False, execute=False)
+        budget=budget, timeout=5, only=None, questions=_questions_file(tmp_path), rescore=False,
+        execute=False,
+        # **والسعرُ صريحٌ من سطر الأمر (R112-1):** $0.30 للمليون مدخلًا ومخرجًا ⇒ فكلفةُ نافذةِ
+        # كلّ سؤالٍ (مليونُ رمزٍ من المُحاكي) = $0.30 بالضبط. **وبلا سطرِ الأمر يُقرأ السعرُ من قائمة
+        # النماذج العامّة** — والضابطُ لا يمسّ الشبكة بحال.
+        price_in_per_m=0.30, price_out_per_m=0.30)
     rc = m.run_questions(a, qs, None, {}, {})
     out = tmp_path / "answers.json"
     saved = json.loads(out.read_text()) if out.exists() else {}
@@ -105,12 +116,23 @@ def test_the_cap_stops_the_loop_with_an_instant_meter(tmp_path, monkeypatch):
     assert rc == 3, f"التوقّفُ بالسقف يجب أن يُقرأ رمزًا غيرَ صفريّ لا {rc}"
 
 
-def test_the_cap_bound_with_a_lagging_meter_is_the_declared_one(tmp_path, monkeypatch):
-    """عدّادٌ متأخّرٌ نداءً واحدًا ⇒ **ثلاثةٌ** بدل اثنين على الميزانية نفسها (١٦٫٥٠) — وهذا
-    **الحدُّ المُعلَن**: التجاوزُ الأقصى = (التأخّر + ١) نداءً. والضابطُ يرسُب لو انفتح السقف أو انسدّ."""
-    rc, results = _run(tmp_path, monkeypatch, _Meter(0.30, lag=1), 16.50)
-    assert len(results) == 3, f"التأخّرُ نداءً واحدًا يجب أن يسمح بنداءٍ زائدٍ واحدٍ لا {len(results)}"
-    assert rc == 3, f"رمزُ الخروج {rc}: التوقّفُ يجب أن يُعلَن"
+def test_a_lagging_meter_no_longer_moves_the_decision(tmp_path, monkeypatch):
+    """**R112-1 · وما كان قياسًا في R110-1 صار مُبطَلًا بقياس:** العدّادُ المتأخّرُ نداءً واحدًا كان
+    يسمح بنداءٍ زائدٍ واحدٍ (**ثلاثةٌ** بدل اثنين على الميزانية نفسها) لأنّ سعرَ النداء كان يُستنتَج
+    **منه**. وقد صار السعرُ يُشاهَد من **رموز الردود** ⇒ **فالتأخّرُ لا يُحرّك القرار**: نفسُ التغطية
+    (٢) مع عدّادٍ لحظيّ ومع عدّادٍ متأخّر — وهو الفرقُ المطلوبُ في مراجعة ١١٢ (رصيدُ الحساب شاهدٌ على
+    مجموع الجولة، لا سعرٌ يحكم). **والمتأخّرُ يبقى مقروءًا:** رصيدُه يُسجَّل لكلّ سؤال (`meter_delta_usd`)
+    ولا يدخل القانون.
+    """
+    d1 = tmp_path / "live"
+    d1.mkdir(exist_ok=True)
+    rc_live, live = _run(d1, monkeypatch, _Meter(0.30), 16.50)
+    d2 = tmp_path / "lagging"
+    d2.mkdir(exist_ok=True)
+    rc_lag, lag = _run(d2, monkeypatch, _Meter(0.30, lag=1), 16.50)
+    assert (rc_live, len(live)) == (3, 2), f"العدّادُ اللحظيّ: رمز {rc_live} وتغطية {len(live)} بدل 3/2"
+    assert (rc_lag, len(lag)) == (3, 2), (
+        f"التأخّرُ حرّك القرار (رمز {rc_lag} وتغطية {len(lag)}) ⇒ السعرُ ما زال يُستنتَج من العدّاد")
 
 
 def test_a_reverse_meter_halts_and_does_not_read_as_success(tmp_path, monkeypatch):
@@ -182,5 +204,10 @@ def test_the_anticipatory_stop_decides_by_the_next_questions_ceiling(tmp_path, m
 
     assert (rc_rich, len(rich)) == (3, 2), f"ميزانيةٌ تغطّي السقفَ يجب أن تطرح سؤالين لا {len(rich)}"
     assert (rc_poor, len(poor)) == (3, 1), f"ميزانيةٌ لا تغطّيه يجب أن تتوقّف بعد سؤالٍ لا {len(poor)}"
-    # **والسقفُ يُسجَّل كما حُوكم به:** السؤالُ الثاني حُكم بسقفٍ = ما حسبته هذه الملفّ من الكود.
-    assert rich[1]["next_ceiling_usd"] == pytest.approx(ceiling_next, rel=1e-6), rich[1]
+    # **والسقفُ يُسجَّل كما حُوكم به:** السؤالُ الثاني حُكم بسقفٍ = ما حسبته هذه الملفّ من الكود،
+    # **وبالسعر المشهود من الرموز** (R112-4: حقلٌ واحد لكلّ معنى — والحقلُ المكرَّرُ `next_ceiling_usd`
+    # أُزيل لأنّه كان يُحسب من الوسائط نفسِها في الدورة نفسِها).
+    assert rich[1]["cap_bound_usd"] == pytest.approx(ceiling_next, rel=1e-6), rich[1]
+    assert rich[1]["cap_price_usd"] == pytest.approx(0.30, rel=1e-6), rich[1]
+    assert rich[1]["cap_price_source"] == "observed-tokens", rich[1]
+    assert "next_ceiling_usd" not in rich[1], "الحقلُ المكرَّرُ عاد إلى السجلّ"

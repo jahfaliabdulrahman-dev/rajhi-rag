@@ -127,6 +127,7 @@ jobs:
                            tests/test_retrieval_named_page.py \
                            tests/test_page_sum_tool.py \
                            tests/test_question_ceiling.py \
+                           tests/test_the_cap_price_is_observed.py \
                            tests/test_publish_guard.py \
                            tests/test_footer_order.py \
                            tests/test_desc_accuracy.py \

@@ -232,5 +232,10 @@ def test_the_loop_decides_by_the_ceiling_and_records_it():
     names = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)}
     assert "hi_cost" not in names, "التقديرُ القديم (أعلى مُلاحَظ وحدَه) عاد إلى الحلقة"
 
-    for field in ('"cost_usd"', '"next_ceiling_usd"', '"cap_seen_usd"'):
+    for field in ('"cost_by_tokens_usd"', '"spent_before_usd"', '"cap_price_usd"',
+                  '"cap_price_source"', '"cap_bound_usd"'):
         assert field in text, f"{field} غيرُ مسجَّل"
+    # **وبلا تكرار (R112-4):** `next_ceiling_usd` كان نسخةً ثانيةً لحقلٍ واحد باسمٍ مضلِّل
+    # (يُحسب من الوسائط نفسِها في الدورة نفسِها) ⇒ أُزيل، **والدليلُ يحمل ما حُوكم به فعلًا**.
+    assert '"next_ceiling_usd"' not in text, "الحقلُ المكرَّرُ عاد"
+    assert '"cap_seen_usd"' not in text, "حقلٌ لا يستهلكه قارئٌ ولا قانون (مصدرُه السعرُ المشهود الآن)"

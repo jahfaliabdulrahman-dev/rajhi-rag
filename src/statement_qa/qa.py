@@ -198,14 +198,30 @@ def question_ceiling(question: str) -> int:
     return MODEL_CALL_LIMIT * (MAX_ATTEMPTS_PER_PART + FALLBACK_CALLS_PER_PART) * max(1, len(parts))
 
 
-def build_llm(model_name: str | None = None):
-    """ChatOpenAI pointed at OpenRouter (key from env / ~/.hermes/.env)."""
+#: **النموذجُ الافتراضيّ — موضعٌ واحد** (R112-1): يستهلكه بناءُ العميل **وسعرُ الرمز** في أداة
+#: القياس (تُقرأ أسعارُه من قائمة النماذج العامّة بالمعرّف نفسه) ⇒ فلا نسخةَ ثانيةً تنحرف عنه.
+DEFAULT_MODEL = "z-ai/glm-5.3-flash"
+
+
+def effective_model(model_name: str | None = None) -> str:
+    """معرّفُ النموذج الفعليّ (وسيطٌ صريح، ثمّ `OPENROUTER_MODEL`، ثمّ الافتراضيّ)."""
+    return model_name or os.environ.get("OPENROUTER_MODEL", DEFAULT_MODEL)
+
+
+def build_llm(model_name: str | None = None, *, callbacks: list | None = None):
+    """ChatOpenAI pointed at OpenRouter (key from env / ~/.hermes/.env).
+
+    **و`callbacks` اختياريّةٌ مُضافةٌ في موضعها (R112-1):** تُمرَّر إلى عميل النموذج نفسه —
+    وبها يُجمَع `usage_metadata` لكلّ ردٍّ لحظةَ وصوله (`UsageMetadataCallbackHandler`) ⇒
+    **سعرُ النداء يُشاهَد ولا يُقدَّر** — **ولا يُلمَس `invoke`** (ضابطُ «النداءُ بلا حالةِ رسمٍ»
+    يقيس `invoke` بلا `config`، ويبقى صادقًا). وبلا وسائطَ تبقى السلوكُ كما هو بالحرف.
+    """
     from langchain_openai import ChatOpenAI
 
     from statement_qa.api_key import get_api_key
 
     key = get_api_key()
-    model = model_name or os.environ.get("OPENROUTER_MODEL", "z-ai/glm-5.3-flash")
+    model = effective_model(model_name)
     return ChatOpenAI(
         model=model,
         base_url="https://openrouter.ai/api/v1",
@@ -216,6 +232,7 @@ def build_llm(model_name: str | None = None):
         timeout=REQUEST_TIMEOUT_S,
         max_retries=MODEL_MAX_RETRIES,
         max_tokens=MAX_ANSWER_TOKENS,
+        **({"callbacks": list(callbacks)} if callbacks else {}),
     )
 
 
