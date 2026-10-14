@@ -24,6 +24,6 @@
  "tests_by_env": {
   "full": 1233,
   "ci-light": 1185,
-  "ci-claims": 926
+  "ci-claims": 943
  }
 }
