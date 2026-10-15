@@ -251,3 +251,34 @@ def test_the_loop_decides_by_the_billed_spend_and_records_it():
     # (يُحسب من الوسائط نفسِها في الدورة نفسِها) ⇒ أُزيل، **والدليلُ يحمل ما حُوكم به فعلًا**.
     assert '"next_ceiling_usd"' not in text, "الحقلُ المكرَّرُ عاد"
     assert '"cap_seen_usd"' not in text, "حقلٌ لا يستهلكه قارئٌ ولا قانون (مصدرُه السعرُ المشهود الآن)"
+
+def test_the_run_header_writes_the_ceiling_under_its_own_source() -> None:
+    """**R127-2 (مراجعة ١٢٧): ترويسةُ ملفّ الجولة تنسب السعرَ إلى مصدره الصحيح.**
+
+    **العطبُ المقيس (منذ R122-1 · r123 مثله):** `price_in_per_m`/`price_out_per_m` كانتا تُكتبان من
+    سعر **القائمة** (شاهدٌ لا يحكم) بينما `price_source` يقول `provider-max-price` ⇒ فالملفُّ يُنسب فيه
+    سعرُ القائمة إلى مصدر الحدّ: يقرأ القارئ `0.15/0.50` والحاكمُ `0.12/0.60`.
+
+    **والضابطُ يقيس الدالّةَ النقيّةَ نفسَها** (`run_header`) بلا تشغيلٍ مدفوع، ويقيس النقيضَ أيضًا:
+    **الحدُّ في حقله، والشاهدُ في حقله** — فلا يُخلط مصدرٌ بمصدر.
+    """
+    sys.path.insert(0, str(ROOT))
+    from tools import eval_questions as ev
+
+    class _A:                      # سطرُ أمرٍ مصغَّر: ما تقرؤه الترويسةُ وحدَه
+        model = None
+        budget = 0.06
+        price_in_per_m = None
+
+    ceiling = (0.12, 0.60)         # حدُّ الطلب = الحاكم في القانون
+    listing = (0.15, 0.50)         # سعرُ القائمة = شاهدٌ لا يحكم
+    head = ev.run_header(_A(), "some/model", "deadbeef", ceiling, listing)
+    assert (head["price_in_per_m"], head["price_out_per_m"]) == ceiling, \
+        f"الحاكمُ لم يُكتب في حقله: {head}"
+    assert head["price_source"] == "provider-max-price", head["price_source"]
+    assert (head["list_price_in_per_m"], head["list_price_out_per_m"]) == listing, \
+        f"الشاهدُ لم يُكتب في حقله: {head}"
+    assert head["list_price_source"] == "models-list", head
+    # **ولا يُنسب الشاهدُ إلى مصدر الحدّ** — وهذا ما كان يقع:
+    assert not (head["price_in_per_m"] == listing[0] and head["price_source"] == "provider-max-price"), \
+        "سعرُ القائمة عاد يُكتب تحت مصدر الحدّ (R127-2)"

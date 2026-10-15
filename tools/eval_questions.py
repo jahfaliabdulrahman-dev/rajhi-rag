@@ -482,6 +482,35 @@ def _resolve_price(a) -> tuple[float, float] | None:
     return fetch_model_price(effective_model(getattr(a, "model", None)))
 
 
+def run_header(a, model_id: str, spec_sha: str,
+               ceiling_pair: tuple[float, float] | None,
+               list_pair: tuple[float, float] | None) -> dict:
+    """ترويسةُ ملفّ الجولة — **ما يحكم يُكتب بحقله ومصدره، والشاهدُ يُكتب باسمه** (R127-2).
+
+    **العطبُ المقيس (منذ R122-1 · r123 مثله):** كانت `price_in_per_m`/`price_out_per_m` تُكتب من
+    `price_pair` = **سعرُ القائمة** — وهو **شاهدٌ لا يحكم** بعد R122-1 — بينما `price_source` يقول
+    `provider-max-price` ⇒ **فالترويسةُ تنسب سعرَ القائمة إلى مصدرِ الحدّ**: يقرأ القارئ `0.15/0.50`
+    تحت مصدرِ الحدّ والحاكمُ `0.12/0.60`. **والمحاسبةُ من فاتورة المزوّد ⇒ فما تغيّر رقمٌ**: الاسمُ هو
+    المُصلَح، والشاهدُ يبقى معلَنًا باسمه الخاصّ (`list_price_*`) فلا يُخلط بالمصدر.
+
+    **والموضعُ دالّةٌ مستقلّة** (نقيّة على مُدخلاتها) ⇒ تُقاس بضابطٍ بلا تشغيلٍ مدفوع ولا نموذج.
+    """
+    return {
+        "model": a.model or "افتراضيّ",
+        "model_id": model_id,
+        "spec_sha": spec_sha,
+        "budget_usd": a.budget,            # **العقدةُ في الدليل**: ميزانيةُ الجولة مُعلنةٌ في ملفّها
+        # **حدُّ الطلب = الحاكمُ في القانون** (R122-1) — بحقله ومصدره:
+        "price_in_per_m": None if not ceiling_pair else ceiling_pair[0],
+        "price_out_per_m": None if not ceiling_pair else ceiling_pair[1],
+        "price_source": _price_source(a),
+        # **وشاهدُ القائمة يُكتب باسمه** (كان يُكتب تحت مصدر الحدّ) — حدٌّ أدنى لا يحكم:
+        "list_price_in_per_m": None if not list_pair else list_pair[0],
+        "list_price_out_per_m": None if not list_pair else list_pair[1],
+        "list_price_source": "models-list",
+    }
+
+
 def usage_snapshot(handler) -> dict:
     """لقطةٌ من عدّاد الرموز اللحظيّ — تُقابَل بلقطةٍ بعد السؤال فيُعرف نصيبُه وحدَه."""
     return dict(getattr(handler, "usage_metadata", None) or {})
@@ -975,6 +1004,12 @@ _NUMTOK = re.compile(r"[\d٠-٩۰-۹][\d٠-٩۰-۹,٬،٫.]*")
 _ABSENCE = ("غير موجود", "لا يوجد", "غير متوف", "لا تتوفر", "لا يمكن", "غير مطبوع", "لا أعلم",
             "لا تتضمّن", "لا تتضمن", "لا بيانات", "خارج", "لا سند")
 _AMBIG = ("تعادل", "متساو", "مبلغان", "مبلغين", "أكثر من مبلغ", "لا يمكن الجزم", "لا يمكن تحديد")
+# **و`_POS`/`_NEG` خرجتا من مسار السلسلة (R127-1 · قرار المالك `20261015-211000`):** كانت `_polarity`
+# تحكم `chn-01..04` بألفاظٍ، فأسقطت جوابًا صحيحًا **٧ مرّات** (الفرقُ الصحيحُ مذكورٌ والنفيُ صريح،
+# و«متّصل» عضوٌ في `_POS`) ⇒ **والحكمُ الآن بالدعوى التي يطلبها السؤال: مبلغُ الفرق مقروءًا رقمًا.**
+# **وقارئُها الباقي واحدٌ:** فرعُ `expect == "boolean"` — **ولا سؤالَ `boolean` في الحزمة (قِيس: ٠)**،
+# فهو مسارٌ غيرُ مُختبَرٍ يحمل الصنفَ نفسَه ⇒ **يُعلَن ولا يُسكَت عنه**، وضابطٌ يقيس أنّ الحزمةَ خاليةٌ
+# منه (فلو دخل سؤالٌ من هذا الصنف ظهر الحدُّ بدل أن يمرّ الحكمُ بقائمةٍ بلا قياس).
 _POS = ("يتّصل", "يتصل", "متّصل", "متصل", "يتماشى", "يساوي")
 _NEG = ("لا يتّصل", "لا يتصل", "غير متّصل", "غير متصل", "لا يتماشى", "لا يساوي", "ينقطع", "لا يوجد اتصال")
 
@@ -994,7 +1029,12 @@ def _is_neg(ans: str) -> bool:
 
 def _polarity(ans: str) -> tuple[bool, bool]:
     """(إيجاب، نفي) — **يُزال النفيُ أوّلاً ثم يُبحث عن الإيجاب**: «لا يساوي» **تحتوي** «يساوي»، فأشعلت
-    العلمَين معاً فيسقط الشرط `neg and not pos` على جوابٍ صحيح (قِيس بالتنفيذ في مراجعة المقاعد)."""
+    العلمَين معاً فيسقط الشرط `neg and not pos` على جوابٍ صحيح (قِيس بالتنفيذ في مراجعة المقاعد).
+
+    **وقارئُها اليومَ واحدٌ:** فرعُ `expect == "boolean"` (تحت `metric == "number"`) وحدَه (R127-1 ·
+    قرار `20261015-211000`): مسارُ `chain` صار يحكم بمبلغ الفرق رقمًا ولا يلمس هذه الدالّة. **ولا سؤالَ
+    `boolean` في الحزمة (قِيس: ٠)** ⇒ فهي قائمةٌ في مسارٍ غيرِ مُختبَرٍ **مُعلَن**، لا في مصحِّحٍ يعمل.
+    """
     t = ans or ""
     stripped = t
     for w in _NEG:
@@ -1075,13 +1115,24 @@ def _score_common(q: dict, truth_val, ans: str, res, rows: list[dict], *,
             if not t:
                 # **عطبُ مرسًى لا يُقرأ حُكماً على النظام** (قياسُ غيابٍ لا يساوي فشلَ النظام).
                 return False, "عطبُ مرسًى: لا سلسلةَ مُشتقّة (لا يُحكم على النظام)"
-            pos, neg = _polarity(ans)
+            # **والحكمُ بالدعوى التي يطلبها السؤال — مبلغُ الفرق مقروءًا رقمًا — ولا قائمةَ ألفاظٍ في
+            # هذا المسار** (قرارُ المالك `20261015-211000` · الخيار ١ · مراجعة ١٢٧ · R127-1):
+            # كانت `_polarity` تقرأ النثرَ بقائمةٍ مبنيّةٍ باليد، فأسقطت جوابًا صحيحًا **٧ مرّات في ٦ من
+            # ١٢ ملفَّ جولة** (r100 · r102 ‏×٢ · r103 · r107 · r108 · r126): كلُّها **تنفي التساويَ
+            # وتذكر الفرقَ الصحيح**، ثمّ تشرح أنّ التسلسلَ متّصل — و«متّصل» عضوٌ في `_POS` ⇒ فسقطت
+            # بـ`neg and not pos`. **والصنفُ نفسُه أُزيل من الامتناع بقرار `20261014-231500`** (الحكمُ
+            # بالإشارة لا بالألفاظ) ⇒ فلا يعود إلى مسار السلسلة. **وما يُترك مُعلَنًا:** فحصُ «لم يدّعِ
+            # التساويَ بالكلام» — وقِيس على الملفّات الـ١٢ أنّ صفرَ جوابٍ يذكر الفرقَ الصحيح **ويدّعي
+            # التساوي** (والنقيضُ محروسٌ بضابط: فرقٌ خطأ ⇒ ✗).
             if t.get("equal"):
                 near = any(abs(v - 0.0) < 0.05 for v in nums)
-                return (pos and not neg and near), f"متساويان: إيجابٌ {'✓' if pos else '✗'} · فرقٌ صفريٌّ {'✓' if near else '✗'}"
+                return near, (f"متساويان: الدعوى فرقٌ صفريٌّ {'وُجد' if near else 'لم يوجد'} "
+                              f"في {len(nums)} رقماً")
             near = any(abs(v - float(t.get("diff"))) < 0.05 for v in nums)
-            return (neg and not pos and near), \
-                f"غيرُ متساويين: نفيٌ {'صريح' if neg else 'غائب/مضادّ'} · الفرقُ {'مذكور' if near else 'غيرُ مذكور'}"
+            # **ولا يُطبع المبلغُ المتوقَّع في السبب:** السطرُ يُنشر في سجلّ التشغيل، والقيمةُ من
+            # الكشف الحقيقيّ ⇒ فالسببُ يقول «مذكور/غيرُ مذكور» بلا رقم.
+            return near, (f"غيرُ متساويين: مبلغُ الفرق {'مذكورٌ رقمًا' if near else 'غيرُ مذكور'} "
+                          f"في {len(nums)} رقماً")
         if q["expect"] == "boolean":
             pos, neg = _polarity(ans)
             if truth_val is True:
@@ -1654,13 +1705,9 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                 observations.append((window[0], window[2]))
             spent_tokens = spent_after     # **مصدرٌ واحدٌ للمُنفَق**: مجموعُ كلفة الردود (R115-1)
         merged = {**prev_all, **done}      # النائبُ يبقى ما لم يُجَب عنه فعلاً
-        out.write_text(json.dumps({"model": a.model or "افتراضيّ", "model_id": model_id,
-                                   "spec_sha": _spec_sha(a.questions),
-                                   "budget_usd": a.budget,     # **العقدةُ في الدليل**: ميزانيةُ الجولة مُعلنةٌ في ملفّها
-                                   # **والسعرُ في الدليل** (شرطُ مراجعة ١١٢): يُقرأ مرّةً ويُكتب مع الجولة
-                                   "price_in_per_m": None if not price_pair else price_pair[0],
-                                   "price_out_per_m": None if not price_pair else price_pair[1],
-                                   "price_source": _price_source(a),
+        # **والترويسةُ من موضعها الواحد** (`run_header` · R127-2): الحاكمُ بمصدره، والشاهدُ باسمه.
+        out.write_text(json.dumps({**run_header(a, model_id, _spec_sha(a.questions),
+                                              ceiling_pair, price_pair),
                                    "results": [merged[k] for k in order if k in merged]},
                                   ensure_ascii=False, indent=1))   # **حفظٌ تدريجيّ: قتلُ العملية لا يُهدر جواباً**
         tools = ",".join(tools_now) or "—"
@@ -1755,7 +1802,18 @@ def _print_metrics(results: list[dict]) -> None:
     names = " · ".join(str(r.get("id")) for r in cut) if cut else "لا شيء"
     print(f"\n✂️ **الردودُ المقطوعة (length): {len(cut)}** — بأسمائها: {names}"
           f"   (المرجعُ: r108-03 ⇒ ١ · r123 ⇒ ٢)")
-    print("\nتفصيلٌ بالقاعدة:")
+    # **وإشارةُ الجواب تُعدّ باسمها (R126-4 · مراجعتا ١٢٦ و١٢٧):** كان العدُّ المطبوع يعدّ **حقلَ
+    # `kind`** وهو **صنفُ السؤال/الأداة** لا **إشارةَ الجواب** (`answer_kind`) ⇒ فالعدُّ الذي طلبه
+    # قرارُ المالك `20261015-175500` («وعددُ الأجوبة الحاملة لـ`kind`، والمُعادة لغيابه») **لم يكن في
+    # الشاشة**، والاسمُ نفسُه كان يُوهم. الآن يُطبع الاثنان — كلٌّ باسمه — ويُطبع معهما سطرُ القطع.
+    sig: dict[str, int] = {}
+    for r in results:
+        key = str(r.get("answer_kind") or "") or "فارغة"
+        sig[key] = sig.get(key, 0) + 1
+    held = sum(v for k, v in sig.items() if k != "فارغة")
+    parts = " · ".join(f"{k} **{v}**" for k, v in sorted(sig.items(), key=lambda kv: -kv[1]))
+    print(f"\n🔎 **إشارةُ الجواب (`answer_kind`): {held} من {len(results)} حملت الإشارة** — {parts}")
+    print("\nتفصيلٌ بصنف السؤال (`kind` = صنفُ الأداة/الاشتقاق، **لا إشارةَ الجواب**):")
     for k, oks in sorted(by_kind.items(), key=lambda kv: -len(kv[1])):
         print(f"  {k:16s} {sum(oks):2d}/{len(oks):2d}")
 
