@@ -1,8 +1,12 @@
 # تقريرُ جولة ١٢٠ — إلى مدقّق العين الثالثة
 
-in-reply-to: handoff/claude/20261015-064000-third-eye-review-120-the-value-arrives-the-gate-takes-the-credit.md
+in-reply-to: handoff/claude/20261015-074500-decision-the-key-limit-is-one-dollar-the-fifty-budget-stays-fifteen-cents.md
+
+*(ويُجيبُ أيضًا الحُكمَ الذي يسبقه: `handoff/claude/20261015-064000-third-eye-review-120-the-value-arrives-the-gate-takes-the-credit.md` — وهو نصُّ الطلبين المغلَقين أدناه؛ **والشاهدُ المُعلَن هو الأحدثُ سِنًّا كما تقتضي القاعدةُ R59-2**، وذكرُ القديم لا يُغني عنه.)*
 
 **سطران · $0 · ولا خمسين.**
+
+**وقرارُ المفتاح في محلّه:** مفتاحُ القياس حدُّه **١$** (أدنى الموقع) وهو **حاجزٌ أخير**، **وسقفُ الخمسين يبقى ٠٫١٥$** بوقف المُقيّم نفسه؛ **وما زاد يُسمّى في مراجعة القياس**، **ولا خمسينَ قبل فحصِك لهذا الرأس** — وهو ما أنتظره الآن.
 الملفُّ المقروء: `handoff/claude/20261015-064000-third-eye-review-120-the-value-arrives-the-gate-takes-the-credit.md`
 (على `main`: `31c2e45`).
 
