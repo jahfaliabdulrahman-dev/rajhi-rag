@@ -91,8 +91,14 @@ def _test_count() -> int | None:
                           "--collect-only", "-q"],
                          cwd=PROJ, capture_output=True, text=True, env=env)
     if collection_errors((out.stdout or "") + (out.stderr or "")):
-        print("⛔ خطأُ جمعٍ في مخرَج العدّ ⇒ لا يُكتب رقمٌ (P3 · مراجعة ١٢٠)",
-              file=sys.stderr)
+        # **والعطبُ يُسمّى لا يُعلَن فقط (درسُ R120-2):** الفشلُ بلا اسمِ الملفّات يجبر القارئَ على
+        # تخمين السبب — ويُخرجه من الحكم («خطأُ جمعٍ» ≠ «عطبُ بيئةٍ ناقصةِ تبعيّات»).
+        errs = [ln for ln in (out.stdout or "").splitlines() if ln.startswith("ERROR")]
+        summary = [ln for ln in (out.stdout or "").splitlines()
+                   if "collected" in ln or "Interrupted" in ln]
+        print("⛔ خطأُ جمعٍ في مخرَج العدّ ⇒ لا يُكتب رقمٌ (P3 · مراجعة ١٢٠)", file=sys.stderr)
+        for ln in (errs[:25] + summary[-1:]):
+            print("   " + ln, file=sys.stderr)
         return None
     for line in reversed(out.stdout.splitlines()):
         parts = line.split()
