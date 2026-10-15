@@ -52,14 +52,23 @@ class _Ans:
 
 
 class _Reply:
-    """ردُّ نموذجٍ مُحاكى **بالشكل الذي يقرأه `finish_reasons_from`**: `generations` ثمّ `llm_output`.
+    """ردُّ نموذجٍ مُحاكى **بالشكل الذي يقرأه الوسيط**: `finish_reason`, و`token_usage` (**رموزًا و`cost`**).
 
-    و`ردٌّ = نداءٌ واحد` — وهو العدُّ الذي صار يحمل السعر (R113-1) بدل أرضية «الأدوات + ١».
+    و`ردٌّ = نداءٌ واحد` — وهو العدُّ الذي صار يحمل السعر (R113-1) بدل «الأدوات + ١».
+    **ويحمل `cost` كما يرسله المزوّد** (R115-1) ليُقاس المُحاسَبُ لا المُخمَّن: ومصدرُ الردّ في
+    المسار الحقيقيّ اثنان (`llm_output["token_usage"]` و`message.response_metadata["token_usage"]`)
+    ⇒ والردُّ المُحاكى يحمل الاثنين، كما يفعل عميل `openai` الحقيقيّ.
     """
 
-    def __init__(self, reason: str = "stop") -> None:
-        self.generations = [[types.SimpleNamespace(generation_info={"finish_reason": reason})]]
-        self.llm_output = {"finish_reason": reason}
+    def __init__(self, reason: str = "stop", prompt_tokens: int = 1_000_000,
+                 completion_tokens: int = 0, cost: float | None = None) -> None:
+        tu: dict = {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens}
+        if cost is not None:
+            tu["cost"] = cost
+        self.generations = [[types.SimpleNamespace(
+            generation_info={"finish_reason": reason},
+            message=types.SimpleNamespace(response_metadata={"token_usage": tu}))]]
+        self.llm_output = {"finish_reason": reason, "token_usage": tu}
 
 
 class _ExpiredThread:
@@ -96,7 +105,10 @@ def _questions_file(tmp_path) -> pathlib.Path:
 def _run(tmp_path, monkeypatch, meter: _Meter, budget: float, n: int = 8,
          rows_n: int = 1, used: list[int] | None = None, calls_for: dict[str, int] | None = None,
          tools_for: dict[str, int] | None = None, expire_on: set[str] | None = None,
-         late: tuple[int, int] | None = None, no_replies: bool = False):
+         late: tuple[int, int] | None = None, no_replies: bool = False,
+         cost_for: dict[str, float] | None = None, no_cost_on: set[str] | None = None,
+         local_for: set[str] | None = None, host_high: tuple[float, float] | None = (0.30, 0.30),
+         cli_price: tuple[float, float] | None = (0.30, 0.30), ceiling: dict | None = None):
     """تشغيلُ `run_questions` بمزوّدٍ مُحاكى. و`calls_for` = نداءاتُ سؤالٍ بعينه (والافتراضُ نداءٌ واحد)،
     و`tools_for` = أدواتُ أثرِه · و`expire_on` = أسئلةٌ **تنتهي مهلتُها** (خيطٌ يعمل ثمّ يُعلن نفسَه حيًّا)،
     و`late = (بعدَ أيّ سؤال, كم نداءً)** = رموزٌ تصل **بين النافذتين** (خيطٌ مُتخلّى عنه يردّ متأخّرًا).
@@ -114,18 +126,21 @@ def _run(tmp_path, monkeypatch, meter: _Meter, budget: float, n: int = 8,
     # في المسار الحقيقيّ (مسباري: طلبان ⇒ مدخلان)، لا أرضيةَ الأدوات.
     seen: dict = {"cbs": []}
 
-    def _build_llm(model=None, callbacks=None):
+    def _build_llm(model=None, callbacks=None, api_key=None, max_price=None):
         seen["cbs"] = list(callbacks or [])
+        # **والحراسةُ بالقياس:** القياسُ يشتري بمفتاح القياس ويرسل حدَّ السعر — يُقاس ما مُرِّر فعلًا.
+        seen["api_key"] = api_key
+        seen["max_price"] = max_price
         return None
 
     monkeypatch.setattr(qa, "build_llm", _build_llm)
 
-    def _fire(reason: str = "stop", times: int = 1) -> None:
+    def _fire(reason: str = "stop", times: int = 1, cost: float | None = None) -> None:
         if no_replies:            # **مراقبٌ غيرُ موصول**: النداءاتُ تقع ولا يُرصد لها ردّ (R113-1)
             return
         for _ in range(times):
             for cb in seen["cbs"]:
-                cb.on_llm_end(_Reply(reason))
+                cb.on_llm_end(_Reply(reason, cost=cost))
 
     # **ورموزُ المزوّد المُحاكى (R112-1):** كلُّ نداءٍ يُضيف **مليونَ رمزٍ مدخلًا**، وبسعرٍ مُعلَن
     # `$0.30/M` تصير كلفةُ النافذة **$0.30 لكلّ نداء** — وعددُ نداءات السؤال يُضبط بـ`calls_for`.
@@ -142,10 +157,23 @@ def _run(tmp_path, monkeypatch, meter: _Meter, budget: float, n: int = 8,
     if used is not None:                     # أثرٌ بحجمٍ محدَّد (لضابط القصّ) — يُرجَع تلقائيًّا
         monkeypatch.setattr(_Ans, "used_row_nos", list(used))
 
-    def _answer(store, qtext, rows=None, chunks=None, llm=None, footers=None, scope=None):
+    def _answer(store, qtext, rows=None, chunks=None, llm=None, footers=None, scope=None,
+                n_pages=None):
+        # **وعددُ صفحات المستند جزءٌ من العقد (R117-2):** البديلُ يطلبه صراحةً **بلا `**kwargs`**
+        # ⇒ فوسيطٌ جديدٌ في `answer_question` يُسقط الضابطَ بنصّه بدل أن يُبتلع صامتًا
+        # (هكذا أمسك هذا البديلُ تمريرَ `n_pages` لحظةَ كتابته).
+        assert isinstance(n_pages, int) and n_pages > 0, \
+            f"النداءُ لا يمرّر عددَ صفحات المستند ({n_pages!r}) — R117-2"
+        if qtext in (local_for or set()):
+            # **سؤالٌ يجيبه الحاجزُ محلّيًّا: بلا نداءِ نموذجٍ وبلا صرف** (كما يقع في المسار الحقيقيّ:
+            # ٨ أسئلةٍ في REQ-108-03 بصفرِ نداء) — ولا يُرصد له ردٌّ ⇒ فلا سعرَ من نافذته (R114-1).
+            return _Ans()
         k = int((calls_for or {}).get(qtext, 1))
         meter.calls += k                      # الكلفةُ تُحتسب عند النداء — كما يفعل المزوّد
-        _fire("tool_calls" if k > 1 else "stop", k)
+        # **وكلفةُ كلّ ردٍّ كما يرسلها المزوّد** (R115-1): الافتراضُ سعرُ رموزِه بالقائمة ($0.30)،
+        # و`no_cost_on` تسحبها من سؤالٍ بعينه لتُقاس رتبةُ البديل.
+        per = None if qtext in (no_cost_on or set()) else float((cost_for or {}).get(qtext, 0.30))
+        _fire("tool_calls" if k > 1 else "stop", k, cost=per)
         t = int((tools_for or {}).get(qtext, 0))     # أثرُ السؤال: ٢٤ أداةً لسؤالٍ بـ٢٥ نداءً مُجاب
         return types.SimpleNamespace(answer=_Ans.answer,
                                      used_row_nos=list(used) if used is not None else list(_Ans.used_row_nos),
@@ -154,6 +182,18 @@ def _run(tmp_path, monkeypatch, meter: _Meter, budget: float, n: int = 8,
 
     monkeypatch.setattr(qa, "answer_question", _answer)
     monkeypatch.setattr(m, "_key_usage", meter.read)
+    # **ومفتاحُ القياس ورتبةُ السعر بلا شبكة** (قرارُ 184500 §٢): يُثبَّتان في الضابط ليقيس
+    # السلوكَ لا الاتّصال — والقياسُ لا يسقط إلى مفتاح التطبيق، وبلا مفتاحٍ يتوقّف مُسمّى.
+    monkeypatch.setattr(m, "eval_key", lambda: "eval-key-test")
+    monkeypatch.setattr(m, "provider_max_price",
+                        lambda _mid: ceiling if ceiling is not None
+                        else {"prompt": 0.12, "completion": 0.60})
+    monkeypatch.setattr(m, "hosts_under", lambda _mid, _m: 21)
+    monkeypatch.setattr(m, "hosts_total", lambda _mid: 33)
+    # **وأعلى سعر مضيفٍ يُثبَّت في الضابط** (لا شبكةَ في الضوابط): رتبةُ البديل تُقاس بقيمةٍ معلَنة.
+    # **و`raising=False` مقصودة:** على نسخةٍ قبل R115-1 لا يوجد الاسمُ أصلًا، والضابطُ يُثبّته **ليقيس
+    # السلوكَ لا غيابَ رمز** — فالأحمرُ يقع على الحاجز، لا على `AttributeError` يشبه القياس.
+    monkeypatch.setattr(m, "host_max_price", lambda _model: host_high, raising=False)
     monkeypatch.setattr(m, "truth", lambda q, c, pack, rows: ({"kind": "مُحاكى"}, "مُحاكى"))
     monkeypatch.setattr(m, "score_answer", lambda q, t, ans, res, rows: (True, "ok"))
     if expire_on:                        # خيطٌ يعمل ثمّ يُعلن نفسَه حيًّا ⇒ النتيجةُ «انتهت المهلة»
@@ -173,23 +213,27 @@ def _run(tmp_path, monkeypatch, meter: _Meter, budget: float, n: int = 8,
         # **والسعرُ صريحٌ من سطر الأمر (R112-1):** $0.30 للمليون مدخلًا ومخرجًا ⇒ فكلفةُ نداءٍ
         # واحدٍ $0.30 بالضبط. **وبلا سطرِ الأمر يُقرأ السعرُ من قائمة النماذج العامّة** — والضابطُ
         # لا يمسّ الشبكة بحال.
-        price_in_per_m=0.30, price_out_per_m=0.30)
+        price_in_per_m=None if cli_price is None else cli_price[0],
+        price_out_per_m=None if cli_price is None else cli_price[1])
     rc = m.run_questions(a, qs, None, {}, {})
     out = tmp_path / "answers.json"
     saved = json.loads(out.read_text()) if out.exists() else {}
     return rc, saved.get("results", [])
 
 
-def test_the_cap_stops_the_loop_with_an_instant_meter(tmp_path, monkeypatch):
-    """**والأرقامُ أُعيدت في R110-1 لأنّ قاعدةَ القرار تغيّرت:** صار الإيقافُ الاستباقيُّ يقارن
-    **سقفَ السؤال التالي** (حدُّ نداءاته من بنية المسار × كلفةِ النداء × الهامش = ٠٫٣٠ × ٣٦ × ١٫٥
-    = **١٦٫٢**) لا أعلى ما رُئي. فالسقفُ الماليُّ الذي يسمح بسؤالين صار **١٦٫٥٠** (١٦٫٢ + ٠٫٣٠)،
-    وبـ٠٫٦٠ كان القياسُ يتوقّف قبل السؤال الثاني بحقّ — **وليس ذلك عطبًا بل شرطُ القرار**:
-    «سقفٌ لا يُخترق ولو قلّت التغطية».
+def test_the_cap_stops_the_loop_by_the_billed_spend(tmp_path, monkeypatch):
+    """**والأرقامُ أُعيدت في R110-1 ثمّ حُسمت في R117-4:** كان الإيقافُ الاستباقيُّ يقارن
+    **سقفَ السؤال التالي** (٠٫٣٠ × ٣٦ × ١٫٥ = **١٦٫٢**) فيتوقّف بميزانية ٠٫٦٠ قبل السؤال الثاني.
+    **وقرارُ 184500 حذف الحجز، وR117-4 أزال الفرعَ نفسَه** ⇒ فالسقفُ الآن **يُقاس بالمُنفَق
+    المُحاسَب وحدَه**: بميزانيةٍ لا يبلغها صرفُ ثمانية أسئلة ($2.40) تُكمل الجولة، وبميزانية
+    سؤالين بالضبط تتوقّف عند السؤال الثالث — **والفرقُ عن الماضي أنّ التوقّفَ من الصرف لا من تقدير.**
     """
     rc, results = _run(tmp_path, monkeypatch, _Meter(0.30), 16.50)
-    assert len(results) == 2, f"لم تتوقّف الحلقة عند السقف: طُرح {len(results)} سؤالاً"
-    assert rc == 3, f"التوقّفُ بالسقف يجب أن يُقرأ رمزًا غيرَ صفريّ لا {rc}"
+    assert (rc, len(results)) == (0, 8), f"بقايا حجزٍ استباقيّ: رمز {rc} وتغطية {len(results)}"
+    d2 = tmp_path / "atcap"
+    d2.mkdir(exist_ok=True)
+    rc2, r2 = _run(d2, monkeypatch, _Meter(0.30), 0.60)          # ٠٫٦٠ = سؤالان بالضبط
+    assert (rc2, len(r2)) == (3, 2), f"التوقّفُ عند المُنفَق المُحاسَب: رمز {rc2} وتغطية {len(r2)}"
 
 
 def test_a_lagging_meter_no_longer_moves_the_decision(tmp_path, monkeypatch):
@@ -206,8 +250,8 @@ def test_a_lagging_meter_no_longer_moves_the_decision(tmp_path, monkeypatch):
     d2 = tmp_path / "lagging"
     d2.mkdir(exist_ok=True)
     rc_lag, lag = _run(d2, monkeypatch, _Meter(0.30, lag=1), 16.50)
-    assert (rc_live, len(live)) == (3, 2), f"العدّادُ اللحظيّ: رمز {rc_live} وتغطية {len(live)} بدل 3/2"
-    assert (rc_lag, len(lag)) == (3, 2), (
+    assert (rc_live, len(live)) == (0, 8), f"العدّادُ اللحظيّ: رمز {rc_live} وتغطية {len(live)}"
+    assert (rc_lag, len(lag)) == (0, 8), (
         f"التأخّرُ حرّك القرار (رمز {rc_lag} وتغطية {len(lag)}) ⇒ السعرُ ما زال يُستنتَج من العدّاد")
 
 
@@ -238,7 +282,7 @@ def test_a_nonzero_meter_baseline_gives_the_same_coverage(tmp_path, monkeypatch)
         d = tmp_path / f"base_{base}"
         d.mkdir(exist_ok=True)
         rc, results = _run(d, monkeypatch, _Meter(0.30, base=base), 16.50)
-        assert (rc, len(results)) == (3, 2), f"رصيد {base}: رمز {rc} وتغطية {len(results)} بدل 3/2"
+        assert (rc, len(results)) == (0, 8), f"رصيد {base}: رمز {rc} وتغطية {len(results)} بدل 0/8"
 
 
 def test_the_stored_record_carries_the_whole_trace_and_its_length(tmp_path, monkeypatch):
@@ -258,15 +302,15 @@ def test_the_stored_record_carries_the_whole_trace_and_its_length(tmp_path, monk
     assert rec["cited_pages"] == [1], f"الصفحاتُ المستشهدة ليست من الأثر: {rec['cited_pages']}"
 
 
-def test_the_anticipatory_stop_decides_by_the_next_questions_ceiling(tmp_path, monkeypatch):
-    """**R110-1 · القرارُ بالحدّ لا بالماضي — ويُقاس باتّجاهين بمزوّدٍ واحد:**
-    نفسُ المزوّد ونفسُ الأسئلة، والفرقُ في متسع الميزانية فقط ⇒ **سؤالان** إن غطّى السقفُ الماليُّ
-    سقفَ السؤال التالي، و**واحدٌ** إن لم يغطّه. ولو كان القرارُ بأعلى ما رُئي (وهو ٠٫٣٠ في الحالين)
-    لحُوكم الحالان حكمًا واحدًا — فالضابطُ يفصل القاعدتين.
+def test_the_next_questions_ceiling_is_no_longer_a_bound(tmp_path, monkeypatch):
+    """**R117-4 · وما تبقّى من R110-1:** نفسُ المزوّد ونفسُ الأسئلة، والفرقُ في متسع الميزانية
+    وحده ⇒ **الميزانيّتان تُكملان الآن** (لا حجزَ استباقيًّا بسقف السؤال القادم)، **والسقفُ
+    يُقاس بالمُنفَق المُحاسَب** وحده. والضابطُ يمنع عودةَ الحجز من بابين: لا حقلَ `cap_bound_usd`
+    في السجلّ، ولا فرعَ `anticipatory` في الشرط — ويُقاس الاتّجاهان بميزانيتين متجاورتين.
     """
     from statement_qa.qa import question_ceiling
 
-    ceiling_next = 0.30 * question_ceiling("س1") * 1.5          # كلفةُ النداء × حدُّ السؤال × الهامش
+    ceiling_next = 0.30 * question_ceiling("س1") * 1.5          # الرقمُ الاستشاريُّ (لا يحكم)
     assert question_ceiling("س1") == 36, question_ceiling("س1")
 
     # **وشاهدٌ منفصلٌ لكلّ حال** (ضابطٌ يعيد استعمال المجلّد يستأنف أجوبةَ الضابط السابق — قِيس في R52-4)
@@ -278,14 +322,14 @@ def test_the_anticipatory_stop_decides_by_the_next_questions_ceiling(tmp_path, m
     rc_rich, rich = _run(d_rich, monkeypatch, _Meter(0.30), ceiling_next + 0.30 + 0.10)
     rc_poor, poor = _run(d_poor, monkeypatch, _Meter(0.30), ceiling_next + 0.30 - 0.10)
 
-    assert (rc_rich, len(rich)) == (3, 2), f"ميزانيةٌ تغطّي السقفَ يجب أن تطرح سؤالين لا {len(rich)}"
-    assert (rc_poor, len(poor)) == (3, 1), f"ميزانيةٌ لا تغطّيه يجب أن تتوقّف بعد سؤالٍ لا {len(poor)}"
-    # **والسقفُ يُسجَّل كما حُوكم به:** السؤالُ الثاني حُكم بسقفٍ = ما حسبته هذه الملفّ من الكود،
-    # **وبالسعر المشهود من الرموز** (R112-4: حقلٌ واحد لكلّ معنى — والحقلُ المكرَّرُ `next_ceiling_usd`
-    # أُزيل لأنّه كان يُحسب من الوسائط نفسِها في الدورة نفسِها).
-    assert rich[1]["cap_bound_usd"] == pytest.approx(ceiling_next, rel=1e-6), rich[1]
+    assert (rc_rich, len(rich)) == (0, 8), f"ميزانيةٌ واسعة: رمز {rc_rich} وتغطية {len(rich)}"
+    assert (rc_poor, len(poor)) == (0, 8), f"ميزانيةٌ ضيّقة: رمز {rc_poor} وتغطية {len(poor)}"
+    # **والدليلُ يحمل ما حُكم به:** السعرُ المشهود، والصرفُ قبل/بعد — **ولا سقفَ سؤالٍ يُسجَّل**
+    # (‏`cap_bound_usd` أُزيل: كان يُقرأ كأنّه حدّ ولا يحكم — R117-4).
     assert rich[1]["cap_price_usd"] == pytest.approx(0.30, rel=1e-6), rich[1]
-    assert rich[1]["cap_price_source"] == "observed-tokens", rich[1]
+    assert rich[1]["cap_price_source"] == "observed-billed", rich[1]
+    assert "cap_bound_usd" not in rich[1], "الحقلُ الذي كان يُسجَّل كأنّه حدّ عاد (R117-4)"
+    assert rich[1]["spent_before_usd"] > 0 and rich[1]["spent_after_usd"] > rich[1]["spent_before_usd"]
     assert "next_ceiling_usd" not in rich[1], "الحقلُ المكرَّرُ عاد إلى السجلّ"
 
 
@@ -365,7 +409,102 @@ def test_tokens_that_land_between_windows_still_enter_the_spend(tmp_path, monkey
     d.mkdir(exist_ok=True)
     rc, results = _run(d, monkeypatch, _Meter(0.30), 25.0, n=6, late=(3, 2))
     assert (rc, len(results)) == (0, 6), f"رمز {rc} وتغطية {len(results)}"
-    assert results[3]["spent_before_usd"] == pytest.approx(1.50, rel=1e-6), (
-        f"رموزٌ وقعت بين النافذتين لم تدخل المُنفَق: {results[3]['spent_before_usd']} بدل 1.50")
+    # **والترتيبُ يُقاس لا يُفترض:** القرارُ يُتّخذ **قبل** لقطة نافذة السؤال، فالرموزُ المتأخّرة
+    # (‏$0.60) تصل بين إغلاق نافذة الثالث وفتح نافذة الرابع ⇒ **قرارُ الرابع يسبقها** (‏0.90)،
+    # **وإغلاقُ الرابع يحملها** (‏0.90 + 0.60 + 0.30 سؤالِه = 1.80)، **وقرارُ الخامس يقرؤها** (‏1.80).
+    # **وقبل الإصلاح** (مجموعُ فروق النوافذ) كانت الرموزُ المتأخّرة تسقط ⇒ 1.20.
+    assert results[3]["spent_before_usd"] == pytest.approx(0.90, rel=1e-6), results[3]
+    assert results[3]["spent_after_usd"] == pytest.approx(1.80, rel=1e-6), (
+        f"رموزٌ وقعت بين النافذتين لم تدخل المُنفَق: {results[3]['spent_after_usd']} بدل 1.80")
+    assert results[4]["spent_before_usd"] == pytest.approx(1.80, rel=1e-6), (
+        f"والمُنفَقُ لم يُحمَل إلى القرار التالي: {results[4]['spent_before_usd']} بدل 1.80")
     assert results[1]["spent_before_usd"] == pytest.approx(0.30, rel=1e-6), results[1]
 
+
+
+# ── R115-1: المُنفَقُ وسعرُ النداء **حدٌّ أعلى لما يُحاسَب عليه**، لكلّ ردّ، لحظةَ القرار ─────────────
+def test_the_billed_cost_wins_when_the_provider_reports_more_than_the_list(tmp_path, monkeypatch):
+    """**قبولُ مراجعة ١١٥، الأوّل (أحمرُ على `bfd539d`):** ردٌّ يحمل `cost` أكبرَ من «الرموز × القائمة»
+    ⇒ **المُنفَقُ يأخذ الأكبر** — وإلّا فالحاجزُ يحرس بسعرٍ أدنى من المُحاسَب.
+
+    السؤالُ الثالث يجيب نداءً واحدًا بكلفةٍ يُعلنها المزوّد **$0.60** ورموزُه تساوي **$0.30** بالقائمة
+    ⇒ بعد الإصلاح: سعرُ النداء بعدها **$0.60** وسقفُ السؤال الرابع **$32.40** ⇒ **توقّفٌ قبل الرابع**
+    بميزانية $20 (‏٣ من ٦). **وقبل الإصلاح:** كان السعرُ يُحسب $0.30 ⇒ لا توقّف (٦ من ٦).
+    **والفرقُ يظهر في السجلّ أيضًا:** `cost_billed_usd` **$0.60** مقابل `cost_by_tokens_usd` **$0.30**.
+    """
+    d = tmp_path / "billed"
+    d.mkdir(exist_ok=True)
+    # **والسقفُ ميزانيةٌ يبلغها المُنفَقُ المُحاسَب:** ٠٫٣٠+٠٫٣٠+**٠٫٦٠**+٠٫٣٠ = ١٫٥٠ ⇒ توقّفٌ قبل
+    # الخامس. ولو حُسب بالرموز×القائمة (٠٫٣٠ للسؤال الثالث) لما بلغ السقفَ ولما توقّف ⇒ فالضابطُ يفصل.
+    rc, results = _run(d, monkeypatch, _Meter(0.30), 1.50, n=6, cost_for={"س3": 0.60})
+    assert (rc, len(results)) == (3, 4), (
+        f"الحاجزُ لم يأخذ كلفةَ المزوّد: رمز {rc} وتغطية {len(results)} من 6 "
+        f"(المتوقَّع: توقّفٌ قبل الخامس ⇒ 4)")
+    third = results[2]
+    assert third["cost_billed_usd"] == pytest.approx(0.60, rel=1e-6), third
+    assert third["cost_by_tokens_usd"] == pytest.approx(0.30, rel=1e-6), third
+    assert third["cost_source"] == "provider-cost", third
+
+
+def test_a_reply_without_a_cost_is_priced_at_the_highest_host_and_declared(tmp_path, monkeypatch):
+    """**قبولُ مراجعة ١١٥، الثاني:** ردٌّ بلا `cost` ⇒ **المصدرُ يُعلَن ولا يُقرأ صفرًا.**
+
+    والأصلُ أنّ سعرَ القائمة وحدَه **ليس حدًّا أعلى** (٣٣ مضيفًا بأسعارٍ تصل ستّةَ أضعافها) ⇒ فالبديلُ
+    **أعلى سعر مضيفٍ** من القائمة العامّة، ويُسمّى في الدليل (`cost_source`).
+    """
+    d = tmp_path / "no-cost"
+    d.mkdir(exist_ok=True)
+    rc, results = _run(d, monkeypatch, _Meter(0.30), 20.0, n=4, no_cost_on={"س2"},
+                       host_high=(0.30, 0.30))
+    assert (rc, len(results)) == (0, 4), f"رمز {rc} وتغطية {len(results)}"
+    second = results[1]
+    assert second["cost_billed_usd"] > 0, "ردٌّ بلا cost قُرئ صفرًا (وهو ما تمنعه المراجعة)"
+    # **والاسمُ يتبع الحاكمَ (R122-1):** بلا `cost` يحكم **حدُّ الطلب** لا سعرُ القائمة ولا أعلى
+    # سعرِ مضيف ⇒ والرقمُ هو الرموز × الحدّ ($0.30 للسؤال المُحاكى بالضبط).
+    assert second["cost_source"] == "provider-max-price", second
+    assert second["cost_billed_usd"] == pytest.approx(0.30, rel=1e-6), second
+
+
+def test_a_reply_without_a_cost_is_priced_at_the_ceiling_even_without_hosts(tmp_path, monkeypatch):
+    """**أُبطلت نسختُه السابقة بتاريخها وسببها (R122-1 · مراجعة ١٢٢):** كان يقول «بلا `cost` وبلا قائمة
+    مضيفين ⇒ توقّفٌ مُسمّى». **والحاكمُ الآن حدُّ الطلب** (لا أعلى سعرِ مضيف) ⇒ فقائمةُ المضيفين **لم
+    تبقَ رتبةً في القانون** ⇒ فسقوطُ قراءتها **لا يُسقط الجولة**، ويُسعَّر الردُّ بحدّ الطلب.
+    **والبابُ المغلَقُ يبقى محروسًا في الضابط التالي** (حين يجهل الحدُّ نفسُه).
+    """
+    d = tmp_path / "no-hosts"
+    d.mkdir(exist_ok=True)
+    rc, results = _run(d, monkeypatch, _Meter(0.30), 20.0, n=4, no_cost_on={"س1"},
+                       host_high=None)
+    assert rc == 0, f"سقوطُ قراءة المضيفين أسقط الجولةَ برمز {rc} وهو ليس حاكمًا"
+    assert len(results) == 4, f"التغطيةُ {len(results)} من 4"
+    assert results[0]["cost_source"] == "provider-max-price", results[0]
+    assert results[0]["cost_billed_usd"] == pytest.approx(0.30, rel=1e-6), results[0]
+
+
+def test_a_reply_with_no_ceiling_and_no_hosts_stops_by_name(tmp_path, monkeypatch):
+    """**ولا يُخترع سعرٌ يحرس السقفَ كذبًا:** بلا `cost`، **والحدُّ نفسُه مجهول** (لا سطرَ أمرٍ ولا
+    `provider.max_price`)، وقائمةُ مضيفين غيرُ مقروءة ⇒ لا كلفةَ تُدَّعى ⇒ **توقّفٌ مُسمّى (٥)**."""
+    d = tmp_path / "unpriceable"
+    d.mkdir(exist_ok=True)
+    rc, results = _run(d, monkeypatch, _Meter(0.30), 20.0, n=4, no_cost_on={"س1"},
+                       host_high=None, cli_price=None,
+                       ceiling={"prompt": 0.0, "completion": 0.0})
+    assert rc == 5, f"لا حدَّ ولا قائمةَ مضيفين ⇒ المتوقَّعُ توقّفٌ مُسمّى (5) لا {rc}"
+    # **والرفضُ عند الإطلاق لا في منتصف الجولة** (أقوى من السابق: لا نداءَ مدفوعًا أصلًا)
+    assert len(results) == 0, f"التوقّفُ قبل أيّ سؤال ⇒ لا سجلَّ مدفوعًا (وجدتُ {len(results)})"
+
+
+def test_a_locally_answered_question_does_not_trip_the_no_price_door(tmp_path, monkeypatch):
+    """**R114-1 (مقيسة في الطريق):** الحاجزُ يجيب أسئلةً **محلّيًّا بلا نداءِ نموذج** (ثمانيةٌ في
+    REQ-108-03) ⇒ فأوّلُ سؤالٍ منها كان **يُسقط الجولةَ كذبًا** بباب «لا سعرَ بعد سؤال» (‏R113-1).
+
+    والفرقُ يُقاس بالرموز: **بلا نداءٍ ⇒ لا رموزَ ⇒ لا شيءَ يُسعَّر ⇒ تُكمل الجولة**؛ ونداءٌ وقع
+    بلا سعرٍ ⇒ **توقّف**. وهذا الضابطُ يقيس الحالةَ الأولى وحدَها (والثانيةُ أعلاه).
+    """
+    d = tmp_path / "local"
+    d.mkdir(exist_ok=True)
+    rc, results = _run(d, monkeypatch, _Meter(0.30), 25.0, n=4, local_for={"س1", "س2"})
+    assert len(results) == 4, f"سؤالٌ محليٌّ يُسقط الجولة: تغطية {len(results)} من 4 برمز {rc}"
+    assert rc == 0, f"رمزُ الخروج {rc} (والمتوقَّع 0: أسئلةٌ محليّةٌ ثمّ نداءاتٌ مُسعَّرة)"
+    assert results[0]["replies_observed"] == 0 and results[0]["cost_billed_usd"] == 0.0, results[0]
+    assert results[2]["replies_observed"] == 1 and results[2]["cost_billed_usd"] > 0, results[2]

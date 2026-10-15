@@ -11,6 +11,8 @@ swallows a real question is worse than the defects it was built for.
 """
 from __future__ import annotations
 
+import pathlib
+
 import sys
 from decimal import Decimal
 from pathlib import Path
@@ -132,23 +134,22 @@ def test_a_city_name_is_not_a_bank_without_the_word_bank():
                     frozenset()).kind == "out_of_scope"
 
 
-def test_a_compound_question_splits_into_its_two_asks():
-    from statement_qa.qa import split_compound
+def test_a_compound_question_is_one_ask_and_no_split_survives():
+    """**R118-2 · مراجعة ١١٨:** كان السؤالُ المركّبُ يُقسم نصفيْن فيُطرح نصفُه الثاني وحدَه
+    («ما الفرقُ بينهما بالمبلغ») فيسأل عن مرجعٍ لم يُذكر ⇒ فقُطع كلُّ الـ`chn` في ٤/٤ بطلبِ
+    توضيحٍ لسؤالٍ كامل. والحكمُ (§٤) قِيس فأوجب الحذف، **فالبوّابةُ تُحكم على السؤال كاملًا**
+    كما كانت تُحكم عليه قبل التقسيم — والمقيسُ أنّ النصَّ الواحد يمرّ بلا أن يُصنَّف جزآن."""
+    import statement_qa.qa as qa
 
-    parts = split_compound("كم مجموع الحوالات الواردة من شركة أ، وكم عدد "
-                           "الحوالات من مؤسسة غير مذكورة في الكشف؟")
-    assert len(parts) == 2
-    assert parts[0].startswith("كم مجموع")
-    assert parts[1].startswith("كم عدد")      # the conjunction is not carried
-
-
-def test_a_conjunction_inside_a_phrase_is_not_a_split_point():
-    """«المدين والدائن» is one thing; splitting it would invent a question."""
-    from statement_qa.qa import split_compound
-
-    for q in ("ما مجموع المدين والدائن؟", "هل يوجد أثر مقاصة في الكشف؟",
-              "كم عدد الحركات في الصفحة 12؟"):
-        assert split_compound(q) == [q], q
+    assert not hasattr(qa, "split_compound"), "التقسيمُ باقٍ ⇒ عطبُ R105-5 يعود"
+    compound = ("كم مجموع الحوالات الواردة من شركة أ، وكم عدد "
+                "الحوالات من مؤسسة غير مذكورة في الكشف؟")
+    gate = scope.classify(compound, (), None, frozenset())
+    assert gate.kind in ("in_scope", "out_of_scope"), gate
+    # **ولا يُقبل أن يُقسَّم نصُّ سؤالٍ في أيّ موضعٍ من الوحدة** (سحبٌ كامل لا تجميدُ دفن):
+    src = pathlib.Path(qa.__file__).read_text(encoding="utf-8")
+    code = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("#"))
+    assert "split_compound(" not in code, "اسمُ التقسيم يُنادى من كود الوحدة"
 
 
 def test_numeric_questions_require_a_tool_and_others_do_not():

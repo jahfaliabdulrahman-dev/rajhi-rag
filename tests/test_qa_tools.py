@@ -130,11 +130,11 @@ def test_the_trace_records_what_was_shown_not_the_whole_page():
     tools = {t.name: t for t in make_qa_tools(_rows(), trace=trace)}
     out = tools["page_rows"].invoke({"page": 2, "limit": 1})
     assert "و1 أخرى" in out, out
-    assert trace == [{"tool": "page_rows", "row_nos": [4]}], trace
+    assert trace == [{"tool": "page_rows", "args": {"page": 2, "limit": 1}, "row_nos": [4]}], trace
 
 
 def test_trace_records_tool_selections():
-    """Evidence trace: every non-empty call records the rows it selected."""
+    """Evidence trace: **every** call records its input and the rows it selected (R109-3)."""
     trace = []
     tools = {t.name: t for t in make_qa_tools(_rows(), trace=trace)}
     tools["count_movements"].invoke({"side": "مدين"})
@@ -152,8 +152,10 @@ def test_trace_records_tool_selections():
     assert trace[4]["row_nos"] == [4, 5]      # page-2 rows
     assert trace[5]["row_nos"] == [4, 5]      # page-2 rows, listed
     # **والعقدُ مُثبَّتٌ لا ضمنيّ:** كان الوصولُ بالفهرس وحدَه ⇒ إضافةُ مفتاحٍ ثالثٍ تمرّ صامتة
-    # (مقيسٌ في مقعد البنية) ⇒ فيُقاس **مجموعُ المفاتيح** في كلّ قيد.
-    assert all(set(c) == {"tool", "row_nos"} for c in trace), trace
+    # (مقيسٌ في مقعد البنية) ⇒ فيُقاس **مجموعُ المفاتيح** في كلّ قيد. **والمفتاحُ الثالثُ هو
+    # المدخلُ (`args`) — أُضيف في R109-3** لأنّ «مدخلات كلّ نداء في الأثر» نصُّ البند.
+    assert all(set(c) == {"tool", "args", "row_nos"} for c in trace), trace
+    assert trace[0]["args"]["side"] == "مدين" and trace[5]["args"] == {"page": 2, "limit": 40}
 
 
 def test_page_rows_answers_the_row_family_with_statement_wide_numbers():
@@ -192,11 +194,19 @@ def test_page_is_keyword_only_so_old_positional_calls_keep_their_meaning():
     assert "حركة" in out and "(صفحة 1،" in out
 
 
-def test_trace_skips_empty_selections():
+def test_a_call_that_selects_nothing_is_still_recorded():
+    """**R109-3 · وُسِّع العقد:** كان الأثرُ **يُكتَم** إن لم تختر الأداةُ صفًّا ⇒ فمحاسبُ الأثر
+    لا يرى النداءَ أصلًا (ولا يعرف ما طُلب). والآن يُسجَّل **كلُّ نداء** بمدخله، وبصفوفٍ فارغة
+    إن لم يختر شيئًا — **والمستهلكون لا يتأثّرون:** `used_rows_from_trace` يجمع الصفوفَ وحدَها.
+    """
     trace = []
     tools = {t.name: t for t in make_qa_tools(_rows(), trace=trace)}
     tools["sum_movements"].invoke({"side": "مدين", "keyword": "لايوجد"})
-    assert trace == []
+    assert len(trace) == 1 and trace[0]["row_nos"] == [], trace
+    assert trace[0]["tool"] == "sum_movements" and trace[0]["args"]["keyword"] == "لايوجد"
+    from statement_qa.qa_tools import used_rows_from_trace
+
+    assert used_rows_from_trace(trace) == []      # الأثرُ الوحيدُ المتوقَّعُ من نداءٍ لم يصب شيئًا
 
 
 def test_used_rows_union_sorted_deduped():

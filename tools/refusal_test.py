@@ -200,7 +200,7 @@ def main() -> int:
         print(f"[{item['id']}] {item['kind']}")
         print(f"السؤال: {item['q']}")
         res = answer_question(store, item["q"], rows=rows, chunks=chunks, llm=llm,
-                              footers=footers)
+                              footers=footers, n_pages=n_pages)
         ans = (res.answer or "").strip()
         print(f"الجواب: {ans}")
         if res.used_row_nos:

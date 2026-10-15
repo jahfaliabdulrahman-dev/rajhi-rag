@@ -29,7 +29,7 @@ import time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from tools import eval_stamp, pack_io  # noqa: E402
-from tools.spend import at_or_over, would_exceed  # noqa: E402
+from tools.spend import at_or_over  # noqa: E402
 
 ARABIC_INDIC = "٠١٢٣٤٥٦٧٨٩"
 PERSIAN = "۰۱۲۳۴۵۶۷۸۹"
@@ -389,6 +389,35 @@ def check_abstention(q: dict, c: Corpus, pack: dict) -> tuple[bool, str]:
     return False, f"سببٌ مجهول: {r}"
 
 
+#: **اسمُ متغيّر مفتاح القياس** (قرارُ 20261014-184500 §٢): مفتاحٌ مستقلٌّ عن مفتاح التطبيق،
+#: **يُنشئه المالك** في OpenRouter بحدِّ صرفٍ بالدولار (‏Credit limit)، وحدُّه **هو ميزانيةُ القياس
+#: التي أذن بها** ⇒ فكلمتُه على كلّ قياسٍ تصير حدَّ المفتاح نفسه، **والمزوّدُ هو من يفرضه** لا حاجزٌ
+#: يتنبّأ. ويُوضع سطرًا في `~/.hermes/.env` (أو `.env`) **بلا لصقٍ في محادثةٍ ولا في المستودع**.
+EVAL_KEY_ENV = "RAJHI_EVAL_OPENROUTER_KEY"
+
+
+def eval_key() -> str | None:
+    """مفتاحُ القياس من `EVAL_KEY_ENV` (بيئةً ثمّ ملفَّي `.env`) — **وهو الوحيدُ الذي يشتري به القياس**.
+
+    **ولا سقوطَ إلى مفتاح التطبيق** (وهو الفرقُ الذي يجعل الحدَّ ضمانًا): قياسٌ بلا مفتاحِ قياسٍ
+    **يتوقّف مُسمّى** قبل أيّ نداءٍ مدفوع، فلا يُفرَغ رصيدُ التطبيق بجولةِ قياس.
+    """
+    import os
+    val = os.environ.get(EVAL_KEY_ENV)
+    if val:
+        return val.strip() or None
+    here = pathlib.Path(__file__).resolve().parent.parent
+    for cand in (here / ".env", pathlib.Path.home() / ".hermes" / ".env"):
+        try:
+            for line in cand.read_text(encoding="utf-8").splitlines():
+                k, _, v = line.strip().partition("=")
+                if k.strip() == EVAL_KEY_ENV:
+                    return v.strip().strip("\"'") or None
+        except OSError:
+            continue
+    return None
+
+
 def _key_usage() -> dict | None:
     """**الكلفةُ الفعليّة من المزوّد** (لا عدّادُنا): رصيدُ المفتاح قبل وبعد — والفرقُ هو الكلفة.
 
@@ -397,9 +426,8 @@ def _key_usage() -> dict | None:
     import urllib.request
     try:
         sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
-        from statement_qa.api_key import get_api_key
         req = urllib.request.Request("https://openrouter.ai/api/v1/key",
-                                     headers={"Authorization": f"Bearer {get_api_key()}"})
+                                     headers={"Authorization": f"Bearer {eval_key() or ''}"})
         with urllib.request.urlopen(req, timeout=20) as r:
             d = json.loads(r.read().decode())["data"]
         return {"usage": d.get("usage"), "limit": d.get("limit"), "limit_remaining": d.get("limit_remaining")}
@@ -424,7 +452,24 @@ def _spent_since(before: dict | None, cur: dict | None) -> float | None:
 
 def _price_source(a) -> str:
     """مصدرُ السعر — **يُكتب في ملفّ الجولة** (شرطُ مراجعة ١١٢: السعرُ جزءٌ من الدليل)."""
-    return "cli" if getattr(a, "price_in_per_m", None) is not None else "models-list"
+    return "cli" if getattr(a, "price_in_per_m", None) is not None else "provider-max-price"
+
+
+def _resolve_ceiling(a) -> tuple[float, float] | None:
+    """**حدُّ الطلب**: ما نُرسله للمزوّد (`provider.max_price`) — أو سعرٌ صريحٌ من سطر الأمر.
+
+    **وهو السعرُ الذي يدخل قانونَ المحاسَبة** (R122-1): لا سعرُ القائمة (فهو **لا يخدم مضيفًا واحدًا**
+    تحت الحدّ اليوم، وقِيس أنّه كان يُضاعف المحاسَب).
+    """
+    if (getattr(a, "price_in_per_m", None) is not None
+            and getattr(a, "price_out_per_m", None) is not None):
+        return float(a.price_in_per_m), float(a.price_out_per_m)
+    from statement_qa.qa import effective_model                       # noqa: PLC0415
+
+    mp = provider_max_price(effective_model(getattr(a, "model", None)))   # ← من هذه الوحدة
+    if not mp or not (mp.get("prompt") or mp.get("completion")):
+        return None
+    return float(mp["prompt"]), float(mp["completion"])
 
 
 def _resolve_price(a) -> tuple[float, float] | None:
@@ -506,10 +551,12 @@ def usage_delta(before: dict | None, after: dict | None) -> dict:
 
 
 def tokens_cost(usage: dict | None, price_in_per_m: float, price_out_per_m: float) -> tuple[float, int, int]:
-    """(الكلفةُ بالدولار, رموزُ المدخل, رموزُ المخرج) من رموزٍ مشهودة × سعرِ الرمز المنشور.
+    """(الكلفةُ بالدولار, رموزُ المدخل, رموزُ المخرج) من رموزٍ مشهودة × سعرِ الرمز **المنشور**.
 
-    **وتقريبُه في الاتجاه الآمن:** رموزُ المدخل قد تحمل رموزًا مُخزَّنةً (cached) يُسعّرها المزوّد
-    أرخصَ ⇒ فالمحسوبُ **حدٌّ أعلى** للكلفة، وهو الاتجاه الصحيح لسقفٍ لا يُخترق.
+    **وحدُّها صُحِّح بالقياس في R115-1: هذا الرقمُ حدٌّ أدنى لا حدًّا أعلى** — كان مكتوبًا هنا
+    «المحسوبُ حدٌّ أعلى للكلفة»، والمقيسُ أنّ المزوّد يحاسب بـ١٫٦× منه (‏$0.042059 مقابل $0.067499)
+    **لأنّ النموذجَ يخدمه ٣٣ مضيفًا بأسعارٍ تصل ستّةَ أضعاف سعر القائمة**. فالرقمُ يُنشر
+    **للمساءلة والعرض** (`cost_by_tokens_usd`)، **والحاكمُ كلفةُ الردود المحاسَبة** (`billed_window`).
     """
     if not usage:
         return 0.0, 0, 0
@@ -518,28 +565,6 @@ def tokens_cost(usage: dict | None, price_in_per_m: float, price_out_per_m: floa
     return (tin * price_in_per_m + tout * price_out_per_m) / 1e6, tin, tout
 
 
-def observation(before: dict | None, after: dict | None, replies: int,
-                price_in_per_m: float, price_out_per_m: float) -> tuple[float, int] | None:
-    """مشاهدةُ نافذةٍ واحدة: **(كلفةُ رموزها, عددُ الردود التي أنتجتها)** — أو `None`.
-
-    **والقسمةُ على الردود لا على أرضيةِ «الأدوات + ١» (R113-1 · مراجعة ١١٣):** الأثرُ **أرضيةٌ**
-    (كلُّ نداءِ أداةٍ سبقه نداءُ نموذج)، ونداءاتُ إعادةِ الطرح/الاحتياط لا أثرَ لها ⇒ فأرضيةٌ يُقسَم
-    عليها **تُعلّي السعرَ** بنسبة الفعليّ إلى الأرضيّ، و`max` يحمله إلى كلّ سقفٍ بعده.
-    **وأسوأُ حالاتها سؤالٌ تنتهي مهلتُه:** أثرُه فارغٌ ⇒ أرضيةٌ ١ ⇒ تُسعَّر نافذتُه كلُّها سعرًا لنداءٍ
-    واحد (قِيس: نافذةُ $7.50 ⇒ سقفُ السؤال القادم **$405**) ⇒ فتتوقّف الجولةُ بلا سبب — وقع ذلك في
-    **خمسينَين من آخر أربع جولات**. **والردودُ عددٌ مشهود** (`finish_log().ends`: نداءٌ = ردّ) ⇒
-    فسعرُ النداء = كلفةُ النافذة ÷ عددِ ردودها.
-
-    **ونافذةٌ لا يُعرف عددُ ردودها لا تُنتج سعرًا** (`None`) كما لا تُنتجه نافذةٌ بلا رموز: الصفرُ
-    سعرٌ يُقبل ويُعمي الحاجز (وقد فعله ١٢ مرّة). والقانونُ يمضي بسعرٍ موثوقٍ سابق، **وإن لم يبقَ سعرٌ
-    أصلًا توقّف بـ`rc=5`** (سقفٌ لا يُحسب لا يُفرض).
-    """
-    if int(replies or 0) <= 0:
-        return None
-    cost, _tin, _tout = tokens_cost(usage_delta(before, after), price_in_per_m, price_out_per_m)
-    if cost <= 0:
-        return None
-    return cost, int(replies)
 
 
 def finish_reasons_from(response) -> list[str]:
@@ -581,26 +606,301 @@ def finish_log():
     return _FinishLog()
 
 
-def cap_evidence(*, spent_before: float, spent_after: float, cost_here: float, bound: float, price: float,
-                 source: str, meter_delta: float | None, tokens: int, tools: int, replies: int) -> dict:
+def host_prices(model_id: str) -> list[tuple[float, float]]:
+    """أسعارُ المضيفين الذين يخدمون النموذج (مدخل, مخرج بالمليون) — قراءةٌ واحدةٌ مُخزَّنة.
+
+    **وهي أساسُ إعلان حدِّ السعر** (قرار 20261014-184500 §٢): يُطبع كم مضيفًا تحت الحدّ، **فلا
+    يُختار رقمٌ بلا أثرٍ معروف**؛ وبلا قراءةٍ تُعاد قائمةٌ فارغة (والحدُّ يبقى القيمةَ المُعلَنة).
+    """
+    import urllib.request                                    # noqa: PLC0415
+    if model_id in _HOST_PRICES:
+        return _HOST_PRICES[model_id]
+    out: list[tuple[float, float]] = []
+    try:
+        req = urllib.request.Request(f"https://openrouter.ai/api/v1/models/{model_id}/endpoints",
+                                     headers={"User-Agent": "rajhi-rag/1.0"})
+        with urllib.request.urlopen(req, timeout=20) as r:      # noqa: S310 — URLٌ ثابتٌ لا يكتب
+            data = json.loads(r.read().decode())
+        for ep in (data.get("data") or {}).get("endpoints") or []:
+            pr = ep.get("pricing") or {}
+            out.append((float(pr.get("prompt") or 0.0) * 1e6, float(pr.get("completion") or 0.0) * 1e6))
+    except Exception:                                            # noqa: BLE001 — بلا قراءةٍ لا عدَّ
+        out = []
+    _HOST_PRICES[model_id] = out
+    return out
+
+
+#: ذاكرةُ أسعار المضيفين (قراءةٌ واحدةٌ لكلّ نموذج).
+_HOST_PRICES: dict[str, list[tuple[float, float]]] = {}
+
+
+def provider_max_price(model_id: str) -> dict:
+    """حدُّ السعر المُرسَل مع كلّ طلب — **من `statement_qa.qa.PROVIDER_MAX_PRICE`** (مصدرٌ واحد).
+
+    القيمةُ مُعلَنةٌ في موضعها بسببها، **وهذا يُعيدها كما هي** فيبقى التطبيقُ والقياسُ على حدٍّ واحد
+    (سطحٌ واحد لا نسختان — فإن غيّر المالكُ القيمةَ تغيّرت في الموضعين).
+    """
+    from statement_qa.qa import PROVIDER_MAX_PRICE                  # noqa: PLC0415
+    return dict(PROVIDER_MAX_PRICE)
+
+
+def hosts_total(model_id: str) -> int:
+    """عددُ المضيفين الذين يخدمون النموذج (٠ = القائمةُ غيرُ مقروءة — تُعلن ولا تُخمَّن)."""
+    return len(host_prices(model_id))
+
+
+def hosts_under(model_id: str, maxp: dict) -> int:
+    """كم مضيفًا سعّرته **تحت الحدّ** في المدخل والمخرج معًا — وهو «أثرُ الرقم» الذي يُطبع."""
+    return sum(1 for pin, pout in host_prices(model_id)
+               if pin <= maxp["prompt"] and pout <= maxp["completion"])
+
+
+def last_billed_run() -> dict | None:
+    """المُنفَقُ المُحاسَب لآخر جولةٍ محفوظة: `{file, field, spent, replies, questions}`.
+
+    **للعلم لا للحكم** (قرار 20261014-184500 §٢): يُقرأ من ملفّات الأجوبة **ولا يُقدَّر بلا ملفّ**
+    ⇒ فالتقديرُ المنشور **من قياسٍ سابق** لا من رأي. **وفيه ثابتان صارا صريحَين (R117-7):**
+
+    ① **الاختيارُ بأحدث تعديلٍ لا بترتيب الأسماء.** كان `sorted(glob(...))` يختار **آخرَ اسم**
+       في القائمة، وقِيس أنّ `answers-r108.json` يأتي **بعد** `answers-r108-03.json` ترتيبًا
+       وإن كان **أقدمَ منه بالساعات** ⇒ فالتقديرُ يُبنى على جولةٍ ليست السابقة. و`st_mtime` كان
+       **يُحفظ ولا يُقارَن** (يُكتَب في كُلٍّ ثمّ يُقرأ `[1:]` وحدَه).
+    ② **والحقلُ يُسمّى ولا يُفترض:** `cost_billed_usd` مجموعُ كلفة الردود لكلّ سؤال؛ فإن لم تحمله
+       الجولةُ — وكلُّ جولات اليوم لا تحمله (قِيس: **٠ من ٤٣٦ سجلًّا في خمسة ملفّات**) — يُقرأ
+       **أقصى `spent_after_usd`** = المُنفَقُ التراكميّ عند آخر سؤال، **وهو الكميّةُ نفسُها** التي
+       يقارنها القانونُ بالسقف (R115-1) ⇒ فالاسمُ يُعاد مع الرقم ليُقرأ مصدرُه.
+       **وحدُّ الاتّجاه مُعلَن:** في جولاتٍ سبقت R115-1 كان `spent_after_usd` يسعّر **الرموزَ
+       بسعر القائمة** (وهو **حدٌّ أدنى**) لا كلفةَ المزوّد ⇒ فالتقديرُ منها **أدنى من الواقع**
+       (قِيس على `answers-r108-03.json`: أقصاه **$0.042059** = مجموعُ `cost_by_tokens_usd`
+       فيه (0.042058)، والمُنفَقُ المحاسَبُ للجولة نفسِها **$0.067499** ⇒ نقصٌ ≈٣٨٪).
+       **ومن الجولة القادمة يُكتب `cost_billed_usd` في كلّ سجلّ ⇒ التقديرُ يصير حدًّا أعلى مطابقًا.**
+    """
+    best: tuple[float, dict] | None = None
+    for f in (pack_io.data_root() / "data" / "eval_pack").glob("answers-r*.json"):
+        try:
+            d = json.loads(f.read_text())
+            mtime = f.stat().st_mtime
+        except (OSError, ValueError):
+            continue
+        rows = d.get("results") or []
+        per = [float(r["cost_billed_usd"]) for r in rows if r.get("cost_billed_usd") is not None]
+        if per:
+            spent, field = sum(per), "cost_billed_usd"
+        else:
+            cum = [float(r["spent_after_usd"]) for r in rows if r.get("spent_after_usd") is not None]
+            if not cum:
+                continue
+            spent, field = max(cum), "spent_after_usd"
+        cand = {"file": f.name, "field": field, "spent": spent,
+                "replies": sum(int(r.get("replies_observed") or 0) for r in rows),
+                "questions": len(rows)}
+        if best is None or mtime > best[0]:
+            best = (mtime, cand)
+    return None if best is None else best[1]
+
+
+def simple_estimate(n_questions: int) -> float | None:
+    """تقديرٌ بسيطٌ قبل القياس: **صرفُ الجولة السابقة المُحاسَب × (أسئلةُ هذه ÷ أسئلتِها)**.
+
+    **وبيانُه:** الجولةُ السابقةُ أنفقت `spent` على `questions` سؤالًا ⇒ فنصيبُ السؤال =
+    `spent/questions` ⇒ والتقديرُ = نصيبُ السؤال × أسئلةُ هذه الجولة. **ولا يُخترع رقمٌ بلا ملفّ**
+    (`None` ⇒ لا سطر).
+    """
+    prev = last_billed_run()
+    if prev is None or not prev["questions"]:
+        return None
+    return prev["spent"] / prev["questions"] * max(1, n_questions)
+
+
+def tokens_in(usage: dict | None) -> int:
+    """مجموعُ رموزٍ في لقطة العدّاد المجمَّع — يُستعمل **للتمييز** لا للتسعير (R114-1).
+
+    لماذا: بابُ «لا سعرَ بعد سؤالٍ» (R113-1) كان يفتح **كذبًا** حين يكون أوّلُ الأسئلة سؤالًا يجيبه
+    الحاجزُ محلّيًّا (بلا نداءِ نموذج ⇒ بلا ردٍّ ⇒ بلا سعر). **والتمييزُ الصادق:** وقعت رموزٌ (نداءاتٌ
+    نُفِّذت) ولا سعرَ رُصد ⇒ المراقبُ غيرُ موصول ⇒ **توقّف**؛ ولم تقع رموزٌ ⇒ لا شيءَ يُسعَّر أصلًا ⇒
+    **لا توقّف** (والسؤالان مختلفان، وخلطُهما يُسقط جولةً سليمة).
+    """
+    tot = 0
+    for u in (usage or {}).values():
+        if isinstance(u, dict):
+            tot += int(u.get("input_tokens") or u.get("prompt_tokens") or 0)
+            tot += int(u.get("output_tokens") or u.get("completion_tokens") or 0)
+    return tot
+
+
+def reply_costs_from(response) -> list[tuple[int, int, float | None]]:
+    """**كلفةُ كلّ ردٍّ كما يرسلها المزوّد: (رموزُ مدخل, رموزُ مخرج, `cost`)** — و`None` = لم يُبلَّغ.
+
+    **المصدرُ الأوّلُ `cost` نفسُه** (R115-1): يصل إلى `on_llm_end` في
+    `llm_output["token_usage"]` وفي `message.response_metadata["token_usage"]` — **مقيسٌ بمسبار
+    المدقّق على عميل `openai` الحقيقيّ** ⇒ **فلا يُبنى عدّادٌ بديل**.
+    **وردٌّ لا يحمل `cost` يُقرأ `None`** («لم يُبلَّغ») **ولا يُقرأ صفرًا** — والصفرُ كلفةٌ تُقبل
+    وتُعمي الحاجز، وهو عينُ ما وقع اثنتَي عشرةَ مرّةً في R108-02.
+
+    وتُقرأ أسماءُ الحقول بصيغتَيها (`prompt_tokens`/`input_tokens` · `completion_tokens`/`output_tokens`)
+    لأنّ المزوّدَ والوسيطَ لا يتّفقان على الاسم، **والمعنى واحد**.
+    """
+    def _ints(tu: dict) -> tuple[int, int]:
+        return (int(tu.get("prompt_tokens") or tu.get("input_tokens") or 0),
+                int(tu.get("completion_tokens") or tu.get("output_tokens") or 0))
+
+    def _cost(tu: dict) -> float | None:
+        c = tu.get("cost")
+        return None if c is None else float(c)
+
+    out: list[tuple[int, int, float | None]] = []
+    llm_out = getattr(response, "llm_output", None) or {}
+    top = llm_out.get("token_usage") if isinstance(llm_out, dict) else None
+    seen_gen = False
+    for gen_list in getattr(response, "generations", None) or []:
+        for g in gen_list or []:
+            seen_gen = True
+            msg = getattr(g, "message", None)
+            meta = getattr(msg, "response_metadata", None) if msg is not None else None
+            tu = meta.get("token_usage") if isinstance(meta, dict) else None
+            if not isinstance(tu, dict):                     # الاحتياطُ: بياناتُ الردّ المجمَّعة
+                tu = top if isinstance(top, dict) else None
+            if not isinstance(tu, dict):
+                continue
+            tin, tout = _ints(tu)
+            out.append((tin, tout, _cost(tu)))
+    if not seen_gen and isinstance(top, dict):                # ردٌّ بلا قائمة توليدات
+        tin, tout = _ints(top)
+        out.append((tin, tout, _cost(top)))
+    return out
+
+
+def cost_log():
+    """مرصادُ **كلفةِ كلّ ردّ** — كما `finish_log` تمامًا: يقرأ ما يرسله المزوّد ولا يحسب بديلًا.
+
+    **ويُقرأ منه المُنفَقُ التراكميُّ** (لا مجموعَ النوافذ): رموزُ خيطٍ مُتخلّى عنه تصل بعد إغلاق
+    نافذته **فتبقى في السجلّ** ⇒ فلا تسقط من المُنفَق (الوجهُ الثاني من R113-1) **وتُنسَب إلى الردّ
+    الذي أنتجها** لا إلى سؤالٍ آخر.
+    """
+    from langchain_core.callbacks import BaseCallbackHandler
+
+    class _CostLog(BaseCallbackHandler):
+        def __init__(self) -> None:
+            super().__init__()
+            self.replies: list[tuple[int, int, float | None]] = []
+
+        def on_llm_end(self, response, **kwargs) -> None:          # noqa: ANN001 · D102
+            self.replies.extend(reply_costs_from(response))
+
+    return _CostLog()
+
+
+#: ذاكرةُ أعلى سعر مضيفٍ في العمليّة (قراءةٌ واحدةٌ لكلّ نموذج ⇒ لا نداءَ متكرّر).
+_HOST_MAX_CACHE: dict[str, tuple[float, float] | None] = {}
+
+
+def host_max_price(model_id: str) -> tuple[float, float] | None:
+    """**أعلى سعر مضيفٍ** يخدم النموذج (رموز مدخل, رموز مخرج بالمليون) — من قائمة المضيفين العامّة.
+
+    (R115-1) **وهو البديلُ المُعلَن حين لا يرسل المزوّدُ `cost`:** فالنموذجُ يخدمه عشراتُ المضيفين
+    بأسعارٍ تختلف أضعافًا (قِيس: ٣٣ مضيفًا · المدخلُ بين $0.0342 و$0.225 للمليون)، **وسعرُ القائمة
+    وحده ليس حدًّا أعلى** كما كان `tokens_cost` يقول — بل **حدًّا أدنى**.
+    **وبلا قراءةٍ ⇒ `None`** (فلا يُخترع سعرٌ يحرس السقفَ كذبًا)، والمصدرُ يُعلَن في الدليل.
+    """
+    import urllib.request                                    # noqa: PLC0415 — محلّيٌّ كبقيّة قراءات الشبكة
+
+    if _HOST_MAX_CACHE.get(model_id) is not None:
+        return _HOST_MAX_CACHE[model_id]
+    try:
+        req = urllib.request.Request(
+            f"https://openrouter.ai/api/v1/models/{model_id}/endpoints",
+            headers={"User-Agent": "rajhi-rag/1.0"})
+        with urllib.request.urlopen(req, timeout=20) as r:      # noqa: S310 — URLٌ ثابتٌ لا يكتب
+            data = json.loads(r.read().decode())
+        pin = pout = 0.0
+        for ep in (data.get("data") or {}).get("endpoints") or []:
+            pr = ep.get("pricing") or {}
+            pin = max(pin, float(pr.get("prompt") or 0.0) * 1e6)
+            pout = max(pout, float(pr.get("completion") or 0.0) * 1e6)
+        got = (pin, pout) if (pin > 0 or pout > 0) else None
+    except Exception:                                            # noqa: BLE001 — قراءةٌ فاشلة ⇒ None
+        got = None
+    _HOST_MAX_CACHE[model_id] = got
+    return got
+
+
+def billed_reply_cost(tin: int, tout: int, cost: float | None, price_in_per_m: float,
+                      price_out_per_m: float, host_high: tuple[float, float] | None
+                      ) -> tuple[float, str] | None:
+    """كلفةُ ردٍّ **لا تتجاوز ما يُحاسِب به المزوّد** — ومعها **مصدرُها مُعلَنًا**.
+
+    ① **`cost` المزوّد ⇒ هو، ولا يعلوه شيء** (R122-1 · مراجعة ١٢٢): كان يُقارَن بـ«الرموز × سعر
+       القائمة» ويُؤخذ **الأكبر**، خوفَ أن يُرسل المزوّدُ `cost` **أقلَّ** من الواقع. **والفرضُ سقط
+       بقياس (2026-10-15):** القائمةُ **$0.15/$0.50** لكلّ مليون، والمضيفون تحت `max_price`
+       (**١٣ من ٣٤**) مدخلُهم **$0.04–$0.12** ⇒ **كلُّهم دون القائمة** ⇒ فالأرضيةُ لم تحرس شيئًا
+       **وضاعفت المحاسَب:** السجلُّ `$0.004933` ⇔ عدّادُ المفتاح **`$0.002519`** (ثابتٌ في قراءتين
+       بعد ٤٤ دقيقة) ⇒ **×1.96** ⇒ فالسقفُ يقف عند **نصف الفعليّ** والرقمُ المنشور **مضاعف**.
+       **والثابتُ الآن:** المُحاسَبُ لا يتجاوز ما يُحاسِب به المزوّد ⇒ `cost` يُؤخذ كما هو.
+    ② **وبلا `cost` ⇒ الرموز × `max_price`** — وهو **حدُّ الطلب نفسِه** (السعرُ الذي نُرسله للمزوّد في
+       `provider.max_price`) لا سعرُ القائمة، فلا يُبنى الحدُّ على سعرٍ لا يخدم أحدًا من مضيفي النموذج.
+    ③ **وإن لم يُعرَف السعرُ (صفرًا) ⇒ أعلى سعرِ مضيفٍ يُعلَن**، **وإن تعذّرت قراءتُه ⇒ `None`**
+       (فلا سعرَ يُخترع، والحلقةُ تتوقّف مُسمّاةً بدل أن تمضي بسقفٍ كاذب). **وأعلى سعرِ المضيف يبقى
+       شاهدًا يُطبع في الدليل**، ولم يبقَ رتبةً في القانون حيث عُرف `max_price`.
+    """
+    if cost is not None:
+        return float(cost), "provider-cost"
+    ceiling = (tin * price_in_per_m + tout * price_out_per_m) / 1e6
+    if ceiling > 0:
+        return ceiling, "provider-max-price"
+    if host_high is None:
+        return None
+    return (tin * host_high[0] + tout * host_high[1]) / 1e6, "host-max-price"
+
+
+def billed_window(replies: list[tuple[int, int, float | None]], price_in_per_m: float,
+                  price_out_per_m: float, host_high: tuple[float, float] | None
+                  ) -> tuple[float, str, int] | None:
+    """كلفةُ نافذةٍ **حدًّا أعلى لما يُحاسَب عليه** = مجموعُ كلفة ردودها، ومصدرُها، وعددُ ردودها.
+
+    **ومصدرُ النافذة يُعلَن جامعةً** (`provider-cost` · `provider-max-price` · `host-max-price`)
+    ⇒ فيُقرأ من الملفّ **أيُّ مرتبةٍ حكمت**، ولا يُدَّعى غيرُها.
+    """
+    if not replies:
+        return None
+    total = 0.0
+    sources: set[str] = set()
+    for tin, tout, cost in replies:
+        got = billed_reply_cost(tin, tout, cost, price_in_per_m, price_out_per_m, host_high)
+        if got is None:
+            return None                    # **ردٌّ لا سعرَ له ⇒ لا كلفةَ تُدَّعى** (fail-closed فوق)
+        total += got[0]
+        sources.add(got[1])
+    return total, "+".join(sorted(sources)), len(replies)
+
+
+def cap_evidence(*, spent_before: float, spent_after: float, cost_here: float, cost_by_tokens: float,
+                 cost_source: str, price: float, source: str, meter_delta: float | None,
+                 tokens: int, tools: int, replies: int) -> dict:
     """ما حُوكم به لكلّ سؤال — **بلا تكرار**: حقلٌ واحد لكلّ معنى (R112-4).
 
     `cap_price_usd` سعرُ النداء المستعمل · `cap_price_source` مصدرُه · `spent_before_usd`/`spent_after_usd`
     المُنفَقُ التراكميّ **قبل** القرار و**بعده** (من عدّاد المكتبة، فيُقابَل مجموعُ النوافذ بالتراكمي)
-    · `cap_bound_usd` السقفُ الذي قُورن به · `replies_observed` **مقسومُ السعر** (R113-1) ·
-    `calls_floor` أرضيةٌ مُعلَنة (الأدوات + ١) **لم تعد مقسومًا عليها** · و`meter_delta_usd` شاهدُ
-    رصيد الحساب لنفس النافذة (يُنشر ولا يحكم) ⇒ فالقانونُ يُعاد تشغيلُه من الملفّ (شرطُ مراجعة ١١٢).
+    · `replies_observed` **مقسومُ السعر** (R113-1) · `calls_floor` أرضيةٌ مُعلَنة (الأدوات + ١) **لم
+    تعد مقسومًا عليها** · و`meter_delta_usd` شاهدُ رصيد الحساب لنفس النافذة (يُنشر ولا يحكم) ⇒
+    فالقانونُ يُعاد تشغيلُه من الملفّ (شرطُ مراجعة ١١٢).
+
+    **و`cap_bound_usd` أُزيل (R117-4 · مراجعة ١١٧):** كان يُسجَّل **كأنّه حدٌّ** وهو سقفُ سؤالٍ
+    قادمٍ لا يحكم شيئًا بعد إزالة الفرع الاستباقيّ ⇒ فحقلٌ باسمٍ يوهم أسوأُ من غيابه. والقانونُ
+    اليوم: **المُنفَقُ المُحاسَب مقابل السقف** — وهو المُسجَّل في `spent_before_usd`/`spent_after_usd`.
     """
     return {
-        "cost_by_tokens_usd": round(cost_here, 6),
+        "cost_billed_usd": round(cost_here, 6),      # **حدُّ ما يُحاسَب عليه** (المصدرُ الأوّل · R115-1)
+        "cost_by_tokens_usd": round(cost_by_tokens, 6),   # **حدٌّ أدنى للعرض والمساءلة** (كان يُظنُّ حدًّا أعلى)
+        "cost_source": cost_source,                  # أيُّ مرتبةٍ حكمت: provider-cost / host-max-price / …
         "spent_before_usd": round(spent_before, 6),
         "spent_after_usd": round(spent_after, 6),
         "cap_price_usd": round(price, 6),
         "cap_price_source": source,
-        "cap_bound_usd": round(bound, 6),
         "tokens_observed": int(tokens),
         "tools_in_trace": int(tools),
-        "calls_floor": int(tools) + 1,        # **أرضيةٌ مُعلَنة** — تُنشر ولا تُقسَم عليها (R113-1)
+        # **`الأدوات + ١` لا «أرضية»:** قِيس أداةٌ في ردٍّ واحد (`num-04`: ردّان و٣ أدوات ⇒ المدخَلُ
+        # يفترض ٣) ⇒ فهي **حدٌّ أعلى للنداءات** لا أرضيةً (R115-5).
+        "tools_plus_one": int(tools) + 1,
         "replies_observed": int(replies),
         "meter_delta_usd": None if meter_delta is None else round(meter_delta, 6),
     }
@@ -628,52 +928,34 @@ def per_call_cost(pairs: list[tuple[float, int]]) -> float:
     return max(vals) if vals else 0.0
 
 
-def run_spend(handler, price_in_per_m: float, price_out_per_m: float) -> tuple[float, int]:
-    """**المُنفَقُ التراكميّ** من عدّاد المكتبة منذ بدء الجولة: (الكلفةُ, الرموز) — لا مجموعَ النوافذ.
-
-    (R113-1 · الوجهُ الثاني) رموزُ خيطٍ مُتخلّى عنه تصل **بعد إغلاق نافذته** ⇒ فمجموعُ فروق النوافذ
-    يُسقطها من المُنفَق كلِّه، والتراكميُّ يحملها عند القرار التالي. والعدّادُ
-    (`UsageMetadataCallbackHandler`) تراكميٌّ بطبيعته ⇒ فهو **المرجعُ الواحد للمُنفَق**، والنوافذُ تُقرأ
-    **للسعر** لا للمجموع.
-    """
-    cost, tin, tout = tokens_cost(usage_snapshot(handler), price_in_per_m, price_out_per_m)
-    return cost, tin + tout
-
-
 #: **هامشٌ مُعلَن على كلفة النداء الأعلى (R110-1 · وسَببُه تغيّر في R112-1):**
 #: كان سببُه **تأخّرَ عدّاد الحساب ≈١٢٠ ث** (فسؤالٌ يُقاس في ذيله قد لا يحمل كلفتَه كاملةً) — **وقد
 #: سقط هذا السبب**: الرموزُ تُقرأ **لحظيًّا** لكلّ ردّ. **والباقي مُقاس:** سعرُ النداء **يتشتّت داخل
 #: السلسلة** (النداءاتُ اللاحقة تحمل سياقًا أطول)، والقانون يضرب **أعلى** سعرٍ رُئي × هذا الهامش ⇒
 #: فالهامشُ غطاءُ نموٍّ لا تعويضَ تأخّر، **ويُنشر مع كلّ جولة تشتُّتٌ المقيس** (`price_per_call_usd`
 #: لكلّ نافذة في ملفّ الأجوبة ⇒ p50/p95/الأعلى قابلةٌ لإعادة الحساب من الدليل).
+#: **ومستهلكُه اليوم بوّابةُ التغطية** (`tools/expected_coverage.check_cap_can_carry`) — تقديرٌ
+#: استشاريّ **لا حكم**: هل يحمل السقفُ أوسعَ سؤال (وإلّا فهو مسرح). **ولم يبقَ للهامش حكمٌ في الحلقة**
+#: (R117-4: الفرعُ الاستباقيُّ أُزيل).
 PER_CALL_MARGIN = 1.5
 
 
-def next_question_ceiling(question: str, pairs: list[tuple[float, int]],
-                          margin: float = PER_CALL_MARGIN) -> float:
-    """سقفُ السؤال التالي: **حدُّ نداءاته × أعلى كلفةِ نداءٍ مُشاهَدة × الهامش** — حدٌّ أعلى لا وسط.
+def cap_verdict(spent: float | None, cap: float) -> str:
+    """قرارُ الصرف **قبل** طرح السؤال: `"go"` أو `"at-cap"` أو `"unknown"`.
 
-    **والحدُّ مشتقٌّ من بنية المسار** (`statement_qa.qa.question_ceiling`: طرحان لكلّ جزء + الاحتياط)
-    لا من رقمٍ يكتبه أحدٌ بيده في أداة القياس. وبلا عيّنةٍ ⇒ **صفر**: لا سندَ يُضرب، **والثقبُ مُعلَن**
-    (والحدُّ الحقيقيّ في التطبيق يبقى قائمًا).
-    """
-    from statement_qa.qa import question_ceiling
+    دالّةٌ خالصةٌ تحمل القاعدةَ كلَّها (`tools/spend` بالسنّات) ⇒ تُقاس بسمٍّ بلا إنفاق.
 
-    return per_call_cost(pairs) * question_ceiling(question) * margin
-
-
-def cap_verdict(spent: float | None, cap: float, bound: float) -> str:
-    """قرارُ الصرف **قبل** طرح السؤال: `"go"` أو `"at-cap"` أو `"anticipatory"` أو `"unknown"`.
-
-    دالّةٌ خالصةٌ تحمل القاعدةَ كلَّها (`tools/spend` بالسنّات) ⇒ تُقاس بسمٍّ بلا إنفاق:
-    بلوغُ السقف، أو تقديرٌ يُوصِل الصرفَ بعد السؤال فوقه.
+    **والحكمُ على المُنفَق المُحاسَب وحدَه** — **ولا verdictَ استباقيًّا** (قرار 20261014-184500 §٢ ·
+    وقُفل في R117-4 · مراجعة ١١٧): كان الفرعُ `anticipatory` يقارن **سقفَ السؤال القادم** (٧٢ نداءً
+    × أعلى سعر × ١٫٥) — وهو **إعادةُ صنعٍ لما يقدّمه المزوّد** (`provider.max_price`)، وهو ما رفع
+    السقفَ المطلوبَ إلى $0.29. وبقي الفرعُ `pass` **و`cap_bound_usd` يُحسب ويُسجَّل كأنّه حدّ** ⇒
+    فالاسمُ يوهم والرقمُ لا يحكم. **فأُزيل الثلاثة:** الفرعُ، والحقلُ، وحسابُه في الحلقة (وشاهدُه
+    `tools/expected_coverage.py` — يُعيد تشغيل القانون نفسِه بلا كلفة، فطابَقَه بعد الإزالة).
     """
     if spent is None:
-        return "unknown"                     # لا قياسَ ⇒ لا حكم (ويُعلن الفرع التقديريّ المُعلَن)
+        return "unknown"                     # لا قياسَ ⇒ لا حكم
     if at_or_over(spent, cap):
         return "at-cap"
-    if bound and would_exceed(spent + bound, cap):
-        return "anticipatory"
     return "go"
 
 
@@ -684,6 +966,12 @@ def cap_verdict(spent: float | None, cap: float, bound: float) -> str:
 
 
 _NUMTOK = re.compile(r"[\d٠-٩۰-۹][\d٠-٩۰-۹,٬،٫.]*")
+# **قائمتا العبارات — للقديم وحده (قرار المالك `20261014-231500` · R118-2):** كانتا تحكمان
+# بالامتناع والتعادل، **وقد خرج الحكمُ من مطابقة النصّ إلى إشارةٍ مُهيكلةٍ يحملها الجواب**
+# (`Answer.kind` · `statement_qa.qa.AnswerKind`) ⇒ فلم يبقَ لهما قارئٌ إلا **`score_answer_by_text`
+# وحدَه** الذي يُطبع في السطر المقارِن «بالجديد X · وبالقديم Y». **ولا تُضاف إليهما عبارةٌ جديدة**
+# (القائمتان لا تصلحان شاهدًا — قِيس أنّ `abs-05` امتنع بـ«لا يظهر» فحُسب خطأً)، وضابطٌ يسقط إن
+# عادتا تحكمان في المصحِّح المعمول به.
 _ABSENCE = ("غير موجود", "لا يوجد", "غير متوف", "لا تتوفر", "لا يمكن", "غير مطبوع", "لا أعلم",
             "لا تتضمّن", "لا تتضمن", "لا بيانات", "خارج", "لا سند")
 _AMBIG = ("تعادل", "متساو", "مبلغان", "مبلغين", "أكثر من مبلغ", "لا يمكن الجزم", "لا يمكن تحديد")
@@ -756,11 +1044,17 @@ def _declares_tie(ans: str) -> bool:
     return bool(_TIE_RE.search(ans))
 
 
-def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[bool, str]:
+def _score_common(q: dict, truth_val, ans: str, res, rows: list[dict], *,
+                  not_found: bool, tie: bool, by: str) -> tuple[bool, str]:
     """حكمٌ **ميكانيكيّ** لكلّ سؤال — بلا حَكَمٍ ذوقيّ (والحدُّ معلَنٌ في التقرير).
 
     الأرقامُ تُقابَل بتسامح ٠٫٠٥ (كسرُ هللة)، والامتناعُ يُشترَط فيه **ألّا يخترع مبلغاً**،
     والاستشهادُ يُقابَل بصفحات الصفوف التي استدعتها الأدوات فعلاً (`used_row_nos`).
+
+    **والحكمان المتغيّران مُدخَلان صريحًا (`not_found` · `tie` · `by`):** هما الموضعان اللذان كانا
+    يُقرآن من قوائم العبارات (R118 · قرار `20261014-231500`) ⇒ فالمصحِّحُ الجديد يقرؤهما من
+    **إشارة الجواب** (`Answer.kind`)، والمصحِّحُ القديم من النصّ (وهو محفوظٌ لأنّ سطر
+    «بالجديد X · وبالقديم Y» يقيسه)، **والمنطقُ الباقي واحدٌ** فلا يفترقان بغير هذين الحكمين.
     """
     nums = extract_numbers(ans)
     m = q["metric"]
@@ -785,8 +1079,9 @@ def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[b
             if truth_val is True:
                 return (pos and not neg), f"إيجابٌ {'موجود' if pos else 'غائب'}{' ونفيٌ مضادّ' if neg else ''}"
             # السلسلةُ لا تتّصل: الجوابُ الصحيحُ نفيٌ صريح
-            return ((neg or (not pos and any(w in ans for w in _ABSENCE)))
-                    and len(cited_pages) >= 2), f"نفيٌ {'صريح' if neg else 'غير صريح'} · صفحاتٌ مُستشهدة {len(cited_pages)}"
+            return ((neg or (not pos and not_found))
+                    and len(cited_pages) >= 2), \
+                f"نفيٌ {'صريح' if neg else 'غير صريح'}{'' if neg else f' · {by}'} · صفحاتٌ مُستشهدة {len(cited_pages)}"
         if truth_val is None:
             return False, "لا قيمةَ مُشتقّة (عطبُ مرسًى)"
         if isinstance(truth_val, str):
@@ -837,24 +1132,59 @@ def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[b
 
     if m == "abstain":
         if q["expect"] == "ambiguous":
-            ok = any(w in ans for w in _AMBIG)
-            return ok, ("أعلن التعادل ✓" if ok else "لم يُعلن التعادل (جزمَ بلا سند)")
+            ok = tie
+            return ok, (f"أعلن التعادل ✓ ({by})" if ok else f"لم يُعلن التعادل (جزمَ بلا سند · {by})")
         # **الاختراعُ = ادّعاءُ مبلغٍ لا سندَ له في الأثر** — لا كلُّ رقمٍ في الجواب (رقمُ الصفحة ليس مبلغاً).
         # قِيس: العدّادُ القديم حسب ٩ اختراعات، منها جوابٌ ردّ فيه رقمَ الصفحة المسؤول عنها ⇒ تعليمٌ كاذب.
         sup = _trace_amounts(res, rows)
         claimed = [v for v in _claimed_amounts(ans) if abs(v) > 0.005]
         unsupported = [v for v in claimed if not any(abs(v - s) < 0.005 for s in sup)]
-        gated = getattr(res, "scope", "in_scope") != "in_scope" or bool(getattr(res, "refused", False))
-        declared = any(w in ans for w in _ABSENCE)
+        # **والحاجزُ من الحاجز وحده (R120-1 · مراجعة ١٢٠ · P2):** كان `or refused` يقرأ إشارةَ
+        # الجواب أيضًا، و`refused` صار **مشتقًّا من `kind`** (قرار 231500) ⇒ فجوابٌ أعلن النموذجُ
+        # امتناعَه **وحمل مبلغًا بلا سند** كان يُحسب صحيحًا بعلّة «بوّابةُ النطاق منعته قبل النموذج»
+        # — **وهو ادّعاءٌ لم يقع** (النموذجُ بلغه السؤال)، وقبولُ القرار ④ («مبلغٌ بلا سند ⇒ خطأٌ كما
+        # كان») مكسور. **وإشارتان تُقرآن من حقلٍ واحد ليستا إشارةً واحدة:** النطاقُ من `scope`،
+        # والامتناعُ المُعلَن من `kind` — كلٌّ في موضعه.
+        gated = getattr(res, "scope", "in_scope") != "in_scope"
+        declared = not_found
         # **عدّادان لا عدّادٌ واحد**: «ادّعى مبلغاً بلا سند» ≠ «لم يُعلن امتناعاً» — وخلطُهما رفع الرقمَ
         # المنشور بواحد (قِيس: ثلاثُ اختراعاتٍ فعليّة + سقوطٌ واحدٌ سببُه عدمُ إعلان التعادل).
         why = ("بوّابةُ النطاق منعته قبل النموذج ✓" if gated
-               else f"امتناعٌ نصّيّ بلا مبلغٍ مُخترع ✓ ({len(claimed)} مبلغاً مُدّعى، كلُّه مسنود)"
+               else f"امتناعٌ مُعلَن بلا مبلغٍ مُخترع ✓ ({by} · {len(claimed)} مبلغاً مُدّعى، كلُّه مسنود)"
                if (not unsupported and declared)
                else f"**اختراع**: ادّعى {len(unsupported)} مبلغاً بلا سند في الأثر ✗" if unsupported
-               else "**لم يُعلن امتناعاً** نصّيّاً ✗ (ولا ادّعى مبلغاً)")
+               else f"**لم يُعلن امتناعاً** ✗ (ولا ادّعى مبلغاً · {by})")
         return (gated or (not unsupported and declared)), why
     return False, f"مقياسٌ مجهول: {m}"
+
+
+def score_answer(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[bool, str]:
+    """**المصحِّحُ المعمولُ به: يقرأ إشارةَ نوع الجواب** (قرار المالك `20261014-231500`).
+
+    الإشارةُ ينتجها مسارُ التطبيق نفسُه (`Answer.kind` عبر `response_format`) ويقرؤها التطبيقُ
+    والقياسُ من موضعٍ واحد ⇒ فلا عبارةَ تُطابَق، ولا قائمةَ تُرقَّع.
+    """
+    kind = str(getattr(res, "answer_kind", "") or "")
+    if getattr(res, "answer_kind_recorded", True) is False:
+        # **سجلٌّ قبل إشارة النوع (R118):** الحقلُ غيرُ محفوظٍ فيه أصلًا ⇒ فالحكمُ به ادّعاءٌ لما
+        # لم يُسجَّل. يُسمّى عطبَ مرسًى (كعطب السلسلة غير المشتقّة)، ويبقى حكمُ المصحِّح القديم
+        # مطبوعًا في السطر المقارِن — فالتاريخُ يُقرأ بمصحِّحه لا بمصحِّحٍ لم يكن.
+        return False, ("عطبُ مرسًى: سجلٌّ قبل إشارة نوع الجواب (`answer_kind`) — لا يُحكم عليه "
+                       "بالمصحِّح الجديد؛ يُقرأ بالمصحِّح القديم")
+    return _score_common(q, truth_val, ans, res, rows,
+                         not_found=(kind == "not_found"), tie=(kind == "tie"),
+                         by=f"إشارةُ الجواب: {kind or 'فارغة'}")
+
+
+def score_answer_by_text(q: dict, truth_val, ans: str, res, rows: list[dict]) -> tuple[bool, str]:
+    """**المصحِّحُ القديم — محفوظٌ للسطر المقارِن وحده** (`بالجديد X · وبالقديم Y`).
+
+    كان هو المصحِّحَ المعمولَ به، ويحكم بالامتناع والتعادل من قائمتَي العبارات أدناه. ولا يُعاد
+    إليه الحكمُ المنشور (قرار 231500)، **ولا تُضاف إليه عبارةٌ جديدة** — يُقاس خلافُه فيُسمّى.
+    """
+    return _score_common(q, truth_val, ans, res, rows,
+                         not_found=any(w in ans for w in _ABSENCE),
+                         tie=any(w in ans for w in _AMBIG), by="مطابقةُ عبارات")
 
 
 class _Trace:
@@ -866,7 +1196,42 @@ class _Trace:
         # استدعى أداةً بلا صفوف (`page_footer`) أو لم يستدعِ شيئًا يبدوان «صفرَ أثر» سواءً.
         self.tools_used = list(rec.get("tools_used") or [])
         self.scope = rec.get("scope") or "in_scope"
+        #: **إشارةُ نوع الجواب المحفوظة مع الجولة** (قرار 231500) — يقرؤها المصحِّحُ المعمول به.
+        self.answer_kind = str(rec.get("answer_kind") or "")
+        #: **وهل سُجِّلت الإشارةُ أصلًا؟** سجلٌّ كُتب **قبل** المخطّط الجديد لا يحمل الحقلَ ⇒
+        #: فلا يجوز أن يُحكم عليه بمصحِّحٍ يقرأ ما لم يُسجَّل (يُسمّى عطبَ مرسًى ويُقرأ بالقديم).
+        self.answer_kind_recorded = "answer_kind" in rec
         self.refused = bool(rec.get("refused"))
+
+
+def box_of(r) -> dict:
+    """**موضعٌ واحدٌ يُبنى منه ما يُحكَم به وما يُحفَظ** — والإشارةُ تُقرأ من ناتج التحليل نفسِه (قرار 231500).
+
+    **عطبٌ مقيسٌ أُغلق بهذه الدالّة (R121-3):** كان بناءُ الصندوق inside `_ask` يحمل
+    `used` · `tools_used` · `scope` · `refused` **بلا `answer_kind`** ⇒ `_Trace.answer_kind_recorded`
+    = **False** ⇒ فكلُّ سؤالٍ في الجولة يُحكم **«عطبَ مرسًى»** ولا يعمل المصحِّحُ الجديدُ أصلًا،
+    **والسجلُّ يُكتب بـ`answer_kind=""`** ⇒ **فالإشارةُ تُفقد من الدليل نفسه** (قِيس: جولتان مسجّلتان
+    `kind=''` قبل إيقاف التشغيل). والدرسُ: حرسٌ يبني الأثرَ بيده لا يقيس مسارَ الجولة ⇒ فالحدُّ
+    بين «ما ينتجه التحليل» و«ما يُسجَّل» يُسمّى هنا **مرّةً واحدة**.
+    """
+    return {"answer": r.answer or "",
+            "used": list(getattr(r, "used_row_nos", None) or []),
+            "tools_used": list(getattr(r, "tools_used", None) or []),
+            "scope": getattr(r, "scope", None),
+            "answer_kind": str(getattr(r, "answer_kind", "") or ""),
+            "refused": bool(getattr(r, "refused", False))}
+
+
+def trace_of(msg: dict):
+    """الأثرُ الذي **تحكم به الجولة وتكتبه** — من رسالةٍ أنتجها `box_of`.
+
+    **والمسارُ الذي يحكم هو المسارُ الذي يُكتب** (وإلّا حُكم على سجلٍّ آخر — وهو بعينه عطبُ R121-3).
+    """
+    if "answer" not in msg:
+        return None
+    return _Trace({"used_row_nos": msg.get("used"), "tools_used": msg.get("tools_used"),
+                   "scope": msg.get("scope"), "answer_kind": msg.get("answer_kind"),
+                   "refused": msg.get("refused")})
 
 
 def _spec_sha(path: pathlib.Path | None = None) -> str:
@@ -907,8 +1272,11 @@ def rescore(a, qs: list[dict], c: Corpus, pack: dict, spec: dict, rows: list[dic
         if q is not None:
             truth_val, _ = truth(q, c, pack, rows)
             ok, why = score_answer(q, truth_val, rec.get("answer", ""), _Trace(rec), rows)
+            ok_text, why_text = score_answer_by_text(q, truth_val, rec.get("answer", ""),
+                                                     _Trace(rec), rows)
             # **لا يُكتب فوق نصّ السؤال المحفوظ**: الملفُّ شاهدٌ على ما طُلب فعلاً (كان يُستبدل فيُفقد الشاهد)
-            rec = {**rec, "ok": ok, "why": why, "metric": q["metric"], "expect": q["expect"],
+            rec = {**rec, "ok": ok, "why": why, "ok_by_text": ok_text, "why_by_text": why_text,
+                   "metric": q["metric"], "expect": q["expect"],
                    "cat": q["cat"], "kind": q["derive"]["kind"]}
             # **أثرٌ قديمٌ مقصوص** (REVIEW-48 · P-2 · والجولة ٤٩): القاعدةُ في `eval_stamp.is_trace_suspect`
             # موضعًا واحدًا ⇒ فلا تنقسم بين `--rescore` وأداة المقارنة.
@@ -938,12 +1306,44 @@ def rescore(a, qs: list[dict], c: Corpus, pack: dict, spec: dict, rows: list[dic
     return 0
 
 
+def refusal_of(msg: dict, res, kinds) -> str | None:
+    """اسمُ رفض المزوّد — من **الحالة المُسمّاة** في النتيجة، أو من **نوع** الاستثناء.
+
+    **ولا يُطابَق نصُّ خطأ** (R117-3): القائمةُ الكلميّةُ كانت تُخطئ ٤٠٣ (`limit_source`) و٥٠٣.
+    و`kinds` مُدخَلٌ لأنّ الأسماءَ مصدرُها `statement_qa.provider_errors` (يُستورَد وقت الحلقة)
+    ⇒ فالدالّةُ **خالصةٌ تُقاس بلا استيرادٍ ثقيل**.
+    """
+    scope = getattr(res, "scope", None) if res is not None else None
+    if scope in kinds:
+        return scope
+    kind = (msg or {}).get("error_refusal")
+    return kind if kind in kinds else None
+
+
+def _refusal_note(msg: dict) -> str:
+    """سطرُ الدليل: `limit_source` إن رُئي، ونصُّ الخطأ كما وصل — **يُطبع ولا يحكم**."""
+    src = (msg or {}).get("error_limit_source")
+    err = (msg or {}).get("error")
+    return ("".join([f" · limit_source={src}"] if src else [])
+            + (f" · {err}" if err else ""))
+
+
 def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     """تشغيلُ الأسئلة على سلسلة السؤال الحقيقيّة — **مدفوع**، ويُقاس بأمرٍ صريح."""
+    # **والمقياسُ لا يشتري إلا بمفتاح القياس — أيًّا كانت الأعلام، وقبل أيّ عملٍ آخر** (R117-3 ·
+    # مراجعة ١١٧ · P2): كان الشرطُ `if a.budget and not eval_key()` ⇒ **بلا `--budget`** يُبنى
+    # العميلُ بـ`api_key=None` فيكمل `build_llm` بـ`api_key or get_api_key()` = **مفتاحُ التطبيق**
+    # (قِيس: ٨/٨ سؤالًا طُرحت و`api_key_passed=None`) ⇒ فالضمانُ كان **مشروطًا بعَلَم**.
+    # والقرارُ جعل حدَّ المفتاح هو الضمان ⇒ فيُشترط دائمًا، **ويُفشَل مُغلقًا قبل أن يُقرأ شيء**.
+    if not eval_key():
+        print(f"\n⛔ **لا مفتاحَ قياس** ({EVAL_KEY_ENV} غيرُ موجودٍ في البيئة ولا في `.env`) ⇒ "
+              f"**لا نداءَ مدفوعًا — ولا يُشترى القياسُ بمفتاح التطبيق** · رمزُ الخروج 5.", flush=True)
+        return 5
     src = pathlib.Path(__file__).resolve().parent.parent / "src"
     sys.path.insert(0, str(src))
     from tools.refusal_test import build_footers, build_rows      # noqa: PLC0415
     from statement_qa.chunking import chunk_rows                  # noqa: PLC0415
+    from statement_qa import provider_errors                      # noqa: PLC0415
     from statement_qa.qa import answer_question, build_llm, effective_model   # noqa: PLC0415
     from statement_qa.retriever import build_index                # noqa: PLC0415
 
@@ -975,8 +1375,21 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
 
     usage = UsageMetadataCallbackHandler()
     finishes = finish_log()
-    llm = build_llm(a.model, callbacks=[usage, finishes])
+    costs = cost_log()                      # **كلفةُ كلّ ردّ كما يرسلها المزوّد** (R115-1)
+    # **والقياسُ يشتري بمفتاحِ القياس وحدَه** (قرار 20261014-184500 §٢): حدُّ صرفٍ يفرضه المزوّد
+    # على المفتاح ⇒ فميزانيةُ القياس هي حدُّ المفتاح نفسه، ولا يُفرَغ رصيدُ التطبيق.
     model_id = effective_model(a.model)     # **المعرّفُ الفعليّ** — به يُقرأ سعرُه ويُكتب في الدليل
+    maxp = provider_max_price(model_id)
+    print(f"      حدُّ سعر المزوّد: مدخلًا ${maxp['prompt']:.4f}/M · مخرجًا ${maxp['completion']:.4f}/M "
+          f"⇒ **{hosts_under(model_id, maxp)} مضيفًا** يخدمون تحت الحدّ (من {hosts_total(model_id)})",
+          flush=True)
+    llm = build_llm(a.model, callbacks=[usage, finishes, costs], api_key=eval_key(), max_price=maxp)
+    # **وأعلى سعر مضيفٍ يُقرأ مرّةً ويُعلَن** (R115-1): البديلُ حين لا يرسل المزوّدُ `cost`،
+    # ولا يُستعمل سعرُ القائمة وحدَه حدًّا (فهو **حدٌّ أدنى**: ٣٣ مضيفًا بأسعارٍ تصل ستّةَ أضعافها).
+    host_high = host_max_price(model_id)
+    print("      أعلى سعر مضيفٍ من القائمة العامّة: "
+          + ("**غيرُ مقروء ⇒ لا سقفَ يُبنى عليه**" if host_high is None
+             else f"${host_high[0]:.4f}/M مدخلًا · ${host_high[1]:.4f}/M مخرجًا"), flush=True)
     out = a.out or (pack_io.data_root() / "data/eval_pack/answers.json")
     out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -994,7 +1407,13 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     todo = [q for q in qs if q["id"] not in done]
     # **والسعرُ يُقرأ عند الطلب فقط:** بلا سقفٍ لا حاجةَ لسعر (ولا نداءَ شبكةٍ بلا سبب) ⇒ فلا يُقاس
     # سعرٌ لا يستهلكه قانون. **وقانونُ السقف يستهلكه** ⇒ فيسقط الفشلُ مُغلَقًا إن لم يُقرأ.
-    price_pair = _resolve_price(a) if a.budget else None
+    # **والقانونُ يستهلك «حدَّ الطلب» لا سعرَ القائمة** (R122-1 · مراجعة ١٢٢): كان القانونُ يأخذ
+    # «الرموز × سعر القائمة» أرضيةً حين يُرسل المزوّدُ `cost` أدنى منها — والقائمةُ اليوم **أعلى من
+    # كلّ مضيفٍ تحت `max_price`** ⇒ فتضاعف المحاسَب (السجلُّ $0.004933 ⇔ العدّادُ $0.002519).
+    # فالسعرُ الذي يدخل القانونَ هو **ما نُرسله للمزوّد** (`provider.max_price`)، أو ما يُصرّح به
+    # سطرُ الأمر — **وسعرُ القائمة يبقى شاهدًا يُطبع** ولا يحكم.
+    ceiling_pair = _resolve_ceiling(a) if a.budget else None
+    price_pair = _resolve_price(a) if a.budget else None        # ← شاهدٌ للطباعة فقط
     if a.budget:                       # **سقفٌ يُقاس بالحدّ لا بالتقدير** (S-2 · R110-1 · ثمّ R112-1)
         # كان `cap = budget / 0.01` ⇒ ٦٠ لخمسين سؤالًا ⇒ **لا يُلجِم أبدًا** ويُوكَل إلى تقديرٍ مُقنَّع.
         # **وبوّابتان قبل أوّل نداء (fail-closed):** شرطُ القرار «يُقرأ العدّادُ قبل وبعد» لا يتحقّق
@@ -1004,17 +1423,31 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                   "قبل وبعد، والبعديّةُ بعد الخروج بثلاث دقائق) ⇒ **لا نداءَ مدفوعًا** · رمزُ الخروج 5.",
                   flush=True)
             return 5
-        if not price_pair:
-            print("⛔ سعرُ رمز النموذج لم يُقرأ (قائمةُ النماذج العامّة) ولا سعرَ صريحًا من سطر الأمر ⇒ "
-                  "**سقفُ السؤال لا يُحسب بحدٍّ مشهود** — وهو عينُ عطب REQ-108-02 (سعرٌ من رصيدِ حسابٍ "
-                  "متأخّر) ⇒ **لا نداءَ مدفوعًا** · رمزُ الخروج 5.", flush=True)
+        if not ceiling_pair:
+            print("⛔ حدُّ الطلب لم يُعرَف (لا سعرَ صريحًا في سطر الأمر ولا `provider.max_price`) ⇒ "
+                  "**المُحاسَبُ لا يُحسب بحدٍّ مشهود** ⇒ **لا نداءَ مدفوعًا** · رمزُ الخروج 5.", flush=True)
             return 5
-        print(f"      سعرُ الرمز: ${price_pair[0]:.4f}/M مدخلًا · ${price_pair[1]:.4f}/M مخرجًا "
-              f"({_price_source(a)})", flush=True)
+        print(f"      **حدُّ الطلب (هو الحاكمُ في القانون): ${ceiling_pair[0]:.4f}/M مدخلًا · "
+              f"${ceiling_pair[1]:.4f}/M مخرجًا · المصدرُ {_price_source(a)}**", flush=True)
+        if price_pair:
+            print(f"      وشاهدٌ لا يحكم: سعرُ القائمة ${price_pair[0]:.4f}/M مدخلًا · "
+                  f"${price_pair[1]:.4f}/M مخرجًا (models-list) — يُطبع لأنّه كان أرضيةَ المحاسَبةَ "
+                  f"قبل R122-1 · وأعلى سعرِ مضيفٍ يُطبع أدناه", flush=True)
     if getattr(a, "only", None):           # إعادةُ أسئلةٍ بعينها (بعد تصحيح نطاقِها أو صياغتِها)
         want = {x.strip() for x in a.only.split(",") if x.strip()}
         todo = [q for q in qs if q["id"] in want]
         done = {k: v for k, v in done.items() if k not in want}
+    est = simple_estimate(len(todo))
+    if est is not None:
+        # **والمصدرُ يُطبع باسمه (R117-7):** أيُّ ملفٍّ وأيُّ حقل — فلا يُقرأ الرقمُ بلا شاهدِه.
+        prev = last_billed_run() or {}
+        direction = ("" if prev.get("field") == "cost_billed_usd" else
+                     " ⚠ الحقلُ ليس `cost_billed_usd`: في هذه الجولة يسعّر الرموزَ بسعر القائمة"
+                     " (حدٌّ أدنى) ⇒ **التقديرُ أدنى من الواقع**")
+        print(f"      تقديرٌ للعلم (لا للحكم): من جولة **{prev.get('file')}** "
+              f"(`{prev.get('field')}` = ${prev.get('spent', 0.0):.6f} على "
+              f"{prev.get('questions')} سؤالًا · {prev.get('replies')} ردًّا) "
+              f"⇒ **${est:.4f}** لـ{len(todo)} سؤالًا{direction}", flush=True)
     print(f"[3/4] طرحُ الأسئلة ({len(todo)} من {len(qs)} · ومحفوظٌ سابقاً {len(done)}) "
           f"على {a.model or 'الافتراضيّ'} …\n", flush=True)
 
@@ -1032,20 +1465,25 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
             # **والسجلُّ فارغٌ بالبناء:** الحزمةُ تطرح كلَّ سؤالٍ في دورةٍ مستقلّة ⇒ فالرقمُ يصف
             # **الدورةَ الأولى** في جلسةٍ جديدة، ولا يُدَّعى أنّه يصف سؤالًا تابعًا.
             r = answer_question(store, qtext, rows=rows, chunks=chunks, llm=llm,
-                                footers=footers, scope=_pack_scope(rows, a.run, n_pages))
-            out_box.update({"answer": r.answer or "", "used": list(getattr(r, "used_row_nos", None) or []),
-                            "tools_used": list(getattr(r, "tools_used", None) or []),
-                            "scope": getattr(r, "scope", None), "refused": bool(getattr(r, "refused", False))})
+                                footers=footers, scope=_pack_scope(rows, a.run, n_pages),
+                                n_pages=n_pages)
+            # **والصندوقُ من موضعه الواحد** (`box_of`): الإشارةُ (`answer_kind`) تُحمَل معه وإلّا
+            # حُكم على كلّ سؤالٍ «عطبَ مرسًى» وفُقدت الإشارةُ من السجلّ (عطبُ R121-3 المقيس).
+            out_box.update(box_of(r))
         except Exception as e:                                   # noqa: BLE001 — عطبٌ يُسمّى لا يُسقط الجولة
             out_box["error"] = f"{type(e).__name__}: {e}"
+            # **ورفضُ المزوّد يُصنَّف من نوعه هنا أيضًا (R117-3):** فلو تسرّب استثناءٌ من طبقةٍ
+            # غيرِ `answer_question` يبقى الحكمُ بالسمة (‏`status_code` و`body`) لا بقائمة كلماتٍ
+            # على النصّ — وهي التي أخطأت ٤٠٣ (`limit_source`) و٥٠٣ في مراجعة ١١٧.
+            out_box["error_refusal"] = provider_errors.classify(e)
+            out_box["error_limit_source"] = provider_errors.limit_source(e)
 
     halt = 0                       # **رمزُ التوقّف المُسمّى** (مراجعة ٥١ · البند ٥): 0 = لا توقّفَ بالسقف،
     # 3 = بلوغُ السقف، 4 = عدّادٌ تراجعيّ. كان `break` يُكمل إلى `return 0/1` ⇒ أتمتةٌ تقرأ توقّفًا
     # مُعلَنًا «نجاحًا». والتوقّفُ ليس حكمًا على الأجوبة ⇒ لا يجوز أن يُصبح رمزَ نجاح.
-    observations: list[tuple[float, int]] = []     # (كلفةُ رموزِ نافذة, أدواتُ أثرها) — **مشاهدةٌ لحظيّة**
-    bound = 0.0                                    # سقفُ السؤال القادم — وهو الذي يقارَن بالسقف الماليّ
+    observations: list[tuple[float, int]] = []     # (كلفةُ نافذةٍ محاسَبة, عددُ ردودها) — R115-1
     spent_tokens = 0.0                             # المُنفَقُ من الرموز × السعر — **لحظيّ، وهو ما يحكم**
-    price_in, price_out = price_pair or (0.0, 0.0)
+    price_in, price_out = ceiling_pair or (0.0, 0.0)     # ← حدُّ الطلب (لا سعرُ القائمة)
     meter_here: float | None = None
     for i, q in enumerate(todo, 1):
         # **قرارُ الشراء بحدِّ السؤال القادم (R110-1) × سعرِ نداءٍ مشهود (R112-1) × ومقسومٍ على الردود
@@ -1054,12 +1492,17 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
         # ثمّ صار من **رموز الردود**، **والقسمةُ على عدد الردود** لا على أرضية «الأدوات + ١»: أرضيةٌ
         # تُعلّي السعرَ، **وتنفجر في سؤالٍ انتهت مهلتُه** (أثرٌ فارغ ⇒ ١ ⇒ سقفٌ $405) فتقف الجولة.
         # **والمُنفَقُ تراكميٌّ من العدّاد** (لا مجموعَ النوافذ) فلا تسقط رموزُ ما بين النافذتين.
-        bound = next_question_ceiling(q["q"], observations)
+        # **والحكمُ على المُنفَق المُحاسَب وحدَه** (R115-1 · وحُذف الفرعُ الاستباقيُّ في R117-4):
+        # لا سقفَ سؤالٍ يُقارَن هنا — فالمزوّدُ هو من يفرض السعرَ والحدّ، والحلقةُ تقارن ما
+        # **حُوسب** به السقفَ الماليّ. و`price` (أعلى سعرٍ مشهود لكلّ ردّ) يبقى **للدليل** لا للحكم.
         price = per_call_cost(observations)
-        source = "observed-tokens" if observations else "none-observation"
-        if a.budget and i > 1 and not observations:
-            # **سقفٌ لا يُحسب لا يُفرض** (بندُ R112-1 نفسُه، من جهة الحلقة): بلا سعرٍ مشهودٍ بعد سؤالٍ
-            # يصير `bound = 0` ⇒ فلا يتوقّف شيءٌ أبدًا ⇒ الصمتُ سقفٌ معطَّلٌ يُنشر كأنّه يعمل.
+        source = "observed-billed" if observations else "none-observation"
+        if a.budget and i > 1 and not observations and tokens_in(usage_snapshot(usage)) > 0:
+            # **سعرٌ لا يُشاهَد لا يُفرض به سقف** (بندُ R112-1 نفسُه، من جهة الحلقة): بلا سعرٍ مشهودٍ
+            # بعد سؤالٍ **يظلّ `spent_tokens = 0`** ⇒ فلا يتوقّف شيءٌ أبدًا ⇒ الصمتُ سقفٌ معطَّلٌ
+            # يُنشر كأنّه يعمل. **وشرطُ الرموز يُفرّق بين الحالين** (R114-1): سؤالٌ يجيبه الحاجزُ
+            # محلّيًّا بلا نداءٍ لا يُسقط الجولة (ولا صرفَ فيه يُسعَّر)، **ونداءٌ وقع ولا سعرَ له
+            # يُسقطها** (fail-closed).
             print(f"\n⛔ **لا سعرَ مشهودًا بعد سؤالٍ** (الردودُ لم تُرصد ولا مرّة) ⇒ لا سقفَ يُحسب "
                   f"⇒ توقّفٌ مُسمّى قبل السؤال {i} (fail-closed) · رمزُ الخروج 5.", flush=True)
             halt = 5
@@ -1070,7 +1513,16 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
             meter_before_i = _spent_since(before, cur_u)
             # **والمُنفَقُ التراكميُّ يُقرأ هنا** — عند القرار، لا عند إغلاق النافذة السابقة ⇒ فرموزٌ
             # وصلت بين النافذتين تدخل الحساب (R113-1).
-            spent_tokens = run_spend(usage, price_in, price_out)[0]
+            # **المُنفَقُ = مجموعُ كلفة الردود كلِّها حتى اللحظة** (لا مجموعَ نوافذ): يُنسب كلُّ ردٍّ
+            # إلى نفسه، وردٌّ وصل بعد إغلاق نافذته يبقى في السجلّ فيدخل الحساب (R113-1 · R115-1).
+            spent_window = billed_window(costs.replies, price_in, price_out, host_high)
+            if spent_window is None and costs.replies:
+                print(f"\n⛔ **ردٌّ بلا سعرٍ يُحتسب**: لا `cost` من المزوّد ولا سعر مضيفٍ مقروء "
+                      f"⇒ لا حدَّ أعلى للمُحاسَب ⇒ توقّفٌ مُسمّى قبل السؤال {i} (fail-closed) · "
+                      f"رمزُ الخروج 5.", flush=True)
+                halt = 5
+                break
+            spent_tokens = 0.0 if spent_window is None else spent_window[0]
             if meter_before_i is not None and meter_before_i < 0:
                 # **توقّفٌ مُسمّى عند عدّادٍ تراجعيّ** (مراجعة ٥٠ · مقعد Spec · P1): عدّادٌ ينقص يعني أنّ ما
                 # يُقاس ليس ما يزيد بالصرف ⇒ لا سقفَ يُوثق به؛ والصمتُ هنا سقفٌ معطَّلٌ يُنشر كأنّه يعمل.
@@ -1088,30 +1540,20 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                 halt = 3
                 break
             # **قرارُ الصرف في موضعٍ واحد** (`cap_verdict` دالّةٌ خالصةٌ تُقاس بسمّ بلا إنفاق):
-            # البابُ البعديّ (بلغ الصرفُ السقف) والبابُ الاستباقيّ (سقفُ السؤال القادم يُوصِل فوقه).
-            verdict = cap_verdict(spent_tokens, float(a.budget), bound)
+            # **وبابٌ واحدٌ فقط: بلوغُ المُنفَق المُحاسَب للسقف.** (والبابُ الاستباقيُّ بسقف السؤال
+            # القادم **أُزيل** في R117-4 بعد أن صار مُعلَّقًا بـ`pass` في R115-1: كان يعيد صنعَ ما
+            # يقدّمه المزوّد — حدُّ سعرٍ لكلّ طلب — وهو ما رفع السقفَ المطلوب إلى $0.29.)
+            verdict = cap_verdict(spent_tokens, float(a.budget))
             if verdict == "at-cap":
                 print(f"\n⛔ السقفُ **المقيس** بلغ {spent_tokens:.4f} من {float(a.budget):.4f} "
                       f"(من الرموز × سعرِ الرمز) ⇒ التوقّف قبل السؤال {i}. "
                       f"**التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** · رمزُ الخروج 3.", flush=True)
                 halt = 3
                 break
-            # **توقّفٌ استباقيّ بسقف السؤال القادم** (مراجعة ٥١ · البند ٤ · **وجذرُه أُصلح في R109-1
-            # ثمّ صار سعرُه مشهودًا في R112-1**): الحدُّ الحقيقيّ في التطبيق (حدُّ نداءاتٍ في الوكيل)،
-            # وسعرُ النداء يُقرأ من الرموز ⇒ فالرقمُ المعلَن أدناه قابلٌ لإعادة الحساب من الدليل.
-            if verdict == "anticipatory":
-                meter_txt = "—" if meter_before_i is None else f"${meter_before_i:.4f}"
-                print(f"\n⛔ **توقّفٌ استباقيّ**: المُنفَق {spent_tokens:.4f} + **سقفُ السؤال القادم** "
-                      f"{bound:.4f} يتجاوز السقف {float(a.budget):.4f} ⇒ لا يُطرح السؤال {i}. "
-                      f"(← سقفُ السؤال = `question_ceiling` من بنية المسار × ${price:.6f} **لسعر نداءٍ "
-                      f"مشهود من الرموز** × هامش {PER_CALL_MARGIN} · ومصدرُه {source} · ورصيدُ الحساب "
-                      f"للعلم: {meter_txt}) · **التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** · "
-                      f"رمزُ الخروج 3.", flush=True)
-                halt = 3
-                break
         u_before = usage_snapshot(usage)
         r_before = len(finishes.reasons)
         replies_before = finishes.ends          # **عدّادُ الردود** (مقسومُ سعر النداء · R113-1)
+        c_before = len(costs.replies)           # **وفهرسُ سجلّ الكلفة** (كلفةُ كلّ ردّ · R115-1)
         t0 = time.monotonic()
         truth_val, _ = truth(q, c, pack, rows)
         box: dict = {}
@@ -1119,12 +1561,29 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
         t.start()
         t.join(int(getattr(a, "timeout", 0) or 150))
         msg = {"error": "انتهت المهلة"} if t.is_alive() else (box or {"error": "لا جواب"})
-        res = _Trace({"used_row_nos": msg.get("used"), "tools_used": msg.get("tools_used"),
-                      "scope": msg.get("scope"),
-                      "refused": msg.get("refused")}) if "answer" in msg else None
+        res = trace_of(msg)      # **والأثرُ الذي يُحكَم به هو نفسُه الذي يُكتب** (R121-3)
         ans = msg["answer"].strip() if res else f"<{msg.get('error')}>"
+        # **ورفضُ المزوّد توقّفٌ مُسمّى لا أخطاءُ أجوبة** (قرارُ 184500 §٢ · **وأُعيد بناؤه في R117-3**):
+        # كان الكاشفُ **قائمةَ كلماتٍ على نصّ الخطأ**، وقِيس أنّها تُخطئ شكلين موثَّقين (٤٠٣ حدُّ المفتاح
+        # بـ`limit_source`، و٥٠٣ لا مضيفَ تحت الحدّ) ⇒ فيُسجَّل السؤالُ **جوابًا خاطئًا** بدل التوقّف.
+        # **والحكمُ الآن من الحالة المُسمّاة** (`scope` من `answer_question`) **أو من نوع الاستثناء**
+        # (`status_code`/`body` في `provider_errors`) — والاثنان من **موضعٍ واحد**، ولا نصَّ يُطابَق.
+        _refusal = refusal_of(msg, res, provider_errors.PROVIDER_REFUSALS)
+        if _refusal:
+            print(f"\n⛔ **المزوّدُ رفض الطلب — حالةٌ مُسمّاة: `{_refusal}`**"
+                  f"{_refusal_note(msg)} ⇒ توقّفٌ مُسمّى قبل إتمام السؤال {i} · "
+                  f"**التغطيةُ المُعلَنة: {i - 1} من {len(todo)}** · والمُنفَقُ المُحاسَب حتى الآن "
+                  f"${spent_tokens:.4f} · رمزُ الخروج 6.", flush=True)
+            done.pop(q["id"], None)          # **السؤالُ الباقي ليس جوابًا خاطئًا**
+            halt = 6
+            break
         ok, why = (score_answer(q, truth_val, ans, res, rows) if res
                    else (False, f"عطبٌ/مهلة: {msg.get('error')}"))
+        # **والحكمُ القديمُ يُحسب على الجواب نفسه** (قرار 231500 البند ٣): يُطبع الاثنان في سطرٍ
+        # واحد، وكلُّ سؤالٍ اختلف حكمُه يُسمّى بسببٍ من كلّ مصحِّح. **وحسابٌ بلا كلفة** (نفسُ
+        # الجواب ونفسُ الأثر) ⇒ فلا نداءَ ثانٍ ولا قرش.
+        ok_text, why_text = (score_answer_by_text(q, truth_val, ans, res, rows) if res
+                             else (False, f"عطبٌ/مهلة: {msg.get('error')}"))
         # **مصدرٌ واحدٌ للحقول الثلاثة** (مراجعة ٥٢ · R52-3): كان `used_row_nos` و`trace_len` و
         # `cited_pages` تُشتقّ كلٌّ على حِدة من `res` ⇒ قصٌّ يُطبَّق على إحداها يجعل **السجلَّ يشهد
         # بغير ما حُكم به**، و`trace_len` يبقى كاملًا فلا يوسم السجلُّ مشكوكًا. الآن: قائمةٌ واحدة.
@@ -1138,6 +1597,11 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                          "tools_used": list(getattr(res, "tools_used", None) or []) if res else [],
                          "trace_len": len(trace),      # **هويّةٌ محروسة**: trace_len == len(used_row_nos)
                          "scope": getattr(res, "scope", None) if res else None,
+                         # **الإشارةُ والحكمان في السجلّ** (قرار 231500): السطرُ المقارِنُ يُقرأ
+                         # من الملفّ ويُعاد فحصُه، وكلُّ اختلافٍ يُسمّى بسببٍ من مصحِّحٍ واحد.
+                         "answer_kind": (getattr(res, "answer_kind", "") or "") if res else None,
+                         "ok_by_text": ok_text,
+                         "why_by_text": why_text,
                          "refused": bool(getattr(res, "refused", False)) if res else None,
                          "spec_sha": _spec_sha(a.questions),   # **شاهدُ الربط**: أيُّ نصِّ سؤالٍ أُجيب عنه
                          "secs": secs}     # **المتزنُ في الدليل**: كم أخذ السؤال (يُقرأ قبل حساب الكلفة)
@@ -1148,27 +1612,33 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
         # (شرطُ مراجعة ١١٢: القانونُ يُعاد تشغيلُه من الملفّ).
         u_after = usage_snapshot(usage)
         delta = usage_delta(u_before, u_after)
-        cost_here, tok_in, tok_out = tokens_cost(delta, price_in, price_out)
+        # **`رموزُ النافذة × سعر القائمة` — للعرض والمساءلة، لا للسقف** (R115-1): هي **حدٌّ أدنى**
+        # (٣٣ مضيفًا بأسعارٍ تصل ستّةَ أضعاف القائمة)، والحاكمُ `billed_window` أدناه.
+        cost_list, tok_in, tok_out = tokens_cost(delta, price_in, price_out)
         tools_now = list(getattr(res, "tools_used", None) or []) if res else []
         replies_here = finishes.ends - replies_before      # **كلُّ ردٍّ = نداءُ نموذج** (R113-1)
-        observed = observation(u_before, u_after, replies_here, price_in, price_out)
+        window = billed_window(costs.replies[c_before:], price_in, price_out, host_high)
         reasons = finishes.reasons[r_before:]
         if a.budget:
             if meter_before_i is not None:
                 meter_after_i = _spent_since(before, _key_usage())
                 meter_here = (None if meter_after_i is None
                               else round(max(0.0, meter_after_i - meter_before_i), 6))
-            # **والتراكميُّ بعد السؤال** يُسجَّل مع النافذة ⇒ فيُقابَل مجموعُ الأجزاء بالمُنفَق الكامل
-            # (وما بين النوافذ يظهر فرقًا مُعلَنًا لا مقبولًا).
-            spent_after = run_spend(usage, price_in, price_out)[0]
+            # **والتراكميُّ بعد السؤال** من سجلّ الكلفة نفسِه ⇒ فيُقابَل مجموعُ الأجزاء بالمُنفَق الكامل
+            # (وما بين النوافذ لا يسقط: كلُّ ردٍّ محسوبٌ في موضعه · R113-1/R115-1).
+            spent_after_w = billed_window(costs.replies, price_in, price_out, host_high)
+            spent_after = 0.0 if spent_after_w is None else spent_after_w[0]
             done[q["id"]].update(cap_evidence(spent_before=spent_tokens, spent_after=spent_after,
-                                              cost_here=cost_here, bound=bound, price=price, source=source,
+                                              cost_here=(0.0 if window is None else window[0]),
+                                              cost_by_tokens=cost_list,
+                                              cost_source=("no-reply" if window is None else window[1]),
+                                              price=price, source=source,
                                               meter_delta=meter_here, tokens=tok_in + tok_out,
                                               tools=len(tools_now), replies=replies_here))
             done[q["id"]]["finish_reasons"] = reasons
-            if observed is not None:
-                observations.append(observed)
-            spent_tokens = spent_after     # **مصدرٌ واحدٌ للمُنفَق**: التراكميُّ من العدّاد (R113-1)
+            if window is not None:
+                observations.append((window[0], window[2]))
+            spent_tokens = spent_after     # **مصدرٌ واحدٌ للمُنفَق**: مجموعُ كلفة الردود (R115-1)
         merged = {**prev_all, **done}      # النائبُ يبقى ما لم يُجَب عنه فعلاً
         out.write_text(json.dumps({"model": a.model or "افتراضيّ", "model_id": model_id,
                                    "spec_sha": _spec_sha(a.questions),
@@ -1233,6 +1703,23 @@ def _print_metrics(results: list[dict]) -> None:
     if subs or susp:
         print(f"➖ مُستبعَدٌ من المقام: **{len(subs)} نائبًا** (مهلةٌ/عطبٌ — لم يُجب) "
               f"· **{len(susp)} أثرًا مشكوكَ القصّ** ⇒ المقامُ = {len(judged)} من {len(results)}")
+    # **والسطرُ المقارِن (قرار المالك `20261014-231500` البند ٣):** العنوانُ هو **الجديد**،
+    # ويُطبع القديمُ معه في السطر نفسه، **وكلُّ سؤالٍ اختلف حكمُه يُسمّى بسببٍ من كليهما** —
+    # فتغيّرُ الرقم يُنسب ولا يُخفى. والمقامُ هو مقامُ العنوان (والمهلةُ في العدّ: قاعدةُ المالك).
+    if any(r.get("ok_by_text") is not None for r in scored):
+        new_ok = sum(1 for r in scored if r.get("ok"))
+        old_ok = sum(1 for r in scored if r.get("ok_by_text"))
+        print(f"\n{'بالجديد':26s} {new_ok:2d}/{len(scored):2d}   ·   {'وبالقديم':26s} "
+              f"{old_ok:2d}/{len(scored):2d}   (نفسُ الأجوبة · بلا نداءٍ ثانٍ)")
+        diff = [r for r in scored if bool(r.get("ok")) != bool(r.get("ok_by_text"))]
+        if diff:
+            print(f"   ⚖️ اختلف الحكمُ في {len(diff)} سؤالًا — وكلٌّ بسببِه:")
+            for r in diff:
+                verdict = "الجديد صوّب" if r.get("ok") else "القديم صوّب"
+                print(f"     · {r['id']}: {verdict} · الجديد: {r.get('why', '')} "
+                      f"← القديم: {r.get('why_by_text', '')}")
+        else:
+            print("   ⚖️ ولا سؤالَ اختلف حكمُه: المصحِّحان يتّفقان على هذه الأجوبة.")
     n_abs = sum(1 for r in judged if r.get("metric") == "abstain")
     fell = [r for r in judged if r.get("metric") == "abstain" and not r.get("ok")]
     invented = sum(1 for r in fell if "**اختراع**" in (r.get("why") or ""))

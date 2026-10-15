@@ -162,14 +162,29 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
                   footers: dict | None = None):
     """Bind the verified rows to LangChain tools (import kept lazy).
 
-    When `trace` is a list, every successful non-empty call appends
-    {"tool": name, "row_nos": [...]} — the raw material for the evidence
-    panel. Pure bookkeeping: it never changes any tool's return text.
+    When `trace` is a list, **every** call appends
+    ``{"tool": name, "args": {…what was passed…}, "row_nos": [...]}`` — the raw
+    material for the evidence panel. Pure bookkeeping: it never changes any
+    tool's return text. (**المدخلاتُ تُسجَّل لكلّ نداء — R109-3** · وكان لا يُسجَّل
+    إلا ما اختار صفوفًا، فيقرأ المحاسبُ الأثرَ ناقصًا.)
 
     `footers` (optional): per-page **printed** footer totals as read from the
     page itself, with their match verdict — the external referee made
     answerable (R77 · مراجعة ٧٧). Its absence is declared by the tool, not
     guessed around.
+
+    **وكلُّ أداةٍ ترفض المدخلَ المجهول (R109-3 · مراجعة ١١٧):** كان مخطّطُ المكتبة
+    يتجاهل الخانةَ الزائدة **صامتًا** (قِيس: نداءٌ بـ`foo=1` ينفّذ ويعيد جوابًا كأنّ لا
+    شيءَ زائدًا) ⇒ فصار المخطّطُ يُبنى من التوقيع نفسه **بـ`extra="forbid"`**.
+
+    **والطبقةُ اليدويّة أُزيلت (R118-1 · مراجعة ١١٨):** كانت فوق `forbid` مُحقِّقًا
+    (`@model_validator(mode="before")`) يرفع خطأً **على مستوى النموذج كلّه بلا `loc`**،
+    ومرشّحةُ `ToolNode` (`_filter_validation_errors`) تُسقِط ما ليس على وسيطٍ يتحكّم به
+    النموذج ⇒ **فرسالتُه تصل النموذجَ فارغة**: قِيس عبر `answer_question` بنموذجٍ مُبرمَج
+    `"… with error:\n \n Please fix the error and try again."` — بلا اسمِ الخانة، فلا يعرف
+    النموذجُ ما يُصلح (وهو صنفُ سقوط `cit-02` في جولاتٍ سابقة). والمكتبةُ تسمّي الخانةَ
+    بنفسها (`page: Extra inputs are not permitted`) **والوسائطُ المقبولةُ معلَنةٌ في مخطّط
+    الأداة المرسَل** ⇒ فلا طبقةَ يدويّةً تُفرِغ الرسالة (ومكوّنُ المكتبة أولى — قاعدةُ المالك).
     """
     from langchain_core.tools import tool
 
@@ -177,11 +192,35 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
     movements = [r for r in numbered if r.get("kind") == "txn"
                  and r.get("movement") is not None]
 
-    def _record(name: str, sel: list[dict]) -> None:
-        """Server-side evidence trace — zero tokens, no text markers."""
-        if trace is not None and sel:
-            trace.append({"tool": name,
-                          "row_nos": [r["row_no"] for r in sel]})
+    def _strict_args(fn):
+        """مخطّطُ وسائط الأداة: من **التوقيع نفسه** + منعُ المدخل المجهول (R109-3 · R118-1)."""
+        from langchain_core.tools.base import create_schema_from_function    # noqa: PLC0415
+        from pydantic import ConfigDict                                     # noqa: PLC0415
+
+        base = create_schema_from_function(fn.__name__, fn)
+
+        class StrictArgs(base):                     # pylint: disable=too-few-public-methods
+            # **ولا مُحقِّقَ يدويًّا فوقه (R118-1):** خطأُ `extra_forbidden` من المكتبة
+            # يحمل `loc=('page',)` فيمرّ إلى النموذج باسم الخانة، وخطأُ المُحقِّق اليدويّ
+            # على مستوى النموذج (بلا `loc`) تُسقِطه مرشّحةُ `ToolNode` ⇒ نصٌّ فارغ.
+            model_config = ConfigDict(extra="forbid")
+
+        return StrictArgs
+
+    def _tool(fn):
+        """`@tool` + المخطّطُ الصارم — **موضعٌ واحد** فلا تُنسى أداةٌ من ثمانٍ."""
+        return tool(args_schema=_strict_args(fn))(fn)
+
+    def _record(name: str, sel: list[dict], args: dict | None = None) -> None:
+        """Server-side evidence trace — zero tokens, no text markers.
+
+        **والنداءُ يُسجَّل كلُّه** (بصفوفٍ أو بلا): المدخلُ محفوظٌ كما وصل، والصفوفُ كما
+        اختارتها الأداة ⇒ فالوصلُ يُقرأ من الأثر لا يُفترض.
+        """
+        if trace is None:
+            return
+        trace.append({"tool": name, "args": dict(args or {}),
+                      "row_nos": [r["row_no"] for r in sel]})
 
     def _on_page(r: dict, page: int) -> bool:
         """**مطابقةُ الصفحة في موضعٍ واحد — داخل هذا الملفّ** (يُقيَّد النطاق بصدق):
@@ -257,7 +296,7 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
             bits.append(f"المبلغ={amount}")
         return " | ".join(bits)
 
-    @tool
+    @_tool
     def sum_movements(side: str = "الكل", keyword: str = "", tx_type: str = "",
                       amount: float | None = None, *,
                       page: int | None = None) -> str:
@@ -277,7 +316,8 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
         **منفصلين**، والمطلوبُ مجموعهما.
         """
         sel = _filtered(side, keyword, tx_type, amount, page)
-        _record("sum_movements", sel)
+        _record("sum_movements", sel, {"side": side, "keyword": keyword, "tx_type": tx_type,
+                                       "amount": amount, "page": page})
         if not sel:
             return "لا توجد حركات مطابقة لهذا الفلتر في الكشف."
         vals = [_dec(r.get("movement")) for r in sel]
@@ -290,7 +330,7 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
                    if any(v is None for v in vals) else "")
                 + f" | أمثلة: {examples}")
 
-    @tool
+    @_tool
     def count_movements(side: str = "الكل", keyword: str = "", tx_type: str = "",
                         amount: float | None = None, date_encoding: str = "",
                         printed_date_encoding: str = "") -> str:
@@ -315,7 +355,9 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
             sel = [r for r in sel if _stored_date_encoding(r) == date_encoding]
         if printed_date_encoding:
             sel = [r for r in sel if _printed_date_encoding(r) == printed_date_encoding]
-        _record("count_movements", sel)
+        _record("count_movements", sel, {"side": side, "keyword": keyword, "tx_type": tx_type,
+                                         "amount": amount, "date_encoding": date_encoding,
+                                         "printed_date_encoding": printed_date_encoding})
         note = _filter_note(side, keyword, tx_type, amount)
         if date_encoding:
             note = f"{note} | ترميزُ التاريخ المخزَّن = {date_encoding}"
@@ -324,7 +366,7 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
         return (f"العدد = {len(sel)} {'صفًّا' if by_date else 'حركة'} "
                 f"(الفلتر: {note})")
 
-    @tool
+    @_tool
     def balance_extremes() -> str:
         """أعلى رصيد وأدنى رصيد ظهر في الكشف (مع موقعهما) — **بالمقارنة الرقميّة لا النصّيّة**.
 
@@ -344,33 +386,36 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
                 continue
             pairs.append((r, val))
         if not pairs:
+            _record("balance_extremes", [], {})
             return "لا توجد أرصدة في الكشف."
         hi = max(pairs, key=lambda p: p[1])[0]
         lo = min(pairs, key=lambda p: p[1])[0]
-        _record("balance_extremes", [hi, lo])
+        _record("balance_extremes", [hi, lo], {})
         tail = (f" · و{unparsed} رصيدًا غيرُ مقروء لم يُدخَل في المقارنة (لم يُخمَّن رقمُه)"
                 if unparsed else "")
         return (f"أعلى رصيد = {_m(hi['balance'])} {_ref(hi)}"
                 f" | أدنى رصيد = {_m(lo['balance'])} {_ref(lo)}{tail}")
 
-    @tool
+    @_tool
     def closing_balance() -> str:
         """آخر رصيد في الكشف (آخر صف يحمل رصيداً) — الرصيد الختامي."""
         with_bal = [r for r in numbered if r.get("balance") is not None]
         if not with_bal:
+            _record("closing_balance", [], {})
             return "لا توجد أرصدة في الكشف."
         last = with_bal[-1]
-        _record("closing_balance", [last])
+        _record("closing_balance", [last], {})
         return f"آخر رصيد = {_m(last['balance'])} {_ref(last)}"
 
-    @tool
+    @_tool
     def page_summary(page: int) -> str:
         """ملخص صفحة واحدة: أول/آخر رصيد + إجمالي المدين وإجمالي الدائن فيها.
         مثال: page_summary(page=10)."""
         rows_on_page = _page_scope(page)
         if not rows_on_page:
+            _record("page_summary", [], {"page": page})     # **النداءُ يُسجَّل ولو لم يجد شيئًا**
             return f"لا توجد بيانات للصفحة {page} في هذا الكشف."
-        _record("page_summary", rows_on_page)
+        _record("page_summary", rows_on_page, {"page": page})
         with_bal = [r for r in rows_on_page if r.get("balance") is not None]
         debits = sum((_dec(r.get("movement")) for r in rows_on_page
                       if r.get("kind") == "txn" and r.get("side") == "debit"
@@ -402,7 +447,7 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
                 f" | إجمالي دائن = {_m(credits)}"
                 f" | عدد الصفوف = {len(rows_on_page)}" + note)
 
-    @tool
+    @_tool
     def page_footer(page: int) -> str:
         """أرقامُ **التذييل المطبوع في الكشف نفسه** لصفحةٍ واحدة — إجمالي مدين تراكميّ · إجمالي دائن
         تراكميّ · رصيدُ الصفحة — **مع حكمِ مطابقتها**، وكلُّها كما ظهرت في الورقة لا محسوبةً من هنا.
@@ -418,7 +463,7 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
         # بلا أرقام صفوف، ويُقرأ في `qa.py` دليلًا على أنّ أداةً استُدعيت فعلًا — فلا يُوصَم جوابُ
         # الفوتر بأنّه «بلا أداة» (R77 · مراجعة ٧٧).
         if trace is not None:
-            trace.append({"tool": "page_footer", "row_nos": [], "page": pg})
+            trace.append({"tool": "page_footer", "args": {"page": pg}, "row_nos": []})
         if not f:
             return (f"الصفحة {pg}: لا تذييلَ مطبوعًا مقروءًا لها في هذا الكشف "
                     f"(تُسمّى ولا تُخمَّن).")
@@ -431,7 +476,7 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
                 f" | حكمُ المطابقة = {_FOOTER_AR.get(str(f.get('verdict') or ''), f.get('verdict'))}"
                 f"{basis}")
 
-    @tool
+    @_tool
     def page_rows(page: int, limit: int = 40) -> str:
         """اعرض **سطور صفحةٍ بعينها** بأرقامها: رقمُ الصفّ ومبلغُه واتجاهُه ورصيدُه ووصفُه.
 
@@ -444,14 +489,15 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
         مثال: page_rows(page=40)."""
         sel = _page_scope(page)
         if not sel:
+            _record("page_rows", [], {"page": page, "limit": limit})
             return f"لا توجد صفوفٌ للصفحة {int(page)} في هذا الكشف."
         shown = sel[:max(1, int(limit))]
-        _record("page_rows", shown)     # **ما ظهر فعلًا** لا كلَّ الصفحة (كان يُسجّل الصفوفَ التي لم تُعرَض)
+        _record("page_rows", shown, {"page": page, "limit": limit})   # **ما ظهر فعلًا** لا كلَّ الصفحة
         more = "" if len(sel) <= len(shown) else f" (و{len(sel) - len(shown)} أخرى)"
         return (f"صفحة {int(page)}: {len(sel)} صفًّا{more} — والأرقامُ على مستوى الكشف:\n"
                 + "\n".join(_row_line(r) for r in shown))
 
-    @tool
+    @_tool
     def search_rows(keyword: str = "", tx_type: str = "", amount: float | None = None,
                     limit: int = 15, *, page: int | None = None) -> str:
         """ابحث وأعد سطور الحركات المطابقة (الموقع/النوع/الاتجاه/المبلغ/الرصيد/الوصف).
@@ -467,7 +513,8 @@ def make_qa_tools(rows: list[dict], trace: list[dict] | None = None,
         تُحصى صفوفٌ لم يرها النموذجُ «مُستشهَدةً» — التعارضُ **مُوثَّقٌ لا مُغلَق**، وإغلاقُه يقتضي
         قياسَ أثرِ التوحيد على مقياسٍ حقيقيّ (غيرُ مقيس)."""
         sel = _filtered("الكل", keyword, tx_type, amount, page)
-        _record("search_rows", sel)
+        _record("search_rows", sel, {"keyword": keyword, "tx_type": tx_type, "amount": amount,
+                                     "limit": limit, "page": page})
         if not sel:
             return "لا توجد حركات مطابقة."
         shown = sel[:max(1, int(limit))]

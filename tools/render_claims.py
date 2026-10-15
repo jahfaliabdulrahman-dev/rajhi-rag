@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -57,8 +58,63 @@ sys.path.insert(0, str(PROJ / "tools"))
 from gate3 import GATE3_DECISION                                    # noqa: E402
 
 
+#: صيغُ خطأِ الجمع التي تُبطل العدَّ — **والعدُّ يسقط إن وقع** (ملاحظةُ العدّ · P3).
+#: **والصيغةُ مُشتقّةٌ من مخرَج pytest الفعليّ لا من تخمين:** `--collect-only -q` مع محلولٍ لا يُجمَّع
+#: يطبع سطرَ الخطأ (`ERROR tests/test_x.py - …`) **ومع ذلك يطبع عدًّا** («… ٣ أخطاء في ٠٫٥٠ ثانية») ⇒
+#: فمطابقةُ «errors during collection» وحدَها **تُخطئ الشكلَ المقيس** (‏«3 errors in 0.50s»):
+_COLLECTION_ERROR_RE = re.compile(
+    r"^ERROR\b|\bERROR collecting\b|errors? during collection|Interrupted:|\b\d+ errors? in \d",
+    re.IGNORECASE | re.MULTILINE)
+
+
+def collection_errors(text: str) -> str:
+    """هل في مخرَج الجمع خطأُ جمعٍ؟ — يُعاد نصُّه، وفارغٌ معناه لا خطأ.
+
+    **والعلّةُ مقيسة (ملاحظةُ العدّ · P3):** كان العدُّ يقبل مخرَجًا فيه خطأُ جمعٍ **صامتًا** فيرى
+    الرقمَ ناقصًا ويقرؤه القارئُ «انزياحَ بيئة» — قِيس **−١٧** في `ci-claims` سببُها `NameError`
+    عند الاستيراد (غيابُ `ConfigDict` في المسار البديل). **فالعدُّ الآن يُعلن العطبَ ولا يُخرجه
+    رقمًا:** يُعاد `None` ⇒ واللقطةُ لا تُكتب، والحرسُ يسقط في موضع الخطوة.
+    """
+    m = _COLLECTION_ERROR_RE.search(text or "")
+    return m.group(0) if m else ""
+
+
+#: **المُعلَنُ لأخطاء الجمع: مجموعةُ أسماءٍ لا عدد** (ملاحظةُ الحدّ · P2).
+#: **والسببُ مقيسٌ:** كان العددَ وحدَه ⇒ **تبديلُ ملفٍّ مُعلَنٍ بملفٍّ مكسورٍ جديد يمرّ صامتًا**
+#: (قِيس: حُذف ملفٌّ من المُعلَنين وأُضيف ملفٌّ مكسور ⇒ بقي العددُ وقُبل الرقمُ المنشور).
+#: فالمقابلةُ الآن **بالأسماء المجرَّدة**، وأيُّ تبديلٍ يُسمّى بالاسم ⇒ **توقّفٌ مُعلَن.**
+#: **والقيمُ المطلقةُ في اللقطة لا هنا** (ولذلك لا رقمَ دعوى في هذا التعليق).
+_UNCOLLECTED_ENV = "RAJHI_CLAIMS_ALLOWED_UNCOLLECTED"
+
+
+def collection_error_lines(text: str) -> list[str]:
+    """أسطرُ الملفّات التي لم تُجمَّع — تُسمّى لتُقرأ (لا «خطأُ جمعٍ» مجهولًا)."""
+    return [ln for ln in (text or "").splitlines() if ln.startswith("ERROR")]
+
+
+def uncollected_names(lines: list[str]) -> set[str]:
+    """أسماءُ الملفّات من أسطر الخطأ — **بالاسم المجرَّد لا بالمسار** (‏`tests/test_x.py` ⇒ `test_x.py`).
+
+    **ولماذا المجرَّد؟** لأنّ قوائمَ الـCI (‏قائمةُ الخطوة ومسبارُ الهبوط وحارسُ السجلّ) تُقرأ بمسحٍ
+    نصّي عن `tests/*.py` في الـworkflow ⇒ فلو كُتبت المساراتُ في `env` لَدخلت القائمةَ الخفيّةَ
+    وقيست الخطوةُ ملفّاتٍ لم تُشغِّلها (قِيس: سقط حارسا السجلّ واللقطة بعد كتابتها بالمسارات).
+    """
+    out: set[str] = set()
+    for ln in lines:
+        parts = ln.split()
+        if len(parts) >= 2:
+            out.add(pathlib.PurePosixPath(parts[1].rstrip(":")).name)
+    return out
+
+
+def allowed_uncollected() -> set[str]:
+    """المجموعةُ المُعلَنة لبيئة هذه الخطوة (‏فارغةٌ = لا ملفَّ مُعفى ⇒ أيُّ خطأٍ يُسقِط العدَّ)."""
+    raw = os.environ.get(_UNCOLLECTED_ENV, "") or ""
+    return {x.strip() for x in raw.split(",") if x.strip()}
+
+
 def _test_count() -> int | None:
-    """عدُّ الاختبارات — ببيئةٍ نظيفة.
+    """عدُّ الاختبارات — ببيئةٍ نظيفة، **ويُبطل بخطأِ جمع**.
 
     عطلٌ مُعلن كان يُعطي أرقاماً خاطئة (227 · 232 · 233) حين يُستدعى من عمليةٍ
     أخرى: المتغيّرات الموروثة (`PYTHONPATH` خصوصاً) تُغيّر ما يُجمَع. **الوثائق
@@ -69,6 +125,23 @@ def _test_count() -> int | None:
     out = subprocess.run([sys.executable, "-m", "pytest", "tests/",
                           "--collect-only", "-q"],
                          cwd=PROJ, capture_output=True, text=True, env=env)
+    text = (out.stdout or "") + (out.stderr or "")
+    errs = collection_error_lines(out.stdout or "")
+    if collection_errors(text):
+        declared = allowed_uncollected()
+        actual = uncollected_names(errs)
+        summary = [ln for ln in (out.stdout or "").splitlines()
+                   if "collected" in ln or "Interrupted" in ln]
+        if actual != declared:
+            # **والعطبُ يُسمّى لا يُعلَن فقط (درسُ R120-2):** الفشلُ بلا اسمِ الملفّات يجبر القارئَ
+            # على تخمين السبب — ويُخرجه من الحكم («خطأُ جمعٍ» ≠ «عطبُ بيئةٍ ناقصةِ تبعيّات»).
+            print(f"⛔ أخطاءُ جمعٍ لا تطابق المُعلَن بالاسم (جديد: {sorted(actual - declared)} · "
+                  f"زائل: {sorted(declared - actual)}) ⇒ لا يُكتب رقمٌ (R121-1)", file=sys.stderr)
+            for ln in (errs[:25] + summary[-1:]):
+                print("   " + ln, file=sys.stderr)
+            return None
+        print(f"⚠ {len(errs)} ملفًّا خارجَ الجمع — **مُعلَنٌ بالاسم** لبيئة هذه الخطوة "
+              f"(`{_UNCOLLECTED_ENV}`) فيُقرأ العدُّ مع حدِّه لا بدونه.", file=sys.stderr)
     for line in reversed(out.stdout.splitlines()):
         parts = line.split()
         if len(parts) >= 2 and parts[0].isdigit() and "test" in parts[1]:

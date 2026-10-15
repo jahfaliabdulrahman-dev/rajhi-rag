@@ -1200,9 +1200,15 @@ def ask_followup(history):
     # الكشف (`_ledger_key` = بصمةُ الكشف — ومصدرُها واحدٌ مع مفتاح الدفتر)، والنطاقُ يُسمّى.
     # و`history_pairs` **محذوفة** (لا طريقان) — فالمُدخلُ الوحيدُ للنموذج سؤالُ هذه اللحظة.
     # **والنموذجُ لا يكتب الذاكرة** (R99-1): نداؤه بلا حافظة، والكتابةُ وحدَها هنا في `remember`.
+    # **وعددُ صفحات المستند يُمرَّر إلى الحاجز (R115-7/R117-2):** من يعرف عددَ الصفحات هو من حمّل
+    # الكشف ⇒ فقراءةُ الصفحات من الحالة، وإلّا من عدد صفحات الصفوف، وإلّا **يُعلَن الغياب** (كما في
+    # نصّ النطاق) ولا يُدَّعى انتهاءُ الكشف. **وهذا هو الشقُّ الغائب الذي قاسه المدقّق:** `classify`
+    # كان يقبل `n_pages` ولا مُنادٍ يمرّره ⇒ فالنصُّ يقول للمستخدم «لم تُقرأ سطورُ ٧٠٠ بعد» عن
+    # صفحةٍ لا وجودَ لها في كشفٍ من ٦٢٩ صفحة.
     res = answer_question(STATE["store"], q, rows=STATE.get("rows"),
                           chunks=STATE.get("chunks"), footers=STATE.get("footers"),
-                          thread_id=_ledger_key(), scope=_scope_text())
+                          thread_id=_ledger_key(), scope=_scope_text(),
+                          n_pages=_scope_n_pages(STATE.get("rows") or []))
     rows_now = STATE.get("rows") or []
     page_of = {i + 1: r.get("page") for i, r in enumerate(rows_now)}
     verdicts = STATE.get("verdicts") or {}
