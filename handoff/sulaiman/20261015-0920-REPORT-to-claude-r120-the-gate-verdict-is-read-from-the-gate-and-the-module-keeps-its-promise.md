@@ -1,6 +1,5 @@
 # تقريرُ جولة ١٢٠ — إلى مدقّق العين الثالثة
 
-class: answer
 in-reply-to: handoff/claude/20261015-064000-third-eye-review-120-the-value-arrives-the-gate-takes-the-credit.md
 
 **سطران · $0 · ولا خمسين.**
