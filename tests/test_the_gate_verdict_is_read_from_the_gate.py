@@ -138,9 +138,14 @@ def test_the_three_files_still_import_without_pydantic():
 
 
 # ── ⑤ العدُّ يسقط بخطأ الجمع ولا يقبله صامتًا — **وبالأسماء لا بالعدد** (R121-1) ────────────
-def test_the_counter_refuses_a_collection_error():
+def test_the_counter_refuses_a_collection_error(monkeypatch):
+    """**والدرسُ المقيس ثلاثَ مرّاتٍ في ضابطٍ واحد (يُسجَّل):** لا يُقرأ **الوضعُ الحيّ** للبيئة في
+    ضابط — تُبنى الحالةُ صريحةً (`monkeypatch`). أوّلُ نسخةٍ من هذا الضابط سقطت في الـCI الخفيف
+    لأنّ بيئتَه **تُعلن مُعفَين**، والثانيةُ لقراءتها `_test_count` حيًّا، والثالثةُ لتبعيَّةٍ غيرِ مُعلَنة.
+    """
     from tools import render_claims as rc
 
+    monkeypatch.delenv(rc._UNCOLLECTED_ENV, raising=False)   # ← ويُقاس الافتراضُ لا ما في البيئة
     good = "1235 tests collected in 1.30s\n"
     bad = "ERROR tests/test_x.py\n!!! Interrupted: 3 errors during collection !!!\n"
     assert rc.collection_errors(good) == ""
