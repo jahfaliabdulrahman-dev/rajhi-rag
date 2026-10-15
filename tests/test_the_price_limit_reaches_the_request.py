@@ -128,3 +128,25 @@ def test_the_app_path_carries_the_limit_end_to_end(sent, monkeypatch):
     for body in sent:
         assert body.get("provider", {}).get("max_price") == dict(qa.PROVIDER_MAX_PRICE), (
             f"طلبٌ بلا حدّ سعرٍ في مسار التطبيق: {body.get('provider')!r}")
+
+
+# ── ⑤ ميزانيّةُ الاستدلال في الجسم نفسه (R124-1 · مراجعة ١٢٤) ──────────────────────────────
+def test_the_reasoning_budget_rides_in_the_body_it_sends(sent):
+    """**القطعُ لأنّ الحدَّ واحدٌ للاستدلال والجواب:** `MAX_ANSWER_TOKENS` يحدهما معًا ⇒ فسؤالٌ يطول
+    تفكيرُه يُقطع قبل أن يُنتج الجواب ⇒ يسقط المسارُ إلى نثر. **والحلُّ بخيار المزوّد في الجسم**
+    (كما `provider.max_price`) — وهذا الضابطُ يقيس **ما أُرسل فعلًا** لا نيّةَ الكود."""
+    qa = _qa()
+    qa.build_llm(api_key="sk-test").invoke("كم رصيد الصفحة ٥؟")
+    assert len(sent) == 1, f"لم يُلتقط طلبٌ واحد ({len(sent)})"
+    reasoning = sent[0].get("reasoning")
+    assert isinstance(reasoning, dict), (
+        f"ميزانيّةُ الاستدلال لم تصل في الجسم: {sent[0].get('reasoning')!r}")
+    assert reasoning.get("max_tokens") == qa.REASONING_MAX_TOKENS, reasoning
+    # **والحدُّ الكلّيّ يبقى سقفَ الكلفة** (R110-1) ⇒ فلا يُنزَع لصالح الاستدلال — **وباسمه على
+    # السلك** (قِيس: المكتبةُ تُرسله `max_completion_tokens` ⇒ فالضابطُ يقيس ما أُرسل لا ما سُمّي في
+    # البانية): `max_tokens` في البانية = `max_completion_tokens` في الجسم.
+    assert sent[0].get("max_completion_tokens") == qa.MAX_ANSWER_TOKENS, \
+        {k: v for k, v in sent[0].items() if "token" in k}
+    # **والاستدلالُ محجوزٌ في حيِّزٍ أضيقَ من الكلّ** ⇒ فيبقى للجواب نصيبُه بالإعداد لا بالتقدير
+    assert qa.REASONING_MAX_TOKENS < qa.MAX_ANSWER_TOKENS, (
+        (qa.REASONING_MAX_TOKENS, qa.MAX_ANSWER_TOKENS))

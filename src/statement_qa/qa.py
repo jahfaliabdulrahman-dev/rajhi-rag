@@ -153,7 +153,14 @@ MODEL_MAX_RETRIES = 1
 # غيرَ محدودةٍ من فوق، ويبقى «أسوأُ كلفةٍ للسؤال» بلا سند. والجوابُ النموذجيّ أقصرُ من هذا بكثير
 # (أسئلةُ الكشف تُجاب بفقرةٍ قصيرة)، فالحاجةُ هنا سقفٌ لا حجب.
 MAX_ANSWER_TOKENS = 3000
-
+# **وميزانيّةُ الاستدلال تُضبط بخيار المزوّد في الجسم (R124-1 · مراجعة ١٢٤):** كان الحدُّ **واحدًا**
+# للاستدلال والجواب معًا ⇒ فسؤالٌ يطول تفكيرُه يُقطع ردُّه **قبل أن يُنتج الجوابَ المنوَّط**، فيسقط
+# المسارُ إلى نثرٍ يمحو أثرَ الأدوات (قِيس: `cit-02` في r108-03 · و`cit-02` و`abs-05` في r123 — ثلاثةُ
+# ردودٍ انتهت بـ`length` في خمسين+خمسين). **والحلُّ بخيار المزوّد** (‏OpenRouter تقبل `reasoning`
+# في الجسم، كما تقبل `provider.max_price`) ⇒ فيبقى للجواب حيِّزٌ مضمون، **ولا قاعدةَ يدويّةً تُخترع**.
+# **وحدُّ القيمة مُعلَنٌ: هذان الرقمان يُقاسان بالتشغيل المدفوع لمنطقة القطع** (طلبٌ للمالك بسطر)،
+# ولا يُدَّعى أنّهما المُثلى قبل ذلك.
+REASONING_MAX_TOKENS = 1500
 
 def _call_limits():
     """حدُّ نداءات النموذج والأدوات في الدور الواحد — **مكوّنُ المكتبة** لا بناءٌ يدويّ (R109-1).
@@ -261,7 +268,11 @@ def build_llm(model_name: str | None = None, *, callbacks: list | None = None,
     # `Completions.create()` التي لا تعرف `provider` ⇒ **`TypeError` قبل أيّ طلب**، وقِيس: صفرُ طلبٍ
     # يصل الخادمَ المُقلَّد، بينما `extra_body` حملت الحدَّ في طلبَي الوكيل (الردُّ وردُّ الأداة).
     # وقاعدةُ المكتبة نصًّا: «Always use `extra_body` for custom parameters, **not** `model_kwargs`.»
-    body = {"provider": {"max_price": dict(max_price or PROVIDER_MAX_PRICE)}}
+    # **وميزانيّةُ الاستدلال في الجسم معه** (R124-1): خيارُ المزوّد نفسه الذي حمل حدَّ السعر ⇒
+    # فيُحجز للجواب حيِّزٌ لا يأكله الاستدلال، **والقطعُ لا يعود يمحو أثرًا** (والحالةُ تُسمّى في
+    # `QAResult.truncated` إن وقع رغم ذلك).
+    body = {"provider": {"max_price": dict(max_price or PROVIDER_MAX_PRICE)},
+            "reasoning": {"max_tokens": REASONING_MAX_TOKENS}}
     return ChatOpenAI(
         model=model,
         base_url="https://openrouter.ai/api/v1",
@@ -563,7 +574,8 @@ def _with_context(system_prompt: str, chunks: str, *, tools_line: bool = True) -
 
 def _run_agent(llm, tools, system_prompt: str, user_content: str,
                response_format=None, thread_id: str | None = None,
-               chunks: str | None = None) -> tuple[str, object | None, str]:
+               chunks: str | None = None,
+               finish: list[str] | None = None) -> tuple[str, object | None, str]:
     """create_agent (langchain 1.x) مع نوعٍ مُقيَّد، و**وضعٌ يُعلَن**: `typed` أو `prose`.
 
     **والذاكرةُ هنا (قرار 98ب · وتصحيحُ R99-1/2):** بخيطٍ (`thread_id`) تُقرأ رسائلُ الدورات
@@ -637,12 +649,19 @@ def _run_agent(llm, tools, system_prompt: str, user_content: str,
         # مُقيَّد، فالجوابُ **نثرٌ** ⇒ يُعلَن كذلك، وإلّا قُرئ استشهادُه لاحقًا كأنّه مُصرَّحٌ به وهو مُقتطع.
         answer = _text(msgs[-1].content).strip() if msgs else ""
         parsed, mode = None, "prose"
+    # **وأسبابُ الانتهاء تُجمَع لمن يُمرّر قائمة** (R124-1): بها يُسمّى **القطعُ** (`length`) حالةً
+    # بدل أن يُقرأ سقوطًا صامتًا — والوسيطُ اختياريٌّ فلا يتغيّر عقدُ الثلاثة (تُقاس به ضوابطُ قائمة).
+    if finish is not None:
+        for m in (res.get("messages", []) if isinstance(res, dict) else []):
+            fr = (getattr(m, "response_metadata", None) or {}).get("finish_reason")
+            if fr:
+                finish.append(str(fr))
     return answer, parsed, mode
 
 
 def _answer_with_tools(llm, rows, context: str, question: str,
                        footers=None, thread_id: str | None = None,
-                       scope: str = "") -> tuple[str, list[dict], object | None, str]:
+                       scope: str = "") -> tuple[str, list[dict], object | None, str, list[str]]:
     """One tool-armed turn — **والسؤالُ البشريُّ هو السؤالُ وحدَه** (R99-2).
 
     كانت القطعُ تُدمج في نصّ الرسالة البشريّة (`القطع المرفقة: … السؤال: …`) ⇒ فتُحفظ معها في
@@ -659,10 +678,11 @@ def _answer_with_tools(llm, rows, context: str, question: str,
     # **توافقٌ خلفيّ تامّ:** بلا ذاكرةٍ ولا نطاقٍ يبقى التلقينُ نصَّه القديم بحرفه.
     system_prompt = (build_system_prompt(scope=scope, with_memory=bool(thread_id))
                      if (thread_id or scope) else AGENT_SYSTEM_PROMPT)
+    finish: list[str] = []          # **أسبابُ الانتهاء** (R124-1): يُقرأ منها القطعُ فتُسمّى الحالة
     text, parsed, mode = _run_agent(llm, tools, system_prompt, question,
                                     response_format=Answer, thread_id=thread_id,
-                                    chunks=context)
-    return text, trace, parsed, mode
+                                    chunks=context, finish=finish)
+    return text, trace, parsed, mode, finish
 
 
 def _tool_was_used(trace: list[dict]) -> bool:
@@ -715,6 +735,9 @@ class QAResult:
     # **بلوغُ حدِّ النداءات حالةٌ مُسمّاةٌ في النتيجة (R110-2)** — تتولّاها طبقةُ العرض برسالةٍ
     # عربيّة، فلا يُطابَق نصٌّ ولا تُعرض جملةُ المكتبة الإنجليزيّة.
     limit_hit: bool = False
+    #: **القطعُ عند حدّ الرموز حالةٌ مُسمّاة (R124-1 · مراجعة ١٢٤):** ردٌّ انتهى بـ`length` ⇒
+    #: الجوابُ ناقص، **والأثرُ المحفوظُ قبل القطع يبقى** (لا يُمحى)، والواجهةُ تُعلن الحالة.
+    truncated: bool = False
     # **أسماءُ الأدوات المستدعاة** (R104-1 · البند ③): `used_row_nos` تعدّ الصفوفَ لا النداءات، فسؤالٌ
     # يستدعي `page_footer` (بلا صفوف) أو يُرفض كان يُقرأ «صفر أثر» بلا تمييز ⇒ وهذا الحقلُ يفصل الحالتين،
     # وهو ما تحتاجه مقابلةُ الذراعين في تجربة R104.
@@ -909,11 +932,14 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
     parsed = None
     mode = "prose"
     answer_kind = ""
+    truncated = False
     if rows:
         try:
-            answer, trace, parsed, mode = _answer_with_tools(llm, rows, context, question,
-                                                             footers=footers,
-                                                             thread_id=thread_id, scope=scope)
+            answer, trace, parsed, mode, finish = _answer_with_tools(
+                llm, rows, context, question, footers=footers,
+                thread_id=thread_id, scope=scope)
+            # **والقطعُ يُقرأ من سبب الانتهاء** (R124-1): `length` ⇒ الردُّ ناقص ⇒ حالةٌ مُسمّاة.
+            truncated = "length" in finish
             from statement_qa.qa_tools import used_rows_from_trace
 
             used = used_rows_from_trace(trace)
@@ -928,11 +954,12 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
                 # One nudge, aimed: «use a tool» is a directive the agent
                 # follows far more often than the softer wording above — and if
                 # it still does not, the answer is labelled rather than trusted.
-                answer2, trace2, parsed2, mode2 = _answer_with_tools(
+                answer2, trace2, parsed2, mode2, finish2 = _answer_with_tools(
                     llm, rows, context,
                     question + "\n\n(استخدم أداة حسابية واحدة على الأقل قبل "
                            "الجواب، ولا تحسب بنفسك.)",
                     footers=footers, thread_id=thread_id, scope=scope)
+                truncated = truncated or "length" in finish2
                 used2 = used_rows_from_trace(trace2)
                 if used2 or _tool_was_used(trace2):
                     answer, used = answer2, used2
@@ -978,8 +1005,25 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
             parsed, mode = None, "prose"
     if not answer:
         answer = _answer_plain(llm, context, question)
-        used = []
-        tools_used = []
+        if truncated:
+            # **والقطعُ لا يمحو ما حسبته الأدوات (R124-1 · الثابت ①):** كان هذا السطرُ يُصفّر
+            # `used` و`tools_used` **وإن كانت الأدواتُ قد نُوديت فعلًا** (قِيس: `cit-02` بنداءين
+            # ثمّ قطع ⇒ أثرٌ فارغ ولوحةُ أدلّةٍ خالية) ⇒ فالجوابُ المنوَّعُ سقط نثرًا فضاع حسابٌ وقع.
+            # **والآن:** الأثرُ يُحفظ، والحالةُ تُسمّى، **والجوابُ لا يُعرض حسابًا كاملًا**
+            # (تسبقُه لافتةُ القطع كما تُسبق حالةُ حدِّ الخطوات)، **والإشارةُ تبقى فارغةً** لأنّ
+            # النموذجَ لم يُعلنها (`prose`) — فلا يُنسب امتناعٌ إلى جوابٍ لم يُعلنه.
+            # **ولا لافتةَ في نصّ الجواب:** العرضُ يُعلن الحالة (`render.py` — موضعُ اللافتات)
+            # والسجلُّ يحمل `truncated=True` بنصٍّ نظيفٍ ⇒ فلا تتلوّث بصماتُ النصوص ولا
+            # تُقارَن لافتةٌ بنصّ جواب.
+            # **وهذا هو الموضعُ الوحيد الذي كان يمحو الأثر:** `used` و`tools_used` **يُتركان كما
+            # استُخرجا من الأثر** أعلاه (لا تصفيرَ) — والجوابُ النثريُّ يُحفظ لأنّ نصًّا ناقصًا
+            # أصدقُ من فراغ، **والحالةُ المُسمّاة تُعلن نقصَه.**
+            pass
+        else:
+            # **وسقوطٌ بلا حسابٍ وقع أصلًا** (مهلةُ مزوّد · عطبٌ): يُصفَّران كما كانا، لأنّهما لم
+            # يُحسبا شيئًا (وقاعدةُ «من لا أثرَ له لا نوعَ له» قائمة).
+            used = []
+            tools_used = []
     # **والاستشهادُ من النوع يُقابَل بالأثر** (بوّابةُ أ-٤): كلُّ استشهادٍ بلا شاهدٍ يُسمّى باسمه
     from statement_qa.qa_tools import citation_truth
 
@@ -1002,4 +1046,5 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
                     tools_used=tools_used,
                     tools_failed=tools_failed,
                     ungrounded=ungrounded,
-                    limit_hit=limit_hit)
+                    limit_hit=limit_hit,
+                    truncated=truncated)

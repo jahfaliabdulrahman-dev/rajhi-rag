@@ -1198,6 +1198,8 @@ class _Trace:
         self.scope = rec.get("scope") or "in_scope"
         #: **إشارةُ نوع الجواب المحفوظة مع الجولة** (قرار 231500) — يقرؤها المصحِّحُ المعمول به.
         self.answer_kind = str(rec.get("answer_kind") or "")
+        #: **حالةُ القطع** (R124-1): `length` ⇒ جوابٌ ناقصٌ وأثرٌ محفوظ.
+        self.truncated = bool(rec.get("truncated"))
         #: **وهل سُجِّلت الإشارةُ أصلًا؟** سجلٌّ كُتب **قبل** المخطّط الجديد لا يحمل الحقلَ ⇒
         #: فلا يجوز أن يُحكم عليه بمصحِّحٍ يقرأ ما لم يُسجَّل (يُسمّى عطبَ مرسًى ويُقرأ بالقديم).
         self.answer_kind_recorded = "answer_kind" in rec
@@ -1219,6 +1221,8 @@ def box_of(r) -> dict:
             "tools_used": list(getattr(r, "tools_used", None) or []),
             "scope": getattr(r, "scope", None),
             "answer_kind": str(getattr(r, "answer_kind", "") or ""),
+            # **والقطعُ حالةٌ مُسمّاةٌ تُحمل مع الأثر** (R124-1): تُعدّ في الجولة بلا بحثٍ في النثر.
+            "truncated": bool(getattr(r, "truncated", False)),
             "refused": bool(getattr(r, "refused", False))}
 
 
@@ -1231,6 +1235,7 @@ def trace_of(msg: dict):
         return None
     return _Trace({"used_row_nos": msg.get("used"), "tools_used": msg.get("tools_used"),
                    "scope": msg.get("scope"), "answer_kind": msg.get("answer_kind"),
+                   "truncated": msg.get("truncated"),
                    "refused": msg.get("refused")})
 
 
@@ -1600,6 +1605,7 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                          # **الإشارةُ والحكمان في السجلّ** (قرار 231500): السطرُ المقارِنُ يُقرأ
                          # من الملفّ ويُعاد فحصُه، وكلُّ اختلافٍ يُسمّى بسببٍ من مصحِّحٍ واحد.
                          "answer_kind": (getattr(res, "answer_kind", "") or "") if res else None,
+                         "truncated": bool(getattr(res, "truncated", False)) if res else None,
                          "ok_by_text": ok_text,
                          "why_by_text": why_text,
                          "refused": bool(getattr(res, "refused", False)) if res else None,
@@ -1650,7 +1656,9 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                                    "results": [merged[k] for k in order if k in merged]},
                                   ensure_ascii=False, indent=1))   # **حفظٌ تدريجيّ: قتلُ العملية لا يُهدر جواباً**
         tools = ",".join(tools_now) or "—"
-        print(f"{i:02d} {q['id']:9s} {'✅' if ok else '❌'} {why}  · أدوات: {tools}", flush=True)
+        # **والقطعُ يُطبع باسمه في السطر نفسه** (R124-1): تُعدّه الجولةُ بلا بحثٍ في النثر.
+        cut = "  · ✂️ قُطع الردُّ (length) — الأثرُ محفوظٌ والجوابُ ناقص" if getattr(res, "truncated", False) else ""
+        print(f"{i:02d} {q['id']:9s} {'✅' if ok else '❌'} {why}  · أدوات: {tools}{cut}", flush=True)
 
     after = _key_usage()
     results = [done[k] for k in order if k in done]
