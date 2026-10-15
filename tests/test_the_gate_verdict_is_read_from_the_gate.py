@@ -137,23 +137,26 @@ def test_the_three_files_still_import_without_pydantic():
     assert text.count("OK tests/") == len(NO_PYDANTIC_FILES), text[-400:]
 
 
-# ── ⑤ العدُّ يسقط بخطأ الجمع ولا يقبله صامتًا ──────────────────────────────────────────────
+# ── ⑤ العدُّ يسقط بخطأ الجمع ولا يقبله صامتًا — **وبالأسماء لا بالعدد** (R121-1) ────────────
 def test_the_counter_refuses_a_collection_error():
     from tools import render_claims as rc
 
     good = "1235 tests collected in 1.30s\n"
-    bad = ("ERROR tests/test_x.py\n!!! Interrupted: 3 errors during collection !!!\n")
+    bad = "ERROR tests/test_x.py\n!!! Interrupted: 3 errors during collection !!!\n"
     assert rc.collection_errors(good) == ""
     assert rc.collection_errors(bad), "خطأُ الجمع مرّ صامتًا ⇒ العدُّ يكتب رقمًا ناقصًا"
     assert rc.collection_errors("") == ""
+    assert rc.uncollected_names(rc.collection_error_lines(bad)) == {"test_x.py"}   # مجرَّدٌ لا مسار
+    assert rc.allowed_uncollected() == set(), "بلا إعلان: لا ملفَّ مُعفى"
     # **ولا يُشترط أن تكون البيئةُ نظيفة** (خطأٌ بيئيٌّ كان في ضابطي: الـCI الخفيفُ فيه ملفّاتٌ لا
     # تُجمَّع ⇒ فسقط الضابطُ في خطوةٍ سليمة) ⇒ **يُقاس الاتّساق لا الحظّ:** حين لا يُقرأ العددُ
-    # فلا بدّ أن يكون السببُ خطأَ جمعٍ **غيرَ مُعلَن** (لا صمتًا بلا سبب).
+    # فلا بدّ أن يكون السببُ خطأَ جمعٍ **خارجَ الأسماء المُعلَنة** (لا صمتًا بلا سبب).
     live = rc._test_count()
+    assert live is None or isinstance(live, int), live
     if live is None:
-        assert rc._allowed_errors() == 0, "العدُّ سقط مع إعلانٍ مُطابقٍ ⇒ تناقضٌ في المسار"
-    else:
-        assert isinstance(live, int), live
+        # **والحدُّ بيئيٌّ مُعلَن لا صامت** (الخطوةُ تُسمّي المُعفَين في `env`) ⇒ فالسقوطُ له سببٌ مكتوبٌ
+        # في مخرَج `_test_count` نفسه (‏«جديد/زائل» بالأسماء)، ولا يُقاس هنا بإعادة تشغيلِ جمعٍ كامل.
+        assert rc.allowed_uncollected() is not None, "لا إعلانَ لأيِّ ملفّ ⇒ كلُّ خطأٍ يُسقِط العدّ"
 
 
 def test_the_counter_returns_nothing_when_the_child_reports_a_collection_error(monkeypatch):
@@ -190,9 +193,10 @@ def test_the_kind_description_carries_instructions_only():
     schema = json.dumps(Answer.model_json_schema(), ensure_ascii=False)
     assert "تُعيده المكتبة" not in schema, "المخطّطُ المُرسَل يحمل ملاحظةَ الهندسة"
 
-def test_a_new_collection_error_stops_the_count_even_where_a_bound_is_declared(monkeypatch):
-    """**وحدُّ البيئة المُعلَن لا يُسكِت الجديد:** بالمقدار المُعلَن يُقرأ العدُّ مع حدِّه، وزيادةٌ عليه
-    تُسقِط العدَّ — فلا يُقبَل خطأُ جمعٍ **غيرُ مُعلَن** أبدًا (وهو نصُّ ملاحظة P3)."""
+def test_a_swapped_file_loads_not_a_count(monkeypatch):
+    """**القبولُ بنصّه (R121-1 · مراجعة ١٢١ · P2):** كان المُعلَنُ **عددًا** ⇒ **حُذف ملفٌّ مُعلَنٌ
+    وأُضيف ملفٌّ مكسورٌ جديد ⇒ بقي العددُ وقُبل الرقمُ ٩٥٥.** والمقابلةُ الآن بالاسم ⇒ الجديدُ يُسمّى
+    فتُسقَط القراءة، والقائمةُ المُعلَنةُ نفسُها تمرّ بالرقم."""
     from tools import render_claims as rc
 
     class _Done:
@@ -201,19 +205,22 @@ def test_a_new_collection_error_stops_the_count_even_where_a_bound_is_declared(m
         def __init__(self, out):
             self.stdout = out
 
-    one = "ERROR tests/test_a.py - ImportError: no PIL\n953 tests collected, 1 error in 0.50s\n"
-    two = ("ERROR tests/test_a.py - ImportError: no PIL\n"
-           "ERROR tests/test_b.py - NameError: boom\n"
-           "952 tests collected, 2 errors in 0.50s\n")
-    monkeypatch.setattr(rc.subprocess, "run", lambda *a, **k: _Done(two))
-    monkeypatch.setenv(rc._ALLOW_ENV, "1")
-    assert rc._test_count() is None, "خطأٌ فوق المقدار المُعلَن مرّ ⇒ العدُّ يقبل عطبًا جديدًا صامتًا"
-    monkeypatch.setattr(rc.subprocess, "run", lambda *a, **k: _Done(one))
-    assert rc._test_count() == 953, "الحدُّ المُعلَن يجب أن يمرّ بالرقم مع إعلانه"
-    monkeypatch.delenv(rc._ALLOW_ENV, raising=False)
-    assert rc._test_count() is None, "بلا إعلان: أيُّ خطأٍ يُسقِط العدّ (الافتراضُ صفر)"
-    assert not rc.collection_error_lines("1235 tests collected in 1.30s\n")
-    assert len(rc.collection_error_lines(one)) == 1
+    declared_a = "ERROR tests/test_a.py - ImportError: no PIL\n953 tests collected, 1 error in 0.50s\n"
+    swapped = "ERROR tests/test_b.py - NameError: boom\n953 tests collected, 1 error in 0.50s\n"
+    monkeypatch.setenv(rc._UNCOLLECTED_ENV, "test_a.py")
+    monkeypatch.setattr(rc.subprocess, "run", lambda *a, **k: _Done(declared_a))
+    assert rc._test_count() == 953, "الملفُّ المُعلَنُ بالاسم يجب أن يمرّ بالرقم"
+    monkeypatch.setattr(rc.subprocess, "run", lambda *a, **k: _Done(swapped))
+    assert rc._test_count() is None, "تبديلُ ملفٍّ مُعلَنٍ بملفٍّ مكسورٍ مرّ ⇒ الحدُّ عددٌ لا أسماء"
+    # **وجديدٌ فوق المُعلَن** ⇒ يُسمّى ويُسقِط
+    monkeypatch.setenv(rc._UNCOLLECTED_ENV, "test_a.py")
+    monkeypatch.setattr(rc.subprocess, "run", lambda *a, **k: _Done(
+        "ERROR tests/test_a.py - ImportError: no PIL\n"
+        "ERROR tests/test_c.py - NameError: boom\n952 tests collected, 2 errors in 0.50s\n"))
+    assert rc._test_count() is None, "خطأٌ جديدٌ فوق المُعلَن مرّ صامتًا"
+    monkeypatch.delenv(rc._UNCOLLECTED_ENV, raising=False)
+    assert rc._test_count() is None, "بلا إعلان: أيُّ خطأٍ يُسقِط العدّ (الافتراضُ لا إعفاء)"
+
 
 # ── ⑦ الحدُّ المُعلَن يجب أن يصل الخطوة فعلًا — لا أن يُبتلع في تعليقٍ بجواره ──────────────
 def test_the_declared_bound_really_reaches_the_claims_step(monkeypatch):
@@ -237,12 +244,17 @@ def test_the_declared_bound_really_reaches_the_claims_step(monkeypatch):
                 job_env = job.get("env") or {}
         merged = {**job_env, **step_env}
         assert merged.get("RAJHI_CLAIMS_ENV") == env_name, f"{step_id}: {merged}"
-        bound = merged.get(rc._ALLOW_ENV)
-        assert bound is not None, (
-            f"الحدُّ المُعلَن ليس مفتاحًا في `env` للخطوة {step_id} (ابتلعه تعليقٌ بجواره؟) "
+        declared = merged.get(rc._UNCOLLECTED_ENV)
+        assert declared is not None, (
+            f"المُعفَون من الجمع ليسوا مفتاحًا في `env` للخطوة {step_id} (ابتلعه تعليقٌ بجواره؟) "
             f"— المفاتيحُ المرئيّة: {sorted(merged)}")
-        assert str(bound).strip().isdigit(), f"الحدُّ ليس عددًا في {step_id}: {bound!r}"
+        names = {x.strip() for x in str(declared).split(",") if x.strip()}
+        assert names, f"لا اسمَ ملفٍّ في إعلان {step_id}"
+        # **ومجرَّدةٌ لا مسارات:** مسارٌ في `env` يُقرأ قائمةً في قوائم الـCI النصّيّة (قاسه حارسُ السجلّ)
+        assert all(n.endswith(".py") and "/" not in n for n in names), \
+            f"الإعلانُ في {step_id} ليس أسماءَ ملفّاتٍ مجرَّدة: {sorted(names)[:3]}"
+        assert len(names) == len(str(declared).split(",")), f"إعلانٌ مكرَّرٌ أو فارغٌ في {step_id}"
     # **والافتراضُ يُقاس بإزالة الإعلان لا بقراءة بيئة الخطوة** (كان شرطًا بيئيًّا يسقط في
     # الـCI الخفيف حيث يُعلَن الحدُّ): بلا المتغيّر ⇒ صفر.
-    monkeypatch.delenv(rc._ALLOW_ENV, raising=False)
-    assert rc._allowed_errors() == 0, "الافتراضُ بلا إعلان يجب أن يكون صفرًا"
+    monkeypatch.delenv(rc._UNCOLLECTED_ENV, raising=False)
+    assert rc.allowed_uncollected() == set(), "الافتراضُ بلا إعلان: لا ملفَّ مُعفى (لا عددَ صفر)"

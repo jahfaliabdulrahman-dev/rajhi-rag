@@ -23,12 +23,12 @@ jobs:
     # يُعلَن في خطوته (`off`) — فلا تُضاف خطوةٌ جديدةٌ فتقع في بيئةٍ منسوبةٍ خطأً بالصمت.
     env:
       RAJHI_CLAIMS_ENV: ci-light
-      # **وحدُّ الجمع مُعلَنٌ لمفسّر هذه المهمّة (تُقاس به الخطوةُ الخفيفةُ ومسبارُ الهبوط معًا):**
+      # **والمُعفَون من الجمع مُعلَنون بأسمائهم لمفسّر هذه المهمّة (تُقاس به الخطوةُ الخفيفةُ ومسبارُ الهبوط معًا):**
       # بيئتُها المثبَّتةُ لا تُجمِّع ملفّاتِ اختبارٍ تعتمد `pdfplumber` و`polars` ⇒ **يُعلَن الحدُّ
       # ولا يُقبَل خطأُ جمعٍ غيرُ مُعلَن** (وإلّا قُرئ العددُ ناقصًا بصمت، أو فشلت حرّاسُ اللقطة
       # في خطوةٍ سليمة). **والعددُ يُقاس من مخرَج الخطوة** («خطأُ جمعٍ غيرُ مُعلَن» يطبع الحاصلَ
       # والمُعلَن) ولا يُخمَّن هنا. وخطوةُ الدعاوى تُبدّل هذا الإعلانَ بمقدارِ بيئتها.
-      RAJHI_CLAIMS_ALLOW_COLLECTION_ERRORS: "3"
+      RAJHI_CLAIMS_ALLOWED_UNCOLLECTED: "test_parser.py,test_reader_stamp_and_contract.py,test_text_reader.py"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
         with:
@@ -64,13 +64,14 @@ jobs:
         # لا غطاءً. **وحدُّ `off` يبقى مكتوبًا في موضعه:** لا يُستعمل ليُسكِت قياسًا مُمكِنًا.
         env:
           RAJHI_CLAIMS_ENV: ci-claims
-          # **وحدُّ الجمع مُعلَنٌ هنا بسببه (ملاحظةُ العدّ الأخيرة):** هذه الخطوةُ تُثبّت `pytest`
+          # **والمُعفَون من الجمع مُعلَنون بأسمائهم هنا وبسببهم:** هذه الخطوةُ تُثبّت `pytest`
           # وحدَه ⇒ **ملفّاتُ اختبارٍ لا تُجمَّع** لتبعيّاتٍ ليست عندها (‏`PIL` · `numpy` ·
           # `openpyxl` · `pdfplumber` · `polars` · `langchain_core`) — **فتُعلَن ولا تُسكَت:** صار
-          # العدُّ **يسقط على أيّ خطأ جمعٍ غيرِ مُعلَن**، ويقرأ المُعلَنَ بعددِه. **والمقدارُ لا يُخمَّن
+          # العدُّ **يسقط على أيّ خطأ جمعٍ خارجَ الأسماء المُعلَنة** (وبالاسم لا بالعدد: تبديلُ ملفٍّ
+      # بملفٍّ مكسورٍ يُسمّى). **والأسماءُ لا تُخمَّن
           # هنا ولا في اللقطة:** يُقاس من مخرَج الخطوة («خطأُ جمعٍ غيرُ مُعلَن» يطبع الحاصلَ والمُعلَن)
           # ثمّ يُحدَّث هذا السطرُ برقمه وسببه — **والقيمُ المطلقةُ في اللقطة لا في هذا التعليق.**
-          RAJHI_CLAIMS_ALLOW_COLLECTION_ERRORS: "19"
+          RAJHI_CLAIMS_ALLOWED_UNCOLLECTED: 'test_app_excel_button.py,test_capture_pack_exclusion.py,test_capture_training.py,test_desc_pass.py,test_desc_reader.py,test_disclosure_and_provenance.py,test_exports.py,test_footer_crop.py,test_footer_oracle.py,test_gate_bites.py,test_pack_seal_and_root.py,test_page_gate.py,test_parser.py,test_question_ceiling.py,test_reader_stamp_and_contract.py,test_rederive_footer_verdicts.py,test_row_bands.py,test_safety.py,test_text_reader.py'
         run: |
           # **وتُثبَّت النسخةُ لا تُترك للتحديث (مقعدُ البنية · جولة ٦٧):** العدُّ دالّةٌ في إصدار
           # المفسّر و`pytest` وتبعيّاتِ المهمّة معًا ⇒ فإصدارٌ غيرُ مثبَّتٍ يجعل قيمةَ `ci-claims`

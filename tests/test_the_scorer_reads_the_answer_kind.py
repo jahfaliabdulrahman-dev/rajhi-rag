@@ -263,3 +263,60 @@ def test_a_typed_answer_from_a_scripted_model_reaches_the_scorer():
     ok_tie, _ = ev.score_answer(_q(expect="ambiguous"), None, tie.answer,
                                 _trace(answer_kind=tie.answer_kind), ROWS)
     assert ok_tie, "تعادلٌ أعلنه النموذجُ لم يُقرأ"
+
+
+# ── R121-3: مسارُ الجولة يُحكَم بالأثر الذي يكتبه — والإشارةُ تُحمَل من ناتج التحليل ─────────
+class _Result:
+    """ناتجُ تحليلٍ بشكلٍ حقيقيّ (‏`QAResult`) — بلا نداءِ نموذج."""
+
+    def __init__(self, kind: str = "not_found"):
+        self.answer = "لا يَظهر في الكشف رقمُ هويةٍ للمستفيد"
+        self.used_row_nos = [1, 2]
+        self.tools_used = ["page_rows"]
+        self.scope = "in_scope"
+        self.answer_kind = kind
+        self.refused = kind == "not_found"
+
+
+def test_the_box_carries_the_signal_the_analysis_produced():
+    """**عطبٌ مقيسٌ في مسار الجولة (R121-3):** كان الصندوقُ يُبنى بيده في `_ask` **بلا `answer_kind`**
+    ⇒ فكلُّ سؤالٍ يُحكم «عطبَ مرسًى» **والمصحِّحُ الجديدُ لا يعمل في الجولة أصلًا**، والسجلُّ يُكتب
+    بـ`answer_kind=""` ⇒ **تُفقد الإشارةُ من الدليل** (قِيس: جولتان `kind=''` ثمّ أُوقفت الجولة).
+    **والحرسُ يقيس الحدَّ من جانبه الصحيح:** ناتجُ تحليلٍ ⇒ `box_of` ⇒ `trace_of` ⇒ حكمٌ بالامتناع."""
+    box = ev.box_of(_Result())
+    assert box["answer_kind"] == "not_found", box
+    tr = ev.trace_of(box)
+    assert tr is not None and tr.answer_kind_recorded is True, "الإشارةُ غيرُ مسجّلةٍ في أثر الجولة"
+    assert tr.answer_kind == "not_found", tr.answer_kind
+    ok, why = ev.score_answer(_q(), None, box["answer"], tr, ROWS)
+    assert "عطبُ مرسًى" not in why, f"الجولةُ تُحكم عطبَ مرسًى: {why}"
+    assert ok and "امتناعٌ مُعلَن" in why, why
+
+
+def test_the_trace_a_run_judges_is_the_one_it_writes():
+    """**والمسارُ الذي يُحكَم به هو المسارُ الذي يُكتب** — السجلُّ يُبنى من الأثر نفسه لا من نسخةٍ ثانية."""
+    box = ev.box_of(_Result(kind="tie"))
+    tr = ev.trace_of(box)
+    rec = {"used_row_nos": tr.used_row_nos, "tools_used": tr.tools_used, "scope": tr.scope,
+           "answer_kind": tr.answer_kind, "refused": tr.refused}
+    assert "answer_kind" in rec and rec["answer_kind"] == "tie", rec
+    assert ev._Trace(rec).answer_kind_recorded is True
+    ok, why = ev.score_answer(_q(metric="abstain", expect="ambiguous"), None, box["answer"],
+                              ev._Trace(rec), ROWS)
+    assert ok and "التعادل" in why, why
+
+
+def test_the_run_path_has_one_home_for_the_box_and_the_trace():
+    """**ولا يُبنى الصندوقُ في مكانين (P2: كودٌ يكرّر مكوّنًا متاحًا عيبٌ):** يُقاس بالـAST أنّ `_ask`
+    يستدعي `box_of(` وأنّ أثرَ الجولة يُبنى بـ`trace_of(` — فلا يعود العطبُ بصمتٍ في موضعٍ آخر."""
+    tree = ast.parse((ROOT / "tools/eval_questions.py").read_text(encoding="utf-8"))
+    calls = {n.func.id for n in ast.walk(tree)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    assert "box_of" in calls, "لا دالّةَ `box_of` في الوحدة ⇒ الصندوقُ يُبنى بيده"
+    assert "trace_of" in calls, "لا دالّةَ `trace_of` ⇒ الأثرُ يُبنى بيده"
+    src = (ROOT / "tools/eval_questions.py").read_text(encoding="utf-8")
+    assert src.count("out_box.update(box_of(") == 1, "بناءُ الصندوق ليس في موضعٍ واحد"
+    assert src.count("res = trace_of(msg)") == 1, "أثرُ الجولة ليس من الموضع الواحد"
+    # والمطبوعاتُ القديمة لم تبقَ: لا أثرَ مبنيًّا بيدٍ في مسار الجولة
+    legacy = 'msg.get("refused")}) if "answer" in msg else None'
+    assert legacy not in src, "ما زال الأثرُ يُبنى بيدٍ في مسار الجولة"

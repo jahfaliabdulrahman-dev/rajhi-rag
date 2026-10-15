@@ -1181,6 +1181,36 @@ class _Trace:
         self.refused = bool(rec.get("refused"))
 
 
+def box_of(r) -> dict:
+    """**موضعٌ واحدٌ يُبنى منه ما يُحكَم به وما يُحفَظ** — والإشارةُ تُقرأ من ناتج التحليل نفسِه (قرار 231500).
+
+    **عطبٌ مقيسٌ أُغلق بهذه الدالّة (R121-3):** كان بناءُ الصندوق inside `_ask` يحمل
+    `used` · `tools_used` · `scope` · `refused` **بلا `answer_kind`** ⇒ `_Trace.answer_kind_recorded`
+    = **False** ⇒ فكلُّ سؤالٍ في الجولة يُحكم **«عطبَ مرسًى»** ولا يعمل المصحِّحُ الجديدُ أصلًا،
+    **والسجلُّ يُكتب بـ`answer_kind=""`** ⇒ **فالإشارةُ تُفقد من الدليل نفسه** (قِيس: جولتان مسجّلتان
+    `kind=''` قبل إيقاف التشغيل). والدرسُ: حرسٌ يبني الأثرَ بيده لا يقيس مسارَ الجولة ⇒ فالحدُّ
+    بين «ما ينتجه التحليل» و«ما يُسجَّل» يُسمّى هنا **مرّةً واحدة**.
+    """
+    return {"answer": r.answer or "",
+            "used": list(getattr(r, "used_row_nos", None) or []),
+            "tools_used": list(getattr(r, "tools_used", None) or []),
+            "scope": getattr(r, "scope", None),
+            "answer_kind": str(getattr(r, "answer_kind", "") or ""),
+            "refused": bool(getattr(r, "refused", False))}
+
+
+def trace_of(msg: dict):
+    """الأثرُ الذي **تحكم به الجولة وتكتبه** — من رسالةٍ أنتجها `box_of`.
+
+    **والمسارُ الذي يحكم هو المسارُ الذي يُكتب** (وإلّا حُكم على سجلٍّ آخر — وهو بعينه عطبُ R121-3).
+    """
+    if "answer" not in msg:
+        return None
+    return _Trace({"used_row_nos": msg.get("used"), "tools_used": msg.get("tools_used"),
+                   "scope": msg.get("scope"), "answer_kind": msg.get("answer_kind"),
+                   "refused": msg.get("refused")})
+
+
 def _spec_sha(path: pathlib.Path | None = None) -> str:
     """بصمةُ **ملفّ الأسئلة المستعملِ فعلًا** — تُحفظ مع كلّ جواب ليكون الربطُ قابلاً للتدقيق.
 
@@ -1406,9 +1436,9 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
             r = answer_question(store, qtext, rows=rows, chunks=chunks, llm=llm,
                                 footers=footers, scope=_pack_scope(rows, a.run, n_pages),
                                 n_pages=n_pages)
-            out_box.update({"answer": r.answer or "", "used": list(getattr(r, "used_row_nos", None) or []),
-                            "tools_used": list(getattr(r, "tools_used", None) or []),
-                            "scope": getattr(r, "scope", None), "refused": bool(getattr(r, "refused", False))})
+            # **والصندوقُ من موضعه الواحد** (`box_of`): الإشارةُ (`answer_kind`) تُحمَل معه وإلّا
+            # حُكم على كلّ سؤالٍ «عطبَ مرسًى» وفُقدت الإشارةُ من السجلّ (عطبُ R121-3 المقيس).
+            out_box.update(box_of(r))
         except Exception as e:                                   # noqa: BLE001 — عطبٌ يُسمّى لا يُسقط الجولة
             out_box["error"] = f"{type(e).__name__}: {e}"
             # **ورفضُ المزوّد يُصنَّف من نوعه هنا أيضًا (R117-3):** فلو تسرّب استثناءٌ من طبقةٍ
@@ -1500,9 +1530,7 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
         t.start()
         t.join(int(getattr(a, "timeout", 0) or 150))
         msg = {"error": "انتهت المهلة"} if t.is_alive() else (box or {"error": "لا جواب"})
-        res = _Trace({"used_row_nos": msg.get("used"), "tools_used": msg.get("tools_used"),
-                      "scope": msg.get("scope"),
-                      "refused": msg.get("refused")}) if "answer" in msg else None
+        res = trace_of(msg)      # **والأثرُ الذي يُحكَم به هو نفسُه الذي يُكتب** (R121-3)
         ans = msg["answer"].strip() if res else f"<{msg.get('error')}>"
         # **ورفضُ المزوّد توقّفٌ مُسمّى لا أخطاءُ أجوبة** (قرارُ 184500 §٢ · **وأُعيد بناؤه في R117-3**):
         # كان الكاشفُ **قائمةَ كلماتٍ على نصّ الخطأ**، وقِيس أنّها تُخطئ شكلين موثَّقين (٤٠٣ حدُّ المفتاح

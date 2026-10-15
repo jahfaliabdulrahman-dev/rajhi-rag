@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -78,12 +79,12 @@ def collection_errors(text: str) -> str:
     return m.group(0) if m else ""
 
 
-#: **مِقدارُ خطأ الجمع المُعلَن لخطوةٍ ما** (‏بلا هذا المتغيّر = صفر ⇒ أيُّ خطأٍ يُسقط العدَّ).
-#: **والسببُ مقيسٌ ومُعلَن:** خطوةُ الدعاوى تُثبّت `pytest` وحدَه ⇒ **ملفّاتُ اختبارٍ لا تُجمَّع**
-#: لتبعيّاتٍ ليست عندها (‏PIL · numpy · openpyxl · pdfplumber · polars · langchain_core) — فالمقدارُ
-#: يُعلَن في الخطوة **ومعه سببُه**، **وأيُّ خطأٍ جديدٍ (عددًا مختلفًا) يُسقِط العدَّ** بدل أن يُكتب
-#: رقمٌ ناقصٌ بلا صوت. **والقيمُ المطلقةُ في اللقطة لا هنا** (ولذلك لا رقمَ دعوى في هذا التعليق).
-_ALLOW_ENV = "RAJHI_CLAIMS_ALLOW_COLLECTION_ERRORS"
+#: **المُعلَنُ لأخطاء الجمع: مجموعةُ أسماءٍ لا عدد** (ملاحظةُ الحدّ · P2).
+#: **والسببُ مقيسٌ:** كان العددَ وحدَه ⇒ **تبديلُ ملفٍّ مُعلَنٍ بملفٍّ مكسورٍ جديد يمرّ صامتًا**
+#: (قِيس: حُذف ملفٌّ من المُعلَنين وأُضيف ملفٌّ مكسور ⇒ بقي العددُ وقُبل الرقمُ المنشور).
+#: فالمقابلةُ الآن **بالأسماء المجرَّدة**، وأيُّ تبديلٍ يُسمّى بالاسم ⇒ **توقّفٌ مُعلَن.**
+#: **والقيمُ المطلقةُ في اللقطة لا هنا** (ولذلك لا رقمَ دعوى في هذا التعليق).
+_UNCOLLECTED_ENV = "RAJHI_CLAIMS_ALLOWED_UNCOLLECTED"
 
 
 def collection_error_lines(text: str) -> list[str]:
@@ -91,12 +92,25 @@ def collection_error_lines(text: str) -> list[str]:
     return [ln for ln in (text or "").splitlines() if ln.startswith("ERROR")]
 
 
-def _allowed_errors() -> int:
-    """المقدارُ المُعلَن لبيئة هذه الخطوة (وسببُه في رأس الخطوة) — والافتراضُ **صفر**. """
-    try:
-        return max(0, int(os.environ.get(_ALLOW_ENV, "0") or 0))
-    except ValueError:
-        return 0
+def uncollected_names(lines: list[str]) -> set[str]:
+    """أسماءُ الملفّات من أسطر الخطأ — **بالاسم المجرَّد لا بالمسار** (‏`tests/test_x.py` ⇒ `test_x.py`).
+
+    **ولماذا المجرَّد؟** لأنّ قوائمَ الـCI (‏قائمةُ الخطوة ومسبارُ الهبوط وحارسُ السجلّ) تُقرأ بمسحٍ
+    نصّي عن `tests/*.py` في الـworkflow ⇒ فلو كُتبت المساراتُ في `env` لَدخلت القائمةَ الخفيّةَ
+    وقيست الخطوةُ ملفّاتٍ لم تُشغِّلها (قِيس: سقط حارسا السجلّ واللقطة بعد كتابتها بالمسارات).
+    """
+    out: set[str] = set()
+    for ln in lines:
+        parts = ln.split()
+        if len(parts) >= 2:
+            out.add(pathlib.PurePosixPath(parts[1].rstrip(":")).name)
+    return out
+
+
+def allowed_uncollected() -> set[str]:
+    """المجموعةُ المُعلَنة لبيئة هذه الخطوة (‏فارغةٌ = لا ملفَّ مُعفى ⇒ أيُّ خطأٍ يُسقِط العدَّ)."""
+    raw = os.environ.get(_UNCOLLECTED_ENV, "") or ""
+    return {x.strip() for x in raw.split(",") if x.strip()}
 
 
 def _test_count() -> int | None:
@@ -114,19 +128,20 @@ def _test_count() -> int | None:
     text = (out.stdout or "") + (out.stderr or "")
     errs = collection_error_lines(out.stdout or "")
     if collection_errors(text):
-        allow = _allowed_errors()
+        declared = allowed_uncollected()
+        actual = uncollected_names(errs)
         summary = [ln for ln in (out.stdout or "").splitlines()
                    if "collected" in ln or "Interrupted" in ln]
-        if len(errs) != allow:
+        if actual != declared:
             # **والعطبُ يُسمّى لا يُعلَن فقط (درسُ R120-2):** الفشلُ بلا اسمِ الملفّات يجبر القارئَ
             # على تخمين السبب — ويُخرجه من الحكم («خطأُ جمعٍ» ≠ «عطبُ بيئةٍ ناقصةِ تبعيّات»).
-            print(f"⛔ خطأُ جمعٍ غيرُ مُعلَن ({len(errs)} والمُعلَنُ {allow}) ⇒ لا يُكتب رقمٌ "
-                  "(ملاحظةُ العدّ · P3)", file=sys.stderr)
+            print(f"⛔ أخطاءُ جمعٍ لا تطابق المُعلَن بالاسم (جديد: {sorted(actual - declared)} · "
+                  f"زائل: {sorted(declared - actual)}) ⇒ لا يُكتب رقمٌ (R121-1)", file=sys.stderr)
             for ln in (errs[:25] + summary[-1:]):
                 print("   " + ln, file=sys.stderr)
             return None
-        print(f"⚠ {len(errs)} ملفًّا خارجَ الجمع — **مُعلَنٌ** لبيئة هذه الخطوة "
-              f"(`{_ALLOW_ENV}={allow}`) فيُقرأ العدُّ مع حدِّه لا بدونه.", file=sys.stderr)
+        print(f"⚠ {len(errs)} ملفًّا خارجَ الجمع — **مُعلَنٌ بالاسم** لبيئة هذه الخطوة "
+              f"(`{_UNCOLLECTED_ENV}`) فيُقرأ العدُّ مع حدِّه لا بدونه.", file=sys.stderr)
     for line in reversed(out.stdout.splitlines()):
         parts = line.split()
         if len(parts) >= 2 and parts[0].isdigit() and "test" in parts[1]:
