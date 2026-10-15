@@ -200,7 +200,7 @@ def test_a_new_collection_error_stops_the_count_even_where_a_bound_is_declared(m
     assert len(rc.collection_error_lines(one)) == 1
 
 # ── ⑦ الحدُّ المُعلَن يجب أن يصل الخطوة فعلًا — لا أن يُبتلع في تعليقٍ بجواره ──────────────
-def test_the_declared_bound_really_reaches_the_claims_step():
+def test_the_declared_bound_really_reaches_the_claims_step(monkeypatch):
     """**عطبٌ وقع فعلًا وهو يُغلَق بضابط (قاسه الـCI في التشغيل نفسه):** تعليقٌ انتهى بلا سطرٍ جديد
     فالتصقت به خانةُ البيئة ⇒ صارت **جزءًا من التعليق** ⇒ الخطوةُ قرأت «المُعلَن ٠» وأسقطت العدّ
     (‏`⛔ خطأُ جمعٍ غيرُ مُعلَن (19 والمُعلَنُ 0)`). **فالحرسُ يقرأ الملفَّ كـYAML لا كنصّ:** خانةٌ
@@ -226,4 +226,7 @@ def test_the_declared_bound_really_reaches_the_claims_step():
             f"الحدُّ المُعلَن ليس مفتاحًا في `env` للخطوة {step_id} (ابتلعه تعليقٌ بجواره؟) "
             f"— المفاتيحُ المرئيّة: {sorted(merged)}")
         assert str(bound).strip().isdigit(), f"الحدُّ ليس عددًا في {step_id}: {bound!r}"
-    assert rc._allowed_errors() == 0, "الافتراضُ بلا إعلان يجب أن يكون صفرًا (وإلّا فقد الإعلانُ معناه)"
+    # **والافتراضُ يُقاس بإزالة الإعلان لا بقراءة بيئة الخطوة** (كان شرطًا بيئيًّا يسقط في
+    # الـCI الخفيف حيث يُعلَن الحدُّ): بلا المتغيّر ⇒ صفر.
+    monkeypatch.delenv(rc._ALLOW_ENV, raising=False)
+    assert rc._allowed_errors() == 0, "الافتراضُ بلا إعلان يجب أن يكون صفرًا"
