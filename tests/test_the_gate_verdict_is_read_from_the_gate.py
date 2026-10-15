@@ -173,3 +173,28 @@ def test_the_kind_description_carries_instructions_only():
         assert note not in desc, f"ملاحظةُ هندسةٍ تُرسَل إلى النموذج: {note!r}"
     schema = json.dumps(Answer.model_json_schema(), ensure_ascii=False)
     assert "تُعيده المكتبة" not in schema, "المخطّطُ المُرسَل يحمل ملاحظةَ الهندسة"
+
+def test_a_new_collection_error_stops_the_count_even_where_a_bound_is_declared(monkeypatch):
+    """**وحدُّ البيئة المُعلَن لا يُسكِت الجديد:** بالمقدار المُعلَن يُقرأ العدُّ مع حدِّه، وزيادةٌ عليه
+    تُسقِط العدَّ — فلا يُقبَل خطأُ جمعٍ **غيرُ مُعلَن** أبدًا (وهو نصُّ ملاحظة P3)."""
+    from tools import render_claims as rc
+
+    class _Done:
+        stderr = ""
+
+        def __init__(self, out):
+            self.stdout = out
+
+    one = "ERROR tests/test_a.py - ImportError: no PIL\n953 tests collected, 1 error in 0.50s\n"
+    two = ("ERROR tests/test_a.py - ImportError: no PIL\n"
+           "ERROR tests/test_b.py - NameError: boom\n"
+           "952 tests collected, 2 errors in 0.50s\n")
+    monkeypatch.setattr(rc.subprocess, "run", lambda *a, **k: _Done(two))
+    monkeypatch.setenv(rc._ALLOW_ENV, "1")
+    assert rc._test_count() is None, "خطأٌ فوق المقدار المُعلَن مرّ ⇒ العدُّ يقبل عطبًا جديدًا صامتًا"
+    monkeypatch.setattr(rc.subprocess, "run", lambda *a, **k: _Done(one))
+    assert rc._test_count() == 953, "الحدُّ المُعلَن يجب أن يمرّ بالرقم مع إعلانه"
+    monkeypatch.delenv(rc._ALLOW_ENV, raising=False)
+    assert rc._test_count() is None, "بلا إعلان: أيُّ خطأٍ يُسقِط العدّ (الافتراضُ صفر)"
+    assert not rc.collection_error_lines("1235 tests collected in 1.30s\n")
+    assert len(rc.collection_error_lines(one)) == 1

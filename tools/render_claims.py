@@ -78,6 +78,28 @@ def collection_errors(text: str) -> str:
     return m.group(0) if m else ""
 
 
+#: **مِقدارُ خطأ الجمع المُعلَن لبيئة الخطوة** (‏بلا هذا المتغيّر = صفر ⇒ أيُّ خطأٍ يُسقط العدَّ).
+#: **والسببُ مقيسٌ ومُعلَن (R120 · P3):** بيئةُ `gate_claims` تُثبّت `pytest` وحدَه ⇒ **١٩ ملفَّ
+#: اختبارٍ لا تُجمَّع** لتبعيّاتٍ ناقصة (‏PIL · numpy · openpyxl · pdfplumber · polars · langchain_core)
+#: — **وهذا قِيسَ بعد إصلاح R120-2 فعُلِم أنّ الأرقام المنشورة قبلُ (926 · 943) كانت عدًّا ناقصًا
+#: لبيئةٍ لا تُجمّع تسعةَ عشرَ ملفًّا بصمت.** والمقدارُ يُعلَن في الخطوة ومعها سببه، **وأيُّ خطأٍ
+#: جديدٍ (عددًا مختلفًا) يُسقِط العدَّ** بدل أن يُكتب رقمٌ ناقصٌ بلا صوت.
+_ALLOW_ENV = "RAJHI_CLAIMS_ALLOW_COLLECTION_ERRORS"
+
+
+def collection_error_lines(text: str) -> list[str]:
+    """أسطرُ الملفّات التي لم تُجمَّع — تُسمّى لتُقرأ (لا «خطأُ جمعٍ» مجهولًا)."""
+    return [ln for ln in (text or "").splitlines() if ln.startswith("ERROR")]
+
+
+def _allowed_errors() -> int:
+    """المقدارُ المُعلَن لبيئة هذه الخطوة (وسببُه في رأس الخطوة) — والافتراضُ **صفر**. """
+    try:
+        return max(0, int(os.environ.get(_ALLOW_ENV, "0") or 0))
+    except ValueError:
+        return 0
+
+
 def _test_count() -> int | None:
     """عدُّ الاختبارات — ببيئةٍ نظيفة، **ويُبطل بخطأِ جمع**.
 
@@ -90,16 +112,22 @@ def _test_count() -> int | None:
     out = subprocess.run([sys.executable, "-m", "pytest", "tests/",
                           "--collect-only", "-q"],
                          cwd=PROJ, capture_output=True, text=True, env=env)
-    if collection_errors((out.stdout or "") + (out.stderr or "")):
-        # **والعطبُ يُسمّى لا يُعلَن فقط (درسُ R120-2):** الفشلُ بلا اسمِ الملفّات يجبر القارئَ على
-        # تخمين السبب — ويُخرجه من الحكم («خطأُ جمعٍ» ≠ «عطبُ بيئةٍ ناقصةِ تبعيّات»).
-        errs = [ln for ln in (out.stdout or "").splitlines() if ln.startswith("ERROR")]
+    text = (out.stdout or "") + (out.stderr or "")
+    errs = collection_error_lines(out.stdout or "")
+    if collection_errors(text):
+        allow = _allowed_errors()
         summary = [ln for ln in (out.stdout or "").splitlines()
                    if "collected" in ln or "Interrupted" in ln]
-        print("⛔ خطأُ جمعٍ في مخرَج العدّ ⇒ لا يُكتب رقمٌ (P3 · مراجعة ١٢٠)", file=sys.stderr)
-        for ln in (errs[:25] + summary[-1:]):
-            print("   " + ln, file=sys.stderr)
-        return None
+        if len(errs) != allow:
+            # **والعطبُ يُسمّى لا يُعلَن فقط (درسُ R120-2):** الفشلُ بلا اسمِ الملفّات يجبر القارئَ
+            # على تخمين السبب — ويُخرجه من الحكم («خطأُ جمعٍ» ≠ «عطبُ بيئةٍ ناقصةِ تبعيّات»).
+            print(f"⛔ خطأُ جمعٍ غيرُ مُعلَن ({len(errs)} والمُعلَنُ {allow}) ⇒ لا يُكتب رقمٌ "
+                  "(P3 · مراجعة ١٢٠)", file=sys.stderr)
+            for ln in (errs[:25] + summary[-1:]):
+                print("   " + ln, file=sys.stderr)
+            return None
+        print(f"⚠ {len(errs)} ملفًّا خارجَ الجمع — **مُعلَنٌ** لبيئة هذه الخطوة "
+              f"(`{_ALLOW_ENV}={allow}`) فيُقرأ العدُّ مع حدِّه لا بدونه.", file=sys.stderr)
     for line in reversed(out.stdout.splitlines()):
         parts = line.split()
         if len(parts) >= 2 and parts[0].isdigit() and "test" in parts[1]:
