@@ -110,6 +110,7 @@ tests/test_the_compound_split_is_measured_not_assumed.py
 tests/test_the_estimate_reads_the_newest_run.py
 tests/test_the_guards_do_not_need_the_owners_key.py
 tests/test_the_scorer_reads_the_answer_kind.py
+tests/test_the_cut_keeps_the_trace.py
 tests/test_the_gate_verdict_is_read_from_the_gate.py
 ```
 

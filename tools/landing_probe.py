@@ -375,6 +375,15 @@ def measure(ref: str, from_worktree: bool, poison: str | None, keep: bool,
             if not quiet:
                 for ln in named[:12]:
                     print(f"      {ln}")
+            # **والدليلُ يُطبع دائمًا** (R125-1 · تشخيص 2026-10-15): كان المسبارُ يطبع **أسماءَ**
+            # الساقط وحدَها — وبـ`--quiet` لا يطبعها — **فيبقى القارئ بلا الخليّة التي اختلفت**، وهو
+            # عطبٌ في أداةٍ حاكمةٍ تُعلن «لا يُقبَل فرقٌ لا اسمَ له» ثمّ تخفي الاسم. فتُطبع الآن أسطرُ
+            # التأكيد (`E …`) وحكمُ `pytest` الختاميّ — **والدليلُ ليس زينةً تُسكَت**.
+            ev = [ln.rstrip() for ln in out.splitlines()
+                  if ln.lstrip().startswith(("E ", "E	")) or ln.startswith(("assert", ">"))]
+            tail = [ln.rstrip() for ln in out.splitlines()[-3:] if ln.strip()]
+            for ln in (ev[-24:] + tail):
+                print(f"      {ln[:200]}")
             failures.append(f"قائمةُ الـCI: {len(named) or '?'} سقوطاً"
                             + (" — " + " · ".join(named[:4]) if named else ""))
         if failures:

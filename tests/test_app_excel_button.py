@@ -26,12 +26,19 @@ from openpyxl import load_workbook
 
 from statement_qa.export_from_state import export_xlsx_from_state
 from test_exports import PROFILE, _synthetic_run
+from tools import to_xlsx as TO_XLSX
 from tools.to_xlsx import load as _load
 
 ROOT = Path(__file__).resolve().parents[1]
 
 #: خليّةٌ موجودةٌ في ملفٍّ وغائبةٌ في الآخر (فرقُ الحجم لا يُمرّ صامتًا).
 _MISSING = "<خليّةٌ غائبة>"
+
+#: **بصمةٌ مُثبَّتةٌ للقياس** — يُقرأ بها الزمنُ في الملفّين فيصيران حتميَّين. **وهي بالصيغة الحقيقيّة
+#: نفسِها** (`%Y-%m-%d %H:%M %z`) لا بصيغةٍ لا تُشبهها (R126-2 · مراجعة ١٢٦: التعليقُ كان يقول
+#: «لا تُشبه زمنًا حقيقيًّا» وهي تشبهه تمامًا) ⇒ **فالحتميّةُ من التثبيت لا من شكل القيمة**،
+#: والضابطُ أدناه يمسك ظهورَ أيّ زمنٍ غيرِ مثبَّتٍ معها.
+PINNED_STAMP = "2026-01-01 00:00 +0000"
 
 #: **الأصنافُ المُعلَنة — ولكلٍّ سببُه المكتوب** (R93-4 · قرار المالك (أ) «فرقٌ مسمًّى محدود» · وبعد
 #: R94-3 صارت **خمسةَ فروقٍ مسمّاة** لا واحدًا — والقائمةُ مكتوبةٌ في ورقة «كيف تُقرأ هذه الأوراق» نفسِها):
@@ -137,8 +144,16 @@ def _both_files(tmp_path) -> tuple[Path, Path]:
     return out_app, out_cli
 
 
-def test_the_button_file_equals_the_cli_file_except_named_classes(tmp_path) -> None:
-    """**كلُّ خليّةٍ تُقابَل في الاتجاهين، وكلُّ فرقٍ يُصنَّف** — ولا حدَّ إجماليًّا يُخفي نموًّا."""
+def test_the_button_file_equals_the_cli_file_except_named_classes(tmp_path, monkeypatch) -> None:
+    """**كلُّ خليّةٍ تُقابَل في الاتجاهين، وكلُّ فرقٍ يُصنَّف** — ولا حدَّ إجماليًّا يُخفي نموًّا.
+
+    **والزمنُ مُثبَّتٌ في القياس** (تشخيص 2026-10-15): الملفّان يُرندَران في **لحظتين** (الزرُّ ثمّ
+    الـCLI في عمليّةٍ ثانية) ⇒ فخليّةُ «تاريخ التصدير» كانت تختلف **حين تقع اللحظتان على دقيقتين**
+    ⇒ **فرقٌ بلا صنفٍ مُعلَن** ⇒ بوّابةٌ تحمرّ بلا علاقةٍ بأيّ تغيير (قِيس: `f05dd64` أخضر · `49ce6fe`
+    أحمر · `2bf9900` أخضرُ بنفس الكود). **والعلاجُ تثبيتُ البصمة في القياس** لا التسامحُ مع فرقها ⇒
+    فالخليّةُ تبقى مُقابَلةً كاملةً (وأيُّ فرقٍ حقيقيّ فيها يعضّ).
+    """
+    monkeypatch.setenv(TO_XLSX.EXPORT_STAMP_ENV, PINNED_STAMP)
     a, b = (_cells(p) for p in _both_files(tmp_path))
     assert set(a) == set(b), f"أوراقٌ في أحد الملفّين فقط: {sorted(set(a) ^ set(b))}"
 
@@ -289,3 +304,24 @@ def test_the_button_is_wired_in_the_interface() -> None:
     called = {getattr(c.func, "id", "") or getattr(c.func, "attr", "")
               for c in ast.walk(fn) if isinstance(c, ast.Call)}
     assert "export_xlsx_from_state" in called, "الدالّةُ لا تستدعي النواةَ — طريقٌ ثانٍ للملفّ"
+
+
+def test_the_two_files_carry_one_pinned_export_stamp(tmp_path, monkeypatch) -> None:
+    """**والعلاجُ يُقاس:** مفتاحُ التثبيت يجعل خليّةَ «تاريخ التصدير» **واحدةً في الملفّين**.
+    **والقيمةُ المُثبَّتةُ بالصيغة الحقيقيّة نفسِها** (R126-2) ⇒ فالحتميّةُ من التثبيت لا من صيغةٍ
+    مختلفة، والباقي مُقابَلٌ كاملًا (وضابطُ السطر التالي يمسك ظهورَ أيّ زمنٍ غيرِ مثبَّتٍ معها).
+
+    **والعضُّ:** إزالةُ المفتاح من `to_xlsx.export_stamp` تُرجع `datetime.now` ⇒ يسقط هذا الضابط
+    (لأنّ القيمةَ المُثبَّتةَ لا تظهر) — فيُقاس الحدُّ الذي يمنع عودةَ العطب.
+    """
+    monkeypatch.setenv(TO_XLSX.EXPORT_STAMP_ENV, PINNED_STAMP)
+    a, b = _both_files(tmp_path)
+    seen = []
+    for path in (a, b):
+        cells = _cells(path)
+        flat = [c for grid in cells.values() for row in grid for c in row]
+        assert PINNED_STAMP in flat, f"البصمةُ المُثبَّتةُ غائبةٌ عن {path.name}: لم يُقرأ المفتاح"
+        assert not [c for c in flat if isinstance(c, str) and c[:2] == "20" and c.endswith(("+0000", "+0300"))
+                    and c != PINNED_STAMP], "زمنٌ حقيقيٌّ ظهر مع البصمة المُثبَّتة ⇒ الزمنُ لا يُقرأ من موضعٍ واحد"
+        seen.append(flat.count(PINNED_STAMP))
+    assert seen == [1, 1], f"البصمةُ ليست مرّةً واحدةً في كلّ ملفّ: {seen}"

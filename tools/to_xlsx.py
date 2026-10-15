@@ -33,11 +33,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -56,6 +58,29 @@ from statement_qa.gap_ledger import (  # noqa: E402
     PageFacts, build_gap_entries, debit_credit, identity,
 )
 from statement_qa.vlm_reader import chain_derive  # noqa: E402
+
+#: **بصمةُ التصدير من موضعٍ واحد، ولها مِفتاحُ تثبيتٍ مُعلَن (تشخيص 2026-10-15 · عطبُ البوّابة الكاذب):**
+#: الخليّةُ «تاريخ التصدير» كانت تُبنى بـ`datetime.now()` في **كلّ رندر** ⇒ وحين يُقابَل ملفان
+#: رُندِرا في **لحظتين** (زرُّ التطبيق ثمّ الـCLI في عمليّةٍ ثانية) ويقعان على **دقيقتين مختلفتين**،
+#: يظهر **فرقٌ بلا صنفٍ مُعلَن** في `tests/test_app_excel_button.py` ⇒ فتحمرّ البوّابةُ في الـCI
+#: **بلا علاقةٍ بأيّ تغييرٍ في الكود**. **قِيس:** `f05dd64` أخضر ثمّ `49ce6fe` أحمر **ثمّ** `2bf9900`
+#: أخضرُ بنفس الكود تمامًا — والتغيّرُ الوحيدُ دقيقةُ الساعة. **والمقيسُ لا المُشتقّ (R126-2):**
+#: **٠ من ٢١** زوجَ رندرةٍ محلّيًّا (تقرير الجولة ١٢٥) · **وحمرٌ واحدٌ في ٢٩٩ تشغيلًا** منذ دخول
+#: الاختبار (مسحُ المراجعة ١٢٦) — وكان هنا «3.16%» **وهو قسمةٌ لا قياس** ⇒ لا يُنشر معدّلٌ مشتقّ.
+#: **والعلاجُ من الجذر لا من العَرَض:** موضعٌ واحد يُقرأ منه الزمن، **ومِفتاحُ تثبيتٍ** يجعله واحدًا
+#: في القياس ⇒ فلا يُتوانُ عن فرقٍ حقيقيّ في الخليّة نفسها (وهو ما كان سيحدث لو أُعلن صنفٌ متسامح).
+#: **والنمطُ معروفٌ في البناء القابلِ لإعادة الإنتاج** (`SOURCE_DATE_EPOCH`) — بمفتاحٍ خاصٍّ بالتصدير.
+#: **وموضعُه بعد الاستيراد (R126-2):** كان معرَّفًا **بين سطور الاستيراد** ⇒ صار بعدها كلِّها.
+EXPORT_STAMP_ENV = "RAJHI_EXPORT_STAMP"
+
+
+def export_stamp() -> str:
+    """زمنُ التصدير — **مُثبَّتٌ إن طُلب** (فأيّ مقارنةٍ بين ملفّين تصير حتميّة)."""
+    pinned = os.environ.get(EXPORT_STAMP_ENV)
+    if pinned:
+        return pinned
+    return datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M %z")
+
 
 SIDE_AR = {"credit": "دائن", "debit": "مدين", "": "غير محدّد"}
 
@@ -1025,7 +1050,7 @@ def build(run: Path, out: Path, gate: Path | None,
                     "(بلا مسح ولا صور ولا نموذج لغوي)")
                     if period_layout else
                     f"{run} — نتائج القراءة الفعلية للكشف ({_n_pages_read(rows, per_page)} ورقة ممسوحة)"),
-        ("تاريخ التصدير", datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M %z")),
+        ("تاريخ التصدير", export_stamp()),
         # **قائمةُ الفروق في الملفّ نفسِه (R94-3 · قرارُ المالك «(أ) بالقائمة الصحيحة»):** كان النصُّ
         # الظاهر يقول «بفرقٍ مُسمًّى واحد» والمقيسُ ستّةُ أصنافٍ قبل إصلاح المخبّآت وخمسةٌ بعده ⇒ فالرقمُ
         # الظاهر كان يخالف الملفّ، والفرقُ الحقيقيّ مكتوبٌ الآن في الورقة التي تُفسّر الأوراق لا في هامش.

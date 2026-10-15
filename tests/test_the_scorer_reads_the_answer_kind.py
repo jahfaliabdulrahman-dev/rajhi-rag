@@ -320,3 +320,45 @@ def test_the_run_path_has_one_home_for_the_box_and_the_trace():
     # والمطبوعاتُ القديمة لم تبقَ: لا أثرَ مبنيًّا بيدٍ في مسار الجولة
     legacy = 'msg.get("refused")}) if "answer" in msg else None'
     assert legacy not in src, "ما زال الأثرُ يُبنى بيدٍ في مسار الجولة"
+
+
+# ── ⑫ الجوابُ المقطوعُ لا يُصوَّب (R125-1 · مراجعة ١٢٥) ─────────────────────────────────────
+def test_a_cut_answer_is_not_scored_correct_by_either_scorer():
+    """**الثابت:** ما سمّاه التطبيقُ ناقصًا لا يُحسب صحيحًا في المصحِّحين، **ويُسمّى سببُه**.
+
+    **والمقيسُ الذي أغلقه:** `cit-02` سؤالُ استشهادٍ قُطع مرّتين (r108-03 · r123) ⇒ فلو قُطع ثالثةً
+    والأثرُ محفوظٌ على صفحته الصحيحة، لقرأ القياسُ «عاد» **وهو ناقصٌ** ⇒ فيُصوّب المنشورُ ما يُحذّر
+    منه التطبيقُ نفسُه. **والحكمُ في موضعٍ واحد (`_score_common`) فلا يتفرّق مصحِّحان.**
+    """
+    rows = [{"page": 4, "row": 1, "page_row": 1, "date": "2026-01-02", "movement": "100.00",
+             "balance": "100.00", "text": "س"}]
+    q = _q(metric="citation", expect="rows_matching", derive={"kind": "rows_matching", "page": 4})
+    tr = _trace(used_row_nos=[1], tools_used=["page_rows"])
+
+    # (أ) النقيض: الأثرُ الصحيحُ بلا قطعٍ **يُصوَّب** ⇒ فالضابطُ يقيس القطعَ لا شيئًا آخر
+    ok_plain, why_plain = ev.score_answer(q, [(4, "100.00")], "حركةٌ بمبلغ 100.00", tr, rows)
+    assert ok_plain, f"أثرٌ صحيحٌ بلا قطعٍ لم يُصوَّب ⇒ الضابطُ لا يقيس ما يدّعيه: {why_plain}"
+
+    # (ب) والقطعُ يُسقطه في المصحِّحين، وكلٌّ يسمّي السبب
+    tr_cut = _trace(used_row_nos=[1], tools_used=["page_rows"], truncated=True)
+    ok_new, why_new = ev.score_answer(q, [(4, "100.00")], "نصٌّ ناقص", tr_cut, rows)
+    ok_old, why_old = ev.score_answer_by_text(q, [(4, "100.00")], "نصٌّ ناقص", tr_cut, rows)
+    assert not ok_new, f"المصحِّحُ الجديد صوّب جوابًا مقطوعًا: {why_new}"
+    assert not ok_old, f"المصحِّحُ القديم صوّب جوابًا مقطوعًا: {why_old}"
+    assert "قُطع" in why_new and "قُطع" in why_old, (why_new, why_old)
+
+    # (ج) **والحكمُ لا يمحو الأثر:** الأثرُ يبقى للمحاسبة والقراءة
+    assert tr_cut.used_row_nos == [1] and tr_cut.tools_used == ["page_rows"], tr_cut.__dict__
+
+
+def test_the_cut_rule_lives_in_one_place():
+    """**وموضعُه واحدٌ بالبناء:** `truncated` لا يُقرأ في `score_answer` ولا في `score_answer_by_text`
+    (يقرآن الإشاراتِ المتغيّرةَ فقط: `answer_kind`)، بل في `_score_common` وحدها ⇒ فلا يتفرّق الحكمان."""
+    src = pathlib.Path(ev.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    fns = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    for name in ("score_answer", "score_answer_by_text"):
+        body = ast.get_source_segment(src, fns[name]) or ""
+        assert "truncated" not in body, f"{name} تقرأ القطع بنفسها ⇒ الحكمُ في موضعين"
+    common = ast.get_source_segment(src, fns["_score_common"]) or ""
+    assert "truncated" in common, "_score_common لا تقرأ القطع ⇒ القاعدةُ بلا موضع"

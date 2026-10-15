@@ -1056,6 +1056,14 @@ def _score_common(q: dict, truth_val, ans: str, res, rows: list[dict], *,
     **إشارة الجواب** (`Answer.kind`)، والمصحِّحُ القديم من النصّ (وهو محفوظٌ لأنّ سطر
     «بالجديد X · وبالقديم Y» يقيسه)، **والمنطقُ الباقي واحدٌ** فلا يفترقان بغير هذين الحكمين.
     """
+    # **والجوابُ المقطوعُ لا يُصوَّب (R125-1 · مراجعة ١٢٥ · الثابت):** التطبيقُ نفسُه يقول للمستخدم في
+    # هذه الحالة «نصُّ الجواب ناقصٌ لا يُعتمد رقمًا» ⇒ فالمصحِّحُ لا يعدّه إصابةً. **وموضعُ الحكم واحدٌ**
+    # (هنا) فلا يختلف مصحِّحان في قراءة القطع، **والأثرُ يبقى في السجلّ** للمحاسبة والقراءة — الحكمُ لا
+    # يمحو الأثر. **والعلّةُ التي أُغلقت:** سؤالُ الاستشهاد `cit-02` قُطع مرّتين (r108-03 · r123)، فلو
+    # قُطع والأثرُ على صفحته الصحيحة لحُسب «عاد» — فيُصوّب المنشورُ ما يُحذّر منه التطبيق.
+    if getattr(res, "truncated", False):
+        return False, ("قُطع الردُّ عند حدّ الرموز (length) — الجوابُ ناقصٌ لا يُصوَّب، "
+                       "والأثرُ محفوظٌ في السجلّ")
     nums = extract_numbers(ans)
     m = q["metric"]
     used = list(getattr(res, "used_row_nos", None) or [])
@@ -1198,6 +1206,8 @@ class _Trace:
         self.scope = rec.get("scope") or "in_scope"
         #: **إشارةُ نوع الجواب المحفوظة مع الجولة** (قرار 231500) — يقرؤها المصحِّحُ المعمول به.
         self.answer_kind = str(rec.get("answer_kind") or "")
+        #: **حالةُ القطع** (R124-1): `length` ⇒ جوابٌ ناقصٌ وأثرٌ محفوظ.
+        self.truncated = bool(rec.get("truncated"))
         #: **وهل سُجِّلت الإشارةُ أصلًا؟** سجلٌّ كُتب **قبل** المخطّط الجديد لا يحمل الحقلَ ⇒
         #: فلا يجوز أن يُحكم عليه بمصحِّحٍ يقرأ ما لم يُسجَّل (يُسمّى عطبَ مرسًى ويُقرأ بالقديم).
         self.answer_kind_recorded = "answer_kind" in rec
@@ -1219,6 +1229,8 @@ def box_of(r) -> dict:
             "tools_used": list(getattr(r, "tools_used", None) or []),
             "scope": getattr(r, "scope", None),
             "answer_kind": str(getattr(r, "answer_kind", "") or ""),
+            # **والقطعُ حالةٌ مُسمّاةٌ تُحمل مع الأثر** (R124-1): تُعدّ في الجولة بلا بحثٍ في النثر.
+            "truncated": bool(getattr(r, "truncated", False)),
             "refused": bool(getattr(r, "refused", False))}
 
 
@@ -1231,6 +1243,7 @@ def trace_of(msg: dict):
         return None
     return _Trace({"used_row_nos": msg.get("used"), "tools_used": msg.get("tools_used"),
                    "scope": msg.get("scope"), "answer_kind": msg.get("answer_kind"),
+                   "truncated": msg.get("truncated"),
                    "refused": msg.get("refused")})
 
 
@@ -1600,6 +1613,7 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                          # **الإشارةُ والحكمان في السجلّ** (قرار 231500): السطرُ المقارِنُ يُقرأ
                          # من الملفّ ويُعاد فحصُه، وكلُّ اختلافٍ يُسمّى بسببٍ من مصحِّحٍ واحد.
                          "answer_kind": (getattr(res, "answer_kind", "") or "") if res else None,
+                         "truncated": bool(getattr(res, "truncated", False)) if res else None,
                          "ok_by_text": ok_text,
                          "why_by_text": why_text,
                          "refused": bool(getattr(res, "refused", False)) if res else None,
@@ -1650,7 +1664,9 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                                    "results": [merged[k] for k in order if k in merged]},
                                   ensure_ascii=False, indent=1))   # **حفظٌ تدريجيّ: قتلُ العملية لا يُهدر جواباً**
         tools = ",".join(tools_now) or "—"
-        print(f"{i:02d} {q['id']:9s} {'✅' if ok else '❌'} {why}  · أدوات: {tools}", flush=True)
+        # **والقطعُ يُطبع باسمه في السطر نفسه** (R124-1): تُعدّه الجولةُ بلا بحثٍ في النثر.
+        cut = "  · ✂️ قُطع الردُّ (length) — الأثرُ محفوظٌ والجوابُ ناقص" if getattr(res, "truncated", False) else ""
+        print(f"{i:02d} {q['id']:9s} {'✅' if ok else '❌'} {why}  · أدوات: {tools}{cut}", flush=True)
 
     after = _key_usage()
     results = [done[k] for k in order if k in done]
@@ -1733,6 +1749,12 @@ def _print_metrics(results: list[dict]) -> None:
     if subs or susp:
         print(f"\n➖ **المُستبعَدُ من المقام (مُعلَن لا مخفيّ):** نوائبُ (مهلةٌ/عطبٌ) **{len(subs)}** · "
               f"أثرٌ مشكوكُ القصّ **{len(susp)}** ⇒ الحكمُ على **{len(judged)}** سجلاً فقط.")
+    # **وعددُ الردود المقطوعة بأسمائها** (قرارُ المالك `20261015-175500`): يُطبع دائمًا ولو صفرًا —
+    # **فالصفرُ المطبوعُ شاهدٌ** لا غيابُ سطر (والمرجعُ: r108-03 ⇒ ١ · r123 ⇒ ٢).
+    cut = [r for r in results if r.get("truncated")]
+    names = " · ".join(str(r.get("id")) for r in cut) if cut else "لا شيء"
+    print(f"\n✂️ **الردودُ المقطوعة (length): {len(cut)}** — بأسمائها: {names}"
+          f"   (المرجعُ: r108-03 ⇒ ١ · r123 ⇒ ٢)")
     print("\nتفصيلٌ بالقاعدة:")
     for k, oks in sorted(by_kind.items(), key=lambda kv: -len(kv[1])):
         print(f"  {k:16s} {sum(oks):2d}/{len(oks):2d}")
