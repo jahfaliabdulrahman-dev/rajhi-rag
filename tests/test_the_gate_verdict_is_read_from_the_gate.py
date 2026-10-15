@@ -198,3 +198,25 @@ def test_a_new_collection_error_stops_the_count_even_where_a_bound_is_declared(m
     assert rc._test_count() is None, "بلا إعلان: أيُّ خطأٍ يُسقِط العدّ (الافتراضُ صفر)"
     assert not rc.collection_error_lines("1235 tests collected in 1.30s\n")
     assert len(rc.collection_error_lines(one)) == 1
+
+# ── ⑦ الحدُّ المُعلَن يجب أن يصل الخطوة فعلًا — لا أن يُبتلع في تعليقٍ بجواره ──────────────
+def test_the_declared_bound_really_reaches_the_claims_step():
+    """**عطبٌ وقع فعلًا وهو يُغلَق بضابط (قاسه الـCI في التشغيل نفسه):** تعليقٌ انتهى بلا سطرٍ جديد
+    فالتصقت به خانةُ البيئة ⇒ صارت **جزءًا من التعليق** ⇒ الخطوةُ قرأت «المُعلَن ٠» وأسقطت العدّ
+    (‏`⛔ خطأُ جمعٍ غيرُ مُعلَن (19 والمُعلَنُ 0)`). **فالحرسُ يقرأ الملفَّ كـYAML لا كنصّ:** خانةٌ
+    مُعلَنةٌ يجب أن تكون **مفتاحًا** في كتلة `env` للخطوة — **وبالاسم الواحد الذي تقرؤه الوحدة.**"""
+    import yaml
+
+    from tools import render_claims as rc
+
+    doc = yaml.safe_load((ROOT / ".github/workflows/publish-guard.yml").read_text(encoding="utf-8"))
+    steps = [s for job in doc["jobs"].values() for s in (job.get("steps") or [])]
+    claims = [s for s in steps if s.get("id") == "gate_claims"]
+    assert len(claims) == 1, f"خطوةُ gate_claims ليست واحدةً: {len(claims)}"
+    env = claims[0].get("env") or {}
+    assert env.get("RAJHI_CLAIMS_ENV") == "ci-claims", env
+    bound = env.get(rc._ALLOW_ENV)
+    assert bound is not None, (
+        f"الحدُّ المُعلَن ليس مفتاحًا في `env` للخطوة (ابتلعه تعليقٌ بجواره؟) — المفاتيح: {sorted(env)}")
+    assert str(bound).strip().isdigit(), f"الحدُّ ليس عددًا: {bound!r}"
+    assert rc._allowed_errors() == 0, "الافتراضُ بلا إعلان يجب أن يكون صفرًا (وإلّا فقد الإعلانُ معناه)"
