@@ -20,6 +20,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from tools import eval_questions as ev  # noqa: E402
+from tools import pack_io  # noqa: E402
 
 
 def _write(root: pathlib.Path, name: str, *, mtime: float, rows: list[dict]) -> pathlib.Path:
@@ -95,8 +96,14 @@ def test_the_estimate_scales_and_vanishes_without_a_file(pack):
 def test_the_real_run_on_this_machine_yields_an_estimate():
     """**وعلى بيانات المالك:** أحدثُ جولةٍ حقيقيّة تُنتج تقديرًا **مُسمّى الحقل** — وهذا هو العطبُ
     الذي كان يقول «لا تقدير» قبل الإصلاح. تُتخطّى في بيئةٍ بلا بيانات (الـCI) بحدٍّ مُعلَن."""
-    if not (pathlib.Path.home() / "Projects" / "rajhi-rag" / "data" / "eval_pack").is_dir():
-        pytest.skip("لا بياناتُ جولاتٍ في هذا الشجر (لا تصل الـCI) — تُقاس على جهاز المالك")
+    # **والتخطّي بجذر الدالّة نفسِه (R126-1 · مراجعة ١٢٦):** كان الشرطُ ينظر في
+    # `Path.home()/Projects/rajhi-rag` — **مسارُ نسخةٍ واحدةٍ بعينها** — والدالّةُ تقرأ
+    # `pack_io.data_root()` (شجرةُ العمل → الشجرةُ الأمّ بحكم `git-common-dir`) ⇒ ففي نسخةٍ أخرى
+    # على الجهاز نفسه **يوجد** المسارُ المخمَّن ولا توجد الجولاتُ في الجذر المقروء
+    # ⇒ **يسقط بدل أن يتخطّى** (قِيس: `1 failed` على الرأس وعلى `main`). والشرطُ الآن على
+    # الجذر الذي تقرؤه الدالّة ⇒ فيتخطّى حيث لا جولات، ويسقط حيث الجولاتُ ناقصة (وهو ما يحرسه).
+    if not (pack_io.data_root() / "data" / "eval_pack").is_dir():
+        pytest.skip("لا بياناتُ جولاتٍ في جذر الأدلّة المقروء (لا تصل الـCI) — تُقاس حيث تكون الجولات")
     got = ev.last_billed_run()
     assert got is not None, "لا جولةَ محفوظةً تُقرأ ⇒ التقديرُ لا يُطبع (عطبُ R117-7)"
     assert got["field"] in ("cost_billed_usd", "spent_after_usd") and got["questions"] > 0
