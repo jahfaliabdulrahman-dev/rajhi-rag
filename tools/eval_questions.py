@@ -452,7 +452,24 @@ def _spent_since(before: dict | None, cur: dict | None) -> float | None:
 
 def _price_source(a) -> str:
     """مصدرُ السعر — **يُكتب في ملفّ الجولة** (شرطُ مراجعة ١١٢: السعرُ جزءٌ من الدليل)."""
-    return "cli" if getattr(a, "price_in_per_m", None) is not None else "models-list"
+    return "cli" if getattr(a, "price_in_per_m", None) is not None else "provider-max-price"
+
+
+def _resolve_ceiling(a) -> tuple[float, float] | None:
+    """**حدُّ الطلب**: ما نُرسله للمزوّد (`provider.max_price`) — أو سعرٌ صريحٌ من سطر الأمر.
+
+    **وهو السعرُ الذي يدخل قانونَ المحاسَبة** (R122-1): لا سعرُ القائمة (فهو **لا يخدم مضيفًا واحدًا**
+    تحت الحدّ اليوم، وقِيس أنّه كان يُضاعف المحاسَب).
+    """
+    if (getattr(a, "price_in_per_m", None) is not None
+            and getattr(a, "price_out_per_m", None) is not None):
+        return float(a.price_in_per_m), float(a.price_out_per_m)
+    from statement_qa.qa import effective_model                       # noqa: PLC0415
+
+    mp = provider_max_price(effective_model(getattr(a, "model", None)))   # ← من هذه الوحدة
+    if not mp or not (mp.get("prompt") or mp.get("completion")):
+        return None
+    return float(mp["prompt"]), float(mp["completion"])
 
 
 def _resolve_price(a) -> tuple[float, float] | None:
@@ -810,20 +827,26 @@ def host_max_price(model_id: str) -> tuple[float, float] | None:
 def billed_reply_cost(tin: int, tout: int, cost: float | None, price_in_per_m: float,
                       price_out_per_m: float, host_high: tuple[float, float] | None
                       ) -> tuple[float, str] | None:
-    """كلفةُ ردٍّ **حدًّا أعلى لما يُحاسَب عليه** — ومعها **مصدرُها مُعلَنًا** (R115-1).
+    """كلفةُ ردٍّ **لا تتجاوز ما يُحاسِب به المزوّد** — ومعها **مصدرُها مُعلَنًا**.
 
-    ① **`cost` المزوّد** (المصدرُ الأوّل) — وهو الأصدق.
-    ② **ويُقارَن بـ`رموز الردّ × سعر القائمة` ويُؤخذ الأكبر:** فالقائمةُ **حدٌّ أدنى** (٣٣ مضيفًا
-       بأسعارٍ تصل ستّةَ أضعافها) ⇒ فالوجودُ في المقارنة يمنع **النقصَ** إن أُرسل `cost` أقلَّ من الواقع،
-       **والحاجزُ لا يَصغر بسببه**.
-    ③ **ولا `cost` ⇒ رموزُ الردّ × أعلى سعر مضيفٍ مُعلَنًا**؛ **وإن تعذّرت القراءةُ ⇒ `None`**
-       (فلا سعرَ يُخترع، والحلقةُ تتوقّف مُسمّاةً بدل أن تمضي بسقفٍ كاذب).
+    ① **`cost` المزوّد ⇒ هو، ولا يعلوه شيء** (R122-1 · مراجعة ١٢٢): كان يُقارَن بـ«الرموز × سعر
+       القائمة» ويُؤخذ **الأكبر**، خوفَ أن يُرسل المزوّدُ `cost` **أقلَّ** من الواقع. **والفرضُ سقط
+       بقياس (2026-10-15):** القائمةُ **$0.15/$0.50** لكلّ مليون، والمضيفون تحت `max_price`
+       (**١٣ من ٣٤**) مدخلُهم **$0.04–$0.12** ⇒ **كلُّهم دون القائمة** ⇒ فالأرضيةُ لم تحرس شيئًا
+       **وضاعفت المحاسَب:** السجلُّ `$0.004933` ⇔ عدّادُ المفتاح **`$0.002519`** (ثابتٌ في قراءتين
+       بعد ٤٤ دقيقة) ⇒ **×1.96** ⇒ فالسقفُ يقف عند **نصف الفعليّ** والرقمُ المنشور **مضاعف**.
+       **والثابتُ الآن:** المُحاسَبُ لا يتجاوز ما يُحاسِب به المزوّد ⇒ `cost` يُؤخذ كما هو.
+    ② **وبلا `cost` ⇒ الرموز × `max_price`** — وهو **حدُّ الطلب نفسِه** (السعرُ الذي نُرسله للمزوّد في
+       `provider.max_price`) لا سعرُ القائمة، فلا يُبنى الحدُّ على سعرٍ لا يخدم أحدًا من مضيفي النموذج.
+    ③ **وإن لم يُعرَف السعرُ (صفرًا) ⇒ أعلى سعرِ مضيفٍ يُعلَن**، **وإن تعذّرت قراءتُه ⇒ `None`**
+       (فلا سعرَ يُخترع، والحلقةُ تتوقّف مُسمّاةً بدل أن تمضي بسقفٍ كاذب). **وأعلى سعرِ المضيف يبقى
+       شاهدًا يُطبع في الدليل**، ولم يبقَ رتبةً في القانون حيث عُرف `max_price`.
     """
-    list_cost = (tin * price_in_per_m + tout * price_out_per_m) / 1e6
     if cost is not None:
-        if float(cost) >= list_cost:
-            return float(cost), "provider-cost"
-        return list_cost, "provider-cost+list-floor"
+        return float(cost), "provider-cost"
+    ceiling = (tin * price_in_per_m + tout * price_out_per_m) / 1e6
+    if ceiling > 0:
+        return ceiling, "provider-max-price"
     if host_high is None:
         return None
     return (tin * host_high[0] + tout * host_high[1]) / 1e6, "host-max-price"
@@ -834,7 +857,7 @@ def billed_window(replies: list[tuple[int, int, float | None]], price_in_per_m: 
                   ) -> tuple[float, str, int] | None:
     """كلفةُ نافذةٍ **حدًّا أعلى لما يُحاسَب عليه** = مجموعُ كلفة ردودها، ومصدرُها، وعددُ ردودها.
 
-    **ومصدرُ النافذة يُعلَن جامعةً** (`provider-cost` · `provider-cost+list-floor` · `host-max-price`)
+    **ومصدرُ النافذة يُعلَن جامعةً** (`provider-cost` · `provider-max-price` · `host-max-price`)
     ⇒ فيُقرأ من الملفّ **أيُّ مرتبةٍ حكمت**، ولا يُدَّعى غيرُها.
     """
     if not replies:
@@ -1384,7 +1407,13 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     todo = [q for q in qs if q["id"] not in done]
     # **والسعرُ يُقرأ عند الطلب فقط:** بلا سقفٍ لا حاجةَ لسعر (ولا نداءَ شبكةٍ بلا سبب) ⇒ فلا يُقاس
     # سعرٌ لا يستهلكه قانون. **وقانونُ السقف يستهلكه** ⇒ فيسقط الفشلُ مُغلَقًا إن لم يُقرأ.
-    price_pair = _resolve_price(a) if a.budget else None
+    # **والقانونُ يستهلك «حدَّ الطلب» لا سعرَ القائمة** (R122-1 · مراجعة ١٢٢): كان القانونُ يأخذ
+    # «الرموز × سعر القائمة» أرضيةً حين يُرسل المزوّدُ `cost` أدنى منها — والقائمةُ اليوم **أعلى من
+    # كلّ مضيفٍ تحت `max_price`** ⇒ فتضاعف المحاسَب (السجلُّ $0.004933 ⇔ العدّادُ $0.002519).
+    # فالسعرُ الذي يدخل القانونَ هو **ما نُرسله للمزوّد** (`provider.max_price`)، أو ما يُصرّح به
+    # سطرُ الأمر — **وسعرُ القائمة يبقى شاهدًا يُطبع** ولا يحكم.
+    ceiling_pair = _resolve_ceiling(a) if a.budget else None
+    price_pair = _resolve_price(a) if a.budget else None        # ← شاهدٌ للطباعة فقط
     if a.budget:                       # **سقفٌ يُقاس بالحدّ لا بالتقدير** (S-2 · R110-1 · ثمّ R112-1)
         # كان `cap = budget / 0.01` ⇒ ٦٠ لخمسين سؤالًا ⇒ **لا يُلجِم أبدًا** ويُوكَل إلى تقديرٍ مُقنَّع.
         # **وبوّابتان قبل أوّل نداء (fail-closed):** شرطُ القرار «يُقرأ العدّادُ قبل وبعد» لا يتحقّق
@@ -1394,14 +1423,16 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
                   "قبل وبعد، والبعديّةُ بعد الخروج بثلاث دقائق) ⇒ **لا نداءَ مدفوعًا** · رمزُ الخروج 5.",
                   flush=True)
             return 5
-        if not price_pair:
-            print("⛔ سعرُ رمز النموذج لم يُقرأ (قائمةُ النماذج العامّة) ولا سعرَ صريحًا من سطر الأمر ⇒ "
-                  "**سقفُ السؤال لا يُحسب بحدٍّ مشهود** — وهو عينُ عطب REQ-108-02 (سعرٌ من رصيدِ حسابٍ "
-                  "متأخّر) ⇒ **لا نداءَ مدفوعًا** · رمزُ الخروج 5.", flush=True)
+        if not ceiling_pair:
+            print("⛔ حدُّ الطلب لم يُعرَف (لا سعرَ صريحًا في سطر الأمر ولا `provider.max_price`) ⇒ "
+                  "**المُحاسَبُ لا يُحسب بحدٍّ مشهود** ⇒ **لا نداءَ مدفوعًا** · رمزُ الخروج 5.", flush=True)
             return 5
-        print(f"      سعرُ القائمة (أرضيةُ العرض، لا حدُّ السقف): ${price_pair[0]:.4f}/M مدخلًا · "
-              f"${price_pair[1]:.4f}/M مخرجًا (models-list) · والحاكمُ كلفةُ الردود المحاسَبة (R115-1) "
-              f"({_price_source(a)})", flush=True)
+        print(f"      **حدُّ الطلب (هو الحاكمُ في القانون): ${ceiling_pair[0]:.4f}/M مدخلًا · "
+              f"${ceiling_pair[1]:.4f}/M مخرجًا · المصدرُ {_price_source(a)}**", flush=True)
+        if price_pair:
+            print(f"      وشاهدٌ لا يحكم: سعرُ القائمة ${price_pair[0]:.4f}/M مدخلًا · "
+                  f"${price_pair[1]:.4f}/M مخرجًا (models-list) — يُطبع لأنّه كان أرضيةَ المحاسَبةَ "
+                  f"قبل R122-1 · وأعلى سعرِ مضيفٍ يُطبع أدناه", flush=True)
     if getattr(a, "only", None):           # إعادةُ أسئلةٍ بعينها (بعد تصحيح نطاقِها أو صياغتِها)
         want = {x.strip() for x in a.only.split(",") if x.strip()}
         todo = [q for q in qs if q["id"] in want]
@@ -1452,7 +1483,7 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     # مُعلَنًا «نجاحًا». والتوقّفُ ليس حكمًا على الأجوبة ⇒ لا يجوز أن يُصبح رمزَ نجاح.
     observations: list[tuple[float, int]] = []     # (كلفةُ نافذةٍ محاسَبة, عددُ ردودها) — R115-1
     spent_tokens = 0.0                             # المُنفَقُ من الرموز × السعر — **لحظيّ، وهو ما يحكم**
-    price_in, price_out = price_pair or (0.0, 0.0)
+    price_in, price_out = ceiling_pair or (0.0, 0.0)     # ← حدُّ الطلب (لا سعرُ القائمة)
     meter_here: float | None = None
     for i, q in enumerate(todo, 1):
         # **قرارُ الشراء بحدِّ السؤال القادم (R110-1) × سعرِ نداءٍ مشهود (R112-1) × ومقسومٍ على الردود

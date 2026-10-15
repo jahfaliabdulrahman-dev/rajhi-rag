@@ -107,7 +107,8 @@ def _run(tmp_path, monkeypatch, meter: _Meter, budget: float, n: int = 8,
          tools_for: dict[str, int] | None = None, expire_on: set[str] | None = None,
          late: tuple[int, int] | None = None, no_replies: bool = False,
          cost_for: dict[str, float] | None = None, no_cost_on: set[str] | None = None,
-         local_for: set[str] | None = None, host_high: tuple[float, float] | None = (0.30, 0.30)):
+         local_for: set[str] | None = None, host_high: tuple[float, float] | None = (0.30, 0.30),
+         cli_price: tuple[float, float] | None = (0.30, 0.30), ceiling: dict | None = None):
     """تشغيلُ `run_questions` بمزوّدٍ مُحاكى. و`calls_for` = نداءاتُ سؤالٍ بعينه (والافتراضُ نداءٌ واحد)،
     و`tools_for` = أدواتُ أثرِه · و`expire_on` = أسئلةٌ **تنتهي مهلتُها** (خيطٌ يعمل ثمّ يُعلن نفسَه حيًّا)،
     و`late = (بعدَ أيّ سؤال, كم نداءً)** = رموزٌ تصل **بين النافذتين** (خيطٌ مُتخلّى عنه يردّ متأخّرًا).
@@ -184,7 +185,9 @@ def _run(tmp_path, monkeypatch, meter: _Meter, budget: float, n: int = 8,
     # **ومفتاحُ القياس ورتبةُ السعر بلا شبكة** (قرارُ 184500 §٢): يُثبَّتان في الضابط ليقيس
     # السلوكَ لا الاتّصال — والقياسُ لا يسقط إلى مفتاح التطبيق، وبلا مفتاحٍ يتوقّف مُسمّى.
     monkeypatch.setattr(m, "eval_key", lambda: "eval-key-test")
-    monkeypatch.setattr(m, "provider_max_price", lambda _mid: {"prompt": 0.12, "completion": 0.60})
+    monkeypatch.setattr(m, "provider_max_price",
+                        lambda _mid: ceiling if ceiling is not None
+                        else {"prompt": 0.12, "completion": 0.60})
     monkeypatch.setattr(m, "hosts_under", lambda _mid, _m: 21)
     monkeypatch.setattr(m, "hosts_total", lambda _mid: 33)
     # **وأعلى سعر مضيفٍ يُثبَّت في الضابط** (لا شبكةَ في الضوابط): رتبةُ البديل تُقاس بقيمةٍ معلَنة.
@@ -210,7 +213,8 @@ def _run(tmp_path, monkeypatch, meter: _Meter, budget: float, n: int = 8,
         # **والسعرُ صريحٌ من سطر الأمر (R112-1):** $0.30 للمليون مدخلًا ومخرجًا ⇒ فكلفةُ نداءٍ
         # واحدٍ $0.30 بالضبط. **وبلا سطرِ الأمر يُقرأ السعرُ من قائمة النماذج العامّة** — والضابطُ
         # لا يمسّ الشبكة بحال.
-        price_in_per_m=0.30, price_out_per_m=0.30)
+        price_in_per_m=None if cli_price is None else cli_price[0],
+        price_out_per_m=None if cli_price is None else cli_price[1])
     rc = m.run_questions(a, qs, None, {}, {})
     out = tmp_path / "answers.json"
     saved = json.loads(out.read_text()) if out.exists() else {}
@@ -455,20 +459,39 @@ def test_a_reply_without_a_cost_is_priced_at_the_highest_host_and_declared(tmp_p
     assert (rc, len(results)) == (0, 4), f"رمز {rc} وتغطية {len(results)}"
     second = results[1]
     assert second["cost_billed_usd"] > 0, "ردٌّ بلا cost قُرئ صفرًا (وهو ما تمنعه المراجعة)"
-    assert second["cost_source"] == "host-max-price", second
+    # **والاسمُ يتبع الحاكمَ (R122-1):** بلا `cost` يحكم **حدُّ الطلب** لا سعرُ القائمة ولا أعلى
+    # سعرِ مضيف ⇒ والرقمُ هو الرموز × الحدّ ($0.30 للسؤال المُحاكى بالضبط).
+    assert second["cost_source"] == "provider-max-price", second
     assert second["cost_billed_usd"] == pytest.approx(0.30, rel=1e-6), second
 
 
-def test_a_reply_without_a_price_and_without_a_host_list_stops_by_name(tmp_path, monkeypatch):
-    """**ولا يُخترع سعرٌ يحرس السقفَ كذبًا:** ردٌّ بلا `cost` وقائمةُ مضيفين غيرُ مقروءة ⇒
-    لا حدَّ أعلى ⇒ **توقّفٌ مُسمّى (٥)** بدل أن تمضي الجولةُ بسقفٍ وهميّ.
+def test_a_reply_without_a_cost_is_priced_at_the_ceiling_even_without_hosts(tmp_path, monkeypatch):
+    """**أُبطلت نسختُه السابقة بتاريخها وسببها (R122-1 · مراجعة ١٢٢):** كان يقول «بلا `cost` وبلا قائمة
+    مضيفين ⇒ توقّفٌ مُسمّى». **والحاكمُ الآن حدُّ الطلب** (لا أعلى سعرِ مضيف) ⇒ فقائمةُ المضيفين **لم
+    تبقَ رتبةً في القانون** ⇒ فسقوطُ قراءتها **لا يُسقط الجولة**، ويُسعَّر الردُّ بحدّ الطلب.
+    **والبابُ المغلَقُ يبقى محروسًا في الضابط التالي** (حين يجهل الحدُّ نفسُه).
     """
-    d = tmp_path / "unpriceable"
+    d = tmp_path / "no-hosts"
     d.mkdir(exist_ok=True)
     rc, results = _run(d, monkeypatch, _Meter(0.30), 20.0, n=4, no_cost_on={"س1"},
                        host_high=None)
-    assert rc == 5, f"لا سعرَ ولا قائمةَ مضيفين ⇒ المتوقَّعُ توقّفٌ مُسمّى (5) لا {rc}"
-    assert len(results) == 1, f"التوقّفُ بعد السؤال الأوّل لا بعد {len(results)}"
+    assert rc == 0, f"سقوطُ قراءة المضيفين أسقط الجولةَ برمز {rc} وهو ليس حاكمًا"
+    assert len(results) == 4, f"التغطيةُ {len(results)} من 4"
+    assert results[0]["cost_source"] == "provider-max-price", results[0]
+    assert results[0]["cost_billed_usd"] == pytest.approx(0.30, rel=1e-6), results[0]
+
+
+def test_a_reply_with_no_ceiling_and_no_hosts_stops_by_name(tmp_path, monkeypatch):
+    """**ولا يُخترع سعرٌ يحرس السقفَ كذبًا:** بلا `cost`، **والحدُّ نفسُه مجهول** (لا سطرَ أمرٍ ولا
+    `provider.max_price`)، وقائمةُ مضيفين غيرُ مقروءة ⇒ لا كلفةَ تُدَّعى ⇒ **توقّفٌ مُسمّى (٥)**."""
+    d = tmp_path / "unpriceable"
+    d.mkdir(exist_ok=True)
+    rc, results = _run(d, monkeypatch, _Meter(0.30), 20.0, n=4, no_cost_on={"س1"},
+                       host_high=None, cli_price=None,
+                       ceiling={"prompt": 0.0, "completion": 0.0})
+    assert rc == 5, f"لا حدَّ ولا قائمةَ مضيفين ⇒ المتوقَّعُ توقّفٌ مُسمّى (5) لا {rc}"
+    # **والرفضُ عند الإطلاق لا في منتصف الجولة** (أقوى من السابق: لا نداءَ مدفوعًا أصلًا)
+    assert len(results) == 0, f"التوقّفُ قبل أيّ سؤال ⇒ لا سجلَّ مدفوعًا (وجدتُ {len(results)})"
 
 
 def test_a_locally_answered_question_does_not_trip_the_no_price_door(tmp_path, monkeypatch):

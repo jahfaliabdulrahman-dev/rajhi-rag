@@ -60,16 +60,19 @@ def test_a_window_carries_its_own_tokens_by_the_published_price():
     كلفةُ الردود المحاسَبة** (`billed_window` · R115-1) لا `رموز × قائمة`.
     """
     m = _eval_module()
-    # ردٌّ يحمل `cost` المزوّد **أكبرَ** من رموزه × القائمة ⇒ يُؤخذ الأكبر (قبولُ مراجعة ١١٥).
+    # ردٌّ يحمل `cost` المزوّد ⇒ **يُؤخذ كما هو** (R122-1: المُحاسَبُ لا يتجاوز ما يُحاسِب به المزوّد).
     win = m.billed_window([(5200, 240, 0.0009)], PRICE_IN_PER_M, PRICE_OUT_PER_M, (0.225, 1.60))
     assert win is not None, "ردٌّ مشهود بلا كلفة"
     cost, src, replies = win
     assert replies == 1 and src == "provider-cost", win
     assert cost == pytest.approx(0.0009), cost
-    # وبلا `cost`: رموزُه × **أعلى سعر مضيفٍ** (لا سعرَ القائمة) — والفرقُ مقيس:
+    # وبلا `cost`: رموزُه × **حدِّ الطلب** (لا سعرَ القائمة ولا أعلى سعرِ مضيف) — R122-1:
     win2 = m.billed_window([(5200, 240, None)], PRICE_IN_PER_M, PRICE_OUT_PER_M, (0.225, 1.60))
-    assert win2[1] == "host-max-price", win2
-    assert win2[0] > (5200 * PRICE_IN_PER_M + 240 * PRICE_OUT_PER_M) / 1e6, "أعلى المضيف أرخصُ من القائمة؟"
+    # **وتغيّر اسمُ المرتبة مع تغيّر ما يحكم (R122-1):** بلا `cost` يحكم **حدُّ الطلب** لا أعلى
+    # سعرِ مضيف ⇒ والاسمُ يتبع الحاكم (`provider-max-price`)، وأعلى سعرِ المضيف شاهدٌ يُطبع.
+    assert win2[1] == "provider-max-price", win2
+    # **والمُقارَنُ الآن هو السعرُ المُمرَّر (حدُّ الطلب) بحرفه** — لا «أعلى المضيف» ولا القائمة
+    assert win2[0] == pytest.approx((5200 * PRICE_IN_PER_M + 240 * PRICE_OUT_PER_M) / 1e6), win2
     # والقائمةُ وحدَها **حدٌّ أدنى** (٤٢ مقابل ٦٧٫٥ سنتًا في القياس الحقيقيّ): تُنشر للمساءلة لا للسقف
     assert m.tokens_cost({"x": {"input_tokens": 5200, "output_tokens": 240}},
                          PRICE_IN_PER_M, PRICE_OUT_PER_M)[0] == pytest.approx(
@@ -105,7 +108,7 @@ def test_a_window_without_tokens_is_not_recorded_as_a_zero_price():
     # والقائمةُ وحدَها ليست حدًّا: **الرتبةُ تُسمّى**، ومع صفرِ رموزٍ لا كلفةَ تُدَّعى بلا سعر مضيف
     assert m.billed_reply_cost(0, 0, None, PRICE_IN_PER_M, PRICE_OUT_PER_M, (0.225, 1.60))[0] == 0.0
     got = m.billed_reply_cost(5200, 240, None, PRICE_IN_PER_M, PRICE_OUT_PER_M, (0.225, 1.60))
-    assert got[1] == "host-max-price" and got[0] > 0
+    assert got[1] == "provider-max-price" and got[0] > 0   # ← الاسمُ يتبع الحاكم (R122-1)
 
 
 # ── ② العطبُ يُعاد إنتاجه بالأرقام المقيسة (فلا يُغلق بادّعاء) ────────────────────────────────
@@ -244,17 +247,59 @@ def test_the_coverage_tool_reads_replies_when_the_file_has_them_and_declares_a_f
     assert calls2["q1"] < calls1["q1"], "الأرضيةُ ليست أدنى من العدد ⇒ فالفرضُ عن الأرضية خاطئ"
 
 
-def test_a_cost_below_the_list_floor_is_priced_at_the_floor_and_declared():
-    """**R116-1 (P3 · مراجعة ١١٦):** الرتبةُ الوسطى (‏`provider-cost+list-floor`) كانت **بلا ضابط**
-    فتمرّ طفرتُها. وتُقاس هنا: `cost` **أدنى** من «الرموز × القائمة» ⇒ يُؤخذ **الأكبر** (القائمة)
-    **ويُسمّى المصدرُ**، فلا ينقص المُنفَقُ إن أُرسل `cost` أقلَّ من الواقع.
+def test_the_providers_cost_is_the_accounted_cost_and_the_floor_is_gone():
+    """**R122-1 (P2 · مراجعة ١٢٢) — وقاعدةُ R116-1 أُبطلت بتاريخها وسببها لا حُذفت صامتة.**
+
+    **ما كانت R116-1 تفرضه:** «`cost` أدنى من الرموز × سعر القائمة ⇒ يُؤخذ **الأكبر** (القائمة)»،
+    خوفَ أن يُرسل المزوّدُ `cost` أقلَّ من الواقع. **والفرضُ سقط بقياس (2026-10-15):** القائمةُ
+    $0.15/$0.50 لكلّ مليون، والمضيفون تحت `max_price` (**١٣ من ٣٤**) مدخلُهم **$0.04–$0.12** ⇒
+    **كلُّهم دون القائمة** ⇒ فالأرضيةُ **ضاعفت المحاسَب**: السجلُّ `$0.004933` ⇔ عدّادُ المفتاح
+    `$0.002519` (ثابتٌ في قراءتين بعد ٤٤ دقيقة) = **×1.96** ⇒ والسقفُ يقف عند نصف الفعليّ.
+
+    **والثابتُ الآن:** المُحاسَبُ **لا يتجاوز ما يُحاسِب به المزوّد** ⇒ `cost` يُؤخذ كما هو.
     """
     from tools import eval_questions as m
 
-    got = m.billed_reply_cost(1_000_000, 0, 0.10, 0.30, 0.30, (0.225, 1.60))
+    cost, src = m.billed_reply_cost(1_000_000, 0, 0.10, 0.12, 0.60, (0.225, 1.60))
+    assert (cost, src) == (0.10, "provider-cost"), (cost, src)
+    # والقائمةُ لا تعلوه: نفسُ الردّ بسعر قائمةٍ أعلى (0.30) يبقى `cost`
+    cost2, src2 = m.billed_reply_cost(1_000_000, 0, 0.10, 0.30, 0.30, (0.225, 1.60))
+    assert (cost2, src2) == (0.10, "provider-cost"), (cost2, src2)
+    # **وحيث يُرسل المزوّدُ cost أعلى** ⇒ هو أيضًا (لا يُخفَّض بسقف)
+    hi = m.billed_reply_cost(1_000_000, 0, 0.90, 0.12, 0.60, (0.225, 1.60))
+    assert hi == (0.90, "provider-cost"), hi
+
+
+def test_without_a_cost_the_reply_is_priced_at_the_request_ceiling():
+    """**القبولُ الثاني (R122-1):** بلا `cost` ⇒ **الرموز × `max_price`** (حدُّ الطلب نفسِه) — لا سعرُ
+    القائمة ولا أعلى سعرِ مضيف؛ **والمصدرُ يُسمّى** فيُقرأ من الملفّ أيُّ مرتبةٍ حكمت."""
+    from tools import eval_questions as m
+
+    got = m.billed_reply_cost(1_000_000, 1_000_000, None, 0.12, 0.60, (0.225, 1.60))
     assert got is not None
     cost, src = got
-    assert src == "provider-cost+list-floor", got
-    assert cost == pytest.approx(0.30), cost          # القائمةُ (حدٌّ أدنى) لا الـ0.10 المُرسَل
-    hi = m.billed_reply_cost(1_000_000, 0, 0.90, 0.30, 0.30, (0.225, 1.60))
-    assert hi[0] == pytest.approx(0.90) and hi[1] == "provider-cost"
+    assert src == "provider-max-price", got
+    assert cost == pytest.approx(0.12 + 0.60), cost          # الرموز × حدِّ الطلب، لا القائمة
+    # **وبلا سعرٍ معروف** (صفر) ⇒ أعلى سعرِ مضيفٍ يُعلَن، **وبلا قراءةٍ ⇒ لا كلفةَ تُدَّعى**
+    assert m.billed_reply_cost(1_000_000, 0, None, 0.0, 0.0, (0.225, 1.60))[1] == "host-max-price"
+    assert m.billed_reply_cost(0, 0, None, 0.0, 0.0, None) is None
+
+
+def test_the_run_feeds_the_request_ceiling_into_the_law_not_the_list_price():
+    """**والقانونُ يستهلك حدَّ الطلب في الجولة نفسِها** (لا سعرَ القائمة): يُقاس بالنصّ وبالدالّة —
+    فالسعرُ الذي يُمرَّر إلى `billed_window` هو `ceiling_pair`، وسعرُ القائمة شاهدٌ للطباعة."""
+    import argparse
+
+    from tools import eval_questions as m
+
+    a = argparse.Namespace(budget=0.15, model=None, price_in_per_m=None, price_out_per_m=None,
+                           questions=pathlib.Path("docs/eval_pack/questions.json"))
+    ceiling = m._resolve_ceiling(a)
+    assert ceiling is not None, "حدُّ الطلب لم يُقرأ من `provider_max_price`"
+    from statement_qa.qa import effective_model
+
+    mp = m.provider_max_price(effective_model(None))
+    assert ceiling == (pytest.approx(mp["prompt"]), pytest.approx(mp["completion"])), ceiling
+    src = (pathlib.Path(__file__).resolve().parents[1] / "tools/eval_questions.py").read_text("utf-8")
+    assert "price_in, price_out = ceiling_pair or (0.0, 0.0)" in src
+    assert "price_in, price_out = price_pair or (0.0, 0.0)" not in src
