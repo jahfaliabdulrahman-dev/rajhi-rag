@@ -110,6 +110,7 @@ def test_the_six_files_pass_in_a_home_without_a_key(tmp_path):
 ROUND_FILES = SIX + (
     "tests/test_the_guards_do_not_need_the_owners_key.py",
     "tests/test_the_scorer_reads_the_answer_kind.py",
+    "tests/test_the_gate_verdict_is_read_from_the_gate.py",
 )
 
 

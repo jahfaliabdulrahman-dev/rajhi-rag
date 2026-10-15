@@ -1116,7 +1116,13 @@ def _score_common(q: dict, truth_val, ans: str, res, rows: list[dict], *,
         sup = _trace_amounts(res, rows)
         claimed = [v for v in _claimed_amounts(ans) if abs(v) > 0.005]
         unsupported = [v for v in claimed if not any(abs(v - s) < 0.005 for s in sup)]
-        gated = getattr(res, "scope", "in_scope") != "in_scope" or bool(getattr(res, "refused", False))
+        # **والحاجزُ من الحاجز وحده (R120-1 · مراجعة ١٢٠ · P2):** كان `or refused` يقرأ إشارةَ
+        # الجواب أيضًا، و`refused` صار **مشتقًّا من `kind`** (قرار 231500) ⇒ فجوابٌ أعلن النموذجُ
+        # امتناعَه **وحمل مبلغًا بلا سند** كان يُحسب صحيحًا بعلّة «بوّابةُ النطاق منعته قبل النموذج»
+        # — **وهو ادّعاءٌ لم يقع** (النموذجُ بلغه السؤال)، وقبولُ القرار ④ («مبلغٌ بلا سند ⇒ خطأٌ كما
+        # كان») مكسور. **وإشارتان تُقرآن من حقلٍ واحد ليستا إشارةً واحدة:** النطاقُ من `scope`،
+        # والامتناعُ المُعلَن من `kind` — كلٌّ في موضعه.
+        gated = getattr(res, "scope", "in_scope") != "in_scope"
         declared = not_found
         # **عدّادان لا عدّادٌ واحد**: «ادّعى مبلغاً بلا سند» ≠ «لم يُعلن امتناعاً» — وخلطُهما رفع الرقمَ
         # المنشور بواحد (قِيس: ثلاثُ اختراعاتٍ فعليّة + سقوطٌ واحدٌ سببُه عدمُ إعلان التعادل).

@@ -57,8 +57,29 @@ sys.path.insert(0, str(PROJ / "tools"))
 from gate3 import GATE3_DECISION                                    # noqa: E402
 
 
+#: صيغُ خطأِ الجمع التي تُبطل العدَّ — **والعدُّ يسقط إن وقع** (P3 · مراجعة ١٢٠).
+#: **والصيغةُ مُشتقّةٌ من مخرَج pytest الفعليّ لا من تخمين:** `--collect-only -q` مع محلولٍ لا يُجمَّع
+#: يطبع سطرَ الخطأ (`ERROR tests/test_x.py - …`) **ومع ذلك يطبع عدًّا** («… ٣ أخطاء في ٠٫٥٠ ثانية») ⇒
+#: فمطابقةُ «errors during collection» وحدَها **تُخطئ الشكلَ المقيس** (‏«3 errors in 0.50s»):
+_COLLECTION_ERROR_RE = re.compile(
+    r"^ERROR\b|\bERROR collecting\b|errors? during collection|Interrupted:|\b\d+ errors? in \d",
+    re.IGNORECASE | re.MULTILINE)
+
+
+def collection_errors(text: str) -> str:
+    """هل في مخرَج الجمع خطأُ جمعٍ؟ — يُعاد نصُّه، وفارغٌ معناه لا خطأ.
+
+    **والعلّةُ مقيسة (مراجعة ١٢٠ · P3):** كان العدُّ يقبل مخرَجًا فيه خطأُ جمعٍ **صامتًا** فيرى
+    الرقمَ ناقصًا ويقرؤه القارئُ «انزياحَ بيئة» — قِيس **−١٧** في `ci-claims` سببُها `NameError`
+    عند الاستيراد (غيابُ `ConfigDict` في المسار البديل). **فالعدُّ الآن يُعلن العطبَ ولا يُخرجه
+    رقمًا:** يُعاد `None` ⇒ واللقطةُ لا تُكتب، والحرسُ يسقط في موضع الخطوة.
+    """
+    m = _COLLECTION_ERROR_RE.search(text or "")
+    return m.group(0) if m else ""
+
+
 def _test_count() -> int | None:
-    """عدُّ الاختبارات — ببيئةٍ نظيفة.
+    """عدُّ الاختبارات — ببيئةٍ نظيفة، **ويُبطل بخطأِ جمع**.
 
     عطلٌ مُعلن كان يُعطي أرقاماً خاطئة (227 · 232 · 233) حين يُستدعى من عمليةٍ
     أخرى: المتغيّرات الموروثة (`PYTHONPATH` خصوصاً) تُغيّر ما يُجمَع. **الوثائق
@@ -69,6 +90,10 @@ def _test_count() -> int | None:
     out = subprocess.run([sys.executable, "-m", "pytest", "tests/",
                           "--collect-only", "-q"],
                          cwd=PROJ, capture_output=True, text=True, env=env)
+    if collection_errors((out.stdout or "") + (out.stderr or "")):
+        print("⛔ خطأُ جمعٍ في مخرَج العدّ ⇒ لا يُكتب رقمٌ (P3 · مراجعة ١٢٠)",
+              file=sys.stderr)
+        return None
     for line in reversed(out.stdout.splitlines()):
         parts = line.split()
         if len(parts) >= 2 and parts[0].isdigit() and "test" in parts[1]:
