@@ -211,12 +211,19 @@ def test_the_declared_bound_really_reaches_the_claims_step():
 
     doc = yaml.safe_load((ROOT / ".github/workflows/publish-guard.yml").read_text(encoding="utf-8"))
     steps = [s for job in doc["jobs"].values() for s in (job.get("steps") or [])]
-    claims = [s for s in steps if s.get("id") == "gate_claims"]
-    assert len(claims) == 1, f"خطوةُ gate_claims ليست واحدةً: {len(claims)}"
-    env = claims[0].get("env") or {}
-    assert env.get("RAJHI_CLAIMS_ENV") == "ci-claims", env
-    bound = env.get(rc._ALLOW_ENV)
-    assert bound is not None, (
-        f"الحدُّ المُعلَن ليس مفتاحًا في `env` للخطوة (ابتلعه تعليقٌ بجواره؟) — المفاتيح: {sorted(env)}")
-    assert str(bound).strip().isdigit(), f"الحدُّ ليس عددًا: {bound!r}"
+    # **والخطوتان اللتان تقيسان معًا** (وهما من يستدعي `_test_count`): لكلٍّ بيئتُها المعلَنة وحدُّها.
+    for step_id, env_name in (("gate_claims", "ci-claims"), ("gate_suite", "ci-light")):
+        chosen = [s for s in steps if s.get("id") == step_id]
+        assert len(chosen) == 1, f"خطوةُ {step_id} ليست واحدةً: {len(chosen)}"
+        job_env, step_env = {}, chosen[0].get("env") or {}
+        for job in doc["jobs"].values():
+            if chosen[0] in (job.get("steps") or []):
+                job_env = job.get("env") or {}
+        merged = {**job_env, **step_env}
+        assert merged.get("RAJHI_CLAIMS_ENV") == env_name, f"{step_id}: {merged}"
+        bound = merged.get(rc._ALLOW_ENV)
+        assert bound is not None, (
+            f"الحدُّ المُعلَن ليس مفتاحًا في `env` للخطوة {step_id} (ابتلعه تعليقٌ بجواره؟) "
+            f"— المفاتيحُ المرئيّة: {sorted(merged)}")
+        assert str(bound).strip().isdigit(), f"الحدُّ ليس عددًا في {step_id}: {bound!r}"
     assert rc._allowed_errors() == 0, "الافتراضُ بلا إعلان يجب أن يكون صفرًا (وإلّا فقد الإعلانُ معناه)"
