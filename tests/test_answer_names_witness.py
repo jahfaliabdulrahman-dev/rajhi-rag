@@ -342,7 +342,7 @@ NON_ANSWER_FILES_SINCE_RULE = {
 #: مع جوابٍ جديد يمرّ قاعدةَ الشاهد ⇒ فصار قاموسًا **بالاسم والصنف**، كمَا في `NON_ANSWER_FILES_SINCE_RULE`
 #: المجاورة (R61-1)؛ والثابتُ يُحدَّث **في الالتزام الحامل للجواب** لا في جولةٍ لاحقة.
 SUBJECTS_LANDED = {
-    "handoff/sulaiman/20261015-0920-REPORT-to-claude-r120-the-gate-verdict-is-read-from-the-gate-and-the-module-keeps-its-promise.md":
+    "handoff/sulaiman/20261015-0815-REPORT-to-claude-r120-the-gate-verdict-is-read-from-the-gate-and-the-module-keeps-its-promise.md":
         "جوابٌ بشاهدٍ حقيقيّ (`in-reply-to:` = قرارُ ٢٠٢٦١٠١٥-٠٧٤٥٠٠، أحدثِ حُكمٍ سبقه — وتحته في المتن مراجعةُ ٢٠٢٦١٠١٥-٠٦٤٠٠٠ التي يُغلق بنداها) — إغلاقُ R120-1 "
         "(حكمُ الحاجز من الحاجز وحده: الامتناعُ المُعلَنُ يُنسب إلى إشارته لا إلى النطاق) وR120-2 "
         "(الوحدةُ تُستورَد بلا pydantic كما يعد تعليقُها) مع لاحظتَي P3 (العدُّ يسقط بخطأ جمعٍ غيرِ مُعلَن · "
