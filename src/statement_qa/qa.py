@@ -27,7 +27,7 @@ from enum import Enum
 # والآن تُستورَد الوحدةُ دائمًا، وتعمل النوعيّةُ حيث يوجد pydantic، **وتُتخطّى ضوابطُ النوع
 # صراحةً** حيث لا يوجد (`pytestmark` في `tests/test_answer_type.py`) — حارسٌ يُطلَق فعلًا.
 try:                                    # pragma: no cover - depends on installed stack
-    from pydantic import BaseModel, Field
+    from pydantic import BaseModel, ConfigDict, Field
     _PYDANTIC = True
 except ImportError:                     # pragma: no cover
     _PYDANTIC = False
@@ -317,10 +317,23 @@ class Answer(BaseModel):
     امتنع بالكلام و`refused=False`) ⇒ فالمصحِّحُ كان يُكمل النقصَ بمطابقة عبارات. الآن **حقلٌ
     مطلوبٌ من تعدادٍ صريح** يُقرأ في التطبيق والقياس من **موضعٍ واحد**، وتغييرُه تغييرٌ في بصمة
     الخليّة (‏`docs/product-journey.md` §٦ ⇒ «قيد إعادة التأهيل»).
+
+    **و`use_enum_values=True` عِلّةٌ لا تزيين (R119-1 · مراجعة ١١٩ · P1):** العضوُ في تعدادٍ
+    مُختلطٍ بـ`str` يُصيغ نفسَه **باسم صنفه** — `str(AnswerKind.NOT_FOUND)` = `'AnswerKind.NOT_FOUND'`
+    (قِيس في ٣٫١١ وفي ٣٫١٣) — فالقيمةُ لم تكن تبلغ أحدًا: قِيس عبر `answer_question` بنموذجٍ
+    مُبرمَج أنّ `answer_kind` تُسجَّل **'AnswerKind.NOT_FOUND'** و`refused` تبقى `False` ⇒ **المصحِّحُ
+    الجديدُ لا يرى امتناعًا أعلنه النموذجُ أبدًا**. وهذه الخانةُ تجعل الحقلَ يحمل **القيمة** (`'not_found'`)
+    بعد التحقّق من التعداد ⇒ فيقرؤها التطبيقُ والقياسُ والمصحِّحُ بلا وسيط. **ولا يُلفّ موضعُ القراءة
+    ببديلٍ صامت** (`getattr(kind, "value", kind)`): البديلُ يُخفي العودةَ إلى العضو ويُسكِت الضابطَ
+    الذي يقيس النوع — والبديلُ الأسوأُ من العطب.
     """
+    # **يحمل القيمةَ لا العضو** (R119-1): بلا هذا السطر يقرأ كلُّ مستهلكٍ اسمَ الصنف.
+    model_config = ConfigDict(use_enum_values=True)
     kind: AnswerKind = Field(
         description=("نوعُ الجواب: `figure` رقمٌ/مقارنةٌ من الكشف · `not_found` الكشفُ لا "
-                     "يحمله (امتناعٌ مُعلَن) · `tie` تساوى مرشّحان أو أكثر (تعادلٌ)"))
+                     "يحمله (امتناعٌ مُعلَن) · `tie` تساوى مرشّحان أو أكثر (تعادلٌ). "
+                     "**وتركُه لا يمرّ:** تُعيده المكتبةُ للنموذج فيُعيد المحاولة (نداءٌ إضافيٌّ "
+                     "داخل حدّ النداءات المُعلَن)"))
     answer: str = Field(description="الجوابُ بالعربية، بأرقامٍ حقيقيةٍ من الكشف")
     cited_row_ids: list[int] = Field(
         default_factory=list, description="أرقامُ الصفوف العامة التي استُشهد بها (وما لا شاهدَ له يُعلَن)")

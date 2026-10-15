@@ -184,3 +184,82 @@ def test_a_record_from_before_the_schema_is_not_judged_by_the_signal():
     # **والجديدُ يحمل الحقل ⇒ يُحكم:** الفرقُ بين «فارغةٍ معلَنة» و«غيرِ محفوظةٍ أصلًا»
     fresh = ev._Trace({"used_row_nos": [], "tools_used": [], "scope": "in_scope", "answer_kind": ""})
     assert fresh.answer_kind_recorded is True
+
+
+# ── ⑩ الإشارةُ تُسجَّل بقيمتها لا باسم صنفها — **مقيسةً من مسار التحليل الحقيقيّ** ─────────────
+def test_the_field_holds_the_value_not_the_enum_member():
+    """**R119-1 (P1 · مراجعة ١١٩):** العضوُ في تعدادٍ مُختلطٍ بـ`str` يُصيغ نفسَه باسم صنفه
+    (‏`str(AnswerKind.NOT_FOUND)` = `'AnswerKind.NOT_FOUND'` · قِيس في ٣٫١١ و٣٫١٣) ⇒ فالقيمةُ
+    لا تبلغ أحدًا. وهذه الضابطةُ تسقط إن أُزيل `use_enum_values` (ولا بديلَ صامتَ في موضع القراءة)."""
+    from statement_qa.qa import Answer, AnswerKind
+
+    a = Answer(kind=AnswerKind.NOT_FOUND, answer="لا يظهر في الكشف", cited_row_ids=[])
+    assert a.kind == "not_found", f"الحقلُ يحمل العضوَ لا القيمة: {a.kind!r}"
+    assert type(a.kind) is str, f"نوعُ الحقل ليس نصًّا: {type(a.kind)}"
+    b = Answer(kind="tie", answer="متعادلان", cited_row_ids=[])
+    assert b.kind == "tie" and type(b.kind) is str
+    # **وما يراه المستهلكُ من موضع القراءة نفسِه** (لا بتعبيرٍ مُعاد كتابتُه في الضابط):
+    assert str(getattr(a, "kind", "") or "") == "not_found"
+
+
+def _typed_model(kind: str):
+    """نموذجٌ مُبرمَج يسلّم `Answer` بالنوع المطلوب — كما يفعله النموذجُ الحقيقيّ."""
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.messages import AIMessage, ToolMessage
+    from langchain_core.outputs import ChatGeneration, ChatResult
+
+    class _M(BaseChatModel):
+        def _generate(self, messages, stop=None, run_manager=None, **kw):
+            if any(isinstance(x, ToolMessage) for x in messages):
+                return ChatResult(generations=[ChatGeneration(message=AIMessage("تم"))])
+            call = {"name": "Answer", "id": "a1", "type": "tool_call",
+                    "args": {"kind": kind, "answer": "لا يظهر في الكشف", "cited_row_ids": []}}
+            return ChatResult(generations=[ChatGeneration(message=AIMessage("", tool_calls=[call]))])
+
+        def bind_tools(self, tools, **kw):
+            return self
+
+        def with_structured_output(self, schema, **kw):
+            return self
+
+        @property
+        def _llm_type(self):
+            return "typed-r119"
+
+    return _M()
+
+
+def test_a_typed_answer_from_a_scripted_model_reaches_the_scorer():
+    """**القبولُ بنصّه (R119-1):** جوابٌ مُنوَّعٌ من نموذجٍ مُبرمَج ⇒ `answer_question` ⇒
+    `answer_kind == "not_found"` و`refused is True` ⇒ والمصحِّحُ يحكم «امتناعٌ مُعلَن». قِيس على
+    `f3c0a58` **`'AnswerKind.NOT_FOUND'` و`refused=False`** (فالإشارةُ كانت تُسجَّل باسم الصنف).
+
+    **والسؤالُ غيرُ رقميّ عن قصد:** سؤالٌ رقميٌّ يُجاب بجوابٍ مُنوَّعٍ بلا نداءِ أداة ٍيُشعل بوّابةَ
+    «لا رقمَ بلا أداة» (وهي تُصفّر `parsed` لأنّ الجوابَ لم يُحسَب) — فتُقاس الإشارةُ حيث تمرّ.
+    """
+    import pytest as _pytest
+
+    _pytest.importorskip("langchain")
+    _pytest.importorskip("langgraph")
+    from statement_qa.qa import answer_question
+
+    class _NoStore:
+        def similarity_search_with_score(self, *_a, **_k):
+            return []
+
+    rows = [{"page": 1, "row": 1, "page_row": 1, "date": "2026-01-02", "movement": "100.00",
+             "balance": "4,321.00", "debit": "100.00", "credit": None, "description": "رسوم",
+             "desc": "رسوم", "kind": "txn"}]
+    res = answer_question(_NoStore(), "ما عنوانُ الفرع الذي نُفِّذت فيه حركة الصفحة ١؟",
+                          rows=rows, llm=_typed_model("not_found"))
+    assert res.answer_kind == "not_found", f"الإشارةُ المُسجَّلة: {res.answer_kind!r} (R119-1)"
+    assert res.refused is True, "الامتناعُ لم يُشتقّ من الإشارة"
+    ok, why = ev.score_answer(_q(), None, res.answer, _trace(answer_kind=res.answer_kind), ROWS)
+    assert ok and "إشارةُ الجواب" in why, f"المصحِّحُ لم يرَ الامتناعَ المُعلَن: {why}"
+
+    tie = answer_question(_NoStore(), "ما عنوانُ الفرع الذي نُفِّذت فيه حركة الصفحة ١؟",
+                          rows=rows, llm=_typed_model("tie"))
+    assert tie.answer_kind == "tie" and tie.refused is False, (tie.answer_kind, tie.refused)
+    ok_tie, _ = ev.score_answer(_q(expect="ambiguous"), None, tie.answer,
+                                _trace(answer_kind=tie.answer_kind), ROWS)
+    assert ok_tie, "تعادلٌ أعلنه النموذجُ لم يُقرأ"
