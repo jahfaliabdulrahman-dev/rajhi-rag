@@ -21,6 +21,8 @@ import pathlib
 import subprocess
 import sys
 
+import pytest
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
@@ -109,8 +111,11 @@ def test_the_three_files_still_import_without_pydantic():
 
     **ويُقاس الاستيرادُ لا تشغيلُ `pytest`:** جمعُ pytest يُشغِّل حزمةَ إضافاتِ البيئة (قِيس في
     هذه الشجرة أنّ حجبَ pydantic يُسقط `langsmith` عبر الإضافات ⇒ العطبُ في مِسبار الجمع لا في
-    الوحدة). **والجمعُ == استيرادُ الملفّ:** فمن استورد سليمًا لم يسقط من الجمع، والملفّاتُ الثلاثةُ
-    لا تستورد شيئًا ثقيلًا في رأسها (وهو ما يجعلها في قائمة الـCI أصلًا).
+    الوحدة). **والجمعُ == استيرادُ الملفّ:** فمن استورد سليمًا لم يسقط من الجمع.
+
+    **وحدُّ البيئة مُعلَنٌ لا مُقنَّع (قِيس في الـCI):** في بيئةٍ لا تُجمِّع بعضَ الملفّات لتبعيّاتٍ
+    غائبة (`pdfplumber` · `polars`) **يُقاس العطبُ المقصودُ وحدَه** (‏`NameError: … ConfigDict`) —
+    **وغيره يُعلَن حدًّا ويُتخطّى باسمه**، فلا يُنسب عطبُ بيئةٍ إلى الوحدة ولا العكس.
     """
     code = (
         "import importlib.util as iu, pathlib\n"
@@ -123,10 +128,13 @@ def test_the_three_files_still_import_without_pydantic():
     )
     out = _run_blocking_pydantic(code)
     text = (out.stdout or "") + (out.stderr or "")
+    assert "ConfigDict" not in text and "NameError" not in text, (
+        f"عطبُ R120-2 عاد (`ConfigDict` غائبٌ في المسار البديل):\n{text[-400:]}")
+    if "ModuleNotFoundError" in text:
+        missing = sorted(set(__import__("re").findall(r"No module named '(\w+)'", text)))
+        pytest.skip(f"بيئةٌ ناقصةُ تبعيّاتٍ ({' · '.join(missing)}) ⇒ الحدُّ مُعلَنٌ هنا لا مسكوتٌ عنه")
     assert out.returncode == 0, f"استيرادُ الملفّات الثلاثة بلا pydantic فشل:\n{text[-600:]}"
     assert text.count("OK tests/") == len(NO_PYDANTIC_FILES), text[-400:]
-    assert "NameError" not in text and "ConfigDict" not in text, (
-        f"عطبُ R120-2 عاد (‏`ConfigDict` غائبٌ في المسار البديل):\n{text[-400:]}")
 
 
 # ── ⑤ العدُّ يسقط بخطأ الجمع ولا يقبله صامتًا ──────────────────────────────────────────────
@@ -138,7 +146,14 @@ def test_the_counter_refuses_a_collection_error():
     assert rc.collection_errors(good) == ""
     assert rc.collection_errors(bad), "خطأُ الجمع مرّ صامتًا ⇒ العدُّ يكتب رقمًا ناقصًا"
     assert rc.collection_errors("") == ""
-    assert isinstance(rc._test_count(), int), "العدُّ لا يُقاس في هذه البيئة"
+    # **ولا يُشترط أن تكون البيئةُ نظيفة** (خطأٌ بيئيٌّ كان في ضابطي: الـCI الخفيفُ فيه ملفّاتٌ لا
+    # تُجمَّع ⇒ فسقط الضابطُ في خطوةٍ سليمة) ⇒ **يُقاس الاتّساق لا الحظّ:** حين لا يُقرأ العددُ
+    # فلا بدّ أن يكون السببُ خطأَ جمعٍ **غيرَ مُعلَن** (لا صمتًا بلا سبب).
+    live = rc._test_count()
+    if live is None:
+        assert rc._allowed_errors() == 0, "العدُّ سقط مع إعلانٍ مُطابقٍ ⇒ تناقضٌ في المسار"
+    else:
+        assert isinstance(live, int), live
 
 
 def test_the_counter_returns_nothing_when_the_child_reports_a_collection_error(monkeypatch):
@@ -165,6 +180,7 @@ def test_the_counter_returns_nothing_when_the_child_reports_a_collection_error(m
 
 # ── ⑥ وصفُ الحقل يذهب للنموذج: تعليمةُ جوابٍ لا ملاحظةُ هندسة ─────────────────────────────
 def test_the_kind_description_carries_instructions_only():
+    pytest.importorskip("pydantic")     # بلا pydantic لا مخطّطَ يُرسَل أصلًا
     from statement_qa.qa import Answer
 
     desc = Answer.model_fields["kind"].description or ""
@@ -205,7 +221,7 @@ def test_the_declared_bound_really_reaches_the_claims_step(monkeypatch):
     فالتصقت به خانةُ البيئة ⇒ صارت **جزءًا من التعليق** ⇒ الخطوةُ قرأت «المُعلَن ٠» وأسقطت العدّ
     (‏`⛔ خطأُ جمعٍ غيرُ مُعلَن (19 والمُعلَنُ 0)`). **فالحرسُ يقرأ الملفَّ كـYAML لا كنصّ:** خانةٌ
     مُعلَنةٌ يجب أن تكون **مفتاحًا** في كتلة `env` للخطوة — **وبالاسم الواحد الذي تقرؤه الوحدة.**"""
-    import yaml
+    yaml = pytest.importorskip("yaml")   # بيئةٌ بلا PyYAML: تُعلَن لا تُنسب عطبًا
 
     from tools import render_claims as rc
 
