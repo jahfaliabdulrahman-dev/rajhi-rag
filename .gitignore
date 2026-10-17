@@ -49,6 +49,8 @@ docs/rajhi-rag-landing-work.md
 docs/rajhi-rag-gate-engineering.md
 docs/rajhi-rag-history.md
 docs/rajhi-rag-product-decisions.md
+# ملاحظاتُ جلسةٍ للنقاش (١٧‑١٠‑٢٠٢٦): تحمل مبالغَ حقيقيّةً بنصّ ردود النموذج ⇒ لا تُتتبَّع أبدًا.
+docs/rajhi-rag-observations-*.md
 
 # **دفاترُ الكشوف (أ-٣): موضعُها مُهمَلٌ ولا يُتتبَّع أبدًا** — قرارُ المالك 2026-10-02؛
 # ويقيس الإهمالَ ضابطٌ في tests/test_ledger.py بـ git check-ignore (لا بالنصّ).
