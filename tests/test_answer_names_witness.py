@@ -271,6 +271,10 @@ NON_ANSWER_FILES_SINCE_RULE = {
         "خطةُ تنفيذٍ قبل القراءة (PLAN) — لا تُجيب حُكماً؛ وباسمها الجديد بعد تصحيح زمن الاسم (R130)",
     "handoff/sulaiman/20261020-0923-REPORT-to-owner-r130-the-database-at-the-core-the-time-dimension-and-the-three-seats.md":
         "تقريرُ إنجازٍ للمالك (R130) — لا يُجيب حُكماً",
+    "handoff/sulaiman/20261020-1121-PLAN-r131-identity-numbering-the-delete-under-the-lock-and-the-ci.md":
+        "خطةُ R131 قبل التنفيذ — لا تُجيب حُكماً",
+    "handoff/sulaiman/20261020-1130-REPORT-to-owner-r131-identity-numbering-the-delete-under-the-lock-and-the-ci.md":
+        "تقريرُ إنجازٍ للمالك (R131) — لا يُجيب حُكماً",
     # **وغلقُ R104 (ثلاثةُ مقاعد: P1 في الدمج + المُعلَن والمُغلق):** نقلُ المقاعد وخطةُ الغلق.
     "handoff/sulaiman/20261010-0124-SEATS-r104-three-isolated-seats-verbatim.md":
         "نقلُ المقاعد الثلاثة بالحرف (R104: P0=٠ · P1=١ في دمج الأسماء · P2=٣ · P3≈١٥) — لا يُجيب حُكماً",
