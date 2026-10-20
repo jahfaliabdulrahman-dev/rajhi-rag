@@ -228,3 +228,10 @@ def test_the_source_identity_has_exactly_one_home():
         src = (root / rel).read_text(encoding="utf-8")
         assert ("import hashlib" not in src and "file_digest(" not in src
                 and "sha256()" not in src), f"{rel}: نسخةُ تجزئةٍ ثانية"
+    # **وحلقةُ القراءة بالقطع نفسُها لا تُنسخ (R133-4):** ثلاثُ نسخٍ أقدم في الأدوات كانت
+    # `sha256()` + `fh.read(1 << 20)` — والمكتبةُ القياسيّة تحمل `file_digest` منذ 3.11.
+    for rel in ("tools/capture_training.py", "tools/backfill_reader_stamp.py",
+                "tools/render_pages.py"):
+        src = (root / rel).read_text(encoding="utf-8")
+        assert "1 << 20" not in src and "sha256()" not in src, f"{rel}: حلقةُ تجزئةٍ يدويّة"
+        assert "file_digest(" in src, f"{rel}: لم تُستعمل file_digest"

@@ -285,6 +285,26 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
     period = ((first_dated[0], last_dated[0], first_dated[1], last_dated[1])
               if first_dated and last_dated else None)
     undated_rows = [r for r in numbered if not _iso_date(r)]
+    # **وحالةُ «لم تُقرأ» تصل من القاعدة في موضعٍ واحد (R133-1):** `read_footers` يحمل `basis`،
+    # والصفحةُ التي لم تُقرأ تُوسم `unread`. فأدواتُ الصفحة تقول «لم تُقرأ» (كما `page_footer`)،
+    # ومجاميعُ الكشف تسمّي ما لم يدخلها — ولا كلمةَ زائدةً على قاعدةٍ كاملة.
+    unread_pages = sorted(pg for pg, f in (footers or {}).items()
+                          if (f or {}).get("basis") == "unread")
+
+    def _unread_reply(pg) -> str | None:
+        """رسالةُ صفحةٍ داخلةٍ في الكشف ولم تُقرأ — **لا دعوى غيابٍ ولا صفرٌ يُخترع**."""
+        pg = int(pg)
+        if pg not in unread_pages:
+            return None
+        return (f"**الصفحة {pg} داخلةٌ في الكشف ولم تُقرأ هذه المرّة** — لا سطورَ ولا تذييل لها، "
+                f"فلا أُعلن غيابًا فيها ولا أُخرج لها صفرًا.")
+
+    def _unread_note() -> str:
+        """ذيلُ المجاميع: يسمّي ما لم يدخلها. **وفارغٌ على قاعدةٍ كاملة** (صفرُ كلمةٍ زائدة)."""
+        if not unread_pages:
+            return ""
+        listed = "، ".join(f"ص{p}" for p in unread_pages)
+        return f" · **ولم تُقرأ: {listed} — لا تدخلها هذه الأرقام**"
 
     def _strict_args(fn):
         """مخطّطُ وسائط الأداة: من **التوقيع نفسه** + منعُ المدخل المجهول (R109-3 · R118-1)."""
@@ -453,6 +473,11 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
         **والمدى الزمنيّ (R130-1):** يُرشَّح بالتاريخ الميلاديّ المخزَّن؛ ومدىً خارج الكشف يُجاب
         «خارج مدّة الكشف» مع المدّة وسندها — لا «لا توجد حركات».
         """
+        if page is not None and (msg := _unread_reply(page)):
+            _record("sum_movements", [], {"side": side, "keyword": keyword, "tx_type": tx_type,
+                                          "amount": amount, "page": page,
+                                          "date_from": date_from, "date_to": date_to})
+            return msg
         sel = _filtered(side, keyword, tx_type, amount, page,
                         date_from=date_from, date_to=date_to)
         _record("sum_movements", sel, {"side": side, "keyword": keyword, "tx_type": tx_type,
@@ -477,6 +502,7 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
                 # وعدُّه في الجواب يمنع «مجموعًا ناقصًا يبدو كاملًا».
                 + (f" · و{len(undated_rows)} صفًّا بلا تاريخٍ لم يدخل المدى"
                    if (date_from or date_to) and undated_rows else "")
+                + (_unread_note() if page is None else "")
                 + f" | أمثلة: {examples}")
 
     @_tool
@@ -525,7 +551,7 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
             # سؤالُ عدٍّ بلا تاريخٍ يُجاب «العدد = 0» صريحًا؛ وبمدىً يُجاب بحدِّ المدّة.
             return _empty_result(d_from, d_to, len(undated_rows))
         return (f"العدد = {len(sel)} {'صفًّا' if by_date else 'حركة'} "
-                f"(الفلتر: {note})")
+                f"(الفلتر: {note})" + _unread_note())
 
     @_tool
     def balance_extremes() -> str:
@@ -555,7 +581,7 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
         tail = (f" · و{unparsed} رصيدًا غيرُ مقروء لم يُدخَل في المقارنة (لم يُخمَّن رقمُه)"
                 if unparsed else "")
         return (f"أعلى رصيد = {_m(hi['balance'])} {_ref(hi)}"
-                f" | أدنى رصيد = {_m(lo['balance'])} {_ref(lo)}{tail}")
+                f" | أدنى رصيد = {_m(lo['balance'])} {_ref(lo)}{tail}" + _unread_note())
 
     @_tool
     def closing_balance() -> str:
@@ -566,12 +592,15 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
             return "لا توجد أرصدة في الكشف."
         last = with_bal[-1]
         _record("closing_balance", [last], {})
-        return f"آخر رصيد = {_m(last['balance'])} {_ref(last)}"
+        return f"آخر رصيد = {_m(last['balance'])} {_ref(last)}" + _unread_note()
 
     @_tool
     def page_summary(page: int) -> str:
         """ملخص صفحة واحدة: أول/آخر رصيد + إجمالي المدين وإجمالي الدائن فيها.
         مثال: page_summary(page=10)."""
+        if (msg := _unread_reply(page)):
+            _record("page_summary", [], {"page": page})
+            return msg
         rows_on_page = _page_scope(page)
         if not rows_on_page:
             _record("page_summary", [], {"page": page})     # **النداءُ يُسجَّل ولو لم يجد شيئًا**
@@ -648,6 +677,9 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
         **والفرقُ عن `search_rows(page=…)` مُعلَن:** هذه تُظهر **كلَّ** صفوف الصفحة (ومنه صفُّ الرصيد
         الافتتاحيّ)، وتلك تُظهر **الحركات** وحدَها (تُسقط غيرَ الحركة).
         مثال: page_rows(page=40)."""
+        if (msg := _unread_reply(page)):
+            _record("page_rows", [], {"page": page, "limit": limit})
+            return msg
         sel = _page_scope(page)
         if not sel:
             _record("page_rows", [], {"page": page, "limit": limit})
@@ -675,6 +707,11 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
         مستهلكًا قائمًا:** `tools/eval_questions.py` يشتقّ دقّةَ الاستشهاد من الصفوف المسجَّلة ⇒ فقد
         تُحصى صفوفٌ لم يرها النموذجُ «مُستشهَدةً» — التعارضُ **مُوثَّقٌ لا مُغلَق**، وإغلاقُه يقتضي
         قياسَ أثرِ التوحيد على مقياسٍ حقيقيّ (غيرُ مقيس)."""
+        if page is not None and (msg := _unread_reply(page)):
+            _record("search_rows", [], {"keyword": keyword, "tx_type": tx_type, "amount": amount,
+                                        "limit": limit, "page": page,
+                                        "date_from": date_from, "date_to": date_to})
+            return msg
         sel = _filtered("الكل", keyword, tx_type, amount, page,
                         date_from=date_from, date_to=date_to)
         _record("search_rows", sel, {"keyword": keyword, "tx_type": tx_type, "amount": amount,
@@ -707,7 +744,8 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
         tail = (f" | و{len(undated_rows)} صفًّا بلا تاريخٍ مقروء (لم تُدخَل في المدّة)"
                 if undated_rows else "")
         return (f"المدّة: من {period[0]} إلى {period[1]} | عددُ الأيام = {days} "
-                f"| الأسابيع = {weeks} | سندُ الطرفين: {_ref(period[2])} و{_ref(period[3])}{tail}")
+                f"| الأسابيع = {weeks} | سندُ الطرفين: {_ref(period[2])} و{_ref(period[3])}"
+                f"{tail}" + _unread_note())
 
     @_tool
     def balance_on(date: str) -> str:

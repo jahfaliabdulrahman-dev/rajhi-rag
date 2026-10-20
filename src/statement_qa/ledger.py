@@ -489,9 +489,12 @@ def ingest(conn: sqlite3.Connection, rows: list[dict], pages: dict[int, dict],
     pages = dict(pages or {})
     kept_pages = {int(pg) for pg in pages}
     doc_pages = max([int(n_pages or 0), *kept_pages, 0])
-    # **وبلا ترقيةِ مخطَّط:** `verdict` قيدُه CHECK لا يقبل قيمةً جديدة، وترقيةُ v2⇒v3 تُبطل قاعدةَ
-    # المالك الحيّة (قراءةٌ مدفوعة). فالوسمُ في `footer_basis='unread'` — عمودٌ نصّيٌّ حرّ — والدالّةُ
-    # `unread_pages` تقرؤه. والحكمُ يبقى `other` فلا يكذب على قيدٍ قائم.
+    # **وبلا ترقيةِ مخطَّط — سببُها القيدُ لا قاعدةٌ قائمة:** `verdict` قيدُه CHECK لا يقبل قيمةً
+    # جديدة، وترقيةُ v2⇒v3 تعني مسارَ هجرةٍ يُختبر ويُصان مقابلَ عمودٍ نصّيٍّ حرٍّ يكفي. فالوسمُ في
+    # `footer_basis='unread'` والدالّةُ `unread_pages` تقرؤه، والحكمُ يبقى `other` فلا يكذب على قيدٍ
+    # قائم. **ولا قاعدةَ للمالك في أيّ مكانٍ الآن** (لا مجلّدَ بياناتِ مستخدمٍ ولا `*.sqlite` في
+    # مجلّدَي النشر والعمل — مقيسٌ في مراجعة ١٣٣): فالادّعاءُ بأنّ الترقيةَ «تُبطل قاعدةً حيّة» غيرُ
+    # قائم، والتصميمُ يبقى لأنّه الأصغرُ لا لأنّه يتفادى إبطالًا.
     for pg in range(1, doc_pages + 1):
         pages.setdefault(pg, {"footer": "other", "basis": "unread", "page_no": None, "rows": 0})
     kept_pages = set(range(1, doc_pages + 1))

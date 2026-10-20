@@ -33,11 +33,8 @@ DOC_ID_METHOD = "sha256(file)[:16] — كما في tools/capture_training.py"
 
 def sha256_16(path: Path) -> str:
     """الوسمُ المعتمد في المشروع: `sha256(file)[:16]` — كما في capture_training وtext_reader."""
-    h = hashlib.sha256()
     with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()[:16]
+        return hashlib.file_digest(fh, "sha256").hexdigest()[:16]
 
 
 def resolve_doc_id(cp: dict, doc: Path, *, explicit: bool = False,

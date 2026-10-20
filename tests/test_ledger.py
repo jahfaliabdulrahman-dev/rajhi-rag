@@ -267,7 +267,7 @@ def test_the_column_contract_is_equal_in_both_directions():
         f"المخطَّطُ والثابتُ افترقا: {sorted(set(sql_cols) ^ {'id', 'seq', *L.COLUMNS, 'desc_norm'})}"
 
 
-def test_the_workbook_rendered_from_the_ledger_equals_the_current_file(tmp_path):
+def test_the_workbook_rendered_from_the_ledger_equals_the_current_file(tmp_path, monkeypatch):
     """**البوّابةُ الحاسمة (الخارطة أ-٣ · مقعدا المواصفة والبنية P1):** «الإكسل المُرندَر **من الدفتر**
     = الملف الحالي **صفًّا بصفّ** — فرقٌ واحد = توقّف».
 
@@ -286,6 +286,11 @@ def test_the_workbook_rendered_from_the_ledger_equals_the_current_file(tmp_path)
         pytest.skip("لا بياناتُ المالك هنا — البوّابةُ الحاسمةُ تُقاس حيث يوجد المصدر")
     import openpyxl                     # noqa: PLC0415
     import to_xlsx                      # noqa: PLC0415
+
+    # **والزمنُ مُثبَّت (R133-5 · مفتاحُ R126):** الرندران يقعان في لحظتين، وخليّةُ «تاريخ التصدير»
+    # تُبنى بـ`datetime.now` ⇒ فرقٌ بلا صنفٍ حين يقعان على دقيقتين (مقيس: خليّةٌ واحدة r3c2).
+    # التثبيتُ يُبقي الخليّةَ مُقابَلةً كاملةً بدل التسامح مع فرقها.
+    monkeypatch.setenv(to_xlsx.EXPORT_STAMP_ENV, "2026-01-01 00:00 +0000")
 
     db = tmp_path / "gate.sqlite"
     rows, _report, per_page, _flags = to_xlsx.load(run)

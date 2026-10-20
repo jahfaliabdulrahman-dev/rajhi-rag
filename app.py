@@ -1748,30 +1748,24 @@ def _conversation_export() -> tuple[str | None, str]:
     finally:
         conn.close()
     from openpyxl import Workbook                     # noqa: PLC0415 — كاتبٌ منظَّم، تبعيّةٌ قائمة
+    from tools.to_xlsx import write_sheet             # noqa: PLC0415 — **الكاتبُ الواحد** (R133-3)
 
     wb = Workbook()
-
-    def _append_text(ws, values):
-        """يُلحق صفًّا **ويُثبّت نصوصَه نصًّا** — openpyxl يجعل ما يبدأ بـ`=` صيغةً حيّة (R132-4)."""
-        ws.append(values)
-        for cell, value in zip(ws[ws.max_row], values):
-            if isinstance(value, str):
-                cell.data_type = "s"
-
     ws = wb.active
     ws.title = "المحادثة"
     ws.sheet_view.rightToLeft = True
-    _append_text(ws, ["#", "التاريخ", "السؤال", "الجواب", "امتناع"])
-    for r in qa_rows:
-        _append_text(ws, [r["id"], r["asked_at"], r["question"], r["answer"] or "",
-                          "نعم" if r["refused"] else ""])
+    # **نفسُ كاتب الدفتر** (الترويسةُ والتنسيقُ وتثبيتُ «النصُّ نصٌّ» في `write_sheet` وحدَه):
+    # نسخةٌ ثانيةٌ من الحلقة تعني أن يُصلَح `=` في موضعٍ ويبقى مفتوحًا في الآخر.
+    write_sheet(ws, ["#", "التاريخ", "السؤال", "الجواب", "امتناع"],
+                [[r["id"], r["asked_at"], r["question"], r["answer"] or "",
+                  "نعم" if r["refused"] else ""] for r in qa_rows],
+                [6, 20, 60, 60, 8])
     ws2 = wb.create_sheet("الأدلّة")
     ws2.sheet_view.rightToLeft = True
-    _append_text(ws2, ["سؤال", "صفحة", "صفّ", "البيان", "المبلغ"])
-    for qid, rows in evidence.items():
-        for e in rows:
-            # **بلا تحويلٍ للنصّ:** openpyxl يحفظ السطرَ الجديد و`|` كما هما.
-            _append_text(ws2, [qid, e["pg"], e["row_no"], e["desc"] or "", e["movement"] or ""])
+    write_sheet(ws2, ["سؤال", "صفحة", "صفّ", "البيان", "المبلغ"],
+                [[qid, e["pg"], e["row_no"], e["desc"] or "", e["movement"] or ""]
+                 for qid, rows in evidence.items() for e in rows],
+                [8, 8, 8, 50, 12])
     with tempfile.TemporaryDirectory(prefix="rajhi_chat_") as work:
         out = Path(work) / "conversation.xlsx"
         wb.save(out)
