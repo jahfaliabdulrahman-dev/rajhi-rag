@@ -23,7 +23,7 @@
  "rehearsal_read_s": 346,
  "tests_by_env": {
   "full": 1320,
-  "ci-light": 1266,
+  "ci-light": 1268,
   "ci-claims": 990
  }
 }
