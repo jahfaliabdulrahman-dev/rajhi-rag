@@ -119,6 +119,10 @@ jobs:
                                       "langchain==1.4.0" "langchain-core==1.6.3" "langgraph==1.2.11" \
                                       "langgraph-checkpoint==4.3.0" "langgraph-checkpoint-sqlite==3.1.2" \
                                       "aiosqlite==0.22.1" "sqlite-vec==0.1.9"
+          # **الموّلدُ نفسه هو الحارس (R132-3):** `PEP 440` لا يمسك إصدارًا صحيحَ الصيغة لكنه غيرُ
+          # موجود (1908.5.22). والمُحلّلُ يمسكه — فيُشغَّل قبل الضوابط، بلا تثبيت.
+          python3 -m pip install --quiet --dry-run -r requirements.lock || {
+            echo "⛔ requirements.lock لا يُحلّ في بيئةٍ نظيفة — إصدارٌ غيرُ موجودٍ أو حزمةٌ بلا مصدر."; exit 1; }
           python3 -m pytest tests/test_compile_all.py \
                            tests/test_requirements_lock.py \
                            tests/test_public_claims.py \

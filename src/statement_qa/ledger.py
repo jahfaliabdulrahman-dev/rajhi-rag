@@ -23,7 +23,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import sqlite3
@@ -55,41 +54,29 @@ def data_home() -> Path:
     return Path(base) / APP_DIRNAME
 
 
-#: **حقولُ البصمة الحاكمة — موضعٌ واحدٌ يقرؤه المنتجان (R130 · إصلاحُ مقعدَي المعايير والبنية).**
-#: العِلّةُ المقيسة: الواجهةُ تُجزّئ `fingerprint_pages` كاملًا (ستّة حقول: `per_page` و`majority` زائدًا)،
-#: وتقريرُ التشغيل يكتب أربعةً فقط ⇒ **تجزئتان مختلفتان لكشفٍ واحد** ⇒ قاعدتان ومساران. والمفتاحُ
-#: يُشتقّ الآن من **الحقول المشتركة** وحدها، فتُنتج الواجهةُ والـCLI المفتاحَ نفسَه بالبناء لا بالصدفة —
-#: وبلا تغييرٍ لمفاتيح قواعد الـCLI القائمة (بصمتها أربعةُ حقولٍ هي نفسُها).
-_KEY_FIELDS = ("overall", "styles", "transitions", "outliers")
+def source_sha256(path) -> str:
+    """تجزئةُ **بايتات ملفّ الكشف** — دالّةُ الهويّة الواحدة (R132-2).
 
-
-def statement_key(era: dict | None, n_pages: int, *, source_sha: str | None = None) -> str:
-    """مفتاحُ الكشف: **تجزئةُ بصمته** (لا عددُ صفحاته) — **موضعٌ واحدٌ يقرؤه التطبيقُ والـCLI.**
-
-    **العِلّة (مقعدُ الواجهة P3 · مُثبت):** كان الاسمُ `ui_<عدد الصفحات>p.sqlite` ⇒ (١) كشفان
-    بـ629 صفحة **يتصادمان**، و(٢) `pages_of(rows)=626` كان يُسمّي الملفَّ `ui_626p` وهو يخزّن 629
-    صفحةً. فالمفتاحُ يُشتقّ من **بصمة المحتوى** (`STATE["era"]`) ⇒ الكشفُ نفسُه يُعطي المفتاحَ نفسَه،
-    وكشفٌ آخرُ لا يُصادمه. وبلا بصمةٍ يُنسب إلى عدد الصفحات **مع إعلان النقص** في الاسم (`nop-`).
-
-    **والسابقةُ `st_` لا `ui_` (R130):** المفتاحُ لم يبقَ للواجهة وحدَها — سطرُ الأوامر يكتب القاعدةَ
-    نفسَها بمفتاحٍ واحد (قرارُ المالك: «مسارٌ واحدٌ للكشف الواحد»)، فالاسمُ `ui_` كان يكذب على القارئ.
-
-    **وR131-2: الهويّةُ من محتوى المصدر لا من صيغة الطباعة.** كان المفتاحُ يُجزّئ
-    `overall/styles/transitions/outliers` — وهي **أنماطُ طباعة الأرقام** (قديمة/حديثة/مختلطة) ⇒
-    كشفان بعددِ الصفحات والصيغةِ نفسَيهما **يتصادمان**، فتمحو قراءةُ الثاني صفوفَ الأوّل ويحمل
-    تنزيلُ محادثته سؤالَ الأوّل. والآن `source_sha` (تجزئةُ بايتات ملفّ الكشف) هي الحاكم: تُسجَّل في
-    تقرير التشغيل عند القراءة (فتقرؤها الواجهةُ والـCLI معًا) ⇒ **ملفّان مختلفان ⇒ مفتاحان أبدًا**،
-    والملفُّ نفسُه ⇒ المفتاحُ نفسُه. والبصمةُ القديمة تبقى **احتياطًا مُعلَنًا** لتقريرٍ قديمٍ بلا
-    `source` (ولا تُقارَن بهويّة).
+    تُنادِيها المساراتُ الثلاثة: الواجهةُ عند القراءة · القارئُ عند كتابة التقرير · الـCLI عند
+    البناء. و`hashlib.file_digest` (بايثون 3.11+) تقرأ بالكتل داخل المكتبة — لا حلقةَ تجزئةٍ يدويّة.
     """
-    if source_sha:
-        return "st_" + hashlib.sha1(str(source_sha).encode("utf-8")).hexdigest()[:10]
-    if era:
-        core = {k: era[k] for k in _KEY_FIELDS if k in era}
-        # **وبلا الحقول المشتركة يُجزّأ ما أُعطي** — لا يُرفض نداءٌ قائم (والتقريرُ القديم يُبقى مقروءًا).
-        raw = json.dumps(core or era, sort_keys=True, ensure_ascii=False, default=str)
-        return "st_" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
-    return f"st_nop-{int(n_pages)}p"
+    with open(path, "rb") as fh:
+        return hashlib.file_digest(fh, "sha256").hexdigest()
+
+
+def statement_key(source_sha: str) -> str:
+    """مفتاحُ الكشف = تجزئةُ **هويّة المصدر** (`source_sha256`) — **وبلا هويّةٍ لا مفتاح.**
+
+    **العِلّة (R130→R132):** كان المفتاحُ يُجزّئ بصمةَ صيغة الأرقام، فكشفان بالطول والصيغة نفسَيهما
+    يتصادمان؛ ثم صار يُجزّئ بايتات الملفّ **مع احتياطيٍّ** إلى البصمة القديمة. والاحتياطيُّ هو العطبُ
+    نفسُه: كلُّ تقريرٍ قائمٍ بلا `source` كان يقع عليه صامتًا. فحُذف: مصدرٌ بلا بايتاتٍ **لا يُعطي
+    مفتاحًا** — والـCLI يرفض ويسمّي `--source`، والواجهةُ تُمرّر الملفَّ دائمًا.
+    """
+    if not source_sha:
+        raise ValueError("هويّةُ الكشف مطلوبة — مصدرٌ بلا بايتاتٍ لا يُعطي مفتاحًا "
+                         "(الـCLI: مرّر --source)")
+    return "st_" + hashlib.sha1(str(source_sha).encode("utf-8")).hexdigest()[:10]
+
 
 #: **حالةُ الدفتر** — القيمةُ الوحيدةُ التي تُنشر عن توفّره هي ما تقوله هذه الدالّة.
 MISSING = "missing"
@@ -469,7 +456,7 @@ def _text(value) -> str | None:
 
 
 def ingest(conn: sqlite3.Connection, rows: list[dict], pages: dict[int, dict],
-           report: dict | None = None) -> dict:
+           report: dict | None = None, n_pages: int | None = None) -> dict:
     """يكتب الجدولَ المُتحقَّق منه وأحكامَ الصفحات في معاملةٍ واحدة — **ويُزيل ما لم تعد القراءةُ تحمله.**
 
     **والمصدرُ هو مخرَجُ `tools/to_xlsx.load` نفسُه** لا نسخةً ثانيةً منه: نسخةٌ ثانيةٌ من بناء
@@ -495,12 +482,24 @@ def ingest(conn: sqlite3.Connection, rows: list[dict], pages: dict[int, dict],
     for r in rows:
         per_page_rows[r.get("page")] = per_page_rows.get(r.get("page"), 0) + 1
     kept_rows = {(int(r["page"]), int(r["row_no"])) for r in rows if r.get("row_no") is not None}
+    # **والقاعدةُ تمثّل الوثيقةَ لا ما قُرئ منها (R132-1):** صفحةٌ لم تُقرأ هذه المرّة (لا صفوفَ
+    # ولا تذييل) كان لها أثرٌ صفر ⇒ فبعد إعادة التشغيل يقول التطبيق «الكشف من صفحتين» عن كشفٍ من
+    # ثلاث، ويُنكر صفحةً داخلة. فتُكتب **صفحةٌ لكلّ صفحةِ وثيقة** بحالة `unread`، ويبقى عدُّ الصفحات
+    # ومعرفةُ «لم تُقرأ» بعد إعادة التشغيل كما في الجلسة.
+    pages = dict(pages or {})
     kept_pages = {int(pg) for pg in pages}
+    doc_pages = max([int(n_pages or 0), *kept_pages, 0])
+    # **وبلا ترقيةِ مخطَّط:** `verdict` قيدُه CHECK لا يقبل قيمةً جديدة، وترقيةُ v2⇒v3 تُبطل قاعدةَ
+    # المالك الحيّة (قراءةٌ مدفوعة). فالوسمُ في `footer_basis='unread'` — عمودٌ نصّيٌّ حرّ — والدالّةُ
+    # `unread_pages` تقرؤه. والحكمُ يبقى `other` فلا يكذب على قيدٍ قائم.
+    for pg in range(1, doc_pages + 1):
+        pages.setdefault(pg, {"footer": "other", "basis": "unread", "page_no": None, "rows": 0})
+    kept_pages = set(range(1, doc_pages + 1))
     pruned_rows = pruned_pages = 0
     with conn:
         for pg, entry in sorted(pages.items()):
             verdict = (entry.get("footer") or "other")
-            if verdict not in {"ok", "gap", "mismatch", "absent", "unchecked"}:
+            if verdict not in {"ok", "gap", "mismatch", "absent", "unchecked", "other"}:
                 verdict = "other"
             cost = (entry.get("usage") or {}).get("cost") if isinstance(entry.get("usage"), dict) else None
             conn.execute(
@@ -542,8 +541,10 @@ def ingest(conn: sqlite3.Connection, rows: list[dict], pages: dict[int, dict],
             if int(pg) not in kept_pages:
                 conn.execute("DELETE FROM pages WHERE pg = ?", (pg,))
                 pruned_pages += 1
-    return {"pages": len(pages), "rows": written, "dropped_no_page": dropped_no_page,
-            "pruned_rows": pruned_rows, "pruned_pages": pruned_pages}
+    return {"pages": len(pages), "doc_pages": doc_pages,
+            "rows": written, "dropped_no_page": dropped_no_page,
+            "pruned_rows": pruned_rows, "pruned_pages": pruned_pages,
+            "unread_pages": [pg for pg in sorted(pages) if (pages[pg].get("basis") == "unread")]}
 
 
 def read_rows(conn: sqlite3.Connection, pg: int | None = None) -> list[dict]:
@@ -666,8 +667,12 @@ def answer(conn: sqlite3.Connection, intent: str, *, pg: int | None = None,
         unproven_n = conn.execute("SELECT COUNT(*) FROM unproven").fetchone()[0]
         verdicts = {v: n for v, n in conn.execute(
             "SELECT COALESCE(verdict,'-'), COUNT(*) FROM pages GROUP BY 1 ORDER BY 2 DESC")}
+        # **وتُسمّى الصفحاتُ غيرُ المقروءة بالرقم (R132-1):** عدُّها لا يكفي — واللافتةُ تحتاج
+        # أسماءَها لئلّا تُقرأ «جاهزة» فوق فجوة.
+        unread = [int(pg) for (pg,) in conn.execute(
+            "SELECT pg FROM pages WHERE footer_basis = 'unread' ORDER BY pg")]
         return {"intent": intent, "rows": rows, "pages": pages,
-                "unproven": unproven_n, "page_verdicts": verdicts}
+                "unproven": unproven_n, "page_verdicts": verdicts, "unread_pages": unread}
     if intent == "unproven":
         got = unproven(conn)
         return {"intent": intent, "count": len(got), "rows": got[:limit]}

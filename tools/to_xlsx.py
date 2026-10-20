@@ -597,6 +597,11 @@ def write_sheet(ws, header: list[str], rows: list[list], widths: list[int],
         cell.alignment = Alignment(horizontal="center", vertical="center")
     for row in rows:
         ws.append(row)
+        # **ونصٌّ لا صيغة (R132-4):** openpyxl يحفظ ما يبدأ بـ`=` صيغةً حيّة (data_type='f')؛
+        # ووصفٌ يبدأ بها يُنفَّذ عند الفتح. فتُثبَّت الخلايا النصّيّة نصًّا بعد الإلحاق.
+        for cell, value in zip(ws[ws.max_row], row):
+            if isinstance(value, str):
+                cell.data_type = "s"
     for i, width in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = width
     ws.freeze_panes = freeze

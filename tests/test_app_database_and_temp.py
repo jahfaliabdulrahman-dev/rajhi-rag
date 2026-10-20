@@ -374,3 +374,63 @@ def test_the_three_surfaces_agree_after_an_incomplete_reread(app):
     # الأداةُ تعدّ **الحركات** (لا صفَّ الرصيد الافتتاحيّ) — فالمقابلةُ بدلالتها لا بعدد الصفوف.
     movements = sum(1 for r in db if not r.get("opening") and r.get("movement") is not None)
     assert f"العدد = {movements}" in counted, counted
+
+
+def test_a_page_never_read_survives_the_restart(app):
+    """**قبولُ R132-1 (P1):** كشفٌ من ٣ صفحات تعثّرت فيه الثانية (لا صفوفَ ولا تذييل)، ثمّ أُعيد
+    التشغيل: القاعدةُ تمثّل **الوثيقة** لا ما قُرئ منها ⇒ `n_pages=3`، وسؤالُ الصفحة ٣ لا يُحجب،
+    وسؤالُ الصفحة ٢ يُجاب «لم تُقرأ» لا «غيرُ موجودة»، والحالةُ تسمّيها ولا تقول «جاهز».
+    """
+    from statement_qa import scope as scope_mod
+    from statement_qa.qa import _data_facts
+
+    key = "st_doc3"
+    path = L.data_home() / Path(*L.LEDGER_SUBDIR) / f"{key}.sqlite"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = L.open_ledger(path)
+    try:
+        rows = []
+        for pg in (1, 3):
+            rows.append({"page": pg, "row_no": 1, "balance": "100.00", "movement": None,
+                         "side": "", "opening": True, "desc": "رصيد افتتاحي", "date": "2026-03-01",
+                         "printed_page": pg})
+            rows.append({"page": pg, "row_no": 2, "balance": "90.00", "movement": "10.00",
+                         "side": "debit", "opening": False, "desc": "سحب", "date": "2026-03-02",
+                         "printed_page": pg})
+        # الصفحة ٢ غيرُ مقروءة: لا صفوفَ ولا تذييل — لكنّها صفحةُ وثيقة
+        L.ingest(conn, rows, {1: {"footer": "ok"}, 3: {"footer": "ok"}}, n_pages=3)
+    finally:
+        conn.close()
+
+    app.STATE.clear()                              # إعادةُ تشغيل
+    assert app._load_from_ledger(key)
+    assert app.STATE["n_pages"] == 3, app.STATE["n_pages"]
+
+    years, max_page, amounts, pages_read = _data_facts(app.STATE["rows"])
+    ok = scope_mod.classify("ما مجموع حركات الصفحة 3؟", years, max_page, amounts,
+                            n_pages=app.STATE["n_pages"], pages_read=pages_read)
+    assert ok.kind != "no_such_data", ok.answer          # صفحةٌ داخلةٌ لها صفوف ⇒ لا حجب
+    missing = scope_mod.classify("ما مجموع حركات الصفحة 2؟", years, max_page, amounts,
+                                 n_pages=app.STATE["n_pages"], pages_read=pages_read)
+    assert missing.kind == "no_such_data", missing
+    assert "لم تُقرأ" in missing.answer and "ينتهي عند" not in missing.answer, missing.answer
+
+    status = app._ledger_ui.status_text(app.DATA_HOME, key, len(app.STATE["rows"]))
+    assert "ص2" in status and "جاهز" not in status, status
+
+
+def test_a_question_starting_with_equals_round_trips_as_text(app):
+    """**R132-4 في تنزيل المحادثة:** سؤالٌ يبدأ بـ`=` يُحفظ نصًّا لا صيغةً حيّة."""
+    from openpyxl import load_workbook
+
+    path = _db(app)
+    conn = L.open_ledger(path)
+    try:
+        L.record_qa(conn, "2026-10-20T10:00:00", "=SUM(A1:A2)", "جواب", [])
+    finally:
+        conn.close()
+    got, note = app._conversation_export()
+    assert got, note
+    ws = load_workbook(got)["المحادثة"]
+    cell = ws.cell(row=ws.max_row, column=3)
+    assert cell.value == "=SUM(A1:A2)" and cell.data_type == "s", (cell.value, cell.data_type)

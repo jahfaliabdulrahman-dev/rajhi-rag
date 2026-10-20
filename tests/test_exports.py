@@ -229,3 +229,17 @@ def test_markdown_renderer_escapes_html_but_keeps_bold():
     html_out = render("**عريض** و<script>alert(1)</script>\n", "x")
     assert "<strong>عريض</strong>" in html_out
     assert "<script>" not in html_out
+
+
+def test_a_cell_starting_with_equals_is_text_not_a_live_formula():
+    """**R132-4:** openpyxl يحفظ ما يبدأ بـ`=` **صيغةً حيّة** — ووصفٌ من كشفٍ يبدأ بها كان
+    يُنفَّذ عند الفتح. الكاتبُ الواحد (`write_sheet`) يُثبّت الخلايا النصّيّة نصًّا.
+    """
+    from openpyxl import Workbook
+    from tools.to_xlsx import write_sheet
+
+    wb = Workbook()
+    ws = wb.active
+    write_sheet(ws, ["الوصف"], [["=1+1"], ["سحب عادي"]], [20])
+    assert ws["A2"].data_type == "s" and ws["A2"].value == "=1+1"
+    assert ws["A3"].data_type == "s"

@@ -24,7 +24,6 @@ their exact shape (tools/qa_gate.py depends on them).
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -666,17 +665,12 @@ def _ledger_path_for(key: str | None = None) -> Path:
 
 
 def _file_sha256(path) -> str:
-    """تجزئةُ **بايتات ملفّ الكشف** — هويّةُ الكشف (R131-2) لا صيغةُ طباعته.
+    """هويّةُ الكشف — **موضعٌ واحد** (`ledger.source_sha256` بـ`hashlib.file_digest` · R132-2).
 
-    تُقرأ بالكتل (الكشفُ ٦٢٩ صفحةً عشراتُ الميغابايت) وتُسجَّل في الحالة، فيُشتقّ منها مفتاحُ
-    القاعدة الذي تقرؤه الواجهةُ والـCLI معًا. **والحدُّ:** الملفُّ نفسه ببايتاته؛ إعادةُ تصدير
-    الكشف من المصرف بملفٍّ جديدٍ تُعطي مفتاحًا جديدًا (وهو الصواب: ملفٌّ آخر).
+    لا حلقةَ تجزئةٍ هنا: الحلقةُ اليدويّةُ الثالثة كانت نسخةً من دالّةٍ في المكتبة القياسيّة،
+    وتفرّقُ النسخُ تُفرّق المفاتيحَ صامتة.
     """
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for block in iter(lambda: fh.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
+    return _ledger.source_sha256(path)
 
 
 def _ledger_write() -> dict:
@@ -694,13 +688,15 @@ def _ledger_write() -> dict:
     if not rows:
         return {"ok": False, "message": "لا صفوفَ لكتابة قاعدةٍ منها."}
     old_key = STATE.get("ledger_key")
-    key = _ledger.statement_key(STATE.get("era"), _ledger.pages_of(rows),
-                                source_sha=STATE.get("source_sha"))
+    if not STATE.get("source_sha"):
+        return {"ok": False, "message": "لا هويّةَ للمصدر — لا تُكتب قاعدةٌ بلا بايتاتِ الكشف."}
+    key = _ledger.statement_key(STATE["source_sha"])
     path = _ledger_ui.ledger_file(DATA_HOME, key)
     try:
         conn = _ledger.open_ledger(path)
         try:
-            stats = _ledger.ingest(conn, rows, _ledger.pages_from_state(rows, STATE.get("footers") or {}))
+            stats = _ledger.ingest(conn, rows, _ledger.pages_from_state(rows, STATE.get("footers") or {}),
+                                   n_pages=STATE.get("n_pages"))
         finally:
             conn.close()
     except _ledger.LedgerUnavailable as e:
@@ -1603,14 +1599,12 @@ def _ledger_key() -> str:
     **وبعد إعادة التشغيل لا بصمةَ في الذاكرة (R130):** يُقرأ المؤشّرُ النشِط من مجلّد بيانات
     المستخدم — فتعرف الواجهةُ أيَّ قاعدةٍ تفتح، ويعمل تنزيلُ المحادثة والأسئلةُ بلا حالةٍ حيّة.
     """
-    rows = _ledger_rows()
-    era = STATE.get("era")
-    if era:
-        # **والهويّةُ نفسُها التي يكتب بها `_ledger_write` (R131-2):** `source_sha` أوّلًا، وإلا
-        # فالبصمةُ الاحتياطيّة — وإلا حُسب مفتاحان لنفس الكشف بين الكتابة والقراءة.
-        return _ledger.statement_key(era, _ledger.pages_of(rows),
-                                     source_sha=STATE.get("source_sha"))
-    return _ledger_ui.active_key(DATA_HOME) or _ledger.statement_key(None, _ledger.pages_of(rows))
+    # **الموضعُ الواحد (R132-2):** الهويّةُ من بايتات الملفّ التي حسبها مسارُ القراءة؛ وبعد إعادة
+    # التشغيل لا بايتاتَ في الذاكرة ⇒ المؤشّرُ النشِط. ولا مفتاحَ مُصطنعًا من عددِ صفحات.
+    sha = STATE.get("source_sha")
+    if sha:
+        return _ledger.statement_key(sha)
+    return _ledger_ui.active_key(DATA_HOME) or ""
 
 
 def _memory_path():
@@ -1648,7 +1642,8 @@ def _ledger_refresh_click() -> str:
 
 def _ledger_build_click():
     rows = _ledger_rows()
-    msg = _ledger_ui.build(DATA_HOME, rows, STATE.get("footers") or {}, _ledger_key())
+    msg = _ledger_ui.build(DATA_HOME, rows, STATE.get("footers") or {}, _ledger_key(),
+                           n_pages=STATE.get("n_pages"))
     return msg, _ledger_refresh_click()
 
 
@@ -1755,19 +1750,28 @@ def _conversation_export() -> tuple[str | None, str]:
     from openpyxl import Workbook                     # noqa: PLC0415 — كاتبٌ منظَّم، تبعيّةٌ قائمة
 
     wb = Workbook()
+
+    def _append_text(ws, values):
+        """يُلحق صفًّا **ويُثبّت نصوصَه نصًّا** — openpyxl يجعل ما يبدأ بـ`=` صيغةً حيّة (R132-4)."""
+        ws.append(values)
+        for cell, value in zip(ws[ws.max_row], values):
+            if isinstance(value, str):
+                cell.data_type = "s"
+
     ws = wb.active
     ws.title = "المحادثة"
     ws.sheet_view.rightToLeft = True
-    ws.append(["#", "التاريخ", "السؤال", "الجواب", "امتناع"])
+    _append_text(ws, ["#", "التاريخ", "السؤال", "الجواب", "امتناع"])
     for r in qa_rows:
-        ws.append([r["id"], r["asked_at"], r["question"], r["answer"] or "", "نعم" if r["refused"] else ""])
+        _append_text(ws, [r["id"], r["asked_at"], r["question"], r["answer"] or "",
+                          "نعم" if r["refused"] else ""])
     ws2 = wb.create_sheet("الأدلّة")
     ws2.sheet_view.rightToLeft = True
-    ws2.append(["سؤال", "صفحة", "صفّ", "البيان", "المبلغ"])
+    _append_text(ws2, ["سؤال", "صفحة", "صفّ", "البيان", "المبلغ"])
     for qid, rows in evidence.items():
         for e in rows:
             # **بلا تحويلٍ للنصّ:** openpyxl يحفظ السطرَ الجديد و`|` كما هما.
-            ws2.append([qid, e["pg"], e["row_no"], e["desc"] or "", e["movement"] or ""])
+            _append_text(ws2, [qid, e["pg"], e["row_no"], e["desc"] or "", e["movement"] or ""])
     with tempfile.TemporaryDirectory(prefix="rajhi_chat_") as work:
         out = Path(work) / "conversation.xlsx"
         wb.save(out)

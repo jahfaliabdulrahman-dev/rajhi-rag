@@ -145,6 +145,15 @@ def status_text(root: Path, key: str | None, rows_count: int, dropped: int = 0) 
                 f"القاعدةُ **{cov['rows']}** صفًّا والقراءةُ **{rows_count}** صفًّا. "
                 f"أعد قراءة الكشف لتُحدَّث القاعدة (لا نسخةَ قديمةَ تحت «جاهز»)."
                 + _dropped_note(dropped))
+    if cov.get("unread_pages"):
+        # **ولا «جاهز» فوق صفحةٍ لم تُقرأ (R132-1):** الحالةُ تبقى بعد إعادة التشغيل كما في الجلسة
+        # — تُسمّى الصفحةُ وتُقرأ «غيرُ مكتملة»، لا «مبنيٌّ وجاهز».
+        listed = "، ".join(f"ص{p}" for p in cov["unread_pages"])
+        return (f"### دفترُ الكشف — **قاعدةٌ غيرُ مكتملة**\n"
+                f"**{cov['rows']}** صفًّا · **{cov['pages']}** صفحة · **لم تُقرأ هذه المرّة: {listed}** · "
+                f"نسخةُ المخطَّط `{ver}` · الملفّ `{path.name}`\n\n"
+                f"أحكامُ الصفحات: " + " · ".join(f"{k}: {v}" for k, v in cov["page_verdicts"].items())
+                + _dropped_note(dropped))
     return (f"### دفترُ الكشف — مبنيٌّ وجاهز ✅\n"
             f"**{cov['rows']}** صفًّا · **{cov['pages']}** صفحة · **{cov['unproven']}** بلا إثبات · "
             f"نسخةُ المخطَّط `{ver}` · الملفّ `{path.name}`\n\n"
@@ -163,7 +172,8 @@ def _dropped_note(dropped: int) -> str:
             f"صفًّا بلا صفحة) **وليس إسقاطًا صامتًا**: العددُ مُعلَنٌ هنا.")
 
 
-def build(root: Path, rows: list[dict], footers: dict | None, key: str | None = None) -> str:
+def build(root: Path, rows: list[dict], footers: dict | None, key: str | None = None,
+          n_pages: int | None = None) -> str:
     """يبني الدفترَ من **حالة القراءة الحالية** ويكتب ملخّصًا — بلا نموذجٍ وبلا شبكة.
 
     **والقراءةُ صارت تكتبه تلقائيًّا (R130)**، وهذا الزرُّ يبقى **إعادةَ بناءٍ يدويّة** (بعد تعديلِ
@@ -172,12 +182,15 @@ def build(root: Path, rows: list[dict], footers: dict | None, key: str | None = 
     """
     if not rows:
         return "**لا صفوفَ لبناء دفترٍ منها** — اقرأ كشفًا أولًا."
+    if not key:
+        # **بلا هويّةٍ لا مفتاح (R132-2):** كان الفرعُ يُصنّع `st_nop-<N>p` من عدد الصفحات —
+        # وهو التصادمُ الذي بُني المفتاحُ الجديد لإنهائه، ويعيش فخًّا صامتًا في وحدةٍ «نقيّة».
+        return "**لا مفتاحَ للكشف — بلا هويّةِ مصدرٍ (بايتات الملفّ) لا دفتر.**"
     pages = L.pages_from_state(rows, footers)
-    key = key or statement_key(None, L.pages_of(rows))
     path = ledger_file(root, key)
     conn = L.open_ledger(path)
     try:
-        got = L.ingest(conn, rows, pages)
+        got = L.ingest(conn, rows, pages, n_pages=n_pages)
         cov = L.answer(conn, "coverage")
     finally:
         conn.close()

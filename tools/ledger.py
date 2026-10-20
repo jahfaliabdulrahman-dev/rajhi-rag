@@ -37,22 +37,20 @@ def _build(args) -> int:
     pages = L.pages_from_run(per_page, flags)
     source_sha = (report.get("source") or {}).get("sha256")
     if not source_sha and args.source:
-        # **تقريرٌ قديمٌ بلا هويّةٍ (R131-2):** يُمرَّر المصدرُ فيُجزّأ الآن — وإلا فالبصمةُ
-        # الاحتياطيّةُ تُعلَن ولا تُقارَن بهويّة.
-        import hashlib as _hashlib
-        h = _hashlib.sha256()
-        with open(Path(args.source).expanduser(), "rb") as fh:
-            for block in iter(lambda: fh.read(1 << 20), b""):
-                h.update(block)
-        source_sha = h.hexdigest()
-    key = L.statement_key(report.get("era"), len(pages), source_sha=source_sha)
+        source_sha = L.source_sha256(Path(args.source).expanduser())
+    if not source_sha:
+        # **بلا هويّةٍ لا مفتاح (R132-2):** كان يسقط على بصمة صيغة الأرقام — وهي العطبُ نفسُه.
+        print("⛔ التقريرُ لا يحمل هويّةَ المصدر (source.sha256) — مرّر --source <ملفّ الكشف> "
+              "لتُجزّأ بايتاتُه. لا تُكتب قاعدةٌ على مفتاحٍ قد يتصادم.", file=sys.stderr)
+        return 2
+    key = L.statement_key(source_sha)
     # **والمسارُ من المفتاح المحسوب نفسِه** لا من حسابٍ ثانٍ: `default_db` تقرأ التقريرَ وحدَه،
     # فلو مرّر المستخدمُ `--source` لحُسب المفتاحُ من الهويّة وبقي المسارُ على البصمة الاحتياطيّة.
     db = (Path(args.db).expanduser() if args.db
           else L.data_home() / Path(*L.LEDGER_SUBDIR) / f"{key}.sqlite")
     conn = L.open_ledger(db)                    # البناءُ يُنشئ (create=True)
     try:
-        written = L.ingest(conn, rows, pages)
+        written = L.ingest(conn, rows, pages, n_pages=len(pages))
         cov = L.answer(conn, "coverage")
     finally:
         conn.close()
@@ -72,9 +70,10 @@ def default_db(report: dict | None = None, pages: dict | None = None) -> Path:
     فالكشفُ الواحد تُكتب قاعدتُه مرّةً واحدةً أيًّا كان من كتبها. وبلا بصمةٍ يُنسب إلى عدد الصفحات
     **مع إعلان النقص** (`nop-`). **ولا مسارَ داخل المستودع:** بياناتُ المستخدم خارج الشجرة بالبناء.
     """
-    key = L.statement_key((report or {}).get("era"), len(pages or {}),
-                          source_sha=((report or {}).get("source") or {}).get("sha256"))
-    return L.data_home() / Path(*L.LEDGER_SUBDIR) / f"{key}.sqlite"
+    sha = ((report or {}).get("source") or {}).get("sha256")
+    if not sha:
+        raise ValueError("هويّةُ المصدر مطلوبة — لا مفتاحَ بلا source.sha256")
+    return L.data_home() / Path(*L.LEDGER_SUBDIR) / f"{L.statement_key(sha)}.sqlite"
 
 
 def _ask(args) -> int:

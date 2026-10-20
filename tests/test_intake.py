@@ -188,11 +188,16 @@ def app_run(monkeypatch, tmp_path):
         monkeypatch.setattr(app, "_close_pages", lambda ps: list(ps))
         app.STATE.clear()
         app.STATE["store"] = "ملفٌّ سابق"
+        # **ملفٌّ حقيقيٌّ صغير (R132-2):** الهويّةُ من بايتات المصدر، وبلا هويّةٍ لا مفتاح — فلا
+        # يُمرَّر مسارٌ وهميّ (كان الإنتاجُ يحتفظ باحتياطيٍّ لخدمة الضوابط).
+        src = tmp_path / "upload.pdf"
+        if not src.exists():
+            src.write_bytes(b"%PDF-1.4\n% test statement\n")
         if via_handler:        # معالجُ الزرّ نفسه (بقفل التشغيل) — القفلُ في مجلّدٍ مؤقت
             monkeypatch.setattr(app, "LOCK_PATH", tmp_path / "job.lock")
-            out = app.process_pdf("upload.pdf", progress=lambda *a, **k: None)
+            out = app.process_pdf(str(src), progress=lambda *a, **k: None)
         else:
-            out = app._process_pdf_locked("upload.pdf", lambda *a, **k: None, skip_rejected=skip)
+            out = app._process_pdf_locked(str(src), lambda *a, **k: None, skip_rejected=skip)
         return out, calls, pages, app.STATE
     run.calls = calls          # سجلُّ الاستدعاءات يبقى مقروءًا حين يرفع التشغيلُ خطأً
     return run

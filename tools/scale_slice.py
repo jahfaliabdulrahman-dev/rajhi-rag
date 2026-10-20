@@ -37,6 +37,7 @@ sys.path.insert(0, str(PROJ))
 sys.path.insert(0, str(PROJ / "src"))
 from tools.spend import at_or_over  # noqa: E402 — **السقفُ بالسنتات** (مراجعة ٥٢ · R52-4 · F7)
 from statement_qa.era import fingerprint_pages, summarize_ar as era_ar  # noqa: E402
+from statement_qa.ledger import source_sha256  # noqa: E402 — الهويّةُ الواحدة (R132-2)
 from statement_qa.footer_oracle import (  # noqa: E402
     FooterReading, check_page_footer, delta_checkable, delta_status,
     page_diverged, read_footer, try_page_reread,
@@ -215,16 +216,6 @@ def _bump_usage(cache: Path, extra: dict) -> None:
         return
     d["usage"] = _sum_dicts(d.get("usage") or {}, extra)
     _write_json_atomic(cache, d)
-
-
-def _sha256_file(path: str | Path) -> str:
-    """تجزئةُ بايتات ملفّ الكشف — الهويّةُ التي يشتقّ منها المساران مفتاحَ القاعدة نفسَه."""
-    import hashlib
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for block in iter(lambda: fh.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
 
 
 def main() -> None:
@@ -794,7 +785,7 @@ def main() -> None:
         "per_page": per_page,
         # **هويّةُ الكشف من بايتات المصدر (R131-2):** تُقرأ بها الواجهةُ والـCLI المفتاحَ نفسَه؛
         # وعددُ الصفحات وصيغةُ الأرقام صفتان مشتقّتان لا تُعرّفان كشفًا.
-        "source": {"sha256": _sha256_file(source), "name": Path(source).name},
+        "source": {"sha256": source_sha256(source), "name": Path(source).name},
     }
     (out / "slice_report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

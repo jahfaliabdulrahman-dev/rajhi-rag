@@ -142,23 +142,21 @@ def test_the_schema_is_v2_and_a_v1_database_is_named_outdated(tmp_path):
 
 
 def test_the_ui_and_the_cli_sign_the_same_statement_with_the_same_key(tmp_path):
-    """**مسارٌ واحد — بالبناء لا بالصدفة (إصلاحُ المقاعد الثلاثة P1):** الواجهةُ تُجزّئ بصمةَ
-    `fingerprint_pages` كاملةً (ستّة حقول)، وتقريرُ التشغيل يكتب أربعة (بلا `per_page`/`majority`)
-    ⇒ كانت تجزئتان مختلفتان لكشفٍ واحد وقاعدتان. والمفتاحُ الآن من **الحقول المشتركة** وحدها.
+    """**مسارٌ واحد — بالبناء (R132-2):** المفتاحُ من **هويّة المصدر** (`source_sha256`) وحدَها،
+    فالواجهةُ والـCLI يُنتجان المفتاحَ نفسَه لنفس البايتات. وبلا هويّةٍ **يرفض** الـCLI بدل أن
+    يكتب على مفتاحِ صيغةِ الأرقام (الاحتياطيُّ الذي حُذف).
     """
+    import pytest
+
     import ledger as cli
 
-    full = {"overall": "o", "styles": {"a": 1}, "transitions": {"b": 2}, "outliers": [],
-            "per_page": {1: {"rows": 2}}, "majority": "m"}
-    report_era = {k: full[k] for k in ("overall", "styles", "transitions", "outliers")}
-    pages = _pages((1, 2))
-
-    ui_key = L.statement_key(full, 626)          # عددُ صفوف العرض
-    cli_key = L.statement_key(report_era, 629)   # عددُ صفحات التقرير
-    assert ui_key == cli_key, (ui_key, cli_key)
-    assert cli.default_db({"era": report_era}, pages).name == f"{ui_key}.sqlite"
-    # وبلا بصمةٍ يُعلَن النقصُ في الاسم بدل مفتاحٍ يكذب
-    assert cli.default_db({}, pages).name.startswith("st_nop-")
+    sha = "b" * 64
+    key = L.statement_key(sha)
+    assert cli.default_db({"source": {"sha256": sha}}).name == f"{key}.sqlite"
+    with pytest.raises(ValueError):
+        cli.default_db({})
+    with pytest.raises(ValueError):
+        L.statement_key("")
 
 
 def test_the_scope_gate_reads_the_page_dimension_from_the_database(tmp_path):
@@ -193,15 +191,10 @@ def test_two_different_sources_never_share_a_key(tmp_path):
         return hashlib.sha256(data).hexdigest()
 
     a, b = sha(b"%PDF-1.4 same-length-A"), sha(b"%PDF-1.4 same-length-B")
-    era = {"overall": "o", "styles": {"a": 1}, "transitions": {"b": 2}, "outliers": []}
-
-    key_a = L.statement_key(era, 10, source_sha=a)
-    key_b = L.statement_key(era, 10, source_sha=b)
+    key_a, key_b = L.statement_key(a), L.statement_key(b)
     assert key_a != key_b, "كشفان مختلفان اشتركا في مفتاحٍ واحد"
-    assert L.statement_key(era, 11, source_sha=a) == key_a, "المفتاحُ تبع عددَ الصفوف لا المصدر"
-    # والمسارُ الثاني يقرأ الهويّةَ من تقرير التشغيل (يُسجّلها القارئ عند القراءة)
-    report = {"era": {k: era[k] for k in ("overall", "styles", "transitions")}, "source": {"sha256": a}}
-    assert cli.default_db(report, _pages((1, 2))).name == f"{key_a}.sqlite"
+    assert L.statement_key(a) == key_a, "المفتاحُ تبع شيئًا غير المصدر"
+    assert cli.default_db({"source": {"sha256": a}}).name == f"{key_a}.sqlite"
 
 
 def test_an_incomplete_reread_leaves_one_contiguous_numbering(tmp_path):
@@ -222,3 +215,16 @@ def test_an_incomplete_reread_leaves_one_contiguous_numbering(tmp_path):
         assert len({r["seq"] for r in now}) == len(now)
     finally:
         conn.close()
+
+
+def test_the_source_identity_has_exactly_one_home():
+    """**قبولُ R132-2:** دالّةُ هويّةٍ واحدة بـ`hashlib.file_digest`، ولا حلقةَ تجزئةٍ ثانية في
+    المسارات الثلاثة. كان في كلٍّ منها حلقةٌ يدويّةٌ للشيء نفسه — وتفرّقُ النسخِ يُفرّق المفاتيح.
+    """
+    root = Path(__file__).resolve().parents[1]
+    ledger_src = (root / "src" / "statement_qa" / "ledger.py").read_text(encoding="utf-8")
+    assert "hashlib.file_digest" in ledger_src, "الهويّةُ لم تُبنَ على file_digest"
+    for rel in ("app.py", "tools/scale_slice.py", "tools/ledger.py"):
+        src = (root / rel).read_text(encoding="utf-8")
+        assert ("import hashlib" not in src and "file_digest(" not in src
+                and "sha256()" not in src), f"{rel}: نسخةُ تجزئةٍ ثانية"

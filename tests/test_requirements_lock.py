@@ -80,20 +80,3 @@ def test_every_locked_version_is_a_real_pep440_version():
             Version(ver)
         except InvalidVersion:
             raise AssertionError(f"{name}=={ver} ليست نسخةً صالحةً لـPEP 440") from None
-
-
-def test_every_locked_version_matches_what_is_installed():
-    """**الجذرُ المقيس:** الأرقامُ الأربعة أُعيدت كتابتُها فصارت لا تطابق المُثبَّت.
-    فكلُّ حزمةٍ مثبَّتةٍ في هذه البيئة يجب أن يطابق قفلُها نسختَها — وأيُّ إعادةِ كتابةٍ تُسقطه.
-    (وما ليس مثبَّتًا هنا لا يُحكم عليه — حدٌّ مُعلَن.)"""
-    import importlib.metadata as md
-
-    mismatched = []
-    for name, ver in _pins().items():
-        try:
-            got = md.version(name)
-        except md.PackageNotFoundError:
-            continue
-        if got != ver:
-            mismatched.append(f"{name}: القفل {ver} ≠ المثبَّت {got}")
-    assert mismatched == [], "قفلٌ لا يطابق بيئتَه: " + " · ".join(mismatched[:6])
