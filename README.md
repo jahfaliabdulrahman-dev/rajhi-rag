@@ -8,7 +8,7 @@
 
 ## المُخرَج — ما يُسلَّم فعلاً
 
-`tools/to_xlsx.py` يكتب ملف Excel بأربع أوراق، كلها من أدلة التشغيل نفسها لا من إعادة حساب:
+`tools/to_xlsx.py` يكتب ملف Excel بسبع أوراق (منها الأربع التالية)، كلها من أدلة التشغيل نفسها لا من إعادة حساب — والأوراق الأخرى: الملخص · الأسئلة · صفوف الأسئلة:
 
 | الورقة | ما فيها |
 |---|---|
@@ -43,16 +43,21 @@ python3 tools/to_pdf.py --md docs/WHO_IS_THIS_FOR.md --out who-is-this-for-ar.pd
 
 ## تشغيل محلي
 
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-# مفتاح OpenRouter للقراءة البصرية
-echo 'OPENROUTER_API_KEY=...' > .env
+**ما يلزم:** Python 3.11 أو 3.12 · Poppler لتحويل صفحات PDF إلى صور (`brew install poppler` على macOS، `sudo apt install poppler-utils` على Linux) · مفتاح [OpenRouter](https://openrouter.ai) للقراءة والإجابة. وأول تشغيل ينزّل نموذج التضمين (نحو 110MB) مرة واحدة.
 
-python app.py            # واجهة Gradio عربية على :7860
+```bash
+git clone https://github.com/jahfaliabdulrahman-dev/rajhi-rag.git
+cd rajhi-rag
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt     # نحو خمس دقائق على نسخة نظيفة
+cp .env.example .env                # ثم ضع مفتاحك: OPENROUTER_API_KEY=sk-or-...
+python app.py                       # واجهة Gradio عربية على http://127.0.0.1:7860
 ```
 
-الخدمات الدائمة (launchd):
+**للتجربة بلا بيانات حقيقية:** ارفع العيّنة المصطنعة `data/sample/statement_sample.pdf` في تبويب «قراءة وتحقق»، ثم اسأل في تبويب «سؤال وجواب».
+**والمفتاح لا يدخل الكود:** يُقرأ من `.env` المستثنى من git، وفحص آلي في كل دفع يرفض أي مفتاح.
+
+الخدمات الدائمة على macOS (launchd):
 
 ```bash
 tools/install_services.sh
