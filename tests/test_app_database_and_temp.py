@@ -248,3 +248,43 @@ def test_the_app_writes_the_question_and_the_intent_reads_it(app):
     flat = " | ".join(str(c) for row in got["rows"] for c in row)
     assert "كم مجموع السحوبات؟" in flat, flat
     assert "10.00" in flat or "صفحة 1" in flat, flat      # دليلُ الصفّ وصل من القاعدة لا من الرام
+
+
+# ————— R131-10 (مراجعة ١٣١): الحذفُ يعدّ نسخَ العرض في حافظة Gradio ولا يبتلع فشلَها —————
+# **العِلّة المقيسة:** كان `delete_files_created_by_app` في `try/except Exception: pass`، ورسالةُ الحذف
+# تعدّ ملفّاتِ القاعدة وحدَها ⇒ «صفرُ ملفّ» عن نسخ العرض (صورُ الصفحات · الإكسل · المحادثة المنزَّلة،
+# وكلُّها بياناتٌ حقيقيّة) دعوى بلا عدّ، وفشلُ حذفها صامت. والضابطان يقيسان العدَّ والفشلَ معًا.
+
+def _display_copy(app, tmp_path) -> Path:
+    """نسخةُ عرضٍ في حافظة Gradio **بمكوّن المكتبة نفسِه** الذي يستعمله التطبيق (`_cache_path`)."""
+    src = tmp_path / "conversation.md"
+    src.write_text("نسخةُ عرض", encoding="utf-8")
+    return Path(app._cache_path(app.conv_file, src))
+
+
+def test_the_delete_counts_the_display_copies_it_removed(app, tmp_path):
+    kept = _display_copy(app, tmp_path)
+    # **والعددُ من قائمة المكتبة قبل الضغط:** قراءةُ العيّنة وضعت صورَ صفحاتها في الحافظة (معرضُ الصفحات)،
+    # وهي ممّا يُعدّ — فالمتوقَّعُ «كلُّ ما في القائمة» لا رقمٌ مكتوبٌ باليد.
+    n = len(app._display_copies())
+    assert kept.exists() and n >= 2, n               # صورُ القراءة + المحادثةُ المنزَّلة
+    msg = app._delete_statement_click()[0]
+    assert not kept.exists(), "نسخةُ العرض بقيت بعد الحذف"
+    assert f"نسخُ العرض المؤقّتة: حُذف **{n}** · بقي **0**" in msg, msg
+    assert app._display_copies() == set()
+
+
+def test_a_failed_display_cleanup_is_named_not_swallowed(app, tmp_path, monkeypatch):
+    import gradio.route_utils as ru
+
+    kept = _display_copy(app, tmp_path)
+    n = len(app._display_copies())
+
+    def _refuse(*_a, **_k):
+        raise PermissionError("محاكاةُ رفضِ النظام")
+
+    monkeypatch.setattr(ru, "delete_files_created_by_app", _refuse)
+    msg = app._delete_statement_click()[0]
+    assert kept.exists()
+    assert "تعذّر حذفُ نسخ العرض المؤقّتة (PermissionError)" in msg, msg
+    assert f"حُذف **0** · بقي **{n}**" in msg, msg

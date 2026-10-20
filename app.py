@@ -1626,8 +1626,40 @@ def _ledger_ask_click(label: str, value: str):
     return pd.DataFrame(got["rows"], columns=got["headers"]), got["note"]
 
 
+def _display_copies() -> set[str]:
+    """نسخُ العرض التي وضعها التطبيقُ في حافظة Gradio وما زالت على القرص — **بقائمة المكتبة نفسِها.**
+
+    هي ما يمرّ عليه `delete_files_created_by_app`: `demo.temp_file_sets` ناقصًا ما تحتفظ به المكوّنات
+    (`keep_in_cache`). فالعدُّ على ما يحذفه المكوّنُ نفسُه، لا على قائمةٍ ثانيةٍ نبنيها.
+    """
+    keep: set = set()
+    for comp in demo.blocks.values():
+        keep.update(getattr(comp, "keep_in_cache", set()))
+    return {f for s in demo.temp_file_sets for f in s if f not in keep and os.path.exists(f)}
+
+
+def _delete_display_copies() -> str:
+    """**يحذف نسخَ العرض بمكوّن المكتبة ويعدّ ما حذفه وما بقي (R131-10 · مراجعة ١٣١).**
+
+    الصورُ والإكسلُ والمحادثةُ المنزَّلة تحمل بياناتٍ حقيقيّة. و`delete_files_created_by_app(demo, None)`
+    هي الدالّةُ التي يناديها `delete_cache` وعند الإغلاق، فتُحذف **الآن** لا بعد عشر دقائق.
+    **والعِلّةُ المقيسة:** كان فشلُها يُبتلع (`except Exception: pass`) والرسالةُ تعدّ ملفّاتِ القاعدة وحدَها
+    ⇒ «صفرُ ملفّ» عن نسخ العرض دعوى بلا عدّ. فالفشلُ يُسمّى بصنفه، والعدُّ قبلُ وبعدُ في السطر نفسِه.
+    """
+    before = _display_copies()
+    failure = ""
+    try:
+        from gradio.route_utils import delete_files_created_by_app   # noqa: PLC0415
+
+        delete_files_created_by_app(demo, age=None)
+    except Exception as e:                     # noqa: BLE001 — يُسمّى في الرسالة ولا يُسقط حذفَ البيانات
+        failure = f"⚠ تعذّر حذفُ نسخ العرض المؤقّتة ({type(e).__name__}) · "
+    left = _display_copies()
+    return f"{failure}نسخُ العرض المؤقّتة: حُذف **{len(before - left)}** · بقي **{len(left)}**"
+
+
 def _delete_statement_click():
-    """**زرُّ الحذف الظاهر (R130):** يمحو القاعدةَ ومحادثتَها وملفّاتِها ويترك صفرَ ملفّ.
+    """**زرُّ الحذف الظاهر (R130):** يمحو القاعدةَ ومحادثتَها وملفّاتِها، ويعدّ ما حذفه وما بقي.
 
     **والترتيبُ مقصود:** إغلاقُ الحافظة (`qa.reset_memory`) **قبل** الحذف — متّصلٌ مفتوحٌ يُعيد إنشاء
     `-wal` بعد إزالة الملفّ. ثمّ يُمسح المؤشّر وتُفرَّغ الحالةُ والأسطح. ويُعاد عدُّ ما حُذف.
@@ -1639,15 +1671,7 @@ def _delete_statement_click():
     if path is not None:
         reset_memory(path)
     got = _ledger_ui.delete(DATA_HOME, key)
-    # **وملفّاتُ التنزيل في حافظة Gradio تُمسح بمكوّن المكتبة** (لا منظّفٍ يدويّ): الصورُ والإكسلُ
-    # والمحادثةُ المنزَّلة. `delete_files_created_by_app(demo, None)` هي التي يناديها `delete_cache`
-    # وعند الإغلاق — فالحذفُ يترك صفرَ ملفٍّ **الآن** لا بعد عشر دقائق.
-    try:
-        from gradio.route_utils import delete_files_created_by_app   # noqa: PLC0415
-
-        delete_files_created_by_app(demo, age=None)
-    except Exception:                          # noqa: BLE001 — لا يُسقط حذفَ البيانات
-        pass
+    display = _delete_display_copies()
     # **وقفلُ المهمّة يُزال** (إصلاحُ مقعد المعايير P2): كان يبقى في مجلّد البيانات فتُقرأ جملةُ
     # «صفرَ ملفّ» وهي غيرُ صحيحة. الحذفُ يقع والتطبيقُ خامل (الواجهةُ مشغولةٌ أثناء المهمّة).
     try:
@@ -1655,7 +1679,7 @@ def _delete_statement_click():
     except OSError:                            # noqa: BLE001 — قفلٌ مفتوحٌ على نظامٍ يمنع الحذف
         pass
     STATE.clear()
-    return (got["message"], "", pd.DataFrame(), _kpi_html(0, 0, 0, None), [],
+    return (f"{got['message']}\n\n{display}", "", pd.DataFrame(), _kpi_html(0, 0, 0, None), [],
             "", "", pd.DataFrame(), _hide_note(),
             _ledger_ui.status_text(DATA_HOME, None, 0))
 
