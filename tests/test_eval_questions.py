@@ -282,3 +282,17 @@ def test_the_run_header_writes_the_ceiling_under_its_own_source() -> None:
     # **ولا يُنسب الشاهدُ إلى مصدر الحدّ** — وهذا ما كان يقع:
     assert not (head["price_in_per_m"] == listing[0] and head["price_source"] == "provider-max-price"), \
         "سعرُ القائمة عاد يُكتب تحت مصدر الحدّ (R127-2)"
+
+
+def test_the_fifty_runs_through_the_shipped_database_path():
+    """**R131-8 (P2):** كانت الخمسون تُمرّر `rows` وحدَها ⇒ `make_qa_tools(rows)` لا `(conn)`،
+    فتقيس توأمًا لا مسار التطبيق (قِيس في مراجعة ١٣١: ٢٧ من ٢٩ نداءً متساوية، والفرقُ صفوفُ
+    الصفحة ٦٢٩ التي يُسقطها `build_rows`). فالضابطُ يقيس **التوصيل**: قاعدةٌ تُبنى بـ`ingest` من
+    التشغيل، و`ledger_path` يُمرَّر إلى `answer_question`، ولا `rows` تمرّ من المسار.
+    """
+    src = (ROOT / "tools" / "eval_questions.py").read_text(encoding="utf-8")
+    assert "L.ingest(" in src and "L.pages_from_run(" in src, "الخمسون لا تبني قاعدةَ المسار المشحون"
+    assert "ledger_path=db_path" in src, "المسارُ لا يُمرَّر إلى الأدوات"
+    call = src[src.index("r = answer_question("):]
+    call = call[:call.index(")") + 1]
+    assert "rows=None" in call and "footers=None" in call, call

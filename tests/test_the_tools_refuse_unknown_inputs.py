@@ -139,20 +139,27 @@ def test_a_typo_cannot_return_a_number():
 
 
 def test_every_tool_carries_the_strict_schema():
-    """**الوصولُ مُعدَّد لا مُدَّعى:** الثمانيةُ كلُّها، لا التي مُسِست في الاختبار."""
+    """**الوصولُ مُعدَّد لا مُدَّعى:** الاثنتا عشرةَ كلُّها، لا التي مُسِست في الاختبار.
+
+    **والعددُ ارتفع من ٨ إلى ١٢ في R130** بأدوات البُعد الزمنيّ (`statement_period` · `balance_on` ·
+    `group_by_date` · `movement_days`) — والزيادةُ مُعلَنةٌ هنا بـسببها، لا مُسكَتٌ عنها بتوسيعٍ صامت.
+    """
     tools = _tools()
-    assert len(tools) == 8, f"عددُ الأدوات تغيّر ({len(tools)}) ⇒ حدِّث نطاقَ الضابط"
+    assert len(tools) == 12, f"عددُ الأدوات تغيّر ({len(tools)}) ⇒ حدِّث نطاقَ الضابط"
+    assert {"statement_period", "balance_on", "group_by_date", "movement_days"} <= {
+        t.name for t in tools}, "أدواتُ الزمن غابت — وR130-1 يوجبها"
     for t in tools:
         extra = (t.args_schema.model_config or {}).get("extra")
         assert extra == "forbid", f"الأداة {t.name}: extra={extra!r} ⇒ تقبل مدخلًا مجهولًا"
 
 
 def test_the_strict_schema_still_declares_the_real_parameters():
-    """**ولا يُفرَغ المخطّط:** الصرامةُ لا تُسقط الوسائطَ المعلَنة (البديلُ الأسوأ من العطب)."""
+    """ولا يُفرَغ المخطّط: الصرامةُ لا تُسقط الوسائطَ المعلَنة (البديلُ الأسوأ من العطب)."""
     tools = _by_name(_tools())
     fields = set(tools["sum_movements"].args_schema.model_fields)
-    assert {"side", "keyword", "tx_type", "amount", "page"} <= fields, fields
+    assert {"side", "keyword", "tx_type", "amount", "page", "date_from", "date_to"} <= fields, fields
     assert "page" in tools["page_footer"].args_schema.model_fields
+    assert "date" in tools["balance_on"].args_schema.model_fields
 
 
 # ── ② كلُّ نداءٍ يُسجَّل بمدخله ───────────────────────────────────────────────────────────
@@ -163,7 +170,8 @@ def test_the_trace_records_the_inputs_of_every_call():
     tools["page_rows"].invoke({"page": 1})
     assert [e["tool"] for e in trace] == ["sum_movements", "page_rows"], trace
     assert trace[0]["args"] == {"side": "مدين", "keyword": "رسوم", "tx_type": "",
-                                "amount": None, "page": None}, trace[0]
+                                "amount": None, "page": None,
+                                "date_from": "", "date_to": ""}, trace[0]
     assert trace[1]["args"]["page"] == 1 and trace[1]["args"]["limit"] == 40
 
 

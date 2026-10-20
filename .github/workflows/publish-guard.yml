@@ -116,7 +116,13 @@ jobs:
           # ⇒ فذكرُ مسارٍ هنا يُقرأ إدراجًا) — وهو في سطور التشغيل أدناه وحدَها.
           python3 -m pip install --quiet "pytest==9.1.1" openpyxl==3.1.5 PyYAML==6.0.3 \
                                       "numpy==2.4.6" "pillow==12.3.0" \
-                                      "langchain==1.4.0" "langchain-core==1.6.3" "langgraph==1.2.11"
+                                      "langchain==1.4.0" "langchain-core==1.6.3" "langgraph==1.2.11" \
+                                      "langgraph-checkpoint==4.3.0" "langgraph-checkpoint-sqlite==3.1.2" \
+                                      "aiosqlite==0.22.1" "sqlite-vec==0.1.9"
+          # **الموّلدُ نفسه هو الحارس (R132-3):** `PEP 440` لا يمسك إصدارًا صحيحَ الصيغة لكنه غيرُ
+          # موجود (1908.5.22). والمُحلّلُ يمسكه — فيُشغَّل قبل الضوابط، بلا تثبيت.
+          python3 -m pip install --quiet --dry-run -r requirements.lock || {
+            echo "⛔ requirements.lock لا يُحلّ في بيئةٍ نظيفة — إصدارٌ غيرُ موجودٍ أو حزمةٌ بلا مصدر."; exit 1; }
           python3 -m pytest tests/test_compile_all.py \
                            tests/test_requirements_lock.py \
                            tests/test_public_claims.py \
@@ -153,6 +159,8 @@ jobs:
                            tests/test_saved_record_mark.py \
                            tests/test_ledger.py \
                            tests/test_ledger_ui.py \
+                           tests/test_ledger_database_core.py \
+                           tests/test_qa_time_tools.py \
                            tests/test_ledger_search_reach.py \
                            tests/test_answer_type.py \
                            tests/test_scope_gate.py \
@@ -160,6 +168,7 @@ jobs:
                            tests/test_agent_prompt_memory.py \
                            tests/test_app_binds_history.py \
                            tests/test_the_memory_reaches_the_model.py \
+                           tests/test_memory_sqlite.py \
                            tests/test_scope_one_home.py \
                            tests/test_app_excel_button.py \
                            tests/test_money_unit.py \

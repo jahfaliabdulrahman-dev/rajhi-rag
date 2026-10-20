@@ -95,7 +95,7 @@ def chat(request, monkeypatch):
         for c in (app.STATE.get("chunks") or [])[:k]])
     app.STATE.setdefault("store", None)
     if hasattr(qa, "clear_conversation"):
-        qa.clear_conversation(app._ledger_key())
+        qa.clear_conversation(app._ledger_key(), app._memory_path())
 
     def ask(history, q):
         history, _ = app.prepare_ask(q, history)
@@ -154,7 +154,8 @@ def test_a_refused_number_does_not_reach_the_next_call(chat) -> None:
     assert REFUSED not in seen, \
         "الرقمُ المرفوضُ بلغ نداءَ السؤال التالي — الذاكرةُ حفظت ما قاله النموذجُ لا ما عُرض"
 
-    stored = qa._thread_messages({"configurable": {"thread_id": app._ledger_key()}})
+    stored = qa._thread_messages({"configurable": {"thread_id": app._ledger_key()}},
+                        app._memory_path())
     humans = [str(m.content) for m in stored if m.type == "human"]
     assert humans == [NUMERIC_Q, Q2], \
         f"سؤالُ مستخدمٍ واحد ⇒ دورةٌ واحدة، والمحفوظُ السؤالُ كما سأله: {humans}"
@@ -189,7 +190,8 @@ def test_each_question_carries_only_its_own_chunks(chat, monkeypatch) -> None:
         assert f"قطعةُ السؤال: {older}" not in seen, \
             f"قطعةُ سؤالٍ سابق («{older}») بلغت النداء الثالث — فالقطعُ تُحفظ وتتراكم"
 
-    stored = qa._thread_messages({"configurable": {"thread_id": app._ledger_key()}})
+    stored = qa._thread_messages({"configurable": {"thread_id": app._ledger_key()}},
+                        app._memory_path())
     assert len(stored) == 2 * len(qs), f"دوراتٌ غيرُ متوقّعة في الحافظة: {len(stored)}"
     assert all("قطعةُ السؤال" not in str(m.content) for m in stored), \
         "قطعُ الاسترجاع دخلت الحافظة — والمحفوظُ السؤالُ وحدَه"

@@ -38,6 +38,19 @@ def _binds(call: ast.Call, name: str) -> bool:
     return any(k.arg == name for k in call.keywords)
 
 
+def _binds_the_footers(call: ast.Call) -> bool:
+    """**أو يُمرّر قاعدةً تحملها (R131-8):** بعد أن صارت الخمسون تمرّ بـ`ledger_path`، تُقرأ
+    التذييلاتُ من القاعدة (`read_footers`) — فربطُ `footers=footers` وحده لم يبقَ الطريقَ الوحيد،
+    و`footers=None` وحده **لا يُقبل** (قيمةٌ صريحةٌ بلا تذييل).
+    """
+    for k in call.keywords:
+        if k.arg == "footers" and not (isinstance(k.value, ast.Constant) and k.value.value is None):
+            return True
+        if k.arg == "ledger_path" and not (isinstance(k.value, ast.Constant) and k.value.value is None):
+            return True
+    return False
+
+
 @pytest.mark.parametrize("rel,label", [
     ("tools/eval_questions.py", "المقياس"),
     ("app.py", "التطبيق"),
@@ -50,7 +63,7 @@ def test_every_harness_binds_the_printed_footers(rel: str, label: str) -> None:
     """
     calls = _calls(ROOT / rel, "answer_question")
     assert calls, f"{label}: لا نداءَ لـ`answer_question` في {rel} — العنوانُ تغيّر ⇒ حدِّث الضابطَ"
-    missing = [c for c in calls if not _binds(c, "footers")]
+    missing = [c for c in calls if not _binds_the_footers(c)]
     assert not missing, (
         f"{label} ({rel}): {len(missing)} نداءً بلا `footers=` من {len(calls)} — "
         f"والمُدخَلُ هو ما كان يُقاس خطأً (R77: أداةُ `page_footer`)")
