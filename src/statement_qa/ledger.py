@@ -55,6 +55,14 @@ def data_home() -> Path:
     return Path(base) / APP_DIRNAME
 
 
+#: **حقولُ البصمة الحاكمة — موضعٌ واحدٌ يقرؤه المنتجان (R130 · إصلاحُ مقعدَي المعايير والبنية).**
+#: العِلّةُ المقيسة: الواجهةُ تُجزّئ `fingerprint_pages` كاملًا (ستّة حقول: `per_page` و`majority` زائدًا)،
+#: وتقريرُ التشغيل يكتب أربعةً فقط ⇒ **تجزئتان مختلفتان لكشفٍ واحد** ⇒ قاعدتان ومساران. والمفتاحُ
+#: يُشتقّ الآن من **الحقول المشتركة** وحدها، فتُنتج الواجهةُ والـCLI المفتاحَ نفسَه بالبناء لا بالصدفة —
+#: وبلا تغييرٍ لمفاتيح قواعد الـCLI القائمة (بصمتها أربعةُ حقولٍ هي نفسُها).
+_KEY_FIELDS = ("overall", "styles", "transitions", "outliers")
+
+
 def statement_key(era: dict | None, n_pages: int) -> str:
     """مفتاحُ الكشف: **تجزئةُ بصمته** (لا عددُ صفحاته) — **موضعٌ واحدٌ يقرؤه التطبيقُ والـCLI.**
 
@@ -67,7 +75,9 @@ def statement_key(era: dict | None, n_pages: int) -> str:
     نفسَها بمفتاحٍ واحد (قرارُ المالك: «مسارٌ واحدٌ للكشف الواحد»)، فالاسمُ `ui_` كان يكذب على القارئ.
     """
     if era:
-        raw = json.dumps(era, sort_keys=True, ensure_ascii=False, default=str)
+        core = {k: era[k] for k in _KEY_FIELDS if k in era}
+        # **وبلا الحقول المشتركة يُجزّأ ما أُعطي** — لا يُرفض نداءٌ قائم (والتقريرُ القديم يُبقى مقروءًا).
+        raw = json.dumps(core or era, sort_keys=True, ensure_ascii=False, default=str)
         return "st_" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
     return f"st_nop-{int(n_pages)}p"
 
@@ -373,20 +383,35 @@ def _db_file(conn: sqlite3.Connection) -> Path:
     return Path(":memory:")
 
 
-def open_ledger(path: Path, *, create: bool = True) -> sqlite3.Connection:
+def open_ledger(path: Path, *, create: bool = True, readonly: bool = False) -> sqlite3.Connection:
     """يفتح الدفترَ أو يُنشئه، **ويُسمّي العطب** بدل أن يرفع خطأً خامًّا.
 
-    والتفريقُ مقصود: `missing` (لا ملفّ) و`corrupt` (ملفٌّ ليس قاعدةً أو بنيتُه مكسورة) —
-    لأنّ علاجَهما مختلف: الأوّل يعيد المستخدمُ التشغيلَ، والثاني يعني ملفًّا أُفسِد.
+    والتفريقُ مقصود: `missing` (لا ملفّ) و`corrupt` (ملفٌّ ليس قاعدةً أو بنيتُه مكسورة) — لأنّ
+    علاجَهما مختلف: الأوّل يعيد المستخدمُ التشغيلَ، والثاني يعني ملفًّا أُفسِد.
+
+    **ولا كتابةَ على قاعدةٍ قائمة (إصلاحُ مقعدَي البنية والمعايير · مُثبت):** كان `executescript(SCHEMA)`
+    و`PRAGMA user_version` يُنفَّذان في **كلّ فتحٍ** — وكلُّ سؤالٍ يفتح القاعدةَ للقراءة ⇒ قفلُ كتابةٍ
+    على الملفّ الذي تحمله حافظةُ المحادثةُ بمتّصلٍ ثانٍ. فصار المخطَّطُ يُنفَّذ عند **الإنشاء** وحدَه،
+    والقاعدةُ القائمةُ تُتحقَّق (ترقيمٌ + جداول) بلا كتابة؛ و`readonly=True` يفتحها بـ`mode=ro` فيمنع
+    الكتابةَ من الأصل.
     """
     path = Path(path)
+    # **ومجلّدٌ ليس قاعدة (إصلاحُ فتحٍ للقراءة P2):** `mode=ro` على مجلّدٍ يُرجع «disk I/O error»
+    # فيُقرأ «تالفًا»؛ والحقيقةُ مسارٌ خاطئ — فتُسمّى قبل الاتّصال.
+    if path.is_dir():
+        raise LedgerUnavailable(UNREADABLE, path, "المسارُ مجلّدٌ لا ملفُّ قاعدة")
     fresh = not path.exists()
     if fresh:
         if not create:
             raise LedgerUnavailable(MISSING, path)
+        if readonly:
+            raise LedgerUnavailable(MISSING, path)
         path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        conn = sqlite3.connect(str(path))
+        if readonly:
+            conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        else:
+            conn = sqlite3.connect(str(path))
         conn.row_factory = sqlite3.Row
         # **ودالّةُ التطبيع تُسجَّل قبل المخطَّط**: العمودُ المُشتقُّ `desc_norm` يعتمد عليها،
         # و`deterministic=True` شرطٌ في أعمدة SQLite المُولَّدة (وبلا الشرط يرفضها المحرّك).
@@ -396,12 +421,14 @@ def open_ledger(path: Path, *, create: bool = True) -> sqlite3.Connection:
         if have not in (0, SCHEMA_VERSION):
             state = OUTDATED if have < SCHEMA_VERSION else NEWER
             raise LedgerUnavailable(state, path, f"user_version={have} والكودُ {SCHEMA_VERSION}")
-        if have == 0 and not fresh and _has_tables(conn):
+        if have == 0 and _has_tables(conn):
             # قاعدةٌ سبقت الترقيم: مخطَّطُها مجهولٌ بالنصّ ⇒ لا يُخمَّن، والدفترُ مُشتقٌّ فإعادتُه رخيصة.
             raise LedgerUnavailable(OUTDATED, path, "قاعدةٌ بلا ترقيم — أعدْ بناءَها من المصدر")
-        conn.executescript(SCHEMA)
-        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-        conn.commit()
+        if fresh or not _has_tables(conn):
+            # ملفٌّ جديدٌ أو ملفٌّ فارغٌ موجود: هنا وحدَه يُنفَّذ المخطَّط.
+            conn.executescript(SCHEMA)
+            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            conn.commit()
         return conn
     except sqlite3.DatabaseError as e:
         # **والتفريقُ بين «ليست قاعدةَ بيانات» و«البيئةُ لا تدعمها» (مقعدُ البنية P3 · مُثبت):** ملفٌّ
@@ -420,12 +447,10 @@ def open_ledger(path: Path, *, create: bool = True) -> sqlite3.Connection:
 
 
 def read_ledger(path: Path) -> sqlite3.Connection:
-    """يفتح الدفترَ **للقراءة ولا يُنشئه**: قاعدةٌ غائبةٌ تُعلَن `missing` لا تُخترع فارغة.
-
-    **العِلّة (مقعدا المواصفة والبنية):** كان `open_ledger` يُنشئ ملفًّا فارغًا افتراضًا ⇒ فقارئٌ
-    يسأل عن كشفٍ لم يُقرأ بعد يحصل على «قاعدة» فارغةٍ بدل الخطأ المسمّى الذي تنصّ عليه المواصفة.
+    """يفتح الدفترَ **للقراءة وحدَها**: قاعدةٌ غائبةٌ تُعلَن `missing`، وقائمةٌ تُفتح بـ`mode=ro` فلا
+    تأخذ قفلَ كتابةٍ ولا تُنفّذ مخطَّطًا (إصلاحُ مقعدَي البنية والمعايير — كلُّ سؤالٍ كان يكتب).
     """
-    return open_ledger(Path(path), create=False)
+    return open_ledger(Path(path), create=False, readonly=True)
 
 
 def _text(value) -> str | None:
@@ -434,7 +459,7 @@ def _text(value) -> str | None:
 
 
 def ingest(conn: sqlite3.Connection, rows: list[dict], pages: dict[int, dict],
-           report: dict | None = None) -> dict:
+           report: dict | None = None, *, prune: bool = True) -> dict:
     """يكتب الجدولَ المُتحقَّق منه وأحكامَ الصفحات في معاملةٍ واحدة — **ويُزيل ما لم تعد القراءةُ تحمله.**
 
     **والمصدرُ هو مخرَجُ `tools/to_xlsx.load` نفسُه** لا نسخةً ثانيةً منه: نسخةٌ ثانيةٌ من بناء
@@ -495,15 +520,19 @@ def ingest(conn: sqlite3.Connection, rows: list[dict], pages: dict[int, dict],
             )
             written += 1
         # **التقليمُ بعدهما:** المشطورُ القديمُ (صفحةٌ أو صفٌّ) لم تعد القراءةُ تحمله.
-        for pid, pg, row_no in conn.execute(
-                "SELECT id, pg, row_no FROM rows_verified").fetchall():
-            if (int(pg), int(row_no)) not in kept_rows:
-                conn.execute("DELETE FROM rows_verified WHERE id = ?", (pid,))
-                pruned_rows += 1
-        for (pg,) in conn.execute("SELECT pg FROM pages").fetchall():
-            if int(pg) not in kept_pages:
-                conn.execute("DELETE FROM pages WHERE pg = ?", (pg,))
-                pruned_pages += 1
+        # **ولا يُقلَّم على قراءةٍ ناقصة (إصلاحُ مقعد المعايير P1 · مُثبت):** صفحةٌ فشلت قراءتُها
+        # هذه المرّة ليست «صفحةً سقطت من الكشف» — وحذفُ صفوفها يفقد دليلَها ويُعلَن «جاهز» فوقه.
+        # فالمُنادي يمرّر `prune=False` متى كان في القراءة عطبُ صفحة، فتُبقى صفوفُها القديمة.
+        if prune:
+            for pid, pg, row_no in conn.execute(
+                    "SELECT id, pg, row_no FROM rows_verified").fetchall():
+                if (int(pg), int(row_no)) not in kept_rows:
+                    conn.execute("DELETE FROM rows_verified WHERE id = ?", (pid,))
+                    pruned_rows += 1
+            for (pg,) in conn.execute("SELECT pg FROM pages").fetchall():
+                if int(pg) not in kept_pages:
+                    conn.execute("DELETE FROM pages WHERE pg = ?", (pg,))
+                    pruned_pages += 1
     return {"pages": len(pages), "rows": written, "dropped_no_page": dropped_no_page,
             "pruned_rows": pruned_rows, "pruned_pages": pruned_pages}
 
@@ -516,13 +545,18 @@ def read_rows(conn: sqlite3.Connection, pg: int | None = None) -> list[dict]:
     فالقارئُ من القاعدة يُرقّم كما تُرقّم الشاشة — لا كما تُرتّب أرقامُ الصفحات. و`COALESCE` يُبقي
     قاعدةً قديمةً بلا `seq` مقروءةً بترتيبٍ معقول بدل أن تُسقط الصفوف.
     """
-    sql = f"SELECT {', '.join(COLUMNS)} FROM rows_verified"
+    sql = f"SELECT COALESCE(seq, id) AS seq, {', '.join(COLUMNS)} FROM rows_verified"
     args: tuple = ()
     if pg is not None:
         sql += " WHERE pg = ?"
         args = (pg,)
     sql += " ORDER BY COALESCE(seq, id), pg, row_no"
-    return [{c: _typed(c, row[c]) for c in COLUMNS} for row in conn.execute(sql, args)]
+    # **و`page` يُضاف إلى مخرَجِ القراءة (إصلاحُ العطب P0 · اتّفق عليه المقاعد الثلاثة):** القاعدةُ
+    # تسمّي العمود `pg`، وكلُّ مستهلكٍ (إعادةُ بناء الحالة · حاجزُ النطاق · `ingest` عند إعادة البناء)
+    # يقرأ `page` ⇒ كانت الصفوفُ تعود بلا صفحة فتُسقَط كلُّها وتُقلَّم. فالسطحُ يُخرج الاسمَين:
+    # `page` للقرّاء (كما وعد تعليقُ الدالّة أصلاً) و`pg` لمن يخاطب SQL.
+    return [{**{c: _typed(c, row[c]) for c in COLUMNS},
+             "page": int(row["pg"]), "seq": int(row["seq"])} for row in conn.execute(sql, args)]
 
 
 def read_footers(conn: sqlite3.Connection) -> dict[int, dict]:

@@ -82,8 +82,10 @@ def _number_rows(rows: list[dict]) -> list[dict]:
 
     **والقاعدةُ تُحفظ ترتيبَها (R130):** القاعدةُ تُخزّن `seq` وتُقرأ به، فترتيبُ الصفوف الوارد هنا
     هو ترتيبُ الكشف الحقيقيّ — ورقمُ `i+1` هو نفسُه رقمُ الشاشة والمصادر. ولا يُعاد الترتيبُ بـ`pg`.
+    **و`seq` إن وُجد فهو الحكم** (R130 · إصلاحُ مقعد البنية): صفوفُ القاعدة تحمله، فيُقرأ كما هو؛
+    وإعادةُ ترقيمها بالتسلسل هنا كانت تُنتج رقمًا ثالثًا يخالف الشاشةَ والقاعدةَ معًا.
     """
-    return [{**r, "row_no": i + 1} for i, r in enumerate(rows)]
+    return [{**r, "row_no": int(r.get("seq") or i)} for i, r in enumerate(rows, start=1)]
 
 
 # ── البُعدُ الزمنيّ (R130-1) ────────────────────────────────────────────────────
@@ -471,6 +473,10 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
         return (f"المجموع = {_m(total)} ريال | عدد الحركات = {len(sel)}"
                 + (f" · واستُبعد {sum(1 for v in vals if v is None)} بلا مبلغ"
                    if any(v is None for v in vals) else "")
+                # **ولا يُسكَت عن صفٍّ بلا تاريخ (إصلاحُ مقعد المعايير P2):** المدى لا ينسبه،
+                # وعدُّه في الجواب يمنع «مجموعًا ناقصًا يبدو كاملًا».
+                + (f" · و{len(undated_rows)} صفًّا بلا تاريخٍ لم يدخل المدى"
+                   if (date_from or date_to) and undated_rows else "")
                 + f" | أمثلة: {examples}")
 
     @_tool
@@ -754,8 +760,11 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
         if not sel:
             return _empty_result(d_from, d_to, len(undated_rows) if (d_from or d_to) else 0)
         days: dict[str, dict] = {}
+        undated = [r for r in sel if not _iso_date(r)]
         for r in sel:
             iso = _iso_date(r)
+            if not iso:                  # صفٌّ بلا تاريخٍ لا يُنسب إلى يوم — ولا يُفتح له مفتاحٌ فارغ
+                continue
             e = days.setdefault(iso, {"count": 0, "debit": Decimal("0"), "credit": Decimal("0")})
             e["count"] += 1
             val = _dec(r.get("movement"))
@@ -772,8 +781,9 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
                  for d in shown]
         more = ("" if len(ordered) <= len(shown)
                 else f" (ويُعرض أوّلُ {len(shown)} من {len(ordered)} يومًا — ضيّق المدى أو ارفع limit)")
-        return (f"أيامٌ لها حركات = {len(ordered)} · مدينُ المدّة {_m(tot)} · دائنُها {_m(tot_c)}{more}\n"
-                + "\n".join(lines))
+        return (f"أيامٌ لها حركات = {len(ordered)} · مدينُ المدّة {_m(tot)} · دائنُها {_m(tot_c)}{more}"
+                + (f" · و{len(undated)} صفًّا بلا تاريخٍ لم يُنسب إلى يوم" if undated else "")
+                + "\n" + "\n".join(lines))
 
     @_tool
     def movement_days(side: str = "الكل", keyword: str = "", tx_type: str = "",

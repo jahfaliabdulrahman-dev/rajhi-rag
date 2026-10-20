@@ -128,11 +128,15 @@ def test_the_tools_read_from_the_database_itself(tmp_path):
 def test_no_phrase_list_was_added_to_forbid_a_sentence():
     """**الثابتُ المنصوص:** لا قائمةَ عباراتٍ تمنع «لا توجد حركات» — المنعُ بالقدرة لا باللفظ.
 
-    يُقاس بالـAST: لا اسمَ جديدًا من صنف `_ABSENCE`/`_AMBIG`، ولا قائمةَ نصوصٍ عربيةٍ تُطابَق على
-    الجواب في `qa_tools` (وهي الوحدةُ التي كانت ستحتاج القائمةَ لو لم تُبنَ القدرة).
+    يُقاس بالـAST في **الوحدات الثلاث** التي كانت ستحتاج القائمةَ لو لم تُبنَ القدرة (`qa_tools` ·
+    `qa` · `render`): لا اسمَ مخزَّنًا يبدأ بـ`_ABSENCE`/`_AMBIG`/`_REFUSAL`/`_BANNED`، ولا قاموسَ
+    مطابقةِ ألفاظ. **وحدُّه مُعلَن:** هذا فحصُ أسماءٍ لا سلوك؛ فحارسُ السلوك هو ضوابطُ الزمن
+    (`balance_on` داخل المدّة/خارجها) — ولو كُتبت مطابقةُ نصٍّ بلا اسمٍ مذكورٍ لم يرها هذا الضابط.
     """
-    tree = ast.parse((ROOT / "src" / "statement_qa" / "qa_tools.py").read_text(encoding="utf-8"))
-    stored = {n.id for n in ast.walk(tree)
-              if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
-    forbidden = {n for n in stored if n.upper().startswith(("_ABSENCE", "_AMBIG", "_REFUSAL"))}
-    assert not forbidden, f"أُضيفت قائمةُ عبارات: {sorted(forbidden)}"
+    for name in ("qa_tools.py", "qa.py", "render.py"):
+        tree = ast.parse((ROOT / "src" / "statement_qa" / name).read_text(encoding="utf-8"))
+        stored = {n.id for n in ast.walk(tree)
+                  if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+        forbidden = {n for n in stored
+                     if n.upper().startswith(("_ABSENCE", "_AMBIG", "_REFUSAL", "_BANNED"))}
+        assert not forbidden, f"{name}: أُضيفت قائمةُ عبارات: {sorted(forbidden)}"

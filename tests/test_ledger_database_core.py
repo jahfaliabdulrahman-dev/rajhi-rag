@@ -141,13 +141,40 @@ def test_the_schema_is_v2_and_a_v1_database_is_named_outdated(tmp_path):
         raise AssertionError("قاعدةُ v1 قُرئت بمخطَّط v2")
 
 
-def test_the_cli_and_ui_compute_the_same_key_from_the_same_fingerprint(tmp_path):
-    """**مسارٌ واحد:** المفتاحُ يُشتقّ من بصمة الكشف في الموضعين — لا اسمُ مجلّدٍ في طرفٍ وبصمةٍ في آخر."""
+def test_the_ui_and_the_cli_sign_the_same_statement_with_the_same_key(tmp_path):
+    """**مسارٌ واحد — بالبناء لا بالصدفة (إصلاحُ المقاعد الثلاثة P1):** الواجهةُ تُجزّئ بصمةَ
+    `fingerprint_pages` كاملةً (ستّة حقول)، وتقريرُ التشغيل يكتب أربعة (بلا `per_page`/`majority`)
+    ⇒ كانت تجزئتان مختلفتان لكشفٍ واحد وقاعدتان. والمفتاحُ الآن من **الحقول المشتركة** وحدها.
+    """
     import ledger as cli
-    from statement_qa import ledger_ui as U
 
-    era = {"pages": 2, "tokens": "س ص"}
+    full = {"overall": "o", "styles": {"a": 1}, "transitions": {"b": 2}, "outliers": [],
+            "per_page": {1: {"rows": 2}}, "majority": "m"}
+    report_era = {k: full[k] for k in ("overall", "styles", "transitions", "outliers")}
     pages = _pages((1, 2))
-    assert cli.default_db({"era": era}, pages).name == f"{U.statement_key(era, 2)}.sqlite"
+
+    ui_key = L.statement_key(full, 626)          # عددُ صفوف العرض
+    cli_key = L.statement_key(report_era, 629)   # عددُ صفحات التقرير
+    assert ui_key == cli_key, (ui_key, cli_key)
+    assert cli.default_db({"era": report_era}, pages).name == f"{ui_key}.sqlite"
     # وبلا بصمةٍ يُعلَن النقصُ في الاسم بدل مفتاحٍ يكذب
     assert cli.default_db({}, pages).name.startswith("st_nop-")
+
+
+def test_the_scope_gate_reads_the_page_dimension_from_the_database(tmp_path):
+    """**حاجزُ الصدق فقد بُعده (مقعدا المواصفة والمعايير P2):** صفوفُ القاعدة تحمل `pg` و`_data_facts`
+    يقرأ `page` ⇒ `max_page=None` و`pages_read=∅`، فشرطُ «صفحةٌ لم تُقرأ» في `scope.classify` لا يشتغل
+    أبدًا على المسار الإنتاجيّ. `read_rows` يُخرج الاسمين، وهذا الضابطُ يقيس ما يصل إلى الحاجز.
+    """
+    from statement_qa.qa import _data_facts
+
+    path = tmp_path / "scope.sqlite"
+    conn = L.open_ledger(path)
+    try:
+        L.ingest(conn, _rows((1, 2)), _pages((1, 2)))
+        rows = L.read_rows(conn)
+    finally:
+        conn.close()
+    _years, max_page, _amounts, pages_read = _data_facts(rows)
+    assert max_page == 2, max_page
+    assert pages_read == {1, 2}, pages_read

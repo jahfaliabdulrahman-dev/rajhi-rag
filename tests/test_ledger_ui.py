@@ -173,7 +173,7 @@ def test_the_answers_render_as_arabic_tables(tmp_path):
     search = U.ask(tmp_path, key, "بحثٌ في البيان", "حوالة")
     assert search["rows"] and search["headers"] == ["صفحة", "صفّ", "البيان", "المبلغ"]
     # **والسطرُ الجديد يبقى في خانته:** وصفٌ بسطرين يُكتب كما هو في الخليّة (لا يُقطع ولا يكسر صفًّا).
-    conn = L.read_ledger(db)
+    conn = L.open_ledger(db)                 # الكتابةُ في الضابط تحتاج فتحًا كاملًا
     try:
         conn.execute("UPDATE rows_verified SET desc = ? WHERE pg = 1 AND row_no = 2",
                      ("سطرٌ أول\nسطرٌ ثانٍ",))

@@ -360,7 +360,9 @@ def _row_record(no: int, r: dict) -> dict:
 
 
 def _rows_df(rows: list[dict]) -> pd.DataFrame:
-    return pd.DataFrame([_row_record(i, r)
+    """جدولُ العرض: رقمُ الصفّ من `seq` (رقمُ العقد STATEMENT-WIDE) لا من ترتيب العرض (R130) —
+    وترقيمُ العرض بالتسلسل كان يُزيح كلَّ اقتباسٍ بعد أوّل صفٍّ بلا رصيد."""
+    return pd.DataFrame([_row_record(int(r.get("seq") or i), r)
                          for i, r in enumerate(rows, start=1)])
 
 
@@ -371,7 +373,8 @@ def _row_iso(r: dict) -> str:
     return normalize_date(r.get("date"))[0]
 
 
-#: أعمدةُ الفلترة = أعمدةُ الجدول نفسُها (يُشتقّان من `render.row_record` لا من قائمةٍ ثانية).
+#: أعمدةُ الفلترة تطابق **مفاتيح `row_record`** — تُقابَل بها في ضابطٍ (`test_app_database_and_temp`)
+#: لأنها قائمةٌ صريحة (لا اشتقاقَ وقتَ الاستيراد من صفٍّ وهميّ): إعادةُ تسميةِ عمودٍ تُسقط الضابط.
 FILTER_COLUMNS: tuple[str, ...] = ("كل الأعمدة", "#", "الصفحة", "التاريخ", "الوصف",
                                    "النوع", "مدين", "دائن", "الرصيد", "الحالة", "التحقق")
 
@@ -388,9 +391,15 @@ def filter_rows(column: str = "", value: str = "",
     **والجدولُ يُعاد مبنيًّا من النتيجة** فلا يُنسخ ما لم يُعرض (عطبُ النسخ الذي أُغلق قبل).
     """
     rows = STATE.get("rows") or []
-    records = [(i, _row_record(i, r)) for i, r in enumerate(rows, start=1)]
+    # **والرقمُ من `seq`** كسطح الجدول نفسه (R130) — وإلا اختلف ما يُفلتر عمّا يُعرض رقمُه.
+    records = [(int(r.get("seq") or i), _row_record(int(r.get("seq") or i), r))
+               for i, r in enumerate(rows, start=1)]
     col = (column or "كل الأعمدة").strip()
     q = (value or "").strip()
+    if (date_from or "").strip() and not _date_arg(date_from):
+        _filter_warning(f"تاريخُ البداية «{date_from}» غيرُ مفهوم — لم يُطبَّق فلترُ التاريخ (YYYY-MM-DD).")
+    if (date_to or "").strip() and not _date_arg(date_to):
+        _filter_warning(f"تاريخُ النهاية «{date_to}» غيرُ مفهوم — لم يُطبَّق فلترُ التاريخ (YYYY-MM-DD).")
     df_from = _date_arg(date_from)
     df_to = _date_arg(date_to)
 
@@ -412,7 +421,18 @@ def filter_rows(column: str = "", value: str = "",
                 if q.lower() not in hay and q.lower() not in hay.replace(",", ""):
                     continue
         out.append(rec)
-    return pd.DataFrame(out)
+    # **والأعمدةُ تبقى حين لا مطابقة** (إصلاحُ مقعد المعيار P3): إطارٌ بلا أعمدة يُظهر جدولًا
+    # بلا رؤوس فيُقرأ عطبًا، لا «صفرَ نتيجة».
+    columns = list(_row_record(1, rows[0]).keys()) if rows else []
+    return pd.DataFrame(out, columns=columns or None)
+
+
+def _filter_warning(text: str) -> None:
+    """رسالةُ فلترٍ غيرِ مفهوم **في الواجهة** (Gradio) بلا إسقاط الضابط إن نُودِيت خارج طلب."""
+    try:
+        gr.Warning(text)
+    except Exception:                    # noqa: BLE001 — خارج سياق طلب Gradio لا قناةَ رسالة
+        pass
 
 
 def _date_arg(text: str) -> str:
@@ -599,19 +619,25 @@ def process_pdf(pdf_path: str, progress=gr.Progress()):
                        "انتظر انتهاءه ثم أعد المحاولة.")
 
 
-def _view_rows(contract: list[dict]) -> list[dict]:
+def _view_rows(contract: list[dict], offset: int = 0) -> list[dict]:
     """**صفوفُ العرض/الأسئلة مشتقّةٌ من صفوف العقد — لا بناءٌ ثانٍ (F5 · مقعدُ البنية):**
 
     كانت تُبنى مستقلّةً عن القراءة نفسِها، فصار لتصنيف «حركة/افتتاح» و«حكم السلسلة» موضعان يزيغان
     (يُعدَّل أحدُهما ويبقى الآخر). والسطحان يبقيان مختلفَين بمفاتيحهما (`kind`/`ok`/`type` للعرض ·
     العقدُ بعشرين عمودًا للدفتر) — **لكنّ المعنى يُحسب مرّةً واحدةً في `build_page_rows`.**
+
+    **و`seq` رقمُ الصفّ على مستوى الكشف (R130 · إصلاحُ مقعد البنية):** الشاشةُ كانت تُرقّم صفوفَ
+    العرض 1..n، والأدواتُ تُرقّم صفوفَ العقد 1..m — وكلُّ صفٍّ بلا رصيدٍ يُزيح الرقمين. فرقمُ الشاشة
+    صار **موضعَ الصفّ في العقد** (والقاعدةُ تخزّنه `seq`)، فما تستشهد به أداةٌ هو ما تراه العين.
+    `offset` موضعُ أوّل صفٍّ من هذه الدفعة في العقد (يُبنى صفحةً صفحةً ثمّ يُجمَع).
     """
     out: list[dict] = []
-    for c in contract:
+    for i, c in enumerate(contract):
         if c.get("balance") is None:      # سطرٌ بلا رصيد ليس حركةً في العرض أيضًا (كما كانت)
             continue
         opening = bool(c.get("opening"))
-        out.append({"page": c["page"],
+        out.append({"seq": offset + i + 1,     # رقمُ الصفّ على مستوى الكشف — يُقرأ في الشاشة والاقتباس
+                    "page": c["page"],
                     "kind": "opening" if opening else "txn",
                     "balance": c["balance"],
                     "movement": None if opening else c.get("derived_movement"),
@@ -637,30 +663,50 @@ def _ledger_path_for(key: str | None = None) -> Path:
     return _ledger_ui.ledger_file(DATA_HOME, key or _ledger_key())
 
 
-def _ledger_write() -> dict:
+def _ledger_write(*, prune: bool = True) -> dict:
     """**القراءةُ تكتب القاعدةَ عند انتهائها (R130 · الخيار ١)** — لا زرٍّ منفصل.
 
     تُكتب صفوفُ العقد (٢٢ عمودًا) وأحكامُ الصفحات وأرقامُ تذييلها المطبوعة. والنَّصُّ على صفوف
     **العقد** لا العرض: العرضُ بلا `row_no` فتسقط الكتابةُ (`IntegrityError` — درسُ الزرّ القديم).
     والفشلُ **يُعلَن ولا يُسقط القراءة**: القراءةُ تمّت، والقاعدةُ بياناتٌ مشتقّةٌ تُعاد.
+
+    **`prune=False` على قراءةٍ ناقصة (إصلاحُ مقعد المعايير P1):** صفحةٌ فشلت قراءتُها هذه المرّة
+    ليست صفحةً سقطت من الكشف؛ فحذفُ صفوفها القديمة يفقد دليلَها ويُعلَن «جاهز» فوق نقص.
     """
     rows = _ledger_rows()
     if not rows:
         return {"ok": False, "message": "لا صفوفَ لكتابة قاعدةٍ منها."}
+    old_key = STATE.get("ledger_key")
     key = _ledger.statement_key(STATE.get("era"), _ledger.pages_of(rows))
     path = _ledger_ui.ledger_file(DATA_HOME, key)
     try:
         conn = _ledger.open_ledger(path)
         try:
-            stats = _ledger.ingest(conn, rows, _ledger.pages_from_state(rows, STATE.get("footers") or {}))
+            stats = _ledger.ingest(conn, rows, _ledger.pages_from_state(rows, STATE.get("footers") or {}),
+                                   prune=prune)
         finally:
             conn.close()
     except _ledger.LedgerUnavailable as e:
         return {"ok": False, "key": key, "path": str(path), "message": f"تعذّرت كتابةُ القاعدة — {e}"}
     STATE["ledger_key"] = key
-    _ledger_ui.active_set(DATA_HOME, key, STATE.get("source_name") or "")
+    try:
+        _ledger_ui.active_set(DATA_HOME, key, STATE.get("source_name") or "")
+    except OSError as e:                       # المؤشّرُ فشل وحدَه — القراءةُ والقاعدةُ سليمتان
+        return {"ok": False, "key": key, "path": str(path), "stats": stats,
+                "message": f"كُتبت القاعدةُ ({stats['rows']} صفًّا) لكن تعذّر تثبيتُ المؤشّر — {e}"}
+    # **وتُغلق حافظةُ الكشف السابق عند التبديل** (مقعدُ البنية P2): كانت `_MEMORY`/`_HOLDERS`
+    # تنمو بلا إخلاء — كلُّ كشفٍ يُفتح يترك متّصلاً ورسمًا حيّين حتى خروج العملية.
+    if old_key and old_key != key:
+        try:
+            from statement_qa.qa import reset_memory   # noqa: PLC0415 — يفتح الحافظةَ عند الحاجة وحدها
+
+            reset_memory(_ledger_ui.ledger_file(DATA_HOME, old_key))
+        except Exception:                      # noqa: BLE001 — لا يُسقط كتابةً تمّت
+            pass
     note = (f"قاعدةُ الكشف: **{stats['rows']}** صفًّا · **{stats['pages']}** صفحة · "
             f"**{stats.get('pruned_rows', 0)}** صفًّا قديمًا أُزيل")
+    if not prune:
+        note += " · **بلا تقليمٍ** (قراءةٌ ناقصة — صفوفُ الصفحات المتعثّرة محفوظة)"
     return {"ok": True, "key": key, "path": str(path), "stats": stats, "message": note}
 
 
@@ -693,15 +739,13 @@ def _load_from_ledger(key: str | None = None) -> bool:
                          for pg, f in footers.items()}
     STATE["printed_pages"] = {int(pg): (f or {}).get("printed_page")
                               for pg, f in footers.items()}
-    # **وأرقامُ الصفوف من العقد لا من ترتيب العرض:** `_view_rows` تُسقِط ما لا رصيدَ له، فترقيمُ العرض
-    # بالتسلسل يزيح كلَّ اقتباسٍ بعد أوّل صفٍّ مُسقَط — والاقتباسُ يُقرأ في الشاشة برقمه. والصفُّ
-    # المطابقُ لعرضٍ هو عقدُه ذو الرصيد، بنفس الترتيب (والسطحان يبقيان مفترقَين: `row_no` لا يدخل العرض).
-    _with_balance = [c for c in contract if c.get("balance") is not None]
-    STATE["chunks"] = chunk_rows([{**r, "row_no": int(_with_balance[i].get("row_no") or i + 1)
-                                   if i < len(_with_balance) else i + 1}
+    # **وأرقامُ الصفوف من العقد:** `_view_rows` تُرقّم بـ`seq` (موضعَ الصفّ في العقد) فيتّفق الاقتباسُ
+    # مع الشاشة، ولا حاجةَ لترقيمٍ ثانٍ. **وعددُ الصفحات من جدول `pages`** لا من صفوف العرض: الصفحةُ
+    # التي لا صفَّ لها (غلاف/ملخّص) كانت تُنقص العدّ ⇒ فيُقال «ينتهي عند 626» في كشفٍ من 629 (R115-7).
+    STATE["chunks"] = chunk_rows([{**r, "row_no": int(r.get("seq") or i + 1)}
                                   for i, r in enumerate(view)])
     STATE["store"] = build_index(STATE["chunks"])
-    STATE["n_pages"] = len({r["page"] for r in view})
+    STATE["n_pages"] = len(footers) if footers else len({r["page"] for r in view})
     STATE["ledger_key"] = key
     return True
 
@@ -768,7 +812,7 @@ def _close_pages(pages) -> list[str]:
         try:
             out.append(_cache_path(gallery, p))
         except Exception:                    # noqa: BLE001 — صورةٌ تعذّرت لا تُسقط القراءة
-            out.append(p)
+            continue                          # **ولا يُعاد مسارٌ داخل مجلّدٍ سيُحذف** (كان صورةً مكسورة صامتة)
     close = getattr(pages, "close", None)
     if callable(close):
         close()
@@ -788,11 +832,14 @@ def _process_pdf_locked(pdf_path: str, progress):
     pages = _pages_to_pngs(pdf_path)
 
     # فحصُ ما قبل القراءة (statement_qa.intake): مجانيٌّ ويسبق **أيَّ** استدعاءٍ مدفوع — حتى
-    # فحصَ المصرف. صفحةٌ مرفوضة ⇒ **تُستبعد وتُسمّى**، وما عداها يُقرأ (البند ١١: لا خانةَ قرار).
+    # فحصَ المصرف. **والسياسةُ لم تتغيّر بإزالة الخانة (إصلاحُ مقعدَي المواصفة والمعايير P1):**
+    # الخانةُ كانت `value=False` بالتصميم ⇒ صفحةٌ مرفوضةٌ واحدة **توقف** القراءةَ وتُسمّى. وإزالتُها
+    # للرسالة لا تُحوّلها إلى استبعادٍ تلقائيّ: كان ذلك يقرأ ويدفع مقابل كشفٍ ناقصٍ بلا قرار العميل.
+    # فالمسارُ الباقي: توقّفٌ مسمًّى وإعادةُ تصوير؛ واستعادةُ «المتابعة بالاستبعاد» قرارُ المالك.
     progress(0.0, "فحص الصفحات قبل القراءة…")
     gate_fn, kind_fn = _local_checks(pages)
     intake = inspect_locally(pages, gate_fn, kind_fn)
-    decision = plan(intake, True)
+    decision = plan(intake, False)
     intake_note = _intake_outcome(intake, decision)
     if decision["blocked"]:
         STATE.clear()   # لا تُجيب الأسئلةُ عن ملفٍّ سابقٍ بعد رفعِ ملفٍّ لم يُقرأ
@@ -1031,7 +1078,8 @@ def _process_pdf_locked(pdf_path: str, progress):
              "reread": any(x.get("page") == pg for x in page_rereads)},
             page_no=page_no)
         rows_contract += page_contract
-        all_rows += _view_rows(page_contract)
+        # **والموضعُ في العقد يُمرَّر** فيحمل صفُّ العرض رقمَه STATEMENT-WIDE كما تحمله الأدوات (R130).
+        all_rows += _view_rows(page_contract, offset=len(rows_contract) - len(page_contract))
         # **و`prev_closing` كما كان:** آخرُ رصيدٍ مقروءٍ في الصفحة يقود سلسلةَ التالية — كان يُحدَّث
         # صفًّا صفًّا في حلقة العرض، ويُقرأ الآن من الصفوف نفسِها فلا يُفقد أثرُه.
         _last_bal = next((r["balance"] for r in reversed(rows) if r["balance"] is not None), None)
@@ -1072,7 +1120,7 @@ def _process_pdf_locked(pdf_path: str, progress):
     # الصفحة المطبوع من **مصدره** (قراءةُ الورقة) لا من خريطةٍ محلّيّةٍ ولا `None`.
     STATE["printed_pages"] = dict(page_no_by_pg)
     STATE["chunks"] = chunk_rows(
-        [{**r, "row_no": i + 1} for i, r in enumerate(all_rows)])
+        [{**r, "row_no": int(r.get("seq") or i + 1)} for i, r in enumerate(all_rows, start=1)])
     STATE["store"] = build_index(STATE["chunks"])
     # **التذييلاتُ المطبوعةُ بصيغةٍ واحدة (R77):** تُبنى من القراءات والأحكام في موضعٍ واحد —
     # `statement_qa.page_footers` — فيرثها مسارُ القراءة (هنا) ومسارُ القياس معًا، ولا نسخةَ ثانيةَ
@@ -1216,7 +1264,9 @@ def _process_pdf_locked(pdf_path: str, progress):
     summary = " • ".join(segs)
     # **وقاعدةُ الكشف تُكتب هنا — عند انتهاء المعالجة، لا بزرّ (R130 · الخيار ١).**
     # والفشلُ يُعلَن في سطر الحالة ولا يُسقط قراءةً تمّت (القاعدةُ بياناتٌ مشتقّةٌ تُعاد).
-    written = _ledger_write()
+    # **ولا تقليمَ إن كان في هذه القراءة عطبُ صفحة** — لا تُقرأ صفحةٌ متعثّرة كأنها سقطت من الكشف.
+    incomplete = bool(failed_pages or pages_without_rows)
+    written = _ledger_write(prune=not incomplete)
     ledger_status = _ledger_ui.status_text(DATA_HOME, _ledger_key(), len(_ledger_rows()),
                                            _ledger.rows_without_page(_ledger_rows()))
     if not written.get("ok"):
@@ -1444,7 +1494,8 @@ def ask_followup(history):
                           n_pages=_scope_n_pages(STATE.get("rows") or []),
                           ledger_path=ledger_path, memory_path=memory_path)
     rows_now = STATE.get("rows") or []
-    page_of = {i + 1: r.get("page") for i, r in enumerate(rows_now)}
+    # **وخريطةُ الصفحة تُبنى برقم الصفّ نفسه** الذي تحمله الأدوات (`seq`) — لا بترتيب العرض (R130).
+    page_of = {int(r.get("seq") or i): r.get("page") for i, r in enumerate(rows_now, start=1)}
     verdicts = STATE.get("verdicts") or {}
     displayed = render_answer_text(res, page_of, verdicts)
     history.append({"role": "assistant", "content": displayed})
@@ -1597,6 +1648,12 @@ def _delete_statement_click():
         delete_files_created_by_app(demo, age=None)
     except Exception:                          # noqa: BLE001 — لا يُسقط حذفَ البيانات
         pass
+    # **وقفلُ المهمّة يُزال** (إصلاحُ مقعد المعايير P2): كان يبقى في مجلّد البيانات فتُقرأ جملةُ
+    # «صفرَ ملفّ» وهي غيرُ صحيحة. الحذفُ يقع والتطبيقُ خامل (الواجهةُ مشغولةٌ أثناء المهمّة).
+    try:
+        LOCK_PATH.unlink(missing_ok=True)
+    except OSError:                            # noqa: BLE001 — قفلٌ مفتوحٌ على نظامٍ يمنع الحذف
+        pass
     STATE.clear()
     return (got["message"], "", pd.DataFrame(), _kpi_html(0, 0, 0, None), [],
             "", "", pd.DataFrame(), _hide_note(),
@@ -1663,7 +1720,7 @@ def _record_qa_row(res, question: str, displayed: str) -> None:
     if path is None:
         return
     try:
-        conn = _ledger.read_ledger(path)
+        conn = _ledger.open_ledger(path)      # **كتابةٌ**: `record_qa` يُدرج — لا يُفتح للقراءة وحدها
     except _ledger.LedgerUnavailable:
         return
     try:

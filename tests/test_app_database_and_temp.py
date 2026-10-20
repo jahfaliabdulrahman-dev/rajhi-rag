@@ -82,7 +82,7 @@ def test_deleting_a_statement_leaves_zero_files_and_empties_the_state(app):
 def test_the_conversation_downloads_from_the_database(app):
     """**البند ١٠:** الملفُّ يُبنى من `qa`+`qa_evidence` (لا من ذاكرةٍ حيّة) — فيبقى بعد الإغلاق."""
     path = _db(app)
-    conn = L.read_ledger(path)
+    conn = L.open_ledger(path)                # الكتابةُ تحتاج فتحًا كاملًا (read_ledger للقراءة وحدها)
     try:
         ids = L.row_ids_for(conn, [(1, 2), (1, 3)])
         L.record_qa(conn, "2026-10-20T09:00:00", "كم مجموع السحوبات؟",
@@ -144,3 +144,107 @@ def test_the_table_filter_uses_a_chosen_column_and_a_date_range(app):
     assert len(dated) == 1 and dated.iloc[0]["الوصف"] == "أ", dated
     assert len(app.filter_rows("", "", "", "2026-03-31")) == 1, "حدُّ «إلى» لم يُطبَّق"
     assert len(app.filter_rows("", "", "2026-04-01")) == 1, "حدُّ «من» لم يُطبَّق"
+
+
+def test_rebuilding_the_ledger_after_a_restart_does_not_wipe_the_rows(app):
+    """**العطب P0 الذي اتّفق عليه المقاعد الثلاثة:** `_load_from_ledger` كان يضع صفوفَ القاعدة
+    (`pg` بلا `page`) في `rows_contract`، وزرُّ «أعد بناء الدفتر» يُعيد إدخالها ⇒ `dropped_no_page`
+    والصفوفُ كلُّها تُقلَّم (قِيس: ٦ ⇒ ٠) والرسالةُ تقول «بُني ✅». فالسطحُ يقرأ الآن `page` من
+    `read_rows`، وهذا الضابطُ يفشل على الشيفرة قبل الإصلاح.
+    """
+    key = app._ledger_key()
+    path = _db(app)
+    conn = L.read_ledger(path)
+    try:
+        before = len(L.read_rows(conn))
+    finally:
+        conn.close()
+    assert before == 5
+
+    app.STATE.clear()                          # إعادةُ تشغيل
+    assert app._load_from_ledger(key)
+    msg, _status = app._ledger_build_click()   # الزرُّ الذي كان يمحو
+
+    conn = L.read_ledger(path)
+    try:
+        after = len(L.read_rows(conn))
+    finally:
+        conn.close()
+    assert after == before, f"أعاد البناءُ كتابةً محت؟ {before} ⇒ {after} — الرسالة: {msg}"
+    assert "0 صفًّا" not in msg, msg
+
+
+def test_pages_are_counted_from_the_database_not_from_rows(app):
+    """**عددُ الصفحات بعد إعادة التشغيل (مقعدُ المواصفة P2):** ٦٢٦ صفًّا لا تعني ٦٢٦ صفحة — الصفحةُ
+    بلا صفٍّ (غلاف/ملخّص) تبقى في جدول `pages`، و`n_pages` من الصفوف كان يقول «ينتهي عند 626»."""
+    key = app._ledger_key()
+    app.STATE.clear()
+    assert app._load_from_ledger(key)
+    assert app.STATE["n_pages"] == 2, app.STATE["n_pages"]
+
+
+def test_the_deleted_statement_leaves_no_file_at_all(app):
+    """**«صفرُ ملفّ» بالمعنى:** يُعدّ **كلُّ** ما في مجلّد البيانات — لا `*.sqlite*` وحدها (كان
+    `job.lock` يبقى فيُكذّب الجملة)."""
+    _db(app)
+    app._delete_statement_click()
+    left = sorted(p.name for p in app.DATA_HOME.rglob("*") if p.is_file())
+    assert left == [], f"ملفّاتٌ بقيت بعد الحذف: {left}"
+    assert not app.LOCK_PATH.exists(), "قفلُ المهمّة بقي بعد الحذف"
+
+
+def test_the_screen_number_and_the_tool_number_are_the_same(app):
+    """**رقمُ الصفّ الواحد (مقعدُ البنية P1):** سطحُ العرض كان يُرقّم 1..n والأدواتُ 1..m، فكلُّ صفٍّ
+    بلا رصيدٍ يُزيحهما. والآن `seq` (موضعُ الصفّ في العقد) هو رقمُ الاثنين."""
+    from statement_qa.qa_tools import make_qa_tools
+
+    rows = app.STATE["rows"]
+    assert [r["seq"] for r in rows] == sorted(r["seq"] for r in rows)
+    struct = [{"pg": 1, "row_no": 1, "page": 1, "balance": "10.00", "movement": None,
+               "side": "", "opening": True, "desc": "افتتاحي", "date": "2026-03-01"},
+              {"pg": 1, "row_no": 2, "page": 1, "balance": None, "movement": None,
+               "side": "", "opening": False, "desc": "سطرُ ملخّص", "date": ""},
+              {"pg": 1, "row_no": 3, "page": 1, "balance": "8.00", "movement": "2.00",
+               "side": "debit", "opening": False, "desc": "سحب", "date": "2026-03-02"}]
+    conn = L.open_ledger(app.DATA_HOME / "numb.sqlite")
+    try:
+        L.ingest(conn, struct, {1: {"verdict": "ok"}})
+        got = {t.name: t for t in make_qa_tools(conn=conn)}
+        text = got["search_rows"].invoke({"keyword": "سحب"})
+        assert "صف 3" in text, text          # موضعُه في العقد (الثالث) لا الثاني في العرض
+    finally:
+        conn.close()
+    view = app._view_rows(struct)
+    assert [r["seq"] for r in view] == [1, 3], view
+
+
+def test_an_empty_filter_keeps_the_columns(app):
+    """الفلترةُ إلى صفر تُبقي رؤوسَ الجدول (وإلا قُرئت عطبًا لا نتيجةً فارغة)."""
+    empty = app.filter_rows("النوع", "لا_يوجد_هذا_أبدًا")
+    assert empty.empty
+    assert list(empty.columns)[:3] == ["#", "الصفحة", "التاريخ"], list(empty.columns)
+
+
+def test_the_filter_columns_match_the_rendered_record():
+    """قائمةُ الفلترة تُقابَل بمفاتيح السجلّ المعروض — إعادةُ تسميةِ عمودٍ تُسقط هذا الضابط."""
+    import app as app_module
+    from statement_qa.render import row_record
+
+    keys = list(row_record(1, {"page": 1, "kind": "txn", "balance": "1", "movement": "1",
+                               "side": "debit", "ok": True, "desc": "x", "date": ""}).keys())
+    assert list(app_module.FILTER_COLUMNS[1:]) == keys, (app_module.FILTER_COLUMNS, keys)
+
+
+def test_the_app_writes_the_question_and_the_intent_reads_it(app):
+    """**قبولُ القرار: «قصدُ الأسئلة المسجَّلة يعرض ما سُئل فعلًا».** الضابطُ السابق كان يُدرج صفَّ
+    `qa` بيده ثمّ يقيس القراءة — فلو حُذف كاتبُ التطبيق بقي أخضر. هذا يُنادي الكاتبَ نفسَه
+    (`_record_qa_row`) ثمّ يقرأ بالقصد، ويقيس الترجمةَ من رقم الصفّ إلى `(صفحة، صف)` في القاعدة.
+    """
+    from types import SimpleNamespace
+
+    res = SimpleNamespace(used_row_nos=[2], cited_row_ids=[], refused=False)
+    app._record_qa_row(res, "كم مجموع السحوبات؟", "المجموع 20.00 (صفحة 1، صف 2)")
+    got = app._ledger_ui.ask(app.DATA_HOME, app._ledger_key(), "الأسئلةُ المسجَّلة")
+    flat = " | ".join(str(c) for row in got["rows"] for c in row)
+    assert "كم مجموع السحوبات؟" in flat, flat
+    assert "10.00" in flat or "صفحة 1" in flat, flat      # دليلُ الصفّ وصل من القاعدة لا من الرام

@@ -260,18 +260,20 @@ def test_the_footer_pass_stops_after_five_consecutive_failures(app_run):
     assert not [c for c in app_run.calls if c[0] == "rows"]
 
 
-def test_rejected_pages_are_skipped_and_named_without_a_checkbox(app_run):
-    """**البند ١١ (R130):** لا خانةَ قرار — الصفحةُ المرفوضةُ تُستبعد بلا قراءة، **وتُسمّى** في
-    رسالة النتيجة؛ وما عداها يُقرأ. (كانت الخانةُ الافتراضيةُ تُوقف القراءةَ كلَّها حتى يُعلَّم صندوقٌ
-    لا يقول شيئًا.)
+def test_a_rejected_page_stops_the_read_and_is_named_without_a_checkbox(app_run):
+    """**البند ١١ (R130) — والعطبُ المصحَّح (مقعدا المواصفة والمعايير P1):** لا خانةَ قرار، **ولا
+    استبعادَ تلقائيًّا**: الخانةُ كانت `value=False` بالتصميم ⇒ صفحةٌ مرفوضةٌ واحدة **توقف** القراءةَ
+    وتُسمّى، ولا يُدفع شيء. أمّا قراءةُ البقيةِ ودفعُها بلا قرار العميل فسلوكٌ لم يُطلب وأثره مال.
     """
-    out, calls, pages, _state = app_run([("10", "0"), ("20", "0"), ("30", "0")],
-                                        rejected=[2])
+    out, calls, _pages, _state = app_run([("10", "0"), ("20", "0"), ("30", "0")],
+                                         rejected=[2])
     touched = {img for _kind, img in calls if _kind != "bank"}
-    assert pages[1] not in touched, "الصفحةُ المرفوضة قُرئت (ودُفعت) بلا استبعاد"
-    assert "مستبعدة" in out[0] or "استُبعدت" in out[9], out[9]
-    assert "ص2" in out[9] and "1" in out[9], out[9]
-    assert "لم يُستبعد شيء" not in out[9], "الرسالةُ قالت إنّ شيئًا لم يُستبعد والصفحةُ استُبعدت"
+    assert not touched, f"قُرئت صفحةٌ (ودُفعت) والقراءةُ يجب أن تتوقّف: {touched}"
+    assert "لم تبدأ القراءة ولم يُدفع شيء" in out[0], out[0]
+    assert "ص2" in out[0] and "إعادة تصوير" in out[0], out[0]
+    assert "ص2" in out[9], out[9]
+    assert "استُبعدت" not in out[9] and "مستبعدة" not in out[9], \
+        "الرسالةُ ادّعت استبعادًا — والسياسةُ توقّفٌ لا استبعاد"
 
 
 def test_the_outcome_message_says_nothing_was_excluded_when_everything_was_read(app_run):

@@ -91,6 +91,8 @@ tests/test_reader_reasoning_retry.py
 tests/test_saved_record_mark.py
 tests/test_ledger.py
 tests/test_ledger_ui.py
+tests/test_ledger_database_core.py
+tests/test_qa_time_tools.py
 tests/test_ledger_search_reach.py
 tests/test_answer_type.py
 tests/test_scope_gate.py
