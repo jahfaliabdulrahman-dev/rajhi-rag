@@ -269,6 +269,8 @@ NON_ANSWER_FILES_SINCE_RULE = {
         "طلبٌ مدفوع (REQ-104-01: ٢٤ طرحًا على ذراعَي جملةِ القاعدة (صياغتان لا يفترقان إلّا بها) · سقفُ $0.05) — لا يُجيب حُكماً",
     "handoff/sulaiman/20261020-0859-PLAN-r130-the-database-at-the-core-and-the-time-dimension.md":
         "خطةُ تنفيذٍ قبل القراءة (PLAN) — لا تُجيب حُكماً؛ وباسمها الجديد بعد تصحيح زمن الاسم (R130)",
+    "handoff/sulaiman/20261020-0923-REPORT-to-owner-r130-the-database-at-the-core-the-time-dimension-and-the-three-seats.md":
+        "تقريرُ إنجازٍ للمالك (R130) — لا يُجيب حُكماً",
     # **وغلقُ R104 (ثلاثةُ مقاعد: P1 في الدمج + المُعلَن والمُغلق):** نقلُ المقاعد وخطةُ الغلق.
     "handoff/sulaiman/20261010-0124-SEATS-r104-three-isolated-seats-verbatim.md":
         "نقلُ المقاعد الثلاثة بالحرف (R104: P0=٠ · P1=١ في دمج الأسماء · P2=٣ · P3≈١٥) — لا يُجيب حُكماً",
