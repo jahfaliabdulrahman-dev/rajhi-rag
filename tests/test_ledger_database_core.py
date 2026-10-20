@@ -178,3 +178,47 @@ def test_the_scope_gate_reads_the_page_dimension_from_the_database(tmp_path):
     _years, max_page, _amounts, pages_read = _data_facts(rows)
     assert max_page == 2, max_page
     assert pages_read == {1, 2}, pages_read
+
+
+def test_two_different_sources_never_share_a_key(tmp_path):
+    """**R131-2 (P1):** الهويّةُ من محتوى المصدر لا من صيغة الطباعة. كشفان بالصيغة والطول نفسَيهما
+    كانا يتصادمان (البصمةُ أنماطُ طباعةٍ لا هويّة) ⇒ قراءةُ الثاني تمحو صفوفَ الأوّل. والآن
+    `source_sha` هي الحاكم، والملفُّ نفسُه يُعطي المفتاحَ نفسَه في الواجهة والـCLI.
+    """
+    import hashlib
+
+    import ledger as cli
+
+    def sha(data: bytes) -> str:
+        return hashlib.sha256(data).hexdigest()
+
+    a, b = sha(b"%PDF-1.4 same-length-A"), sha(b"%PDF-1.4 same-length-B")
+    era = {"overall": "o", "styles": {"a": 1}, "transitions": {"b": 2}, "outliers": []}
+
+    key_a = L.statement_key(era, 10, source_sha=a)
+    key_b = L.statement_key(era, 10, source_sha=b)
+    assert key_a != key_b, "كشفان مختلفان اشتركا في مفتاحٍ واحد"
+    assert L.statement_key(era, 11, source_sha=a) == key_a, "المفتاحُ تبع عددَ الصفوف لا المصدر"
+    # والمسارُ الثاني يقرأ الهويّةَ من تقرير التشغيل (يُسجّلها القارئ عند القراءة)
+    report = {"era": {k: era[k] for k in ("overall", "styles", "transitions")}, "source": {"sha256": a}}
+    assert cli.default_db(report, _pages((1, 2))).name == f"{key_a}.sqlite"
+
+
+def test_an_incomplete_reread_leaves_one_contiguous_numbering(tmp_path):
+    """**R131-3 (P1):** الصفحةُ التي تعثّرت في إعادة القراءة لا تُترك صفوفُها القديمةُ بأرقامها —
+    فتصير الشاشةُ ٦ والقاعدةُ ٩ والرقمُ الواحدُ لصفّين. السياسةُ واحدة: صفوفُ القاعدة = صفوفُ هذه
+    القراءة، و`seq` فريدٌ متّصل، والصفحةُ الغائبةُ تُسمّى (في سطر الحالة).
+    """
+    conn = L.open_ledger(tmp_path / "inc.sqlite")
+    try:
+        L.ingest(conn, _rows((1, 2, 3)), _pages((1, 2, 3)))
+        first = L.read_rows(conn)
+        assert len(first) == 9
+        # إعادةُ قراءةٍ تعثّرت فيها الثانية: تُقرأ ١ و٣ وحدَهما (الصفحةُ ٢ تُسمّى في الحالة)
+        L.ingest(conn, _rows((1, 3)), _pages((1, 3)))
+        now = L.read_rows(conn)
+        assert {r["page"] for r in now} == {1, 3}, "صفوفُ الصفحة المتعثّرة بقيت تُخدَم"
+        assert [r["seq"] for r in now] == list(range(1, len(now) + 1)), [r["seq"] for r in now]
+        assert len({r["seq"] for r in now}) == len(now)
+    finally:
+        conn.close()

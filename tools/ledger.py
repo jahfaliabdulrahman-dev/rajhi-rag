@@ -35,8 +35,21 @@ def _build(args) -> int:
         print(f"لا صفوف في {run}/results — هل المسار صحيح؟", file=sys.stderr)
         return 2
     pages = L.pages_from_run(per_page, flags)
-    key = L.statement_key(report.get("era"), len(pages))
-    db = Path(args.db).expanduser() if args.db else default_db(report, pages)
+    source_sha = (report.get("source") or {}).get("sha256")
+    if not source_sha and args.source:
+        # **تقريرٌ قديمٌ بلا هويّةٍ (R131-2):** يُمرَّر المصدرُ فيُجزّأ الآن — وإلا فالبصمةُ
+        # الاحتياطيّةُ تُعلَن ولا تُقارَن بهويّة.
+        import hashlib as _hashlib
+        h = _hashlib.sha256()
+        with open(Path(args.source).expanduser(), "rb") as fh:
+            for block in iter(lambda: fh.read(1 << 20), b""):
+                h.update(block)
+        source_sha = h.hexdigest()
+    key = L.statement_key(report.get("era"), len(pages), source_sha=source_sha)
+    # **والمسارُ من المفتاح المحسوب نفسِه** لا من حسابٍ ثانٍ: `default_db` تقرأ التقريرَ وحدَه،
+    # فلو مرّر المستخدمُ `--source` لحُسب المفتاحُ من الهويّة وبقي المسارُ على البصمة الاحتياطيّة.
+    db = (Path(args.db).expanduser() if args.db
+          else L.data_home() / Path(*L.LEDGER_SUBDIR) / f"{key}.sqlite")
     conn = L.open_ledger(db)                    # البناءُ يُنشئ (create=True)
     try:
         written = L.ingest(conn, rows, pages)
@@ -59,7 +72,8 @@ def default_db(report: dict | None = None, pages: dict | None = None) -> Path:
     فالكشفُ الواحد تُكتب قاعدتُه مرّةً واحدةً أيًّا كان من كتبها. وبلا بصمةٍ يُنسب إلى عدد الصفحات
     **مع إعلان النقص** (`nop-`). **ولا مسارَ داخل المستودع:** بياناتُ المستخدم خارج الشجرة بالبناء.
     """
-    key = L.statement_key((report or {}).get("era"), len(pages or {}))
+    key = L.statement_key((report or {}).get("era"), len(pages or {}),
+                          source_sha=((report or {}).get("source") or {}).get("sha256"))
     return L.data_home() / Path(*L.LEDGER_SUBDIR) / f"{key}.sqlite"
 
 
@@ -111,6 +125,8 @@ def main(argv=None) -> int:
     b = sub.add_parser("build", help="ابنِ دفترًا من نتائج تشغيل")
     b.add_argument("--run", required=True, help="مجلّدُ التشغيل (فيه results/ وslice_report.json)")
     b.add_argument("--db", default=None, help="مسارُ الدفتر (افتراضًا data/ledgers/<اسم>.sqlite)")
+    b.add_argument("--source", default=None,
+                   help="ملفّ الكشف الأصليّ — تُجزّأ بايتاتُه لهويّةٍ واحدة مع الواجهة (R131-2)")
     b.set_defaults(fn=_build)
 
     a = sub.add_parser("ask", help="اسأل الدفترَ بقصدٍ من قائمةٍ مغلقة")

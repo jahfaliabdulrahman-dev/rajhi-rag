@@ -107,7 +107,8 @@ def blocked_message_ar(intake: Intake) -> str:
                 f"{_pages_with_reasons(intake, intake.blank())}.")
     return (f"⛔ **لم تبدأ القراءة ولم يُدفع شيء.** {len(rej)} من {len(intake.gate)} "
             f"صفحة تحتاج إعادة تصوير — {_pages_with_reasons(intake, rej)}. "
-            f"أعد تصويرها وارفع الملف من جديد.")
+            f"أعد تصويرها وارفع الملف من جديد، أو علّم «متابعة مع استبعاد الصفحات المرفوضة» "
+            f"لتُقرأ البقيةُ وتُسمّى المستبعَدة في الملخّص.")
 
 
 def summary_ar(intake: Intake, skipped: list[int]) -> str:

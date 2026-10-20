@@ -90,11 +90,15 @@ def test_the_conversation_downloads_from_the_database(app):
     finally:
         conn.close()
     app.STATE.clear()                         # كأنّ التطبيق أُعيد تشغيلُه
-    got, note = app._conversation_markdown()
+    got, note = app._conversation_export()
     assert got and Path(got).exists(), note
-    text = Path(got).read_text(encoding="utf-8")
-    assert "كم مجموع السحوبات؟" in text and "المجموع 20.00" in text
-    assert "الأدلّة" in text and "| 1 | 2 |" in text, text[:400]
+    from openpyxl import load_workbook
+
+    wb = load_workbook(got)
+    chat = list(wb["المحادثة"].values)
+    ev = list(wb["الأدلّة"].values)
+    assert chat[1][2] == "كم مجموع السحوبات؟" and "المجموع 20.00" in chat[1][3], chat
+    assert ev[1][1:3] == (1, 2), ev                 # الصفّ الأولُ من الأدلّة: صفحة 1، صف 2
 
 
 def test_no_rajhi_work_folder_is_left_in_the_system_temp_dir(app):
@@ -189,8 +193,10 @@ def test_the_deleted_statement_leaves_no_file_at_all(app):
     _db(app)
     app._delete_statement_click()
     left = sorted(p.name for p in app.DATA_HOME.rglob("*") if p.is_file())
-    assert left == [], f"ملفّاتٌ بقيت بعد الحذف: {left}"
-    assert not app.LOCK_PATH.exists(), "قفلُ المهمّة بقي بعد الحذف"
+    # **«صفرُ ملفّ» يُعرَّف على بيانات الكشف (R131-5):** `job.lock` ملفُّ تنسيقٍ بين النوافذ
+    # (رقمُ العملية ووقتها) لا بياناتُ كشف — ويبقى لأنّ حذفَه أثناء تشغيلٍ يفتح البابَ لمهمّتين.
+    assert left == ["job.lock"], f"بقيت ملفّاتُ كشفٍ بعد الحذف: {left}"
+    assert not list(app.DATA_HOME.rglob("*.sqlite*")) and not (app.DATA_HOME / "active.json").exists()
 
 
 def test_the_screen_number_and_the_tool_number_are_the_same(app):
@@ -257,7 +263,7 @@ def test_the_app_writes_the_question_and_the_intent_reads_it(app):
 
 def _display_copy(app, tmp_path) -> Path:
     """نسخةُ عرضٍ في حافظة Gradio **بمكوّن المكتبة نفسِه** الذي يستعمله التطبيق (`_cache_path`)."""
-    src = tmp_path / "conversation.md"
+    src = tmp_path / "conversation.xlsx"
     src.write_text("نسخةُ عرض", encoding="utf-8")
     return Path(app._cache_path(app.conv_file, src))
 
@@ -288,3 +294,44 @@ def test_a_failed_display_cleanup_is_named_not_swallowed(app, tmp_path, monkeypa
     assert kept.exists()
     assert "تعذّر حذفُ نسخ العرض المؤقّتة (PermissionError)" in msg, msg
     assert f"حُذف **0** · بقي **{n}**" in msg, msg
+
+
+def test_the_conversation_export_keeps_newlines_and_pipes_exactly(app):
+    """**قبولُ R131-6:** وصفٌ فيه سطرٌ جديدٌ و`|` يعود من الملفّ **حرفًا بحرف** — الجدولُ اليدويّ
+    كان يبدّل `|` بـ`/` ويسقط السطرَ الجديد، فينكسر الصفُّ في ٣٨٨٣ وصفًا من ٥٨٠٩ في كشف المالك.
+    """
+    from openpyxl import load_workbook
+
+    path = _db(app)
+    conn = L.open_ledger(path)
+    try:
+        ids = L.row_ids_for(conn, [(1, 2)])
+        row_id = ids[0] if ids else conn.execute("SELECT id FROM rows_verified LIMIT 1").fetchone()[0]
+        conn.execute("UPDATE rows_verified SET desc = ? WHERE id = ?",
+                     ("سطرٌ أول\nسطرٌ ثانٍ | عمود", row_id))
+        conn.commit()
+        L.record_qa(conn, "2026-10-20T09:30:00", "سؤالُ السطرين", "جواب", [row_id])
+    finally:
+        conn.close()
+    got, note = app._conversation_export()
+    assert got, note
+    wb = load_workbook(got)
+    descs = [r[3] for r in wb["الأدلّة"].values]
+    assert "سطرٌ أول\nسطرٌ ثانٍ | عمود" in descs, descs
+
+
+def test_the_delete_is_refused_while_a_read_holds_the_job_lock(app):
+    """**R131-5 (P2):** الحذفُ يجري تحت قفل المهمّة نفسِه. كان يزيل ملفَّ القفل بلا شرط ⇒ مَن بعده
+    يأخذه وقراءةٌ جاريةٌ تعمل ⇒ مهمّتان مدفوعتان، والقراءةُ الجاريةُ تُعيد كتابةَ البيانات بعد «حُذفت».
+    """
+    from statement_qa.job_lock import job_lock
+
+    path = _db(app)
+    assert path.exists()
+    with job_lock(app.LOCK_PATH):                 # قراءةٌ جارية
+        out = app._delete_statement_click()
+        assert "لم يُحذف شيء" in out[0], out[0]
+        assert path.exists(), "حُذفت القاعدةُ رغم تشغيلٍ جارٍ"
+    out = app._delete_statement_click()           # بعد تحرير القفل
+    assert "حُذفت" in out[0], out[0]
+    assert not path.exists()

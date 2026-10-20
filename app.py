@@ -24,6 +24,7 @@ their exact shape (tools/qa_gate.py depends on them).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -594,7 +595,7 @@ def _desc_pass(order: list[int], pages: list[str], all_rows: list[dict],
     return rep
 
 
-def process_pdf(pdf_path: str, progress=gr.Progress()):
+def process_pdf(pdf_path: str, skip_rejected: bool = False, progress=gr.Progress()):
     """Tab 1 handler — single-job lock → read all pages → chain-audit →
     footer oracle + era/order checks → chunks+index → **قاعدةُ الكشف تُكتب تلقائيًّا**.
 
@@ -605,15 +606,16 @@ def process_pdf(pdf_path: str, progress=gr.Progress()):
     Guarded by the single-job lock (what-if delta #3): a second concurrent
     run gets a clear Arabic message instead of interleaving with this one.
 
-    **وخانةُ «استبعاد الصفحات المرفوضة» أُزيلت (R130 · البند ١١):** لا قرارَ للعميل فيها — الصفحةُ
-    المرفوضةُ تُستبعد **وتُسمّى** في رسالة النتيجة، وما عداها يُقرأ. والخانةُ كانت تُقرأ نقصًا وهي
-    لا تقول ما وقع؛ والرسالةُ تقوله.
+    **وخانةُ «المتابعة باستبعاد الصفحات المرفوضة» (R131-7):** تعود بقيمتها التصميميّة `False` —
+    صفحةٌ مرفوضةٌ واحدة **توقف** القراءةَ ولا يُدفع شيء، والرسالةُ تقول ما حدث. وتُعلَّم الخانة
+    فيُقرأ ما عداها وتُسمّى المستبعَدة. **فلا دفعَ إلا بفعلٍ صريح من العميل** (وهو ما طلبته
+    المراجعة ١٣٠: «تُصلَح الإشارةُ لا القيمة»).
     """
     if not pdf_path:
         raise gr.Error("ارفع ملف PDF أولاً ثم اضغط «قراءة الكشف».")
     try:
         with job_lock(LOCK_PATH):
-            return _process_pdf_locked(pdf_path, progress)
+            return _process_pdf_locked(pdf_path, progress, skip_rejected=bool(skip_rejected))
     except JobBusyError:
         raise gr.Error("يوجد تشغيل جارٍ الآن (نافذة أو طلب آخر) — "
                        "انتظر انتهاءه ثم أعد المحاولة.")
@@ -663,27 +665,42 @@ def _ledger_path_for(key: str | None = None) -> Path:
     return _ledger_ui.ledger_file(DATA_HOME, key or _ledger_key())
 
 
-def _ledger_write(*, prune: bool = True) -> dict:
+def _file_sha256(path) -> str:
+    """تجزئةُ **بايتات ملفّ الكشف** — هويّةُ الكشف (R131-2) لا صيغةُ طباعته.
+
+    تُقرأ بالكتل (الكشفُ ٦٢٩ صفحةً عشراتُ الميغابايت) وتُسجَّل في الحالة، فيُشتقّ منها مفتاحُ
+    القاعدة الذي تقرؤه الواجهةُ والـCLI معًا. **والحدُّ:** الملفُّ نفسه ببايتاته؛ إعادةُ تصدير
+    الكشف من المصرف بملفٍّ جديدٍ تُعطي مفتاحًا جديدًا (وهو الصواب: ملفٌّ آخر).
+    """
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _ledger_write() -> dict:
     """**القراءةُ تكتب القاعدةَ عند انتهائها (R130 · الخيار ١)** — لا زرٍّ منفصل.
 
     تُكتب صفوفُ العقد (٢٢ عمودًا) وأحكامُ الصفحات وأرقامُ تذييلها المطبوعة. والنَّصُّ على صفوف
     **العقد** لا العرض: العرضُ بلا `row_no` فتسقط الكتابةُ (`IntegrityError` — درسُ الزرّ القديم).
     والفشلُ **يُعلَن ولا يُسقط القراءة**: القراءةُ تمّت، والقاعدةُ بياناتٌ مشتقّةٌ تُعاد.
 
-    **`prune=False` على قراءةٍ ناقصة (إصلاحُ مقعد المعايير P1):** صفحةٌ فشلت قراءتُها هذه المرّة
-    ليست صفحةً سقطت من الكشف؛ فحذفُ صفوفها القديمة يفقد دليلَها ويُعلَن «جاهز» فوق نقص.
+    **وسياسةٌ واحدةٌ للكاتبين (R131-3):** التقليمُ دائمًا — صفوفُ القاعدة هي صفوفُ هذه القراءة
+    وحدَها، فتَبقى الشاشةُ والقاعدةُ والأدواتُ على الترقيم نفسه. والصفحةُ المتعثّرة **تُسمّى** في
+    سطر الحالة، ولا تُخدَم صفوفٌ من قراءةٍ سابقة (لا رقمَ لصفّين).
     """
     rows = _ledger_rows()
     if not rows:
         return {"ok": False, "message": "لا صفوفَ لكتابة قاعدةٍ منها."}
     old_key = STATE.get("ledger_key")
-    key = _ledger.statement_key(STATE.get("era"), _ledger.pages_of(rows))
+    key = _ledger.statement_key(STATE.get("era"), _ledger.pages_of(rows),
+                                source_sha=STATE.get("source_sha"))
     path = _ledger_ui.ledger_file(DATA_HOME, key)
     try:
         conn = _ledger.open_ledger(path)
         try:
-            stats = _ledger.ingest(conn, rows, _ledger.pages_from_state(rows, STATE.get("footers") or {}),
-                                   prune=prune)
+            stats = _ledger.ingest(conn, rows, _ledger.pages_from_state(rows, STATE.get("footers") or {}))
         finally:
             conn.close()
     except _ledger.LedgerUnavailable as e:
@@ -705,8 +722,6 @@ def _ledger_write(*, prune: bool = True) -> dict:
             pass
     note = (f"قاعدةُ الكشف: **{stats['rows']}** صفًّا · **{stats['pages']}** صفحة · "
             f"**{stats.get('pruned_rows', 0)}** صفًّا قديمًا أُزيل")
-    if not prune:
-        note += " · **بلا تقليمٍ** (قراءةٌ ناقصة — صفوفُ الصفحات المتعثّرة محفوظة)"
     return {"ok": True, "key": key, "path": str(path), "stats": stats, "message": note}
 
 
@@ -819,7 +834,7 @@ def _close_pages(pages) -> list[str]:
     return out
 
 
-def _process_pdf_locked(pdf_path: str, progress):
+def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
     # **ومسحُ ذاكرة المحادثة هنا لا يتوقّف على ترتيب مستمعَي الزرّ** (تصحيحُ مقعد البنية 2026-10-08):
     # الحالةُ **قبل استبدالها** في كلِّ ترتيبٍ ⇒ يُمسح خيطُ الكشف المُغادَر فعلًا؛ ومع مسحِ
     # `_reset_qa_surfaces` عند النقر تُغطّى كلُّ سيناريوهات العودة (كشفٌ جديد · إعادةُ قراءة ·
@@ -829,6 +844,11 @@ def _process_pdf_locked(pdf_path: str, progress):
     old_key = _ledger_key()
     old_path = _ledger_ui.ledger_file(DATA_HOME, old_key) if old_key else None
     clear_conversation(old_key, memory_path=old_path if old_path and old_path.exists() else None)
+    # **هويّةُ الكشف من الملفّ نفسه (R131-2):** تُجزّأ بايتاتُ الـPDF مرّةً هنا، فيُشتقّ منها مفتاحُ
+    # القاعدة — كشفان بصيغةٍ وطولٍ واحدين لا يتصادمان بعد اليوم. وإن غاب الملفُ (مسارٌ وهميّ في
+    # ضابط) يُترك فارغًا فتعمل البصمةُ الاحتياطيّة — والحدُّ مُعلَن: هويّةٌ بلا محتوى ليست هويّة.
+    STATE["source_sha"] = (_file_sha256(pdf_path)
+                           if Path(pdf_path).exists() else None)
     pages = _pages_to_pngs(pdf_path)
 
     # فحصُ ما قبل القراءة (statement_qa.intake): مجانيٌّ ويسبق **أيَّ** استدعاءٍ مدفوع — حتى
@@ -839,7 +859,7 @@ def _process_pdf_locked(pdf_path: str, progress):
     progress(0.0, "فحص الصفحات قبل القراءة…")
     gate_fn, kind_fn = _local_checks(pages)
     intake = inspect_locally(pages, gate_fn, kind_fn)
-    decision = plan(intake, False)
+    decision = plan(intake, bool(skip_rejected))
     intake_note = _intake_outcome(intake, decision)
     if decision["blocked"]:
         STATE.clear()   # لا تُجيب الأسئلةُ عن ملفٍّ سابقٍ بعد رفعِ ملفٍّ لم يُقرأ
@@ -1264,13 +1284,21 @@ def _process_pdf_locked(pdf_path: str, progress):
     summary = " • ".join(segs)
     # **وقاعدةُ الكشف تُكتب هنا — عند انتهاء المعالجة، لا بزرّ (R130 · الخيار ١).**
     # والفشلُ يُعلَن في سطر الحالة ولا يُسقط قراءةً تمّت (القاعدةُ بياناتٌ مشتقّةٌ تُعاد).
-    # **ولا تقليمَ إن كان في هذه القراءة عطبُ صفحة** — لا تُقرأ صفحةٌ متعثّرة كأنها سقطت من الكشف.
+    # **وسياسةٌ واحدة (R131-3):** التقليمُ دائمًا، والصفحةُ المتعثّرة تُسمّى أدناه — لا صفوفَ من
+    # قراءةٍ سابقة تبقى بأرقامها فتشير إلى صفّين.
     incomplete = bool(failed_pages or pages_without_rows)
-    written = _ledger_write(prune=not incomplete)
+    written = _ledger_write()
     ledger_status = _ledger_ui.status_text(DATA_HOME, _ledger_key(), len(_ledger_rows()),
                                            _ledger.rows_without_page(_ledger_rows()))
     if not written.get("ok"):
         ledger_status = f"### دفترُ الكشف\n**{written.get('message') or 'تعذّرت الكتابة'}**"
+    elif incomplete:
+        # **الصفحةُ المتعثّرة تُسمّى في حالة القاعدة أيضًا** (R131-3): القاعدةُ تحمل صفوفَ هذه
+        # القراءة وحدَها، فلا تُقرأ «جاهزةٌ» كاملةً وهي ناقصة.
+        missed = sorted(set(failed_pages or []) | set(pages_without_rows or []))
+        ledger_status += ("\n\n**قاعدةٌ غيرُ مكتملة** — لم تُقرأ هذه المرّة: "
+                          + "، ".join(f"ص{p}" for p in missed)
+                          + ". أرقامُ الصفوف من هذه القراءة وحدَها (لا صفوفَ من قراءةٍ سابقة).")
     gallery_out = _close_pages(pages)
     return (summary, rows_view,
             _kpi_html(len(all_rows), n_ok, n_susp, last_bal), gallery_out,
@@ -1578,7 +1606,10 @@ def _ledger_key() -> str:
     rows = _ledger_rows()
     era = STATE.get("era")
     if era:
-        return _ledger.statement_key(era, _ledger.pages_of(rows))
+        # **والهويّةُ نفسُها التي يكتب بها `_ledger_write` (R131-2):** `source_sha` أوّلًا، وإلا
+        # فالبصمةُ الاحتياطيّة — وإلا حُسب مفتاحان لنفس الكشف بين الكتابة والقراءة.
+        return _ledger.statement_key(era, _ledger.pages_of(rows),
+                                     source_sha=STATE.get("source_sha"))
     return _ledger_ui.active_key(DATA_HOME) or _ledger.statement_key(None, _ledger.pages_of(rows))
 
 
@@ -1668,28 +1699,36 @@ def _delete_statement_click():
 
     key = _ledger_key()
     path = _ledger_ui.ledger_file(DATA_HOME, key) if key else None
-    if path is not None:
-        reset_memory(path)
-    got = _ledger_ui.delete(DATA_HOME, key)
-    display = _delete_display_copies()
-    # **وقفلُ المهمّة يُزال** (إصلاحُ مقعد المعايير P2): كان يبقى في مجلّد البيانات فتُقرأ جملةُ
-    # «صفرَ ملفّ» وهي غيرُ صحيحة. الحذفُ يقع والتطبيقُ خامل (الواجهةُ مشغولةٌ أثناء المهمّة).
+    # **الحذفُ تحت قفل المهمّة نفسِه (R131-5):** كان يزيل ملفَّ القفل بلا شرط، فيأخذه مَن بعده
+    # وقراءةٌ جاريةٌ ما زالت تعمل ⇒ مهمّتان وكتابةٌ تُعيد البيانات بعد «حُذفت». والعقدُ: إن كان
+    # تشغيلٌ جارٍ **لا يُحذف شيء** ويُقال ذلك؛ وملفُّ القفل ليس بياناتِ كشفٍ فلا يُحسب في «صفر ملفّ».
     try:
-        LOCK_PATH.unlink(missing_ok=True)
-    except OSError:                            # noqa: BLE001 — قفلٌ مفتوحٌ على نظامٍ يمنع الحذف
-        pass
-    STATE.clear()
+        with job_lock(LOCK_PATH):
+            if path is not None:
+                reset_memory(path)
+            got = _ledger_ui.delete(DATA_HOME, key)
+            display = _delete_display_copies()
+            STATE.clear()
+    except JobBusyError:
+        return ("**لم يُحذف شيء — يوجد تشغيلٌ جارٍ الآن.** انتظر انتهاءه ثمّ أعد المحاولة.",
+                gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
+                gr.update(), gr.update(), gr.update(), gr.update())
     return (f"{got['message']}\n\n{display}", "", pd.DataFrame(), _kpi_html(0, 0, 0, None), [],
             "", "", pd.DataFrame(), _hide_note(),
             _ledger_ui.status_text(DATA_HOME, None, 0))
 
 
-def _conversation_markdown() -> tuple[str | None, str]:
-    """**تنزيلُ المحادثة (البند ١٠):** سؤالٌ وجوابٌ وأدلّةٌ من **القاعدة** — لا من ذاكرةٍ حيّة.
+def _conversation_export() -> tuple[str | None, str]:
+    """**تنزيلُ المحادثة (البند ١٠ · وإصلاحُ R131-6):** سؤالٌ وجوابٌ وأدلّةٌ من **القاعدة**، في
+    **مصنَّف Excel** بكاتبٍ منظَّم (`openpyxl`) — لا جدولَ Markdown يُبنى باليد.
 
-    والقراءةُ من جدول `qa` + `qa_evidence` + `rows_verified` (لا من رسائل الحافظة): الرسائلُ تُقصّ
-    إلى نافذةِ ثلاثِ دورات، والسجلُّ المقصودُ «ما سُئل فعلًا» يبقى كاملًا. فالحذفُ/إعادةُ التشغيل
-    لا يقطعان التنزيل.
+    **العِلّة المقيسة (مراجعة ١٣١):** الجدولُ اليدويّ كان يستبدل `|` بـ`/` (فيغيّر الوصف) **ولا
+    يهرّب سطرًا جديدًا** ⇒ في كشف المالك ٣٨٨٣ وصفًا من ٥٨٠٩ فيه سطرٌ جديد (v1) و٥١٨٦ (v2) ⇒ يكاد
+    كلُّ دليلٍ ينكسر. والآن كلُّ خليّةٍ نصٌّ كما هو، حرفًا بحرف.
+
+    والقراءةُ من `qa` + `qa_evidence` + `rows_verified` (لا من رسائل الحافظة): الرسائلُ تُقصّ إلى
+    نافذةِ ثلاثِ دورات، والسجلُّ المقصودُ «ما سُئل فعلًا» يبقى كاملًا. فالحذفُ/إعادةُ التشغيل لا
+    يقطعان التنزيل.
     """
     key = _ledger_key()
     if not key:
@@ -1705,31 +1744,35 @@ def _conversation_markdown() -> tuple[str | None, str]:
         ).fetchall()
         if not qa_rows:
             return None, "**لا محادثةَ مسجَّلةً بعد** في هذا الكشف."
-        name = (_ledger_ui.active_get(DATA_HOME) or {}).get("name") or "كشف"
-        lines = [f"# محادثةُ كشف — {name}", ""]
+        evidence = {}
         for r in qa_rows:
-            lines.append(f"## {r['asked_at']} — سؤال {r['id']}")
-            lines.append(f"**السؤال:** {r['question']}")
-            lines.append(f"**الجواب:** {r['answer'] or '—'}")
-            ev = conn.execute(
+            evidence[r["id"]] = conn.execute(
                 "SELECT v.pg, v.row_no, v.desc, v.movement FROM qa_evidence e "
                 "JOIN rows_verified v ON v.id = e.row_id WHERE e.qa_id = ? ORDER BY v.pg, v.row_no",
                 (r["id"],)).fetchall()
-            if ev:
-                lines += ["**الأدلّة:**", "", "| صفحة | صفّ | البيان | المبلغ |", "|---|---|---|---|"]
-                for e in ev:
-                    desc = (e["desc"] or "").replace("|", "/")
-                    lines.append(f"| {e['pg']} | {e['row_no']} | {desc} | {e['movement'] or ''} |")
-            else:
-                lines.append("**الأدلّة:** لا صفوفَ دليلٍ مرتبطة (امتناعٌ أو جوابٌ بلا صفوف).")
-            lines.append("")
     finally:
         conn.close()
+    from openpyxl import Workbook                     # noqa: PLC0415 — كاتبٌ منظَّم، تبعيّةٌ قائمة
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "المحادثة"
+    ws.sheet_view.rightToLeft = True
+    ws.append(["#", "التاريخ", "السؤال", "الجواب", "امتناع"])
+    for r in qa_rows:
+        ws.append([r["id"], r["asked_at"], r["question"], r["answer"] or "", "نعم" if r["refused"] else ""])
+    ws2 = wb.create_sheet("الأدلّة")
+    ws2.sheet_view.rightToLeft = True
+    ws2.append(["سؤال", "صفحة", "صفّ", "البيان", "المبلغ"])
+    for qid, rows in evidence.items():
+        for e in rows:
+            # **بلا تحويلٍ للنصّ:** openpyxl يحفظ السطرَ الجديد و`|` كما هما.
+            ws2.append([qid, e["pg"], e["row_no"], e["desc"] or "", e["movement"] or ""])
     with tempfile.TemporaryDirectory(prefix="rajhi_chat_") as work:
-        out = Path(work) / "conversation.md"
-        out.write_text("\n".join(lines), encoding="utf-8")
+        out = Path(work) / "conversation.xlsx"
+        wb.save(out)
         kept = _cache_path(conv_file, out)
-    return kept, f"**{len(qa_rows)}** سؤالًا وجوابًا · ملفّ Markdown"
+    return kept, f"**{len(qa_rows)}** سؤالًا وجوابًا · ملفّ Excel (ورقةُ المحادثة وورقةُ الأدلّة)"
 
 
 def _record_qa_row(res, question: str, displayed: str) -> None:
@@ -1776,8 +1819,12 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي", delete_cache=(600, 
                                      file_types=[".pdf"], elem_id="file-panel")
                     btn = gr.Button("قراءة الكشف وبناء الفهرس", variant="primary",
                                     interactive=False)
-                    # **البند ١١:** مكانُ خانة «استبعاد الصفحات المرفوضة» صار **رسالةً بما حدث**؛
-                    # فالخانةُ كانت تُقرأ نقصًا ولا تقول شيئًا، والقراءةُ تكتب القاعدةَ تلقائيًّا.
+                    # **خانةُ المتابعة (R131-7):** تعود بقيمتها التصميميّة `False` — التوقّفُ هو
+                    # الافتراض، والاستبعادُ فعلٌ صريحٌ يُعلَّم فلا يُدفع مقابل كشفٍ ناقصٍ بلا قرار.
+                    skip_rejected_in = gr.Checkbox(
+                        label="متابعة مع استبعاد الصفحات المرفوضة (تُقرأ البقيةُ وتُسمّى المستبعَدة)",
+                        value=False)
+                    # **والبند ١١:** ورسالةٌ بما حدث فعلًا تُعرض بعد القراءة (لا خانةَ صامتة).
                     intake_note = gr.Markdown(
                         "**فحصُ الصفحات قبل القراءة:** تظهر نتيجتُه هنا بعد القراءة.",
                         rtl=True)
@@ -1856,8 +1903,8 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي", delete_cache=(600, 
             with gr.Row():
                 conv_btn = gr.Button("تنزيل المحادثة (سؤال · جواب · أدلّة)", scale=2)
                 conv_note = gr.Markdown(rtl=True, scale=3)
-            conv_file = gr.File(label="ملفّ المحادثة (Markdown)")
-            conv_btn.click(_conversation_markdown, inputs=[], outputs=[conv_file, conv_note],
+            conv_file = gr.File(label="ملفّ المحادثة (Excel)")
+            conv_btn.click(_conversation_export, inputs=[], outputs=[conv_file, conv_note],
                            api_name="download_conversation")
             ask.click(prepare_ask, inputs=[q, chat], outputs=[chat, q],
                       show_progress="hidden", api_name="ask_question"
@@ -1895,7 +1942,7 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي", delete_cache=(600, 
                             outputs=[ledger_out, ledger_note])
                 l_refresh.click(_ledger_refresh_click, outputs=[ledger_state])
             # **توصيلُ زرّ القراءة (٣):** بعد تعريف كلّ مخرجاتِه، ومنها `ledger_state`.
-            btn.click(process_pdf, inputs=[pdf_in],
+            btn.click(process_pdf, inputs=[pdf_in, skip_rejected_in],
                       outputs=[ticker, table, kpi, gallery, filter_col, filter_value,
                                filter_from, filter_to, ledger_state, intake_note],
                       show_progress_on=[ticker])

@@ -158,12 +158,14 @@ def _run(tmp_path, monkeypatch, meter: _Meter, budget: float, n: int = 8,
         monkeypatch.setattr(_Ans, "used_row_nos", list(used))
 
     def _answer(store, qtext, rows=None, chunks=None, llm=None, footers=None, scope=None,
-                n_pages=None):
+                n_pages=None, ledger_path=None):
         # **وعددُ صفحات المستند جزءٌ من العقد (R117-2):** البديلُ يطلبه صراحةً **بلا `**kwargs`**
         # ⇒ فوسيطٌ جديدٌ في `answer_question` يُسقط الضابطَ بنصّه بدل أن يُبتلع صامتًا
         # (هكذا أمسك هذا البديلُ تمريرَ `n_pages` لحظةَ كتابته).
         assert isinstance(n_pages, int) and n_pages > 0, \
             f"النداءُ لا يمرّر عددَ صفحات المستند ({n_pages!r}) — R117-2"
+        # **وR131-8: الخمسون تمرّ بقاعدة المسار المشحون** — البديلُ يطلبها صراحةً بلا `**kwargs`.
+        assert ledger_path is not None, "القرارُ لا يمرّر قاعدةَ المسار المشحون (R131-8)"
         if qtext in (local_for or set()):
             # **سؤالٌ يجيبه الحاجزُ محلّيًّا: بلا نداءِ نموذجٍ وبلا صرف** (كما يقع في المسار الحقيقيّ:
             # ٨ أسئلةٍ في REQ-108-03 بصفرِ نداء) — ولا يُرصد له ردٌّ ⇒ فلا سعرَ من نافذته (R114-1).

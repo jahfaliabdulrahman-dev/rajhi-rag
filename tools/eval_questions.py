@@ -1410,11 +1410,31 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     from statement_qa import provider_errors                      # noqa: PLC0415
     from statement_qa.qa import answer_question, build_llm, effective_model   # noqa: PLC0415
     from statement_qa.retriever import build_index                # noqa: PLC0415
+    from statement_qa import ledger as L                          # noqa: PLC0415
 
     before = _key_usage()
     print(f"[1/4] بناءُ الجدول من {a.run} …", flush=True)
     rows, n_pages = build_rows(a.run)
     print(f"      {n_pages} صفحة | {len(rows)} صفًّا", flush=True)
+    # **والخمسون تمرّ بالمسار الذي يُشحن (R131-8):** كانت تُمرّر `rows` وحدَها ⇒ `make_qa_tools(rows)`
+    # لا `(conn)`، فتقيس توأمًا لا قاعدةَ التطبيق (قِيس في مراجعة ١٣١: ٢٧ من ٢٩ نداءً متساوية،
+    # والفرقُ صفوفُ الصفحة ٦٢٩ التي يُسقطها `build_rows`). فتُبنى قاعدةٌ من التشغيل نفسِه بـ`ingest`
+    # (المولّدُ المشحون `to_xlsx.load`) ويُمرَّر `ledger_path` — فالأدواتُ تقرأ القاعدة كما في التطبيق.
+    import shutil as _shutil
+    import tempfile as _tempfile
+
+    eval_db_dir = pathlib.Path(_tempfile.mkdtemp(prefix="rajhi_eval_db_"))
+    import atexit as _atexit                                     # noqa: PLC0415
+    _atexit.register(_shutil.rmtree, eval_db_dir, ignore_errors=True)   # قاعدةُ القياس مؤقّتة
+    db_path = eval_db_dir / "eval.sqlite"
+    from tools import to_xlsx as _to_xlsx                      # noqa: PLC0415
+    _conn = L.open_ledger(db_path)
+    try:
+        _drows, _report, _per_page, _flags = _to_xlsx.load(a.run)
+        L.ingest(_conn, _drows, L.pages_from_run(_per_page, _flags))
+    finally:
+        _conn.close()
+    print(f"      قاعدةُ القياس: {len(_drows)} صفًّا (مسارُ ingest نفسه)", flush=True)
     # **التذييلاتُ المطبوعة (R77):** يُبنى بالدالّة نفسِها التي يبنيها التطبيق (`app.py`)، ويُمرَّر
     # إلى الأدوات — وبدونه أجابت أداةُ `page_footer` «لا يوجد» لكلّ صفحة: **قاس المقياسُ نفسَه**
     # لا المنتجَ (قِيس: صنفُ footer 0/8، ولكلّ صفحةٍ منها تذييلٌ مطبوعٌ في البيانات).
@@ -1528,9 +1548,9 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
             # المرفوع — المصدرُ مختلفٌ ومُعلَن، والصيغةُ واحدة).
             # **والسجلُّ فارغٌ بالبناء:** الحزمةُ تطرح كلَّ سؤالٍ في دورةٍ مستقلّة ⇒ فالرقمُ يصف
             # **الدورةَ الأولى** في جلسةٍ جديدة، ولا يُدَّعى أنّه يصف سؤالًا تابعًا.
-            r = answer_question(store, qtext, rows=rows, chunks=chunks, llm=llm,
-                                footers=footers, scope=_pack_scope(rows, a.run, n_pages),
-                                n_pages=n_pages)
+            r = answer_question(store, qtext, rows=None, chunks=chunks, llm=llm,
+                                footers=None, scope=_pack_scope(rows, a.run, n_pages),
+                                n_pages=n_pages, ledger_path=db_path)
             # **والصندوقُ من موضعه الواحد** (`box_of`): الإشارةُ (`answer_kind`) تُحمَل معه وإلّا
             # حُكم على كلّ سؤالٍ «عطبَ مرسًى» وفُقدت الإشارةُ من السجلّ (عطبُ R121-3 المقيس).
             out_box.update(box_of(r))

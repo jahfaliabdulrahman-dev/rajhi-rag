@@ -173,7 +173,7 @@ def app_run(monkeypatch, tmp_path):
     monkeypatch.setattr(app, "_local_checks",
                         lambda pages: (_gate(verdicts), lambda img: "transactions"))
 
-    def run(cumulative: list[tuple[str, str]], rejected=(), via_handler=False,
+    def run(cumulative: list[tuple[str, str]], rejected=(), via_handler=False, skip=False,
             printed=None, footer_cost=0.0, footer_fail=False):
         pages = _images(len(cumulative))
         knobs.update(printed=dict(zip(pages, printed or [])), footer_cost=footer_cost,
@@ -192,7 +192,7 @@ def app_run(monkeypatch, tmp_path):
             monkeypatch.setattr(app, "LOCK_PATH", tmp_path / "job.lock")
             out = app.process_pdf("upload.pdf", progress=lambda *a, **k: None)
         else:
-            out = app._process_pdf_locked("upload.pdf", lambda *a, **k: None)
+            out = app._process_pdf_locked("upload.pdf", lambda *a, **k: None, skip_rejected=skip)
         return out, calls, pages, app.STATE
     run.calls = calls          # سجلُّ الاستدعاءات يبقى مقروءًا حين يرفع التشغيلُ خطأً
     return run
@@ -276,12 +276,27 @@ def test_a_rejected_page_stops_the_read_and_is_named_without_a_checkbox(app_run)
         "الرسالةُ ادّعت استبعادًا — والسياسةُ توقّفٌ لا استبعاد"
 
 
+def test_ticking_the_skip_choice_reads_the_rest_and_names_the_excluded(app_run):
+    """**الافتراضُ توقّف (فوق)، والفعلُ الصريحُ يُكمل (هنا):** تُعلَّم الخانة ⇒ تُقرأ الصفحاتُ
+    الصالحةُ وتُسمّى المرفوضةُ، ولا تُقرأ المرفوضةُ ولا تُدفع (R131-7)."""
+    out, calls, pages, _state = app_run([("10", "0"), ("20", "0"), ("30", "0")],
+                                        rejected=[2], skip=True)
+    read = {img for kind, img in calls if kind == "rows"}
+    assert pages[1] not in read, "الصفحةُ المرفوضةُ قُرئت رغم الاستبعاد"
+    assert len(read) == 2, read
+    assert "استُبعدت" in out[9] and "ص2" in out[9], out[9]
+
+
 def test_the_outcome_message_says_nothing_was_excluded_when_everything_was_read(app_run):
     out, _calls, _pages, _state = app_run([("10", "0"), ("20", "0"), ("30", "0")])
     assert "لم يُستبعد شيء — قُرئت الصفحاتُ كلُّها" in out[9], out[9]
 
 
-def test_the_read_button_has_no_skip_checkbox():
+def test_the_read_button_carries_the_skip_choice_at_false_by_default():
+    """**R131-7 (نصُّ المراجعة ١٣٠):** «تُصلَح الإشارةُ لا القيمة» — فتعود الخانةُ بقيمتها
+    التصميميّة `False` (توقّفٌ ولا دفع)، وتُوصل كمدخلٍ ثانٍ لمسار القراءة؛ وتُعلَّم فيُستبعد
+    المرفوض ويُقرأ الباقي. وكانت جولتان أزالتا القدرةَ بلا نصّ.
+    """
     if not _app_stack():
         pytest.skip("حزمة التطبيق غير مثبّتة هنا (CI خفيف) — فحص محلي فقط")
     import app
@@ -289,8 +304,10 @@ def test_the_read_button_has_no_skip_checkbox():
     fns = app.demo.fns.values() if isinstance(app.demo.fns, dict) else app.demo.fns
     wired = [f for f in fns if getattr(f, "fn", None) is app.process_pdf]
     assert len(wired) == 1
-    assert [type(i).__name__ for i in wired[0].inputs] == ["File"], \
-        "زرّ القراءة ما زال يمرّر قرارَ استبعادٍ للعميل (البند ١١: رسالةٌ لا خانة)"
+    assert [type(i).__name__ for i in wired[0].inputs] == ["File", "Checkbox"], \
+        "مسارُ القراءة لا يحمل قرارَ الاستبعاد (R131-7)"
+    box = [i for i in wired[0].inputs if type(i).__name__ == "Checkbox"][0]
+    assert box.value is False, "الافتراضُ يجب أن يكون التوقّف (لا دفعَ بلا فعلٍ صريح)"
 
 
 def test_dates_are_settled_from_the_page_reading_before_its_description_is_replaced(app_run):

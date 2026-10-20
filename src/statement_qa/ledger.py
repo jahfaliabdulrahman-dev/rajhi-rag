@@ -63,7 +63,7 @@ def data_home() -> Path:
 _KEY_FIELDS = ("overall", "styles", "transitions", "outliers")
 
 
-def statement_key(era: dict | None, n_pages: int) -> str:
+def statement_key(era: dict | None, n_pages: int, *, source_sha: str | None = None) -> str:
     """مفتاحُ الكشف: **تجزئةُ بصمته** (لا عددُ صفحاته) — **موضعٌ واحدٌ يقرؤه التطبيقُ والـCLI.**
 
     **العِلّة (مقعدُ الواجهة P3 · مُثبت):** كان الاسمُ `ui_<عدد الصفحات>p.sqlite` ⇒ (١) كشفان
@@ -73,7 +73,17 @@ def statement_key(era: dict | None, n_pages: int) -> str:
 
     **والسابقةُ `st_` لا `ui_` (R130):** المفتاحُ لم يبقَ للواجهة وحدَها — سطرُ الأوامر يكتب القاعدةَ
     نفسَها بمفتاحٍ واحد (قرارُ المالك: «مسارٌ واحدٌ للكشف الواحد»)، فالاسمُ `ui_` كان يكذب على القارئ.
+
+    **وR131-2: الهويّةُ من محتوى المصدر لا من صيغة الطباعة.** كان المفتاحُ يُجزّئ
+    `overall/styles/transitions/outliers` — وهي **أنماطُ طباعة الأرقام** (قديمة/حديثة/مختلطة) ⇒
+    كشفان بعددِ الصفحات والصيغةِ نفسَيهما **يتصادمان**، فتمحو قراءةُ الثاني صفوفَ الأوّل ويحمل
+    تنزيلُ محادثته سؤالَ الأوّل. والآن `source_sha` (تجزئةُ بايتات ملفّ الكشف) هي الحاكم: تُسجَّل في
+    تقرير التشغيل عند القراءة (فتقرؤها الواجهةُ والـCLI معًا) ⇒ **ملفّان مختلفان ⇒ مفتاحان أبدًا**،
+    والملفُّ نفسُه ⇒ المفتاحُ نفسُه. والبصمةُ القديمة تبقى **احتياطًا مُعلَنًا** لتقريرٍ قديمٍ بلا
+    `source` (ولا تُقارَن بهويّة).
     """
+    if source_sha:
+        return "st_" + hashlib.sha1(str(source_sha).encode("utf-8")).hexdigest()[:10]
     if era:
         core = {k: era[k] for k in _KEY_FIELDS if k in era}
         # **وبلا الحقول المشتركة يُجزّأ ما أُعطي** — لا يُرفض نداءٌ قائم (والتقريرُ القديم يُبقى مقروءًا).
@@ -459,7 +469,7 @@ def _text(value) -> str | None:
 
 
 def ingest(conn: sqlite3.Connection, rows: list[dict], pages: dict[int, dict],
-           report: dict | None = None, *, prune: bool = True) -> dict:
+           report: dict | None = None) -> dict:
     """يكتب الجدولَ المُتحقَّق منه وأحكامَ الصفحات في معاملةٍ واحدة — **ويُزيل ما لم تعد القراءةُ تحمله.**
 
     **والمصدرُ هو مخرَجُ `tools/to_xlsx.load` نفسُه** لا نسخةً ثانيةً منه: نسخةٌ ثانيةٌ من بناء
@@ -520,19 +530,18 @@ def ingest(conn: sqlite3.Connection, rows: list[dict], pages: dict[int, dict],
             )
             written += 1
         # **التقليمُ بعدهما:** المشطورُ القديمُ (صفحةٌ أو صفٌّ) لم تعد القراءةُ تحمله.
-        # **ولا يُقلَّم على قراءةٍ ناقصة (إصلاحُ مقعد المعايير P1 · مُثبت):** صفحةٌ فشلت قراءتُها
-        # هذه المرّة ليست «صفحةً سقطت من الكشف» — وحذفُ صفوفها يفقد دليلَها ويُعلَن «جاهز» فوقه.
-        # فالمُنادي يمرّر `prune=False` متى كان في القراءة عطبُ صفحة، فتُبقى صفوفُها القديمة.
-        if prune:
-            for pid, pg, row_no in conn.execute(
-                    "SELECT id, pg, row_no FROM rows_verified").fetchall():
-                if (int(pg), int(row_no)) not in kept_rows:
-                    conn.execute("DELETE FROM rows_verified WHERE id = ?", (pid,))
-                    pruned_rows += 1
-            for (pg,) in conn.execute("SELECT pg FROM pages").fetchall():
-                if int(pg) not in kept_pages:
-                    conn.execute("DELETE FROM pages WHERE pg = ?", (pg,))
-                    pruned_pages += 1
+        # **السياسةُ الواحدة (R131-3):** ما لم تعد القراءةُ تحمله يُحذف — ولو كانت صفحةً تعثّرت
+        # هذه المرّة. فصفوفُ القاعدة هي صفوفُ هذه القراءة، وترقيمُها متّصلٌ وفريد، والشاشةُ والأدواتُ
+        # تقرأ الشيءَ نفسه. والصفحةُ المتعثّرة تُسمّى في سطر الحالة، ولا تُخدَم صفوفُ الأمس.
+        for pid, pg, row_no in conn.execute(
+                "SELECT id, pg, row_no FROM rows_verified").fetchall():
+            if (int(pg), int(row_no)) not in kept_rows:
+                conn.execute("DELETE FROM rows_verified WHERE id = ?", (pid,))
+                pruned_rows += 1
+        for (pg,) in conn.execute("SELECT pg FROM pages").fetchall():
+            if int(pg) not in kept_pages:
+                conn.execute("DELETE FROM pages WHERE pg = ?", (pg,))
+                pruned_pages += 1
     return {"pages": len(pages), "rows": written, "dropped_no_page": dropped_no_page,
             "pruned_rows": pruned_rows, "pruned_pages": pruned_pages}
 

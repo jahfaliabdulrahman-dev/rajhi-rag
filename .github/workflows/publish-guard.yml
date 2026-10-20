@@ -116,7 +116,9 @@ jobs:
           # ⇒ فذكرُ مسارٍ هنا يُقرأ إدراجًا) — وهو في سطور التشغيل أدناه وحدَها.
           python3 -m pip install --quiet "pytest==9.1.1" openpyxl==3.1.5 PyYAML==6.0.3 \
                                       "numpy==2.4.6" "pillow==12.3.0" \
-                                      "langchain==1.4.0" "langchain-core==1.6.3" "langgraph==1.2.11"
+                                      "langchain==1.4.0" "langchain-core==1.6.3" "langgraph==1.2.11" \
+                                      "langgraph-checkpoint==4.3.0" "langgraph-checkpoint-sqlite==3.1.2" \
+                                      "aiosqlite==0.22.1" "sqlite-vec==0.1.9"
           python3 -m pytest tests/test_compile_all.py \
                            tests/test_requirements_lock.py \
                            tests/test_public_claims.py \
@@ -162,6 +164,7 @@ jobs:
                            tests/test_agent_prompt_memory.py \
                            tests/test_app_binds_history.py \
                            tests/test_the_memory_reaches_the_model.py \
+                           tests/test_memory_sqlite.py \
                            tests/test_scope_one_home.py \
                            tests/test_app_excel_button.py \
                            tests/test_money_unit.py \

@@ -217,6 +217,16 @@ def _bump_usage(cache: Path, extra: dict) -> None:
     _write_json_atomic(cache, d)
 
 
+def _sha256_file(path: str | Path) -> str:
+    """تجزئةُ بايتات ملفّ الكشف — الهويّةُ التي يشتقّ منها المساران مفتاحَ القاعدة نفسَه."""
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="measured scale slice")
     ap.add_argument("--source", default=None,
@@ -782,6 +792,9 @@ def main() -> None:
         },
         "stop_reason": stop_reason,
         "per_page": per_page,
+        # **هويّةُ الكشف من بايتات المصدر (R131-2):** تُقرأ بها الواجهةُ والـCLI المفتاحَ نفسَه؛
+        # وعددُ الصفحات وصيغةُ الأرقام صفتان مشتقّتان لا تُعرّفان كشفًا.
+        "source": {"sha256": _sha256_file(source), "name": Path(source).name},
     }
     (out / "slice_report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
