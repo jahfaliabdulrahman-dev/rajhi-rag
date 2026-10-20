@@ -277,6 +277,8 @@ NON_ANSWER_FILES_SINCE_RULE = {
         "تقريرُ إنجازٍ للمالك (R131) — لا يُجيب حُكماً",
     "handoff/sulaiman/20261020-1235-REPORT-to-owner-r132-the-document-in-the-database-one-identity-and-green-ci.md":
         "تقريرُ إنجازٍ للمالك (R132) — لا يُجيب حُكماً",
+    "handoff/sulaiman/20261020-1448-REPORT-to-owner-r133-the-tools-read-the-unread-page.md":
+        "تقريرُ إنجازٍ للمالك (R133) — لا يُجيب حُكماً",
     # **وغلقُ R104 (ثلاثةُ مقاعد: P1 في الدمج + المُعلَن والمُغلق):** نقلُ المقاعد وخطةُ الغلق.
     "handoff/sulaiman/20261010-0124-SEATS-r104-three-isolated-seats-verbatim.md":
         "نقلُ المقاعد الثلاثة بالحرف (R104: P0=٠ · P1=١ في دمج الأسماء · P2=٣ · P3≈١٥) — لا يُجيب حُكماً",
