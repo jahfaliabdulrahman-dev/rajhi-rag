@@ -335,3 +335,42 @@ def test_the_delete_is_refused_while_a_read_holds_the_job_lock(app):
     out = app._delete_statement_click()           # بعد تحرير القفل
     assert "حُذفت" in out[0], out[0]
     assert not path.exists()
+
+
+def test_the_three_surfaces_agree_after_an_incomplete_reread(app):
+    """**قبولُ R131-3 (الضابطُ الثلاثيّ الذي تبنّاه المدقّق):** بعد إعادة قراءةٍ تعثّرت فيها صفحة،
+    **الشاشة = القاعدة = الأدوات** و`seq` متّصل. يحاكي: تُبقى صفحةٌ واحدةٌ في القاعدة (كما يفعل
+    `ingest` بعد تعثّر الأخرى)، ثمّ تُعاد الأسطحُ من القاعدة ويُقاس الثلاثةُ معًا.
+    """
+    from statement_qa.qa_tools import make_qa_tools
+
+    key = app._ledger_key()
+    path = _db(app)
+    conn = L.open_ledger(path)
+    try:
+        rows = L.read_rows(conn)
+        pages = L.read_footers(conn)
+        keep = [r for r in rows if r["page"] == 1]
+        L.ingest(conn, keep, {1: pages[1]})        # الصفحةُ ٢ «تعثّرت»: لا صفوفَ لها الآن
+    finally:
+        conn.close()
+
+    app.STATE.clear()                              # إعادةُ تشغيل
+    assert app._load_from_ledger(key)
+    screen = [int(r["seq"]) for r in app.STATE["rows"]]
+    number_of_displayed = len(app._rows_df(app.STATE["rows"]))
+
+    conn = L.read_ledger(path)
+    try:
+        db = L.read_rows(conn)
+        tools = {t.name: t for t in make_qa_tools(conn=conn)}
+        counted = tools["count_movements"].invoke({})
+    finally:
+        conn.close()
+    db_seq = [int(r["seq"]) for r in db]
+    assert screen == db_seq, f"الشاشة {screen} ≠ القاعدة {db_seq}"
+    assert db_seq == list(range(1, len(db_seq) + 1)), db_seq
+    assert number_of_displayed == len(db_seq)
+    # الأداةُ تعدّ **الحركات** (لا صفَّ الرصيد الافتتاحيّ) — فالمقابلةُ بدلالتها لا بعدد الصفوف.
+    movements = sum(1 for r in db if not r.get("opening") and r.get("movement") is not None)
+    assert f"العدد = {movements}" in counted, counted

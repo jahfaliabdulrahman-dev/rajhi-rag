@@ -1420,13 +1420,13 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     # لا `(conn)`، فتقيس توأمًا لا قاعدةَ التطبيق (قِيس في مراجعة ١٣١: ٢٧ من ٢٩ نداءً متساوية،
     # والفرقُ صفوفُ الصفحة ٦٢٩ التي يُسقطها `build_rows`). فتُبنى قاعدةٌ من التشغيل نفسِه بـ`ingest`
     # (المولّدُ المشحون `to_xlsx.load`) ويُمرَّر `ledger_path` — فالأدواتُ تقرأ القاعدة كما في التطبيق.
-    import shutil as _shutil
     import tempfile as _tempfile
 
-    eval_db_dir = pathlib.Path(_tempfile.mkdtemp(prefix="rajhi_eval_db_"))
-    import atexit as _atexit                                     # noqa: PLC0415
-    _atexit.register(_shutil.rmtree, eval_db_dir, ignore_errors=True)   # قاعدةُ القياس مؤقّتة
-    db_path = eval_db_dir / "eval.sqlite"
+    # **بعمر الدالّة لا بعمر العملية:** `TemporaryDirectory` يُنظَّف عند خروج `_run` (وفي CLI عند
+    # الخروج أيضًا) — و`mkdtemp`+`atexit` كان يُبقي مجلّدات `rajhi_eval_db_*` في تشغيلٍ داخل عمليةٍ
+    # واحدة (قِيس: مجلّدان باقيان بعد ضوابط الخمسين).
+    eval_db_tmp = _tempfile.TemporaryDirectory(prefix="rajhi_eval_db_")
+    db_path = pathlib.Path(eval_db_tmp.name) / "eval.sqlite"
     from tools import to_xlsx as _to_xlsx                      # noqa: PLC0415
     _conn = L.open_ledger(db_path)
     try:
