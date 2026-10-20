@@ -486,10 +486,14 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
         if not sel:
             # **ولفظُ الفراغ يتبع السؤال:** سؤالٌ بلا تاريخٍ لا يُنطَق فيه بمدّة (R130-1 يمنع دعوى
             # الغياب عن بُعدٍ لم يُسأل)؛ وسؤالٌ بمدىً يُجاب بحدِّه: خارج المدّة أو لا مطابقة.
+            # **وفرعُ «لا نتيجة» دعوى عن الكشف أيضًا (R134-1):** فقد تكون الحركةُ في صفحةٍ لم تُقرأ
+            # ⇒ يسمّيها `_unread_note` كما تسمّيها المجاميعُ الناجحة. وعلى قاعدةٍ كاملةٍ لا كلمةَ زائدة.
+            suffix = _unread_note() if page is None else ""
             if date_from or date_to:
                 return _empty_result(_parse_date_arg(date_from, "date_from"),
-                                     _parse_date_arg(date_to, "date_to"), len(undated_rows))
-            return "لا توجد حركات مطابقة لهذا الفلتر في الكشف."
+                                     _parse_date_arg(date_to, "date_to"),
+                                     len(undated_rows)) + suffix
+            return "لا توجد حركات مطابقة لهذا الفلتر في الكشف." + suffix
         vals = [_dec(r.get("movement")) for r in sel]
         total = sum((v for v in vals if v is not None), Decimal("0"))
         examples = "؛ ".join(
@@ -718,10 +722,14 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
                                      "limit": limit, "page": page,
                                      "date_from": date_from, "date_to": date_to})
         if not sel:
+            # **والفرعُ الفارغ يسمّي الناقص (R134-1):** «لا توجد حركات مطابقة» دعوى عن الكشف،
+            # والحركةُ قد تكون في صفحةٍ لم تُقرأ — فيُذكر ما لم يدخل البحث.
+            suffix = _unread_note() if page is None else ""
             if date_from or date_to:
                 return _empty_result(_parse_date_arg(date_from, "date_from"),
-                                     _parse_date_arg(date_to, "date_to"), len(undated_rows))
-            return "لا توجد حركات مطابقة."
+                                     _parse_date_arg(date_to, "date_to"),
+                                     len(undated_rows)) + suffix
+            return "لا توجد حركات مطابقة." + suffix
         shown = sel[:max(1, int(limit))]
         lines = [_row_line(r) for r in shown]
         more = "" if len(sel) <= len(shown) else f" (و{len(sel) - len(shown)} أخرى)"
@@ -758,26 +766,29 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
         d = _parse_date_arg(date, "date")
         if d is None:
             raise ValueError("balance_on تحتاج تاريخًا (YYYY-MM-DD) — حدُّ الأداة: لا يومَ بلا تاريخ")
+        # **وكلُّ جوابٍ عن يومٍ هو جوابٌ عن الكشف (R134-1):** صفحةٌ لم تُقرأ قد تحمل رصيدًا
+        # في اليوم نفسِه أو بعدَه ⇒ يُسمّى الناقصُ في كلّ فرع، ولا يُدّعى «لا رصيدَ» ولا «خارج المدّة».
+        note = _unread_note()
         with_bal = [r for r in numbered if r.get("balance") is not None]
         if not with_bal:
             _record("balance_on", [], {"date": date})
-            return "لا أرصدةَ مقروءةً في هذا الكشف (حدُّ الأداة: الرصيدُ من الصفوف)."
+            return "لا أرصدةَ مقروءةً في هذا الكشف (حدُّ الأداة: الرصيدُ من الصفوف)." + note
         if period is not None and (d < period[0] or d > period[1]):
             _record("balance_on", [period[2], period[3]], {"date": d})
             side = "قبل" if d < period[0] else "بعد"
             return (f"خارج مدّة الكشف — {period[0]} إلى {period[1]} "
                     f"(سندها: {_ref(period[2])} — {_ref(period[3])})؛ فاليوم {d} {side} المدّة. "
-                    f"لم أدّعِ غيابَ حركاتٍ في الكشف، وإنّما أنّ هذا اليومَ خارج ما يغطّيه.")
+                    f"لم أدّعِ غيابَ حركاتٍ في الكشف، وإنّما أنّ هذا اليومَ خارج ما يغطّيه." + note)
         upto = [(iso, r) for r in with_bal if (iso := _iso_date(r)) and iso <= d]
         if not upto:
             _record("balance_on", [], {"date": d})
             return (f"لا رصيدَ مقروءًا في {d} ولا قبله داخل المدّة "
                     f"({period[0] if period else '؟'} إلى {period[1] if period else '؟'}) — "
-                    f"حدُّ الأداة: أوّلُ رصيدٍ مقروءٍ بعد هذا اليوم.")
+                    f"حدُّ الأداة: أوّلُ رصيدٍ مقروءٍ بعد هذا اليوم." + note)
         iso, row = max(upto, key=lambda p: (p[0], p[1]["row_no"]))
         _record("balance_on", [row], {"date": d})
         when = "في اليوم نفسه" if iso == d else f"آخرُ رصيدٍ قبلَه بتاريخ {iso}"
-        return f"الرصيد = {_m(row['balance'])} ريال ({when}) — {_ref(row)}"
+        return f"الرصيد = {_m(row['balance'])} ريال ({when}) — {_ref(row)}" + note
 
     @_tool
     def group_by_date(side: str = "الكل", keyword: str = "", tx_type: str = "",
@@ -821,6 +832,7 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
                 else f" (ويُعرض أوّلُ {len(shown)} من {len(ordered)} يومًا — ضيّق المدى أو ارفع limit)")
         return (f"أيامٌ لها حركات = {len(ordered)} · مدينُ المدّة {_m(tot)} · دائنُها {_m(tot_c)}{more}"
                 + (f" · و{len(undated)} صفًّا بلا تاريخٍ لم يُنسب إلى يوم" if undated else "")
+                + _unread_note()
                 + "\n" + "\n".join(lines))
 
     @_tool
@@ -839,10 +851,11 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
         _record("movement_days", sel, {"side": side, "keyword": keyword, "tx_type": tx_type,
                                        "date_from": date_from, "date_to": date_to})
         if not sel:
-            return _empty_result(d_from, d_to, len(undated_rows) if (d_from or d_to) else 0)
+            return (_empty_result(d_from, d_to, len(undated_rows) if (d_from or d_to) else 0)
+                    + _unread_note())
         if period is None:
             return ("لا تاريخَ ميلاديًّا مقروءًا — حدُّ الأداة: المعدّلُ الأسبوعيّ يحتاج مدّةً "
-                    "مؤرّخة، فلا أُخرجه من غيرها.")
+                    "مؤرّخة، فلا أُخرجه من غيرها." + _unread_note())
         first = max(d_from or period[0], period[0])
         last = min(d_to or period[1], period[1])
         days = max(1, (_date.fromisoformat(last) - _date.fromisoformat(first)).days + 1)
@@ -855,7 +868,8 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
         return (f"أيّامُ الحركة = {len(used_days)} · عددُ الحركات = {len(sel)} · "
                 f"مجموعُ المبالغ = {_m(total)} ريال | المدى = {span} ({days} يومًا = {weeks} أسبوع) | "
                 f"المعدّلُ الأسبوعيّ = {_m(rate_a)} ريالًا و{rate_n} حركة/أسبوع"
-                + (f" | أوّلُ يومٍ {used_days[0]} وآخرُها {used_days[-1]}" if used_days else ""))
+                + (f" | أوّلُ يومٍ {used_days[0]} وآخرُها {used_days[-1]}" if used_days else "")
+                + _unread_note())
 
     return [sum_movements, count_movements, balance_extremes,
             closing_balance, page_summary, page_footer, page_rows, search_rows,

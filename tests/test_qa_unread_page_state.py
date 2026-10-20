@@ -115,3 +115,51 @@ def test_a_complete_ledger_gets_no_extra_word(tmp_path):
     assert count == "العدد = 6 حركة (الفلتر: الاتجاه=الكل)", count
     assert "لم تُقرأ" not in total and "60.00" in total, total
     assert "لم تُقرأ" not in page and "صفحة 1" in page, page
+
+
+def test_the_empty_answer_of_a_whole_statement_tool_names_the_unread_page(tmp_path):
+    """**R134-1:** «لا توجد حركات مطابقة» دعوى عن الكشف — والحركةُ قد تكون في ص٢.
+
+    فكلُّ أداةٍ تُجيب عن الكشف كلِّه — **ومنها فرعُ «لا نتيجة»** و`group_by_date` و`movement_days`
+    و`balance_on` — تسمّي ما لم يدخلها بـ`_unread_note` نفسِه.
+    """
+    conn = _ledger(tmp_path)
+    try:
+        by, _ = _tools(conn)
+        got = {
+            "sum (بلا مطابقة)": by["sum_movements"].invoke({"tx_type": "سحب صراف آلي"}),
+            "sum (بمدىً بلا مطابقة)": by["sum_movements"].invoke(
+                {"date_from": "2027-01-01", "date_to": "2027-01-31"}),
+            "search (بلا مطابقة)": by["search_rows"].invoke({"keyword": "وصفٌ لا وجودَ له"}),
+            "group_by_date": by["group_by_date"].invoke({}),
+            "movement_days": by["movement_days"].invoke({}),
+            "balance_on (داخل المدّة)": by["balance_on"].invoke({"date": "2026-03-02"}),
+            "balance_on (خارج المدّة)": by["balance_on"].invoke({"date": "2027-01-01"}),
+        }
+    finally:
+        conn.close()
+
+    for name, text in got.items():
+        assert "لم تُقرأ" in text and "ص2" in text, f"{name} لم يسمّ الناقص: {text}"
+
+
+def test_on_a_complete_ledger_the_empty_and_aggregate_answers_carry_no_note(tmp_path):
+    """**قبولُ الحرف:** على قاعدةٍ كاملةٍ لا كلمةَ زائدة في أيّ فرع."""
+    conn = _ledger(tmp_path, n_pages=2, pages=(1, 2))
+    try:
+        by, _ = _tools(conn)
+        count = by["count_movements"].invoke({})
+        empty_sum = by["sum_movements"].invoke({"tx_type": "سحب صراف آلي"})
+        empty_search = by["search_rows"].invoke({"keyword": "وصفٌ لا وجودَ له"})
+        group = by["group_by_date"].invoke({})
+        days = by["movement_days"].invoke({})
+        balance = by["balance_on"].invoke({"date": "2026-03-02"})
+    finally:
+        conn.close()
+
+    assert count == "العدد = 6 حركة (الفلتر: الاتجاه=الكل)", count
+    assert empty_sum == "لا توجد حركات مطابقة لهذا الفلتر في الكشف.", empty_sum
+    assert empty_search == "لا توجد حركات مطابقة.", empty_search
+    for name, text in (("group_by_date", group), ("movement_days", days),
+                       ("balance_on", balance)):
+        assert "لم تُقرأ" not in text, f"{name}: كلمةٌ زائدة على قاعدةٍ كاملة: {text}"
