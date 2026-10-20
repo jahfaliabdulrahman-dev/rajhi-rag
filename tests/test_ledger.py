@@ -260,8 +260,11 @@ def test_the_column_contract_is_equal_in_both_directions():
     assert set(L.COLUMNS) == ledger_from_render, (
         f"عقدُ الأعمدة افترق — في الدفتر وليس في الرندر: {sorted(set(L.COLUMNS) - ledger_from_render)} · "
         f"وفي الرندر وليس في الدفتر: {sorted(ledger_from_render - set(L.COLUMNS))}")
-    assert set(sql_cols) == {"id", *L.COLUMNS, "desc_norm"}, \
-        f"المخطَّطُ والثابتُ افترقا: {sorted(set(sql_cols) ^ {'id', *L.COLUMNS, 'desc_norm'})}"
+    # **و`seq` عمودُ قاعدةٍ لا عمودُ رندر (R130):** رقمُ الصفّ العامّ يُخزَّن ليُقرأ به الترتيبُ،
+    # وليس عمودًا يُعرَض أو يُصدَّر؛ فالتساوي يبقى بين `COLUMNS` والرندر، و`seq` يُعلَن استثناءً
+    # باسمه وسببه بدل أن يُدسّ في `COLUMNS` فتتغيّر خليّةُ الإكسل.
+    assert set(sql_cols) == {"id", "seq", *L.COLUMNS, "desc_norm"}, \
+        f"المخطَّطُ والثابتُ افترقا: {sorted(set(sql_cols) ^ {'id', 'seq', *L.COLUMNS, 'desc_norm'})}"
 
 
 def test_the_workbook_rendered_from_the_ledger_equals_the_current_file(tmp_path):

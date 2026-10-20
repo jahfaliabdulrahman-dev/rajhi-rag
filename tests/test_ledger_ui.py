@@ -131,7 +131,8 @@ def test_the_ledger_answers_with_the_network_booby_trapped(tmp_path, monkeypatch
     for label in U.INTENT_LABELS:
         got = U.ask(tmp_path, U.statement_key({"x": 1}, 2), label,
                     "1" if "أحكام" in label else "حوالة")
-        assert got.strip() and "Traceback" not in got, (label, got[:120])
+        text = got["note"] + " ".join(str(c) for row in got["rows"] for c in row)
+        assert text.strip() and "Traceback" not in text, (label, text[:120])
 
 
 def test_a_missing_or_unreadable_ledger_shows_a_named_message(tmp_path):
@@ -140,46 +141,60 @@ def test_a_missing_or_unreadable_ledger_shows_a_named_message(tmp_path):
     """
     key = U.statement_key({"t": 1}, 10)
     ghost = U.ask(tmp_path, key, "المجاميع (مدين/دائن)")
-    assert "تعذّر فتحُ الدفتر" in ghost and "ابنِ دفترَ الكشف" in ghost
+    assert "تعذّر فتحُ الدفتر" in ghost["note"] and "أعد قراءة الكشف" in ghost["note"]
     _built(tmp_path, key=key)                             # باسم الملفّ الذي تطلبه الشاشة
     status = U.status_text(tmp_path, key, 3)
     assert "مبنيٌّ وجاهز" in status and "تعذّر" not in status, status
     out = U.ask(tmp_path, key, "قصدٌ مُخترَع")
-    assert "قصدٌ غيرُ مُعدَّد" in out and "المجاميع" in out
-    assert "يحتاج رقمَ الصفحة" in U.ask(tmp_path, key, "أحكامُ الصفحات")
-    assert "يحتاج نصَّ البحث" in U.ask(tmp_path, key, "بحثٌ في البيان", "   ")
-    assert "ليس رقمَ صفحة" in U.ask(tmp_path, key, "أحكامُ الصفحات", "كذا")
+    assert "قصدٌ غيرُ مُعدَّد" in out["note"] and "المجاميع" in out["note"]
+    assert "يحتاج رقمَ الصفحة" in U.ask(tmp_path, key, "أحكامُ الصفحات")["note"]
+    assert "يحتاج نصَّ البحث" in U.ask(tmp_path, key, "بحثٌ في البيان", "   ")["note"]
+    assert "ليس رقمَ صفحة" in U.ask(tmp_path, key, "أحكامُ الصفحات", "كذا")["note"]
     # والمسارُ: داخل مجلّدٍ مُهمَلٍ تحت data/ وباسمٍ من بصمة الكشف لا بعدد صفحاته
     f = U.ledger_file(tmp_path, key)
-    assert f.name.startswith("ui_") and str(f.parent).endswith("data/ledgers"), f
+    assert f.name.startswith("st_") and str(f.parent).endswith("data/ledgers"), f
 
 
-def test_the_answers_render_as_arabic_marks(tmp_path):
-    """الجوابُ يُصاغ **جدولًا يُقرأ في ثوانٍ**، وكلُّ رقمٍ مع عدّاده — لا نصًّا سائلًا."""
-    db = _built(tmp_path, key=U.statement_key({"t": 9}, 2))
-    assert db.exists()
+def test_the_answers_render_as_arabic_tables(tmp_path):
+    """الجوابُ **بياناتٌ لجدول** (R130-3): عناوينُ عربيةٌ وصفوفٌ تحمل الأرقامَ — لا نصٌّ سائل.
+    ووصفٌ فيه سطرٌ جديد يبقى في خانته (وهو القبولُ المنصوص: جدولُ Markdown كان ينكسر).
+    """
     key = U.statement_key({"t": 9}, 2)
-    for label, needle in (("المجاميع (مدين/دائن)", "| المجموع المدين |"),
-                          ("تغطيةُ الكشف (صفوف · صفحات · بلا إثبات)", "صفًّا"),
-                          ("الصفوفُ بلا إثبات", "بلا إثبات"),
-                          ("أحكامُ الصفحات", "| صفحة | مطبوع |"),
-                          ("بحثٌ في البيان", "حوالة")):
-        got = U.ask(tmp_path, key, label, "2" if "أحكام" in label else "حوالة")
-        assert needle in got, (label, got[:200])
-    assert U.ask(tmp_path, key, "أحكامُ الصفحات", "٢")        # أرقامٌ عربية تُقبل
-    assert "لا صفحةَ بهذا الرقم" in U.ask(tmp_path, key, "أحكامُ الصفحات", "99")
+    db = _built(tmp_path, key=key)
+    assert db.exists()
+    totals = U.ask(tmp_path, key, "المجاميع (مدين/دائن)")
+    assert totals["headers"][:2] == ["البند", "المبلغ"]
+    assert totals["rows"][0][0] == "المجموع المدين"
+    pages = U.ask(tmp_path, key, "أحكامُ الصفحات", "2")
+    assert pages["headers"] == ["صفحة", "مطبوع", "الحكم", "صفوف"]
+    assert pages["rows"][0][0] == 2
+    assert U.ask(tmp_path, key, "أحكامُ الصفحات", "٢")["rows"]        # أرقامٌ عربية تُقبل
+    assert "لا صفحةَ بهذا الرقم" in U.ask(tmp_path, key, "أحكامُ الصفحات", "99")["note"]
+    search = U.ask(tmp_path, key, "بحثٌ في البيان", "حوالة")
+    assert search["rows"] and search["headers"] == ["صفحة", "صفّ", "البيان", "المبلغ"]
+    # **والسطرُ الجديد يبقى في خانته:** وصفٌ بسطرين يُكتب كما هو في الخليّة (لا يُقطع ولا يكسر صفًّا).
+    conn = L.read_ledger(db)
+    try:
+        conn.execute("UPDATE rows_verified SET desc = ? WHERE pg = 1 AND row_no = 2",
+                     ("سطرٌ أول\nسطرٌ ثانٍ",))
+        conn.commit()
+    finally:
+        conn.close()
+    got = U.ask(tmp_path, key, "بحثٌ في البيان", "سطرٌ أول")
+    assert any("\n" in str(cell) for row in got["rows"] for cell in row), got
 
 
 def test_the_ledger_key_identifies_the_statement_not_its_page_count(tmp_path):
     """**مقعدُ الواجهة P3 · مُثبت:** كان الاسمُ بعدد الصفحات ⇒ كشفان بـ629 صفحة **يتصادمان**،
     و`pages_of(rows)=626` كان يُسمّي الملفَّ `ui_626p` وهو يخزّن 629 صفحةً. والمفتاحُ الآن من
     بصمة المحتوى ⇒ الكشفُ نفسُه مفتاحُه نفسُه، وكشفٌ آخرُ لا يُصادمه؛ وبلا بصمةٍ يُعلَن النقصُ في الاسم.
+    **والسابقةُ `st_` لا `ui_` (R130):** المفتاحُ صار مشتركًا مع سطر الأوامر، فاسمُ «واجهة» يكذب.
     """
     a = U.statement_key({"pages": 629, "tokens": "س"}, 629)
     b = U.statement_key({"pages": 629, "tokens": "ص"}, 629)
     assert a != b, "كشفان مختلفان بمفتاحٍ واحد ⇒ تصادم"
     assert U.statement_key({"pages": 629, "tokens": "س"}, 629) == a, "الكشفُ نفسُه تغيّر مفتاحُه"
-    assert U.statement_key(None, 626) == "ui_nop-626p", "بلا بصمةٍ يُعلَن النقصُ في الاسم"
+    assert U.statement_key(None, 626) == "st_nop-626p", "بلا بصمةٍ يُعلَن النقصُ في الاسم"
     # والصفحاتُ المُسمَّاة من عدّ الصفوف (626) لا تُسمّي الملفَّ حين توجد بصمة (629)
     assert "626" not in U.ledger_file(tmp_path, a).name
 

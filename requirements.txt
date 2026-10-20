@@ -1,5 +1,6 @@
 langchain>=1.0,<2
 langgraph>=1.0,<2
+langgraph-checkpoint-sqlite>=3.0
 langchain-openai>=1.0,<2
 langchain-community>=0.4,<1
 langchain-huggingface>=0.1

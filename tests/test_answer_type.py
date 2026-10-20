@@ -253,7 +253,11 @@ def test_a_compound_question_is_asked_once_not_in_parts(monkeypatch):
             for i in range(1, 6)]
     calls = {"n": 0, "questions": []}
 
-    def fake(store, question, rows_, chunks, llm, k, footers=None, thread_id=None, scope=""):
+    # **والتوقيعُ تبع المنفّذ لا العكس:** `_answer_one` صار يقبل `memory_path`/`ledger_conn` في R130
+    # (الحافظةُ صارت قاعدة)، والبديلُ في الاختبار يُثبّت **عددَ النداءات** لا الوسائط ⇒ يُقبل الزائد
+    # صراحةً بدل أن ينكسر الضابطُ على معاملٍ لا يقيسه.
+    def fake(store, question, rows_, chunks, llm, k, footers=None, thread_id=None, scope="",
+             memory_path=None, ledger_conn=None):
         calls["n"] += 1
         calls["questions"].append(question)
         return q.QAResult(answer="جواب", sources=[], used_row_nos=[1], tools_used=["row_chain"])

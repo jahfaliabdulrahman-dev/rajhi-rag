@@ -69,20 +69,28 @@ def test_the_scope_never_raises_on_a_missing_key() -> None:
 
 
 def test_the_memory_key_is_the_statement_fingerprint() -> None:
-    """**شرط ٢ (قرار 98ب):** معرّفُ المحادثة = **بصمةُ الكشف** (`_ledger_key` ⇒ `statement_key`) —
-    مصدرُها واحدٌ مع مفتاح الدفتر، فيقرأ الكشفُ نفسُه المفتاحَ نفسَه."""
+    """**شرط ٢ (قرار 98ب · وعُدِّل R130):** معرّفُ المحادثة = **بصمةُ الكشف** (`_ledger_key` ⇒ `statement_key`).
+
+    **والتغييرُ في R130 مُعلَن:** صار `key` متغيّرًا محليًّا (لأنّه يُمرَّر مرّتين: خيطًا ومسارَ حافظةٍ)،
+    فيُقاس المعنى: `key = _ledger_key()` ثمّ `thread_id=key` — لا الاسمُ الحرفيّ القديم.
+    """
     read = APP.read_text(encoding="utf-8")
     ask = ast.get_source_segment(read, _fn("ask_followup")) or ""
-    assert "thread_id=_ledger_key()" in ask, "المعرّفُ ليس بصمةَ الكشف — والذاكرةُ تلتصق بغير صاحبها"
+    assert "key = _ledger_key()" in ask and "thread_id=key" in ask, \
+        "المعرّفُ ليس بصمةَ الكشف — والذاكرةُ تلتصق بغير صاحبها"
     key = ast.get_source_segment(read, _fn("_ledger_key")) or ""
     assert "statement_key(" in key, "مفتاحُ البصمة انقطع عن مصدره (`statement_key`)"
 
 
 def test_the_read_wipes_the_conversation_too() -> None:
     """**R93-2 (جهةُ الحافظة · شرط ٢):** القراءةُ تمسح **ذاكرةَ المحادثة** لا أسطحَ العرض وحدها
-    (`clear_conversation(_ledger_key())`) — وكلُّ سيناريوهات العودة تبدأ نظيفة."""
+    — وكلُّ سيناريوهات العودة تبدأ نظيفة.
+
+    **وفي R130 صار المسحُ على ملفّ القاعدة** (`memory_path=…`): الحافظةُ صارت `SqliteSaver` لا رامًا،
+    فالمسحُ بلا مسارٍ يمسح خيطًا في الذاكرة لا وجودَ له.
+    """
     reset = ast.get_source_segment(APP.read_text(encoding="utf-8"), _fn("_reset_qa_surfaces")) or ""
-    assert "clear_conversation(_ledger_key())" in reset, \
+    assert "clear_conversation(key" in reset and "memory_path=" in reset, \
         "القراءةُ لا تمسح ذاكرةَ المحادثة — والقديمُ يعود في كشفٍ جديد (R93-2)"
 
 

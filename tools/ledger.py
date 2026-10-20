@@ -25,40 +25,42 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from statement_qa import ledger as L            # noqa: E402
 
-REPO = Path(__file__).resolve().parents[1]      # **الجذرُ يُشتقّ من موضع الملفّ لا من الـCWD:** الضابطُ
-                                                # الذي أمسك هذا (مقعدُ الترتيب P3) بنى من CWD آخر
-                                                # فأنشأ الدفترَ **خارج الشجرة** حيث لا يُهمَل ولا يُحرس.
-
 
 def _build(args) -> int:
     import to_xlsx                              # noqa: PLC0415  (يُستورد عند الحاجة فقط: يحتاج polars)
 
     run = Path(args.run).expanduser()
-    rows, _report, per_page, _flags = to_xlsx.load(run)
+    rows, report, per_page, flags = to_xlsx.load(run)
     if not rows:
         print(f"لا صفوف في {run}/results — هل المسار صحيح؟", file=sys.stderr)
         return 2
-    db = Path(args.db).expanduser() if args.db else default_db(run)
+    pages = L.pages_from_run(per_page, flags)
+    key = L.statement_key(report.get("era"), len(pages))
+    db = Path(args.db).expanduser() if args.db else default_db(report, pages)
     conn = L.open_ledger(db)                    # البناءُ يُنشئ (create=True)
     try:
-        written = L.ingest(conn, rows, per_page)
+        written = L.ingest(conn, rows, pages)
         cov = L.answer(conn, "coverage")
     finally:
         conn.close()
     print(f"الدفتر: {db}")
-    print(f"  صفوفٌ مُدخَلة: {written} · صفحات: {cov['pages']} · بلا إثبات: {cov['unproven']}")
+    print(f"  المفتاحُ: {key}")
+    print(f"  صفوفٌ مُدخَلة: {written['rows']} · صفحات: {cov['pages']} · بلا إثبات: {cov['unproven']}")
     print(f"  أحكامُ الصفحات: {cov['page_verdicts']}")
     print("  (لم يُكتب شيءٌ في مجلّد المصدر: القراءةُ وحدَها)")
     return 0
 
 
-def default_db(run: Path) -> Path:
-    """المسارُ الافتراضيّ: `<جذرُ المستودع>/data/ledgers/<اسم التشغيل>.sqlite` — مُهمَلٌ ومحروس.
+def default_db(report: dict | None = None, pages: dict | None = None) -> Path:
+    """المسارُ الافتراضيّ: **مجلّدُ بيانات المستخدم** `<data_home>/data/ledgers/<مفتاح>.sqlite`.
 
-    **مثبَّتٌ بالجذر لا بالـCWD** (مقعدُ الترتيب P3 · مُثبت): كان نسبيًّا، فيُنشئ الدفترَ حيث تُشغَّل
-    الأداة — خارجَ الشجرة عند التشغيل من غير الجذر، فلا يشملُه الإهمالُ ولا حارسُ النشر.
+    **وبمفتاحٍ واحدٍ مع الواجهة (R130 · قرارُ المالك: «مسارٌ واحدٌ للكشف الواحد»):** المفتاحُ من
+    بصمة الكشف (`report["era"]`) — نفسُ الدالّة التي تناديها الشاشة (`ledger.statement_key`) ⇒
+    فالكشفُ الواحد تُكتب قاعدتُه مرّةً واحدةً أيًّا كان من كتبها. وبلا بصمةٍ يُنسب إلى عدد الصفحات
+    **مع إعلان النقص** (`nop-`). **ولا مسارَ داخل المستودع:** بياناتُ المستخدم خارج الشجرة بالبناء.
     """
-    return REPO / Path(*L.LEDGER_SUBDIR) / f"{Path(run).name}.sqlite"
+    key = L.statement_key((report or {}).get("era"), len(pages or {}))
+    return L.data_home() / Path(*L.LEDGER_SUBDIR) / f"{key}.sqlite"
 
 
 def _ask(args) -> int:

@@ -18,6 +18,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 # **والاستيرادُ متسامحٌ عن قصد (قِيس):** كان `from pydantic import …` في الرأس ⇒ فصارت الوحدةُ
 # تحتاج pydantic **لتُستورَد**، فنقص جمعُ البيئة الخفيفة (بلا langchain/pydantic) بلا رسالة.
@@ -131,7 +132,16 @@ AGENT_SYSTEM_PROMPT = """أنت محاسب مدقق تعمل على كشف حس�
 7. الاتجاه (مدين/دائن) يصف اتجاه الحركة فقط وليس نوعها: «مدين» ≠ «سحب صراف آلي».
    لأسئلة النوع (سحوبات صراف آلي، تحويلات، إيداعات، نقاط بيع، سداد) استخدم tx_type،
    وللمبلغ المحدد استخدم amount معه (مثال «سحب بـ1000» ⇒ tx_type="سحب صراف آلي", amount=1000)،
-   وإن ظهر المبلغ نفسه بأنواع أخرى فاذكر ذلك صراحةً في الجواب."""
+   وإن ظهر المبلغ نفسه بأنواع أخرى فاذكر ذلك صراحةً في الجواب.
+8. **التاريخُ بُعدٌ له أدواتُه (R130-1):** أيُّ سؤالٍ عن **تاريخٍ أو فترةٍ أو يومٍ بعينه** («الرصيد في
+   ٢٠٢٦-٠٣-١٥» · «مدّة الكشف» · «معدّل السحب في الأسبوع» · «كم يومًا فيه سحوبات؟» · «حركات مارس»)
+   ⇒ استدعِ أداةً تقرأ التاريخ أوّلًا: `balance_on(date=…)` · `statement_period()` ·
+   `movement_days(…)` · `group_by_date(…)` · أو `date_from`/`date_to` على `sum_movements`/
+   `count_movements`/`search_rows`. **ولا تقل «لا توجد حركات في هذا التاريخ» بلا أداةٍ سألت التاريخ**
+   — فإن لم تستطع، قل حرفيًّا: «هذا البُعد لا تجيب عنه أداة» ولا تجعلها دعوى عن الكشف.
+   وإن قال أيُّ أداةٍ **«خارج مدّة الكشف»** فانقل المدّةَ وسندَها كما هي، ولا تُبدّلها بـ«لا توجد حركات».
+9. **ولا تحسب أنت أيَّ معدّلٍ أو قسمةٍ** (معدّل أسبوعيّ · نسبة · متوسط): الأداةُ تُخرج المعدّلَ جاهزًا
+   (`movement_days`)، وإن لم تُخرجه فقل إنّ الحساب خارج قدرة الأدوات."""
 
 
 # ── حدُّ السؤال الواحد (R109-1) ────────────────────────────────────────────────
@@ -360,10 +370,16 @@ class Answer(BaseModel):
         default_factory=list, description="أرقامُ الصفوف العامة التي استُشهد بها (وما لا شاهدَ له يُعلَن)")
 
 
-# ── ذاكرةُ الحوار بمكوّن LangChain (قرار 98ب) ─────────────────────────────────
-# **المسارُ واحد (لا طريقان):** السجلُّ **رسائلُ** خيطٍ في `MemorySaver` بمعرّف الكشف، والنافذةُ
-# بـ`trim_messages` (أداةُ المكتبة) لا بعدٍّ يدوي، والساقطُ يُحذف من الحافظة **ويُسمّى بعدده** في
-# التلقين. والدالّةُ اليدويّة (`format_history`/`history_pairs`) **محذوفة** بقرار 98ب ولا تُعاد.
+# ── ذاكرةُ الحوار بمكوّن LangGraph — SqliteSaver (قرارُ المالك R130) ─────────────
+# **المسارُ واحد (لا طريقان):** السجلُّ **رسائلُ** خيطٍ في الحافظة، والنافذةُ بـ`trim_messages` (أداةُ
+# المكتبة) لا بعدٍّ يدوي، والساقطُ يُحذف من الحافظة **ويُسمّى بعدده** في التلقين. والدالّةُ اليدويّة
+# (`format_history`/`history_pairs`) **محذوفة** بقرار 98ب ولا تُعاد.
+#
+# **والحافظةُ صارت ملفًّا لا رامًا (R130 · الخيار ١ · `langgraph-checkpoint-sqlite`):** كان
+# `MemorySaver` ⇒ المحادثةُ تضيع بإغلاق التطبيق ولا تُنزَّل. والآن الملفُّ هو **قاعدةُ الكشف نفسُها**
+# (جداولُ الحافظة بجانب `rows_verified`/`pages`/`qa`) ⇒ الحذفُ يمحو المحادثةَ مع القاعدة، والحافظةُ
+# تبقى بعد الإغلاق. **وحدُّها المُعلَن:** `SqliteSaver` محليّةُ الاستعمال (لا خادمَ ولا قفلَ موزّع)،
+# وهذا تطبيقُ مستخدمٍ واحد على جهازه — لا ادّعاءَ جاهزيّةٍ للإنتاج الموزّع.
 _MEMORY_POLICY = (
     "**ذاكرةُ الحوار (رسائلُ لا نصّ في التعليمات — يُستأنس به لفهم السؤال، ولا يُنقل عنه رقمٌ بلا أداة):**\n"
     "يُحفظ سجلُّ كلِّ دورةٍ بمعرّف الكشف — آخرُ {turns} دوراتٍ يبقين، وما سقط يُسمّى بعدده."
@@ -373,7 +389,7 @@ _TEMPLATE_HEAD = (
     "**نطاقُ الكشف الذي تعمل عليه:** {scope}\n"
     "{memory}"
 )
-MEMORY_TURNS = 3          # **حدٌّ مُعلَن:** آخرُ ثلاث دورات — ولا ذاكرةٌ تنمو بلا سقف
+MEMORY_TURNS = 3          # **حدٌّ مُعلن:** آخرُ ثلاث دورات — ولا ذاكرةٌ تنمو بلا سقف
 
 
 def _turns(messages) -> int:
@@ -416,52 +432,98 @@ def _memory_note(prior_turns: int, dropped_turns: int) -> str:
     return ""
 
 
-_MEMORY_SAVER = None
+_MEMORY: dict[str, tuple] = {}       # مفتاحُ الملفّ ⇒ (المتّصل، الحافظة)
+_HOLDERS: dict[str, Any] = {}        # مفتاحُ الملفّ ⇒ حاملُ الرسائل (رسمٌ صغيرٌ محمولٌ بالحافظة)
+_MEMORY_KEY_DEFAULT = ":memory:"     # بلا مسار: حافظةٌ في الذاكرة — للاختبارات وأدوات القياس
 
 
-def _memory():
-    """الحافظةُ (مكوّنُ LangChain `MemorySaver`) — كائنٌ واحدٌ لكلّ العملية، بلا اختراع مخزن."""
-    global _MEMORY_SAVER
-    if _MEMORY_SAVER is None:
-        from langgraph.checkpoint.memory import MemorySaver            # noqa: PLC0415
+def _memory_key(memory_path) -> str:
+    """مفتاحُ الحافظة: مسارُ الملفّ نصًّا، أو `:memory:` حين لا يُمرَّر مسار.
 
-        _MEMORY_SAVER = MemorySaver()
-    return _MEMORY_SAVER
-
-
-_HOLDER = None
+    **ولا مسارَ افتراضيّ على القرص:** من لا يمرّر قاعدة (أداةُ قياسٍ · ضابط) لا يترك ملفًّا في
+    مجلّد المستخدم؛ ومن يمرّر (التطبيق) تُحفظ محادثتُه في قاعدة كشفه.
+    """
+    return str(memory_path) if memory_path else _MEMORY_KEY_DEFAULT
 
 
-def _memory_holder():
+def _conn_for(key: str):
+    """متّصلٌ بالحافظة — `check_same_thread=False` لأنّ Gradio ينادي من خيطِ عامل، والقفلُ في المكتبة."""
+    import sqlite3                                                # noqa: PLC0415
+
+    if key == _MEMORY_KEY_DEFAULT:
+        return sqlite3.connect(":memory:", check_same_thread=False)
+    from pathlib import Path                                       # noqa: PLC0415
+
+    Path(key).parent.mkdir(parents=True, exist_ok=True)
+    return sqlite3.connect(key, check_same_thread=False)
+
+
+def _memory(memory_path=None):
+    """الحافظةُ (`SqliteSaver`) — كائنٌ واحدٌ لكلّ ملفّ، والمخطَّطُ يُنشأ مرّةً (`setup` مُتعامِد).
+
+    **والملفُّ ملفُّ القاعدة نفسِه** حين يمرّره التطبيق: لا مخزنَ ثالثًا يُنشأ، فالحذفُ يمحو الكلّ.
+    """
+    from langgraph.checkpoint.sqlite import SqliteSaver         # noqa: PLC0415
+
+    key = _memory_key(memory_path)
+    if key not in _MEMORY:
+        conn = _conn_for(key)
+        saver = SqliteSaver(conn)
+        saver.setup()
+        _MEMORY[key] = (conn, saver)
+    return _MEMORY[key][1]
+
+
+def _memory_holder(memory_path=None):
     """حاملُ الرسائل: أصغرُ رسمٍ من LangGraph يقرأ المخزنَ ويكتبه **بواجهته العامّة**.
 
     **ولماذا رسمٌ صغيرٌ لا رسمُ الوكيل:** رسمٌ مشحونٌ بحافظةٍ **لا يُنادى** بلا `thread_id`
     (قِيس: `ValueError: Checkpointer requires … 'thread_id'`) ⇒ فالنداءُ إمّا يكتب أو يفشل،
     والذاكرةُ يجب أن تُكتب **مُنتقاةً** لا بكلّ خطوة. فنداءُ النموذج يقع في رسمٍ **بلا حافظة**
-    (لا يكتب شيئًا)، وهذا الحاملُ يحمل `MemorySaver` وحدَه ⇒ **الكتابةُ بيدنا**.
+    (لا يكتب شيئًا)، وهذا الحاملُ يحمل الحافظةَ وحدَها ⇒ **الكتابةُ بيدنا**.
 
     **ولا داخليّةَ حافظةٍ هنا:** `get_state`/`update_state` واجهتُه العامّة (R99-7)، بعد أن كانت
     النافذةُ تُحسب بقراءة `get_tuple().checkpoint["channel_values"]` — وهي قراءةٌ هشّةٌ عند الترقية.
     """
-    global _HOLDER
-    if _HOLDER is None:
+    key = _memory_key(memory_path)
+    if key not in _HOLDERS:
         from langgraph.graph import END, START, MessagesState, StateGraph   # noqa: PLC0415
 
         b = StateGraph(MessagesState)
         b.add_node("hold", lambda _s: {})
         b.add_edge(START, "hold")
         b.add_edge("hold", END)
-        _HOLDER = b.compile(checkpointer=_memory())
-    return _HOLDER
+        _HOLDERS[key] = b.compile(checkpointer=_memory(memory_path))
+    return _HOLDERS[key]
 
 
-def _thread_messages(config: dict) -> list:
+def _thread_messages(config: dict, memory_path=None) -> list:
     """رسائلُ الخيط من الحافظة — بالواجهة العامّة (`get_state`)، لا بقراءةٍ داخليّة."""
-    state = _memory_holder().get_state(config)
+    state = _memory_holder(memory_path).get_state(config)
     return list((getattr(state, "values", None) or {}).get("messages") or [])
 
 
-def remember(thread_id: str | None, question: str, answer: str) -> None:
+def reset_memory(memory_path=None) -> bool:
+    """يُغلق حافظةَ ملفٍّ ويُخرجها من الذاكرة — **قبل حذف الملفّ** كي لا يُعاد إنشاؤه من متّصلٍ مفتوح.
+
+    (يُنادى من زرّ «احذف بيانات هذا الكشف»؛ ثمّ يُنادى `ledger.delete_statement` فيجد الملفّات.)
+    """
+    key = _memory_key(memory_path)
+    holder = _HOLDERS.pop(key, None)
+    del holder                                   # لا مرجعَ يمنع الإغلاق
+    entry = _MEMORY.pop(key, None)
+    if entry is None:
+        return False
+    conn, _saver = entry
+    try:
+        conn.close()
+    except Exception:                            # noqa: BLE001 — إغلاقٌ فاشلٌ لا يمنع الحذف
+        return False
+    return True
+
+
+def remember(thread_id: str | None, question: str, answer: str,
+             memory_path=None) -> None:
     """**التبادلُ المقبولُ وحدَه** يُثبَّت في الخيط: سؤالُ المستخدم كما سأله + **الجوابُ المعروض**.
 
     **وهو موضعُ الكتابة الواحد في الوحدة** (R99-1 · قرار 98ب): النداءُ إلى النموذج **بلا حافظة**،
@@ -486,15 +548,40 @@ def remember(thread_id: str | None, question: str, answer: str) -> None:
     from langchain_core.messages import AIMessage, HumanMessage     # noqa: PLC0415
 
     config = {"configurable": {"thread_id": thread_id}}
-    _kept, removals, _note = _window(_thread_messages(config))
-    _memory_holder().update_state(
+    _kept, removals, _note = _window(_thread_messages(config, memory_path))
+    _memory_holder(memory_path).update_state(
         config, {"messages": [*removals, HumanMessage(content=question), AIMessage(content=answer)]})
 
 
-def clear_conversation(thread_id: str | None) -> None:
-    """مسحُ محادثة الكشف (R93-2 · شرط ٢ من قرار 98ب): كلُّ قراءةٍ ⇒ محادثةٌ نظيفة."""
-    if thread_id:
-        _memory().delete_thread(thread_id)
+def clear_conversation(thread_id: str | None, memory_path=None) -> None:
+    """مسحُ محادثة الكشف (R93-2 · شرط ٢ من قرار 98ب): كلُّ قراءةٍ ⇒ محادثةٌ نظيفة.
+
+    **وبلا قاعدةٍ موجودة لا يُنشأ ملفّ:** `delete_thread` على ملفٍّ غيرِ موجود كان سيُنشئ قاعدةً
+    فارغةً؛ فالقاعدةُ تُفتح **للقراءة** أوّلًا (`read_ledger`)، وما لا وجودَ له لا يُمسّ.
+    """
+    if not thread_id:
+        return
+    if memory_path:
+        import sqlite3                                             # noqa: PLC0415
+        from pathlib import Path                                   # noqa: PLC0415
+
+        from statement_qa import ledger as _L                      # noqa: PLC0415
+
+        path = Path(memory_path)
+        if not path.exists():
+            return
+        # **الترقيمُ يُقرأ مباشرةً لا بـ`read_ledger`:** قاعدةٌ أنشأتها الحافظةُ وحدَها (بلا كتابة
+        # دفتر) يكون `user_version = 0` مع جداولِ حافظةٍ ⇒ فيسمّيها `read_ledger` «قديمة» ويمنع
+        # مسحَ الخيط. فيُقرأ الترقيمُ من المحرّك، ويُمنع فقط ما هو **مخالفٌ صراحةً**.
+        try:
+            c = sqlite3.connect(str(path))
+            ver = int(c.execute("PRAGMA user_version").fetchone()[0])
+            c.close()
+        except sqlite3.DatabaseError:
+            return
+        if ver not in (0, _L.SCHEMA_VERSION):
+            return
+    _memory(memory_path).delete_thread(thread_id)
 
 
 def _window(prior) -> tuple[list, list, str]:
@@ -575,7 +662,8 @@ def _with_context(system_prompt: str, chunks: str, *, tools_line: bool = True) -
 def _run_agent(llm, tools, system_prompt: str, user_content: str,
                response_format=None, thread_id: str | None = None,
                chunks: str | None = None,
-               finish: list[str] | None = None) -> tuple[str, object | None, str]:
+               finish: list[str] | None = None,
+               memory_path=None) -> tuple[str, object | None, str]:
     """create_agent (langchain 1.x) مع نوعٍ مُقيَّد، و**وضعٌ يُعلَن**: `typed` أو `prose`.
 
     **والذاكرةُ هنا (قرار 98ب · وتصحيحُ R99-1/2):** بخيطٍ (`thread_id`) تُقرأ رسائلُ الدورات
@@ -614,7 +702,7 @@ def _run_agent(llm, tools, system_prompt: str, user_content: str,
     config = {"configurable": {"thread_id": thread_id}} if thread_id else None
     kept: list = []
     if config is not None:
-        kept, _dropped, note = _window(_thread_messages(config))
+        kept, _dropped, note = _window(_thread_messages(config, memory_path))
         if note:
             system_prompt = f"{system_prompt}\n\n{note}"
     # **القطعُ تُضمّ هنا مرّةً — بلا خطّافٍ ولا سياقٍ ولا متوسّط** (P-1): والوكيلُ يُبنى لكلّ نداء
@@ -661,7 +749,8 @@ def _run_agent(llm, tools, system_prompt: str, user_content: str,
 
 def _answer_with_tools(llm, rows, context: str, question: str,
                        footers=None, thread_id: str | None = None,
-                       scope: str = "") -> tuple[str, list[dict], object | None, str, list[str]]:
+                       scope: str = "", memory_path=None,
+                       ledger_conn=None) -> tuple[str, list[dict], object | None, str, list[str]]:
     """One tool-armed turn — **والسؤالُ البشريُّ هو السؤالُ وحدَه** (R99-2).
 
     كانت القطعُ تُدمج في نصّ الرسالة البشريّة (`القطع المرفقة: … السؤال: …`) ⇒ فتُحفظ معها في
@@ -674,14 +763,17 @@ def _answer_with_tools(llm, rows, context: str, question: str,
     from statement_qa.qa_tools import make_qa_tools
 
     trace: list[dict] = []
-    tools = make_qa_tools(rows, trace=trace, footers=footers)
+    # **الأدواتُ تقرأ من القاعدة نفسِها (R130):** بمرور `ledger_conn` تُقرأ الصفوفُ والتذييلاتُ من
+    # SQL لا من `rows`؛ و`rows` يبقى للتوافق (وحداتٌ/اختبارات تبني صفوفًا بلا قاعدة).
+    tools = make_qa_tools(rows if ledger_conn is None else None, trace=trace,
+                          footers=footers, conn=ledger_conn)
     # **توافقٌ خلفيّ تامّ:** بلا ذاكرةٍ ولا نطاقٍ يبقى التلقينُ نصَّه القديم بحرفه.
     system_prompt = (build_system_prompt(scope=scope, with_memory=bool(thread_id))
                      if (thread_id or scope) else AGENT_SYSTEM_PROMPT)
     finish: list[str] = []          # **أسبابُ الانتهاء** (R124-1): يُقرأ منها القطعُ فتُسمّى الحالة
     text, parsed, mode = _run_agent(llm, tools, system_prompt, question,
                                     response_format=Answer, thread_id=thread_id,
-                                    chunks=context, finish=finish)
+                                    chunks=context, finish=finish, memory_path=memory_path)
     return text, trace, parsed, mode, finish
 
 
@@ -839,7 +931,8 @@ def _data_facts(rows) -> tuple[set, int | None, frozenset, set]:
 
 def answer_question(store, question: str, rows=None, chunks=None,
                     llm=None, k: int = 4, footers=None, thread_id: str | None = None,
-                    scope: str = "", n_pages: int | None = None) -> QAResult:
+                    scope: str = "", n_pages: int | None = None,
+                    ledger_path=None, memory_path=None) -> QAResult:
     """Agent-with-tools answer when rows exist; strict RAG fallback otherwise.
 
     `chunks` (optional): the run's chunks — used ONLY to name the last page for
@@ -848,6 +941,9 @@ def answer_question(store, question: str, rows=None, chunks=None,
     external referee, made answerable (R77). Absent ⇒ the tool says so.
     `n_pages` (optional · **R115-7/R117-2**): عددُ صفحات المستند — يمرّره من **يعرفه**
     (التطبيقُ من الملفّ، والقياسُ من `build_rows`) فلا يُدّعى عن الكشف ما لم يُقرأ.
+    `ledger_path` (R130): **قاعدةُ الكشف** — تُفتح للقراءة، وتُقرأ منها الصفوفُ والتذييلاتُ
+    وتُمرَّر إلى الأدوات (`make_qa_tools(conn=…)`) ⇒ فالجوابُ من القاعدة لا من نسخةٍ في الذاكرة.
+    `memory_path` (R130): ملفُّ `SqliteSaver` — قاعدةُ الكشف نفسُها في التطبيق.
 
     **ورفضُ المزوّد (٤٠٢/٤٠٣/٥٠٣) حالةٌ مُسمّاةٌ في النتيجة لا استثناءٌ يصعد (R117-3/R117-8):**
     كان يصعد إلى Gradio بلا رسالةٍ عربيّة، وإلى القياس نصًّا يُسجَّل جوابًا خاطئًا ⇒ **واحدٌ من
@@ -859,7 +955,8 @@ def answer_question(store, question: str, rows=None, chunks=None,
     try:
         return _answer_question(store, question, rows=rows, chunks=chunks, llm=llm, k=k,
                                 footers=footers, thread_id=thread_id, scope=scope,
-                                n_pages=n_pages)
+                                n_pages=n_pages, ledger_path=ledger_path,
+                                memory_path=memory_path)
     except Exception as exc:                      # noqa: BLE001 — يُصنَّف ثمّ يُعاد رفعُه إن لم يُعرف
         kind = provider_errors.classify(exc)
         if kind is None:
@@ -870,7 +967,8 @@ def answer_question(store, question: str, rows=None, chunks=None,
 
 def _answer_question(store, question: str, rows=None, chunks=None,
                      llm=None, k: int = 4, footers=None, thread_id: str | None = None,
-                     scope: str = "", n_pages: int | None = None) -> QAResult:
+                     scope: str = "", n_pages: int | None = None,
+                     ledger_path=None, memory_path=None) -> QAResult:
     """جسمُ `answer_question` — مفصولًا ليُغلَّف بصنفِ رفض المزوّد في موضعٍ واحد."""
     # THE GATE RUNS BEFORE THE MODEL. Three measured defects (Gate 4) came from
     # handing a model with tools a question whose premise sits outside the
@@ -878,42 +976,61 @@ def _answer_question(store, question: str, rows=None, chunks=None,
     # Determinism here is not a stronger prompt, it is not asking at all.
     from statement_qa.scope import classify
 
-    if rows:
-        _years, _max_page, _amounts, _pages_read = _data_facts(rows)
-        gate = classify(question, _years, _max_page, _amounts,
-                        n_pages=n_pages, pages_read=_pages_read)
-        if gate.kind != "in_scope":
-            return QAResult(answer=gate.answer, sources=[], used_row_nos=[],
-                            scope=gate.kind)
+    # **والقاعدةُ مصدرُ السؤال نفسِه (R130):** تُفتح مرّةً للقراءة، ويُقرأ منها ما يُغذّي
+    # الحاجزَ والأدواتَ معًا — فحكمُ النطاق على ما في القاعدة لا على نسخةٍ قديمةٍ في الذاكرة.
+    conn = None
+    from statement_qa import ledger as _L                          # noqa: PLC0415 — وحدةٌ خفيفة
+    if ledger_path is not None:
+        from pathlib import Path                                  # noqa: PLC0415
 
+        conn = _L.read_ledger(Path(ledger_path))
+    try:
+        if conn is not None:
+            if rows is None:
+                rows = _L.read_rows(conn)
+            if footers is None:
+                footers = _L.read_footers(conn)
 
-    llm = llm or build_llm()
+        if rows:
+            _years, _max_page, _amounts, _pages_read = _data_facts(rows)
+            gate = classify(question, _years, _max_page, _amounts,
+                            n_pages=n_pages, pages_read=_pages_read)
+            if gate.kind != "in_scope":
+                return QAResult(answer=gate.answer, sources=[], used_row_nos=[],
+                                scope=gate.kind)
 
-    # **ولا تقسيمَ لسؤالٍ مركّب (R118-2 · مراجعة ١١٨ · حكمُ `20261010-023343` §٤):** كان
-    # `split_compound` يقطع «هل يساوي …؟ وما الفرقُ بينهما بالمبلغ؟» نصفين فيُسأل النصفُ الثاني
-    # وحدَه ⇒ **فيُولد سؤالُ الفرق بلا مرجعه**. وقِيس في أحدث جولة (`answers-r108-03.json`، بلا
-    # كلفة): النصفُ الثاني في `chn-01..04` كلِّها **نصٌّ واحدٌ متطابق (بصمة `ebf18e19` · ٢٣٥ حرفًا)**
-    # «السؤال غير محدد المرجع: لم يُذكر بين أيّ شيئين يُطلب الفرق بالمبلغ… أرجو تحديد الطرفين»
-    # — **والمستخدمُ سأل سؤالًا كاملًا يسمّي الطرفين**، ثمّ يُطلب منه توضيحُه.
-    # **والحكمُ سأل: هل تحرس البوّابةُ (قراءةُ الجواب + النطاق) الحالةَ F؟** والقياسُ بلا كلفة:
-    #   • على الجزء «ما الفرقُ بينهما بالمبلغ»: `needs_tools` = **False** (لا كلمةَ عددٍ فيه)
-    #     وجوابُه ليس مبلغًا (`_money_shaped` = False) ⇒ **البوّابةُ عمياءُ عنه بالبناء**؛
-    #   • وعلى السؤال **كاملًا**: مبلغٌ في الجواب بلا نداءِ أداةٍ يُشعل البوّابة (توجيهٌ ثمّ رفض)،
-    #     والمسألةُ التي لا وجودَ لها في الكشف يحكمها **الحاجزُ قبل النموذج** أو **إشارةُ نوع الجواب**.
-    # ⇒ فالتقسيمُ **هو ما يُعطّل الحرسَ ويصنع الطلبَ الكاذب** ⇒ يُحذف، ويصل السؤالُ الوكيلَ كاملًا
-    # (فالمرجعُ حاضِر، والكودُ اليدويُّ أقلّ). **وعلامةُ ما بعده تُقرأ في الخمسين: غيابُ `ebf18e19`.**
-    res = _answer_one(store, question, rows, chunks, llm, k, footers,
-                      thread_id=thread_id, scope=scope)
-    # **والذاكرةُ هنا للقراءة وحدها:** تُمرَّر `thread_id` فيقرأ الوكيلُ الدورات السابقة (وبوّابةُ
-    # النطاق تسبق كلَّ نداء)، **ولا كتابةَ فيها** — الكتابةُ الوحيدةُ `remember`، تُناديها الواجهةُ
-    # بما **عرضته** للمستخدم (`app.ask_followup`). ولماذا هناك لا هنا: `res.answer` نصُّ الجواب،
-    # والمعروضُ يزيد عليه راياتِ `render.answer_text` (تعذُّرُ الأدوات · رقمٌ بلا شاهد) — والواجهةُ
-    # وحدَها تعرفه، فبالكتابة عندها يُطابق المحفوظُ ما رآه المستخدمُ بالبناء (مقعدُ المواصفة).
-    return res
+        llm = llm or build_llm()
+
+        # **ولا تقسيمَ لسؤالٍ مركّب (R118-2 · مراجعة ١١٨ · حكمُ `20261010-023343` §٤):** كان
+        # `split_compound` يقطع «هل يساوي …؟ وما الفرقُ بينهما بالمبلغ؟» نصفين فيُسأل النصفُ الثاني
+        # وحدَه ⇒ **فيُولد سؤالُ الفرق بلا مرجعه**. وقِيس في أحدث جولة (`answers-r108-03.json`، بلا
+        # كلفة): النصفُ الثاني في `chn-01..04` كلِّها **نصٌّ واحدٌ متطابق (بصمة `ebf18e19` · ٢٣٥ حرفًا)**
+        # «السؤال غير محدد المرجع: لم يُذكر بين أيّ شيئين يُطلب الفرق بالمبلغ… أرجو تحديد الطرفين»
+        # — **والمستخدمُ سأل سؤالًا كاملًا يسمّي الطرفين**، ثمّ يُطلب منه توضيحُه.
+        # **والحكمُ سأل: هل تحرس البوّابةُ (قراءةُ الجواب + النطاق) الحالةَ F؟** والقياسُ بلا كلفة:
+        #   • على الجزء «ما الفرقُ بينهما بالمبلغ»: `needs_tools` = **False** (لا كلمةَ عددٍ فيه)
+        #     وجوابُه ليس مبلغًا (`_money_shaped` = False) ⇒ **البوّابةُ عمياءُ عنه بالبناء**؛
+        #   • وعلى السؤال **كاملًا**: مبلغٌ في الجواب بلا نداءِ أداةٍ يُشعل البوّابة (توجيهٌ ثمّ رفض)،
+        #     والمسألةُ التي لا وجودَ لها في الكشف يحكمها **الحاجزُ قبل النموذج** أو **إشارةُ نوع الجواب**.
+        # ⇒ فالتقسيمُ **هو ما يُعطّل الحرسَ ويصنع الطلبَ الكاذب** ⇒ يُحذف، ويصل السؤالُ الوكيلَ كاملًا
+        # (فالمرجعُ حاضِر، والكودُ اليدويُّ أقلّ). **وعلامةُ ما بعده تُقرأ في الخمسين: غيابُ `ebf18e19`.**
+
+        # **والذاكرةُ هنا للقراءة وحدها:** تُمرَّر `thread_id` فيقرأ الوكيلُ الدورات السابقة (وبوّابةُ
+        # النطاق تسبق كلَّ نداء)، **ولا كتابةَ فيها** — الكتابةُ الوحيدةُ `remember`، تُناديها الواجهةُ
+        # بما **عرضته** للمستخدم (`app.ask_followup`). ولماذا هناك لا هنا: `res.answer` نصُّ الجواب،
+        # والمعروضُ يزيد عليه راياتِ `render.answer_text` (تعذُّرُ الأدوات · رقمٌ بلا شاهد) — والواجهةُ
+        # وحدَها تعرفه، فبالكتابة عندها يُطابق المحفوظُ ما رآه المستخدمُ بالبناء (مقعدُ المواصفة).
+        return _answer_one(store, question, rows, chunks, llm, k, footers,
+                           thread_id=thread_id, scope=scope,
+                           memory_path=memory_path, ledger_conn=conn)
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _answer_one(store, question: str, rows, chunks, llm, k: int,
-                footers=None, thread_id: str | None = None, scope: str = "") -> QAResult:
+                footers=None, thread_id: str | None = None, scope: str = "",
+                memory_path=None, ledger_conn=None) -> QAResult:
     """One question, one answer, with its own tool trace and its own honesty.
 
     **ولا كتابةَ ذاكرةٍ هنا** (R99-1): النداءاتُ **محاولاتٌ** — تُرفض فتُعاد بتوجيهٍ، أو يُجزَّأ
@@ -937,7 +1054,8 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
         try:
             answer, trace, parsed, mode, finish = _answer_with_tools(
                 llm, rows, context, question, footers=footers,
-                thread_id=thread_id, scope=scope)
+                thread_id=thread_id, scope=scope, memory_path=memory_path,
+                ledger_conn=ledger_conn)
             # **والقطعُ يُقرأ من سبب الانتهاء** (R124-1): `length` ⇒ الردُّ ناقص ⇒ حالةٌ مُسمّاة.
             truncated = "length" in finish
             from statement_qa.qa_tools import used_rows_from_trace
@@ -958,7 +1076,8 @@ def _answer_one(store, question: str, rows, chunks, llm, k: int,
                     llm, rows, context,
                     question + "\n\n(استخدم أداة حسابية واحدة على الأقل قبل "
                            "الجواب، ولا تحسب بنفسك.)",
-                    footers=footers, thread_id=thread_id, scope=scope)
+                    footers=footers, thread_id=thread_id, scope=scope,
+                    memory_path=memory_path, ledger_conn=ledger_conn)
                 truncated = truncated or "length" in finish2
                 used2 = used_rows_from_trace(trace2)
                 if used2 or _tool_was_used(trace2):

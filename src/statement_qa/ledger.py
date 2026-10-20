@@ -22,20 +22,54 @@
 """
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import re
 import sqlite3
+import sys
 from decimal import Decimal
 from pathlib import Path
 
-#: مسارُ الدفتر: **مُهمَلٌ ولا يُتتبَّع أبدًا** (قرارُ المالك) — **والدعوى صارت واقعةً يُقاس بها**
-#: (مقعدُ المعايير F1 · مُثبت): أُضيف `**/data/ledgers/` إلى `.gitignore`، ويقيس ذلك ضابطٌ في
-#: `tests/test_ledger.py` بـ`git check-ignore` (لا بالنصّ)، **لأنّه كان مكتوبًا هنا ومخالفًا للواقع**:
-#: `git status` كان يُظهر `?? data/ledgers/` و`git add` كان يقبله.
-#: **وحراستُه بالامتداد مقيسةٌ لا مُدّعاة** (F2): `tools/publish_guard.py` يحجب `.sqlite` بـ
-#: `OPAQUE_EXTS` (قِيس: `publish_guard --tree` على ملفٍّ مُتتبَّعٍ ⇒ `BLOCK opaque_binary`)،
-#: **وحارسُ المبالغ لا يحجب `.sqlite`** (قِيس: `undeclared_binaries()` ⇒ `[]`) — فالتغطيةُ حارسٌ
-#: واحدٌ + الإهمال، وهذا ما يُقال لا «حارسان».
+#: مسارُ الدفتر **داخل مجلّد بيانات المستخدم** — قرارُ المالك (R130 · الخيار ١): «القاعدةُ في مجلّد
+#: بيانات المستخدم وحده، ولا تدخل المستودع». فالمسارُ الجذريُّ صار **مُعطًى من الخارج** (`root`)،
+#: والتطبيقُ يمرّر `data_home()` لا جذرَ المستودع؛ وما بقي تحت `data/` في الشجرة **مُهمَلٌ** (حراسةٌ
+#: ثانيةٌ للاختبارات والمسارات القديمة): `git check-ignore` يشهد، و`publish_guard` يحجب `.sqlite`.
 LEDGER_SUBDIR = ("data", "ledgers")
+
+#: **مجلّدُ بيانات المستخدم** — موضعٌ واحد: متغيّرُ بيئةٍ للتشغيل المعزول والاختبار، ثمّ مجلّدُ
+#: التطبيق النظاميّ (macOS: `~/Library/Application Support`؛ غيرُه: `XDG_DATA_HOME`).
+#: **ولماذا لا `<repo>/data`:** قرارُ المالك نصَّ على ألّا تدخل القاعدةُ المستودعَ؛ فالمسارُ هنا
+#: خارجَ الشجرة بالبناء، والإهمالُ يبقى حراسةً لمن يمرّر جذرًا قديمًا.
+APP_DIRNAME = "rajhi-rag"
+
+
+def data_home() -> Path:
+    """مجلّدُ بيانات المستخدم للتطبيق — يُنشأ عند الحاجة ولا يُخترع له مسارٌ ثالث."""
+    env = os.environ.get("RAJHI_DATA_HOME")
+    if env:
+        return Path(env).expanduser()
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / APP_DIRNAME
+    base = os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share")
+    return Path(base) / APP_DIRNAME
+
+
+def statement_key(era: dict | None, n_pages: int) -> str:
+    """مفتاحُ الكشف: **تجزئةُ بصمته** (لا عددُ صفحاته) — **موضعٌ واحدٌ يقرؤه التطبيقُ والـCLI.**
+
+    **العِلّة (مقعدُ الواجهة P3 · مُثبت):** كان الاسمُ `ui_<عدد الصفحات>p.sqlite` ⇒ (١) كشفان
+    بـ629 صفحة **يتصادمان**، و(٢) `pages_of(rows)=626` كان يُسمّي الملفَّ `ui_626p` وهو يخزّن 629
+    صفحةً. فالمفتاحُ يُشتقّ من **بصمة المحتوى** (`STATE["era"]`) ⇒ الكشفُ نفسُه يُعطي المفتاحَ نفسَه،
+    وكشفٌ آخرُ لا يُصادمه. وبلا بصمةٍ يُنسب إلى عدد الصفحات **مع إعلان النقص** في الاسم (`nop-`).
+
+    **والسابقةُ `st_` لا `ui_` (R130):** المفتاحُ لم يبقَ للواجهة وحدَها — سطرُ الأوامر يكتب القاعدةَ
+    نفسَها بمفتاحٍ واحد (قرارُ المالك: «مسارٌ واحدٌ للكشف الواحد»)، فالاسمُ `ui_` كان يكذب على القارئ.
+    """
+    if era:
+        raw = json.dumps(era, sort_keys=True, ensure_ascii=False, default=str)
+        return "st_" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
+    return f"st_nop-{int(n_pages)}p"
 
 #: **حالةُ الدفتر** — القيمةُ الوحيدةُ التي تُنشر عن توفّره هي ما تقوله هذه الدالّة.
 MISSING = "missing"
@@ -55,7 +89,10 @@ UNREADABLE = "unreadable"
 OUTDATED = "outdated"
 NEWER = "newer"
 #: نسخةُ المخطَّط الحاليّة. **تُرفع مع كلّ تغييرٍ بنيويّ،** ويُقيَّد الترقيمُ في `PRAGMA user_version`.
-SCHEMA_VERSION = 1
+#: **v2 (R130):** `rows_verified.seq` (رقمُ الصفّ على مستوى الكشف) و`pages.footer_*` (أرقامُ التذييل
+#: المطبوع كما ظهرت في الورقة) — فتُجيب أدواتُ الوكيل من القاعدة وحدَها: الأرقامَ وأحكامَ الصفحاتِ
+#: وتذييلاتِها، بلا حالةِ واجهةٍ في الذاكرة. قاعدةٌ v1 تُعلَن `outdated` وتُعاد من المصدر (رخيصة).
+SCHEMA_VERSION = 2
 
 
 class LedgerUnavailable(RuntimeError):
@@ -106,19 +143,33 @@ PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
 
 -- صفحاتُ الكشف: حكمُ التذييل لكلّ صفحة (قرارُ المالك: «أحكامَ التذييل لكلّ صفحة»).
+-- **وأرقامُ التذييل المطبوع as-is (R130):** تُقرأ من الورقة، لا تُعاد للجمع؛ وأدواتُ الوكيل تقرؤها
+-- من هنا (`page_footer`) فلا تعتمد على حالةٍ في الذاكرة. وفارغةٌ تعني «لم يُقرأ» لا «صفر».
 CREATE TABLE IF NOT EXISTS pages (
-    pg            INTEGER PRIMARY KEY,
-    printed_page  TEXT,
-    verdict       TEXT NOT NULL CHECK (verdict IN
+    pg              INTEGER PRIMARY KEY,
+    printed_page    TEXT,
+    verdict         TEXT NOT NULL CHECK (verdict IN
                       ('ok','gap','mismatch','absent','unchecked','other')),
-    rows_count    INTEGER NOT NULL DEFAULT 0,
-    cost_usd      TEXT,                       -- كلفةُ الصفحة: TEXT لا REAL (المالُ لا يُطبَع عائمًا)
-    CHECK (cost_usd IS NULL OR typeof(cost_usd) = 'text')
+    rows_count      INTEGER NOT NULL DEFAULT 0,
+    footer_debits   TEXT,
+    footer_credits  TEXT,
+    footer_balance  TEXT,
+    footer_basis    TEXT,
+    cost_usd        TEXT,                       -- كلفةُ الصفحة: TEXT لا REAL (المالُ لا يُطبَع عائمًا)
+    CHECK (cost_usd IS NULL OR typeof(cost_usd) = 'text'),
+    CHECK (footer_debits  IS NULL OR typeof(footer_debits)  = 'text'),
+    CHECK (footer_credits IS NULL OR typeof(footer_credits) = 'text'),
+    CHECK (footer_balance IS NULL OR typeof(footer_balance) = 'text')
 );
 
 -- الجدولُ المُتحقَّق منه: أعمدةُ الرندر **الاثنان والعشرون** نفسُها (فيُقابَل صفًّا بصفّ).
 CREATE TABLE IF NOT EXISTS rows_verified (
     id               INTEGER PRIMARY KEY,
+    -- **رقمُ الصفّ على مستوى الكشف (R130):** ترتيبُ الصفوف في المعالجة (المؤشّرُ الذي تستعمله
+    -- الأدواتُ والمصادرُ وأرقامُ الصفحات)، مخزَّنًا فلا يعيد القارئُ اشتقاقَه من `pg` — فترتيبُ
+    -- الملفّ قد يختلف عن ترتيب الكشف الحقيقيّ (صفحاتٌ مقلوبةٌ بشاهد). يُكتب في `ingest` من ترتيب
+    -- الصفوف الوارد، ويُقرأ به `read_rows` ⇒ أرقامُ الأدوات من القاعدة تُطابق أرقامَ الشاشة.
+    seq              INTEGER,
     pg               INTEGER NOT NULL REFERENCES pages(pg) ON DELETE CASCADE,
     row_no           INTEGER NOT NULL,
     printed_page     TEXT,
@@ -161,6 +212,7 @@ CREATE TABLE IF NOT EXISTS rows_verified (
 );
 
 CREATE INDEX IF NOT EXISTS idx_rows_page  ON rows_verified(pg, row_no);
+CREATE INDEX IF NOT EXISTS idx_rows_seq   ON rows_verified(seq);
 CREATE INDEX IF NOT EXISTS idx_rows_date  ON rows_verified(date_iso);
 CREATE INDEX IF NOT EXISTS idx_rows_state ON rows_verified(row_state);
 
@@ -383,10 +435,17 @@ def _text(value) -> str | None:
 
 def ingest(conn: sqlite3.Connection, rows: list[dict], pages: dict[int, dict],
            report: dict | None = None) -> dict:
-    """يكتب الجدولَ المُتحقَّق منه وأحكامَ الصفحات في معاملةٍ واحدة.
+    """يكتب الجدولَ المُتحقَّق منه وأحكامَ الصفحات في معاملةٍ واحدة — **ويُزيل ما لم تعد القراءةُ تحمله.**
 
     **والمصدرُ هو مخرَجُ `tools/to_xlsx.load` نفسُه** لا نسخةً ثانيةً منه: نسخةٌ ثانيةٌ من بناء
     الصفوف تعني حكمين يُفترقان صامتين، والبوّابةُ («يُقرأ صفًّا بصفّ») تُقابِل مصدرًا بمصدر.
+
+    **والحذفُ داخلَ المعاملة نفسِها (R130 · قرارُ المالك):** «إعادةُ القراءة تُحدّثها ولا تُبقي نسخةً
+    قديمةً تحت «جاهز»». كان `ON CONFLICT DO UPDATE` يُحدّث الموجودَ **ويترك ما سقط من القراءة
+    الجديدة** ⇒ قاعدةٌ تحمل صفوفًا من قراءةٍ سابقة بجانب صفوف اليوم، ولافتةُ «جاهز» تُقرأ عليها.
+    فصار ما لم يعد في القراءة **يُحذف باسمه** (صفحاتٌ ثمّ صفوفٌ) في نفس المعاملة: إمّا أن تنطبق
+    القراءةُ كلُّها أو لا شيء. **ولا يُحذف صفٌّ ثمّ يُعاد إدراجُه:** التحديثُ يحفظ `id` فيبقى
+    `qa_evidence` (الدليلُ المرتبطُ بالسؤال) — والحذفُ لا يمسّ إلّا ما لا وجودَ له في القراءة الجديدة.
     """
     written = 0
     # **وعدُ الصفوف في الصفحة يُشتقّ من الصفوف نفسِها** (قاسته بوّابةُ المسارين): كان يُؤخذ من
@@ -400,6 +459,9 @@ def ingest(conn: sqlite3.Connection, rows: list[dict], pages: dict[int, dict],
     per_page_rows: dict = {}
     for r in rows:
         per_page_rows[r.get("page")] = per_page_rows.get(r.get("page"), 0) + 1
+    kept_rows = {(int(r["page"]), int(r["row_no"])) for r in rows if r.get("row_no") is not None}
+    kept_pages = {int(pg) for pg in pages}
+    pruned_rows = pruned_pages = 0
     with conn:
         for pg, entry in sorted(pages.items()):
             verdict = (entry.get("footer") or "other")
@@ -407,38 +469,83 @@ def ingest(conn: sqlite3.Connection, rows: list[dict], pages: dict[int, dict],
                 verdict = "other"
             cost = (entry.get("usage") or {}).get("cost") if isinstance(entry.get("usage"), dict) else None
             conn.execute(
-                "INSERT INTO pages(pg, printed_page, verdict, rows_count, cost_usd) "
-                "VALUES(?,?,?,?,?) ON CONFLICT(pg) DO UPDATE SET "
+                "INSERT INTO pages(pg, printed_page, verdict, rows_count, cost_usd, "
+                "                  footer_debits, footer_credits, footer_balance, footer_basis) "
+                "VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(pg) DO UPDATE SET "
                 "printed_page=excluded.printed_page, verdict=excluded.verdict, "
-                "rows_count=excluded.rows_count, cost_usd=excluded.cost_usd",
+                "rows_count=excluded.rows_count, cost_usd=excluded.cost_usd, "
+                "footer_debits=excluded.footer_debits, footer_credits=excluded.footer_credits, "
+                "footer_balance=excluded.footer_balance, footer_basis=excluded.footer_basis",
                 (pg, str(entry.get("page_no")) if entry.get("page_no") else None, verdict,
-                 int(per_page_rows.get(pg, 0)), _text(cost)),
+                 int(per_page_rows.get(pg, 0)), _text(cost),
+                 _text(entry.get("debits")), _text(entry.get("credits")),
+                 _text(entry.get("balance")), _text(entry.get("basis"))),
             )
         sets = ", ".join(f"{c}=excluded.{c}" for c in INS_COLUMNS if c not in ("pg", "row_no"))
-        for r in rows:
+        for seq, r in enumerate(rows, start=1):
             # **`ON CONFLICT … DO UPDATE` لا `INSERT OR REPLACE` (مقعدا المواصفة والبنية · مُثبت):**
             # `OR REPLACE` يحذف الصفَّ ثمّ يُدرجه ⇒ يتبدّل `id`، و`ON DELETE CASCADE` يمسح
             # `qa_evidence` ⇒ **فقدانُ دليلِ الأسئلة صامتًا** عند إعادة قراءة كشفٍ سُئل عنه.
             # والتحديثُ يُبقي المعرّفَ فيبقى الدليل.
             conn.execute(
-                f"INSERT INTO rows_verified({', '.join(INS_COLUMNS)}) "
-                f"VALUES({', '.join('?' for _ in INS_COLUMNS)}) "
-                f"ON CONFLICT(pg, row_no) DO UPDATE SET {sets}",
-                _row_values(r),
+                f"INSERT INTO rows_verified(seq, {', '.join(INS_COLUMNS)}) "
+                f"VALUES(?, {', '.join('?' for _ in INS_COLUMNS)}) "
+                f"ON CONFLICT(pg, row_no) DO UPDATE SET seq=excluded.seq, {sets}",
+                (seq, *_row_values(r)),
             )
             written += 1
-    return {"pages": len(pages), "rows": written, "dropped_no_page": dropped_no_page}
+        # **التقليمُ بعدهما:** المشطورُ القديمُ (صفحةٌ أو صفٌّ) لم تعد القراءةُ تحمله.
+        for pid, pg, row_no in conn.execute(
+                "SELECT id, pg, row_no FROM rows_verified").fetchall():
+            if (int(pg), int(row_no)) not in kept_rows:
+                conn.execute("DELETE FROM rows_verified WHERE id = ?", (pid,))
+                pruned_rows += 1
+        for (pg,) in conn.execute("SELECT pg FROM pages").fetchall():
+            if int(pg) not in kept_pages:
+                conn.execute("DELETE FROM pages WHERE pg = ?", (pg,))
+                pruned_pages += 1
+    return {"pages": len(pages), "rows": written, "dropped_no_page": dropped_no_page,
+            "pruned_rows": pruned_rows, "pruned_pages": pruned_pages}
 
 
 def read_rows(conn: sqlite3.Connection, pg: int | None = None) -> list[dict]:
-    """يُعيد الصفوفَ بأسماء الرندر نفسها — **لتُقابَل صفًّا بصفّ** (البوّابةُ الحاسمة)."""
+    """يُعيد الصفوفَ بأسماء الرندر نفسها — **لتُقابَل صفًّا بصفّ** (البوّابةُ الحاسمة).
+
+    **والترتيبُ بـ`seq` لا بـ`pg` (R130):** رقمُ الصفّ على مستوى الكشف هو ما تعرضه الشاشةُ وتستشهد
+    به الأدواتُ؛ وترتيبُ الملفّ قد يختلف عن ترتيب الكشف الحقيقيّ. و`seq` يُكتب من ترتيب المعالجة،
+    فالقارئُ من القاعدة يُرقّم كما تُرقّم الشاشة — لا كما تُرتّب أرقامُ الصفحات. و`COALESCE` يُبقي
+    قاعدةً قديمةً بلا `seq` مقروءةً بترتيبٍ معقول بدل أن تُسقط الصفوف.
+    """
     sql = f"SELECT {', '.join(COLUMNS)} FROM rows_verified"
     args: tuple = ()
     if pg is not None:
         sql += " WHERE pg = ?"
         args = (pg,)
-    sql += " ORDER BY pg, row_no"
+    sql += " ORDER BY COALESCE(seq, id), pg, row_no"
     return [{c: _typed(c, row[c]) for c in COLUMNS} for row in conn.execute(sql, args)]
+
+
+def read_footers(conn: sqlite3.Connection) -> dict[int, dict]:
+    """التذييلاتُ المطبوعة لكلّ صفحة **من القاعدة** — بالصيغة التي تستهلكها `qa_tools.page_footer`.
+
+    **العِلّة (R130 · الخيار ١):** الأدواتُ صارت تقرأ من القاعدة نفسِها، فلا يكفي أن تُخزَّن أحكامُ
+    الصفحات؛ الأرقامُ المطبوعة (مدين/دائن/رصيد) هي ما يُجيب عنه `page_footer`، وكانت في حالة
+    التطبيق وحدَها. فتُكتب في `pages` وتُقرأ من هنا — **وتُترك `None` إن لم تُقرأ** (لا صفرَ يُخترع).
+    """
+    out: dict[int, dict] = {}
+    for row in conn.execute(
+            "SELECT pg, printed_page, verdict, footer_debits, footer_credits, "
+            "       footer_balance, footer_basis FROM pages ORDER BY pg"):
+        out[int(row["pg"])] = {
+            "page": int(row["pg"]),
+            "printed_page": row["printed_page"],
+            "debits": row["footer_debits"],
+            "credits": row["footer_credits"],
+            "balance": row["footer_balance"],
+            "verdict": str(row["verdict"] or "unchecked"),
+            "basis": str(row["footer_basis"] or ""),
+        }
+    return out
 
 
 def search(conn: sqlite3.Connection, query: str, limit: int = 20) -> list[dict]:
@@ -588,5 +695,75 @@ def pages_from_state(rows: list[dict], footers: dict | None = None) -> dict[int,
     for pg, f in (footers or {}).items():
         e = per.setdefault(int(pg), {"page_no": None, "footer": "unchecked",
                                      "rows": 0, "usage": None})
-        e["footer"] = str((f or {}).get("verdict") or "unchecked")
+        f = f or {}
+        e["footer"] = str(f.get("verdict") or "unchecked")
+        # **والأرقامُ المطبوعة كما ظهرت (R130):** تُخزَّن في `pages` فيقرؤها `page_footer` من القاعدة.
+        # و`None` يبقى `None` — «لم يُقرأ» لا «صفر».
+        for key in ("debits", "credits", "balance"):
+            if e.get(key) is None and f.get(key) is not None:
+                e[key] = f.get(key)
+        if f.get("basis") and not e.get("basis"):
+            e["basis"] = str(f.get("basis"))
     return per
+
+
+def pages_from_run(per_page: dict | list, flags: dict | None = None) -> dict[int, dict]:
+    """مدخلاتُ `pages` من **تقرير تشغيل** (`to_xlsx.load`'s `per_page` + `flags`) — مسارُ الـCLI.
+
+    **ولماذا دالّةٌ هنا لا في الأداة (R130 · مسارٌ واحد):** الواجهةُ ومسارُ سطر الأوامر يكتبان
+    القاعدةَ نفسَها؛ فلا بدّ أن يُبنى مدخلُ الصفحات بالشكلِ نفسِه في الموضعين. الأرقامُ المطبوعة في
+    تقرير التشغيل تحت `flags[pg]["printed"]` (قراءةُ التذييل)، والحكمُ تحت `per_page[pg]["footer"]`
+    — فتُجمع هنا مرّةً واحدة، ويبقى `tools/ledger.py` توصيلًا لا بناءً ثانيًا.
+    """
+    entries = per_page.values() if isinstance(per_page, dict) else (per_page or [])
+    flags = flags or {}
+    out: dict[int, dict] = {}
+    for e in entries:
+        pg = int(e.get("page") or e.get("pg") or 0)
+        if not pg:
+            continue
+        printed = (flags.get(pg) or {}).get("printed") or {}
+        out[pg] = {
+            "page_no": e.get("page_no"),
+            "footer": str(e.get("footer") or e.get("verdict") or "unchecked"),
+            "rows": int(e.get("rows") or e.get("rows_count") or 0),
+            "usage": e.get("usage") or None,
+            "debits": printed.get("debits"),
+            "credits": printed.get("credits"),
+            "balance": printed.get("balance"),
+            "basis": e.get("basis") or "",
+        }
+    return out
+
+
+def row_ids_for(conn: sqlite3.Connection, pairs) -> list[int]:
+    """معرّفاتُ الصفوف من أزواج `(pg, row_no)` — يُترجَم بها «رقمُ الصفّ العامّ» إلى `qa_evidence`.
+
+    **العِلّة:** الأدواتُ تُرجع أرقامَ الصفوف **العامة** (١..N على مستوى الكشف)، وجدولُ الدليل
+    `qa_evidence` يشير إلى `rows_verified.id` (مفتاحٍ داخليّ). وكانت الترجمةُ غيرَ موجودة، فجدولُ
+    الأسئلة لا يكتب دليلًا. والترجمةُ هنا بموضعٍ واحد لا في الشاشة.
+    """
+    out: list[int] = []
+    for pg, row_no in pairs:
+        row = conn.execute("SELECT id FROM rows_verified WHERE pg = ? AND row_no = ?",
+                           (int(pg), int(row_no))).fetchone()
+        if row is not None:
+            out.append(int(row["id"]))
+    return out
+
+
+def delete_statement(path: Path) -> dict:
+    """يمحو ملفَّ القاعدة وملفّاتَ WAL/SHM — **ويُعيد ما حُذف بعدده** (لا دعوى بلا عدّ).
+
+    **والحذفُ لا يفتح القاعدةَ ولا يقرؤها:** الملفُّ قد يكون مفتوحًا في حافظةِ محادثةٍ أو في عمليةٍ
+    أخرى؛ إغلاقُ الحافظة مسؤوليةُ من يملكها (`qa.clear_conversation`/`reset_memory`)، ثمّ يُنادى هذا
+    فيجد الملفّات. وما لا وجودَ له لا يُعدّ.
+    """
+    path = Path(path)
+    removed = []
+    for suffix in ("", "-wal", "-shm"):
+        f = Path(str(path) + suffix)
+        if f.exists():
+            f.unlink()
+            removed.append(f.name)
+    return {"removed": removed, "count": len(removed), "path": str(path)}

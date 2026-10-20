@@ -173,7 +173,7 @@ def app_run(monkeypatch, tmp_path):
     monkeypatch.setattr(app, "_local_checks",
                         lambda pages: (_gate(verdicts), lambda img: "transactions"))
 
-    def run(cumulative: list[tuple[str, str]], rejected=(), skip=False, via_handler=False,
+    def run(cumulative: list[tuple[str, str]], rejected=(), via_handler=False,
             printed=None, footer_cost=0.0, footer_fail=False):
         pages = _images(len(cumulative))
         knobs.update(printed=dict(zip(pages, printed or [])), footer_cost=footer_cost,
@@ -183,21 +183,25 @@ def app_run(monkeypatch, tmp_path):
         verdicts.clear()
         verdicts.update({p: "reject" for p in rejected})
         monkeypatch.setattr(app, "_pages_to_pngs", lambda _pdf: pages)
+        # **الحافظةُ خارج هذه الضوابط (R130):** نسخُ الصور إلى حافظة Gradio يكتب ملفّاتٍ في مجلّد
+        # النظام؛ فتُستبدل الدالّةُ بنقلٍ شكليّ — والقياسُ هنا للقراءة لا لحياة الصور.
+        monkeypatch.setattr(app, "_close_pages", lambda ps: list(ps))
         app.STATE.clear()
         app.STATE["store"] = "ملفٌّ سابق"
         if via_handler:        # معالجُ الزرّ نفسه (بقفل التشغيل) — القفلُ في مجلّدٍ مؤقت
             monkeypatch.setattr(app, "LOCK_PATH", tmp_path / "job.lock")
-            out = app.process_pdf("upload.pdf", skip, progress=lambda *a, **k: None)
+            out = app.process_pdf("upload.pdf", progress=lambda *a, **k: None)
         else:
-            out = app._process_pdf_locked("upload.pdf", lambda *a, **k: None, skip)
+            out = app._process_pdf_locked("upload.pdf", lambda *a, **k: None)
         return out, calls, pages, app.STATE
     run.calls = calls          # سجلُّ الاستدعاءات يبقى مقروءًا حين يرفع التشغيلُ خطأً
     return run
 
 
 def test_a_blocked_upload_makes_no_paid_call_and_forgets_the_old_file(app_run):
+    """**كلُّ الصفحات مرفوضة** ⇒ لا صفحةَ تُقرأ ⇒ توقفٌ قبل أيّ نداءٍ مدفوع (وقبل فحص المصرف)."""
     out, calls, _pages, state = app_run([("10", "0"), ("20", "0"), ("30", "0")],
-                                        rejected=[2])
+                                        rejected=[1, 2, 3])
     assert calls == [], "فحصُ ما قبل القراءة يسبق كلَّ استدعاءٍ مدفوع — حتى فحصَ المصرف"
     assert "لم تبدأ القراءة" in out[0]
     assert "store" not in state, "الأسئلةُ لا تُجيب عن ملفٍّ سابق"
@@ -256,23 +260,26 @@ def test_the_footer_pass_stops_after_five_consecutive_failures(app_run):
     assert not [c for c in app_run.calls if c[0] == "rows"]
 
 
-def test_skipped_pages_are_never_read_and_are_named(app_run):
+def test_rejected_pages_are_skipped_and_named_without_a_checkbox(app_run):
+    """**البند ١١ (R130):** لا خانةَ قرار — الصفحةُ المرفوضةُ تُستبعد بلا قراءة، **وتُسمّى** في
+    رسالة النتيجة؛ وما عداها يُقرأ. (كانت الخانةُ الافتراضيةُ تُوقف القراءةَ كلَّها حتى يُعلَّم صندوقٌ
+    لا يقول شيئًا.)
+    """
     out, calls, pages, _state = app_run([("10", "0"), ("20", "0"), ("30", "0")],
-                                        rejected=[2], skip=True)
+                                        rejected=[2])
     touched = {img for _kind, img in calls if _kind != "bank"}
-    assert pages[1] not in touched
-    assert "مستبعدة بلا قراءة 1" in out[0]
+    assert pages[1] not in touched, "الصفحةُ المرفوضة قُرئت (ودُفعت) بلا استبعاد"
+    assert "مستبعدة" in out[0] or "استُبعدت" in out[9], out[9]
+    assert "ص2" in out[9] and "1" in out[9], out[9]
+    assert "لم يُستبعد شيء" not in out[9], "الرسالةُ قالت إنّ شيئًا لم يُستبعد والصفحةُ استُبعدت"
 
 
-def test_the_handler_forwards_the_skip_choice(app_run):
-    """الاختبارُ السابق يستدعي الداخلَ مباشرة؛ فتعطيلُ التمرير في المعالج نفسه كان يمرّ (مقيس)."""
-    out, calls, pages, _state = app_run([("10", "0"), ("20", "0"), ("30", "0")],
-                                        rejected=[2], skip=True, via_handler=True)
-    assert pages[1] not in {img for _kind, img in calls if _kind != "bank"}
-    assert "مستبعدة بلا قراءة 1" in out[0]
+def test_the_outcome_message_says_nothing_was_excluded_when_everything_was_read(app_run):
+    out, _calls, _pages, _state = app_run([("10", "0"), ("20", "0"), ("30", "0")])
+    assert "لم يُستبعد شيء — قُرئت الصفحاتُ كلُّها" in out[9], out[9]
 
 
-def test_the_read_button_sends_the_skip_checkbox():
+def test_the_read_button_has_no_skip_checkbox():
     if not _app_stack():
         pytest.skip("حزمة التطبيق غير مثبّتة هنا (CI خفيف) — فحص محلي فقط")
     import app
@@ -280,7 +287,8 @@ def test_the_read_button_sends_the_skip_checkbox():
     fns = app.demo.fns.values() if isinstance(app.demo.fns, dict) else app.demo.fns
     wired = [f for f in fns if getattr(f, "fn", None) is app.process_pdf]
     assert len(wired) == 1
-    assert [type(i).__name__ for i in wired[0].inputs] == ["File", "Checkbox"]
+    assert [type(i).__name__ for i in wired[0].inputs] == ["File"], \
+        "زرّ القراءة ما زال يمرّر قرارَ استبعادٍ للعميل (البند ١١: رسالةٌ لا خانة)"
 
 
 def test_dates_are_settled_from_the_page_reading_before_its_description_is_replaced(app_run):
