@@ -215,10 +215,60 @@ def test_an_unreadable_threshold_blocks_by_name_instead_of_crashing():
 def test_without_a_manifest_the_guard_fails_closed_unless_ci_is_declared(tmp_path, monkeypatch, capsys):
     """**«يفشل مُغلَقاً» تُقاس:** بلا مانيفست ⇒ `rc=2` — ولا يُفتح إلّا بعلَمٍ صريحٍ `--ci`."""
     monkeypatch.setattr(ag, "MANIFEST", tmp_path / "nope.json")
+    monkeypatch.delenv(ag.MANIFEST_ENV, raising=False)     # «بلا مانيفست» = لا ملفَّ **ولا بيئة**
     assert ag.load_deny() is None
     assert ag.main([]) == 2, "بلا مانيفست يجب أن يسقط مُغلَقاً (كان `rc=0` في الإصدار الثاني)"
     assert ag.main(["--ci"]) != 2, "`--ci` إعلانٌ صريح للسطح العامّ ⇒ يمضي ويُعلن ما فحصه"
     capsys.readouterr()
+
+
+def _env_manifest(fps: list[str], key: bytes) -> str:
+    """مانيفستٌ كما تحمله بيئةُ الجلسة السحابيّة: JSON ⇒ gzip ⇒ base64 (بصماتٌ وهميّة ومفتاحٌ وهميّ)."""
+    import base64, gzip, hmac as _hmac  # noqa: E401, PLC0415
+    fps = sorted(fps)
+    digest = _hmac.new(key, "\n".join(fps).encode(), hashlib.sha256).hexdigest()
+    body = json.dumps({"fingerprints": fps, "set_digest": digest}).encode()
+    return base64.b64encode(gzip.compress(body)).decode()
+
+
+def test_the_cloud_session_carries_the_manifest_in_its_environment(tmp_path, monkeypatch):
+    """**قرارُ المالك (2026-10-28 · الخيار (أ)):** الجلسةُ السحابيّة بلا `data/` تحمل المانيفستَ في البيئة
+    ⇒ الحارسُ يعمل فيها **كاملًا** (يعضّ على قيمةٍ في المانيفست)، لا مخفَّفًا."""
+    _key(tmp_path, monkeypatch)
+    monkeypatch.setattr(ag, "MANIFEST", tmp_path / "absent.json")
+    key = ag.load_key()
+    monkeypatch.setenv(ag.MANIFEST_ENV, _env_manifest([ag.fingerprint(FAKE)], key))
+    deny = ag.load_deny()
+    assert deny == {ag.fingerprint(FAKE)}, "المانيفستُ المحمولُ في البيئة لم يُقرأ"
+    assert ag.find_in_text(f"الرصيد {FAKE}", deny), "الحارسُ لم يعضّ على قيمةٍ في مانيفست البيئة"
+
+
+def test_a_truncated_environment_manifest_fails_closed(tmp_path, monkeypatch):
+    """**متغيّرٌ مقطوعٌ يحمل بصماتٍ أقلّ ⇒ يمرّ ما كان يجب أن يسقط.** فبصمةُ المجموعة تُقابَل قبل الاستعمال:
+    حذفُ بصمةٍ مع إبقاء البصمة الجامعة ⇒ سقوطٌ مُغلَق، ونصٌّ لا يُفكّ ⇒ سقوطٌ مُغلَق."""
+    import base64, gzip  # noqa: E401, PLC0415
+    _key(tmp_path, monkeypatch)
+    monkeypatch.setattr(ag, "MANIFEST", tmp_path / "absent.json")
+    good = json.loads(gzip.decompress(base64.b64decode(
+        _env_manifest([ag.fingerprint(FAKE), "a" * 32], ag.load_key()))))
+    good["fingerprints"] = good["fingerprints"][:1]                     # قطعٌ والجامعةُ باقية
+    monkeypatch.setenv(ag.MANIFEST_ENV, base64.b64encode(gzip.compress(json.dumps(good).encode())).decode())
+    with pytest.raises(SystemExit):
+        ag.load_deny()
+    monkeypatch.setenv(ag.MANIFEST_ENV, "not-base64-at-all!")
+    with pytest.raises(SystemExit):
+        ag.load_deny()
+
+
+def test_an_environment_manifest_without_its_key_fails_closed(tmp_path, monkeypatch):
+    """المانيفستُ بلا مفتاحٍ لا يُتحقَّق منه ⇒ لا يُستعمل (فشلٌ مُغلَق، لا مرورٌ صامت)."""
+    _key(tmp_path, monkeypatch)
+    env = _env_manifest([ag.fingerprint(FAKE)], ag.load_key())
+    monkeypatch.setattr(ag, "KEY_FILE", tmp_path / "no-key")
+    monkeypatch.setattr(ag, "MANIFEST", tmp_path / "absent.json")
+    monkeypatch.setenv(ag.MANIFEST_ENV, env)
+    with pytest.raises(SystemExit):
+        ag.load_deny()
 
 
 @pytest.mark.skipif(not ag.MANIFEST.exists(),

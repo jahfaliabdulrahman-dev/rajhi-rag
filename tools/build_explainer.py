@@ -19,7 +19,6 @@ WORK.mkdir(parents=True, exist_ok=True)
 c = json.loads((ROOT / "docs" / "claims.json").read_text(encoding="utf-8"))
 V = {k: c.get(k) for k in ("pages", "rows", "clean", "clean_pct", "mismatch", "gap", "absent",
                            "documented_ratio")}
-T = c.get("tests_by_env", {})
 
 SECTIONS = [
     ("ما هذا المشروع — بجملة واحدة", f"""
@@ -42,7 +41,7 @@ SECTIONS = [
 <tr><td>الصفوفُ النظيفة</td><td><b>{V['clean']}</b> ({V['clean_pct']})</td></tr>
 <tr><td>الموثَّقةُ في الكشف</td><td><b>{V['documented_ratio']}</b></td></tr>
 <tr><td>مخالفةٌ · فجوةٌ · بلا إطار</td><td><b>{V['mismatch']}</b> · <b>{V['gap']}</b> · <b>{V['absent']}</b></td></tr>
-<tr><td>الاختباراتُ الآليّة (ثلاثُ بيئات)</td><td><b>{T.get('full')}</b> · <b>{T.get('ci-light')}</b> · <b>{T.get('ci-claims')}</b></td></tr>
+<tr><td>الاختباراتُ الآليّة</td><td>تجري في الـCI عند كلّ دفع (العددُ لا يُنشر: <span dir="ltr">pytest --collect-only -q</span>)</td></tr>
 </table>
 <p>وهذه الأرقامُ ليست شهادةَ صاحبةِ المشروع: تُشتقّ آليًّا من ملفّ الادّعاءات في المستودع، وأيُّ انحرافٍ
 عن الوثائقِ يُسقط فحصًا آليًّا قبل النشر.</p>"""),

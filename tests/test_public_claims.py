@@ -50,97 +50,6 @@ def test_public_documents_match_the_measured_report():
     assert drifts == [], f"انزياح بين الوثيقة ومصدرها: {drifts}"
 
 
-def test_a_stale_snapshot_cannot_hide_behind_a_stale_document(tmp_path, monkeypatch):
-    """**الثقبُ الذي أمسكته المراجعة ٦٦ (R66-1): بلا تقريرٍ مقيس، كانت الوثيقةُ تُقابَل باللقطة وحدَها.**
-
-    فلقطةٌ `tests=865` ووثيقةٌ تقول «حالياً 865» **توافقان بعضَهما** بينما العدُّ الحيُّ `868` ⇒ الحكمُ
-    أخضرُ في الـCI ولا أحدَ يرى الانزياح (قِيس: `render_claims.py --check` ⇒ «الوثائقُ توافق لقطتها
-    الملتزمة» والعدُّ الحيُّ `868`). و`_test_count()` **لا يحتاج** كاشَ التصريح ⇒ فصار العددُ يُقاس حيًّا
-    في هذا المسار أيضًا؛ وهذا الضابطُ يقيس **العلّةَ نفسَها**: يُثبّت لقطةً متقادمة، ويُطالب بالخروج `1`.
-    (والوثيقةُ تُطابَق بـ`check` مُبدَّلةٍ هنا لتُحاكي «وثيقةٌ موافقةٌ للقطة» — وهو حالُ العطب بعينه.)
-    """
-    import json
-    import render_claims as rc
-
-    if rc.CLAIMS_ENV == "off":
-        pytest.skip("بيئةٌ تُعلن أنّها لا تقيس (`off`) ⇒ لا قياسَ حيًّا يُقابَل (الإعلانُ في الأداة)")
-    snap = tmp_path / "claims.json"
-    # **واللقطةُ تُعلن بيئتَها (مقعدُ البنية · جولة ٦٧):** فالمقيسُ هنا **انزياحُ العدد** لا «مفتاحٌ
-    # ناقص» — وإلّا لخرج الفشلُ من سببٍ آخرَ فلم تُقَس العلّةُ المقصودة.
-    snap.write_text(json.dumps({"tests": 0, "tests_by_env": {rc.CLAIMS_ENV: 0}}, ensure_ascii=False),
-                    encoding="utf-8")
-    monkeypatch.setattr(rc, "SNAPSHOT", snap)
-    monkeypatch.setattr(rc, "REPORT", tmp_path / "no-report-here.json")
-    monkeypatch.setattr(rc, "check", lambda _d: [])          # الوثيقةُ توافق اللقطةَ المتقادمة (العطب)
-    monkeypatch.setattr(sys, "argv", ["render_claims.py", "--check"])
-    with pytest.raises(SystemExit) as e:
-        rc.main()
-    assert e.value.code == 1, "لقطةٌ متقادمةٌ مرّت: العددُ لم يُقَس حيًّا في مسار اللقطة"
-
-
-def test_the_committed_snapshot_matches_the_live_count():
-    """**اللقطةُ تُقابَل بعددٍ حيٍّ من داخل المجموعة نفسِها (R67-2 · مراجعة ٦٧).**
-
-    كان إغلاقُ R66-1 يعتمد على خطوة الـCI وحدَها، **وهي تجري قبل تثبيت `pytest`** ⇒ `_test_count()`
-    تُعيد `None` فيتخطّى القياسُ الحيُّ بصمت، فتُقابَل لقطةٌ متقادمةٌ بوثيقةٍ متقادمةٍ مثلها.
-    وضابطٌ في المجموعة لا يعتمد على ترتيب خطوات الـCI — حيث `pytest` موجودٌ بالضرورة.
-
-    **وبمفتاح بيئةٍ مُعلَن** (`RAJHI_CLAIMS_ENV`): فالعدُّ يتغيّر بما هو مُثبَّت (قِيس: ٨٧٤ في بيئة
-    المالك الكاملة · ٧٢٣ في بيئة مجموعة الـCI · ٦٦٣ في خطوة الـclaims قبل التبعيّات) ⇒ فلا يُقابَل
-    رقمُ بيئةٍ برقمِ أخرى.
-    """
-    import render_claims as rc
-
-    if rc.CLAIMS_ENV == "off":
-        pytest.skip("بيئةٌ تُعلن أنّها لا تقيس (`off`) ⇒ لا قياسَ حيًّا يُقابَل (الإعلانُ في الأداة)")
-    live = rc._test_count()
-    assert live is not None, "لا `pytest` هنا ⇒ لا قياس (والبوّابةُ تفشل مُغلَقةً في الخطوة)"
-    snap = json.loads(rc.SNAPSHOT.read_text(encoding="utf-8"))
-    expected = (snap.get("tests_by_env") or {}).get(rc.CLAIMS_ENV)
-    assert expected is not None, (
-        f"بيئةُ القياس `{rc.CLAIMS_ENV}` غيرُ مُعلَنةٍ في اللقطة "
-        f"(المُعلَن: {sorted((snap.get('tests_by_env') or {}))}) ⇒ سجِّل قياسَها بـ`--write`")
-    assert expected == live, (
-        f"عددُ `{rc.CLAIMS_ENV}` في اللقطة {expected} والمعدودُ حيًّا {live} ⇒ "
-        f"`python3 tools/render_claims.py --write` ثم تصحيحُ سطر الوثيقة")
-
-
-def test_an_unmeasurable_count_fails_closed(tmp_path, monkeypatch):
-    """**R67-2 · مراجعة ٦٧:** كان `_test_count()` إن عاد `None` يُتخطّى **بصمت** ⇒ مصادقةٌ على رقمٍ
-    لا يُقاس. والآن الفشلُ مُغلَق — **ورمزُه ٢ لا ١** (قاعدةُ `docs/GATES.md`: «١ = تحوّل/غياب ·
-    ٢ = تعذّرُ القياس» — وهو تعذُّرُ قياسٍ لا تحوّل).
-    """
-    import render_claims as rc
-
-    snap = tmp_path / "claims.json"
-    snap.write_text(json.dumps({"tests": 5, "tests_by_env": {rc.CLAIMS_ENV: 5}}), encoding="utf-8")
-    monkeypatch.setattr(rc, "SNAPSHOT", snap)
-    monkeypatch.setattr(rc, "REPORT", tmp_path / "no-report.json")
-    # **ويُعطَّل فرعُ «الوثيقة ≠ اللقطة» عن قصد:** وإلّا خرج رمزُ الخروج ١ من عدمِ القياس لا من التخطّي،
-    # فلا تفصل الضابطةُ بين «فشلٍ مُغلَق» و«تخطٍّ صامت». هنا الوثيقةُ موافقةٌ للقطة تمامًا.
-    monkeypatch.setattr(rc, "check", lambda d: [])
-    monkeypatch.setattr(rc, "_test_count", lambda: None)
-    monkeypatch.setattr(sys, "argv", ["render_claims.py", "--check"])
-    with pytest.raises(SystemExit) as e:
-        rc.main()
-    assert e.value.code == 2, "قياسٌ متعذّرٌ لم يفشل مُغلَقًا برمز «تعذّر القياس» ⇒ التخطّي الصامت عاد"
-
-
-def test_the_published_count_is_the_full_environment_measurement():
-    """**«المنشور = قياسُ بيئة `full`» (مقعدُ البنية · جولة ٦٧):** كان `tests` مربوطًا بالوثيقة وحدَها،
-    و`tests_by_env[البيئة النشطة]` بالسياق، **ولا شيءَ يربط الاثنين** ⇒ فتعديلٌ يدويّ متزامن في اللقطة
-    والوثيقة يمرّ أخضرَ في الـCI (الذي يقيس بيئةً أخرى). فالعلاقةُ المُعلَنة تُقابَل هنا، وفي الأداة.
-    """
-    import render_claims as rc
-
-    snap = json.loads(rc.SNAPSHOT.read_text(encoding="utf-8"))
-    full = (snap.get("tests_by_env") or {}).get("full")
-    assert full is not None, "لا مفتاحَ لبيئة `full` في اللقطة ⇒ لا يُعرف ما يقيسه العددُ المنشور"
-    assert snap.get("tests") == full, (
-        f"العددُ المنشور {snap.get('tests')} ≠ قياسُ بيئة `full` {full}: الوثيقةُ العامّةُ تُقابَل "
-        f"بالمنشور، فيجب أن يكون قياسَ بيئته المُعلَنة بعينها")
-
-
 def test_claims_lists_every_metric_it_promises():
     import render_claims as rc
 
@@ -148,7 +57,7 @@ def test_claims_lists_every_metric_it_promises():
             "ok": 621, "mismatch": 0, "gap": 2, "absent": 4, "unchecked": 2,
             "documented_ratio": "621/629", "clean_ratio": "5770/5793",
             "recoveries": 23, "rereads": 15, "arbitrations": 3,
-            "median_page_s": 22.18, "tests": 113, "gate3_price_cap_pages": 133}
+            "median_page_s": 22.18, "gate3_price_cap_pages": 133}
     pairs = rc.claims(fake)
     assert len(pairs) >= 8
     assert any(n == "621/629" for _f, n, _l in pairs)
@@ -308,41 +217,18 @@ def test_the_slides_name_the_four_missing_topics_and_source_their_numbers() -> N
         "المستهلكُ لا يقرأ الزمنَ من اللقطة ⇒ قيمتُه مكتوبةٌ في مستهلك (لا يُحرَس بالـ`--check`)"
 
 
-def test_every_occurrence_of_the_ci_pair_must_carry_the_derived_number():
-    """**R108-4 — الحرسُ مربوطٌ بالموضع لا بالملفّ** (قياسٌ دفع ثمنَه العطب).
+def test_the_test_count_stays_unpublished():
+    """**قرارُ المالك (2026-10-28 · الخيار (أ)): عدّادُ الاختبارات لا يُنشر ولا يُحرَس.**
 
-    **العطبُ المقيس (2026-10-13):** `docs/DELIVERY_REPORT.md` ينشر زوجَ بيئتَي الـCI **مرّتين** — §١٦ سطر ٣٤٩
-    و§١٧ سطر ٣٦٦. والالتزامُ `94d1bab` ورسالتُه كلُّها «ci-light is 1103» صحّح الأوّل وترك الثاني
-    **`**1100 · 851**`** — و`check` مرّ **أخضر** (`rc=0` · «كل رقم معلن يطابق مصدره») لأنّه يسأل
-    «هل النصُّ في الملفّ؟» (`needle in text`) **لا** «هل كلُّ موضعٍ يحمله يحمله صحيحًا» ⇒ فالموضعُ الصحيحُ
-    الواحد **يُرخّص** كلَّ نسخةٍ تخالفه في الملفّ نفسه. وهو الصنفُ الذي سمّاه هذا المستودع مرّتين
-    («نسختان من الحقيقة» · والتصحيحُ المؤرَّخ R99-5 في `COURSE_REQUIREMENTS.md`) — مُغلَقًا في موضعٍ
-    ومتروكًا في آخر.
-
-    **والضابطُ بالنقيضين** (قاعدةُ الحارس: لا يُصدَّق حرسٌ بلا حالةٍ تُسقطه): الدالّةُ نفسُها تُعيد `[]`
-    على نصٍّ كلُّ مواضعه مشتقّة، وتُعيد **الموضعَ المخالف** على نصٍّ فيه نسخةٌ متقادمة.
+    كان عددًا لكلّ بيئةٍ يُحمرّ عند كلّ اختبارٍ جديد حتى يُعاد كتابتُه في ثلاث وثائق ولقطة. فأُزيل الرقمُ
+    وحارسُه معًا. وهذا الضابطُ يحرس **الحدَّ نفسَه**: عودةُ الرقم إلى اللقطة، أو عودةُ عدّاده إلى الأداة،
+    أو عودةُ كتابته في الـCI، تُسقطه بالاسم — فلا يرجع الاحتكاكُ صامتًا بلا قرارٍ جديد.
     """
     import render_claims as rc
 
-    text = ("| ١٢ | … ✅ **1140** … · و**1103 · 851** في بيئتَي الـCI |\n"
-            "| الاختبارات | **1140** … · و**1100 · 851** لبيئتَي الـCI |\n")
-    assert rc.pair_occurrences(text) == [("1103", "851"), ("1100", "851")]
-    assert rc.conflicting_pairs(text, 1103, 851) == [("1100", "851")], \
-        "النسخةُ الثانية المخالفة مرّت ⇒ عينُ العطب عاد"
-    # **النقيضُ عبر الأداة نفسِها:** موضعٌ صحيحٌ واحد · وموضعان صحيحان ⇒ صفرُ مخالف
-    assert rc.conflicting_pairs("**1103 · 851**", 1103, 851) == []
-    assert rc.conflicting_pairs("**1103 · 851** ثمّ **1103 · 851**", 1103, 851) == []
-    # **وحدُّه المُعلَن مقيسٌ لا موعود:** صيغةٌ أخرى (مفردة) لا تُقاس بهذا الحرس ⇒ يُقال بدل أن يُدَّعى
-    assert rc.conflicting_pairs("**1100** وحدَها", 1103, 851) == []
-
-
-def test_the_live_report_carries_no_stale_copy_of_the_ci_pair():
-    """**وضابطُ الحيّ:** كلُّ موضعٍ في التقرير المنشور يحمل الزوجَ المشتقَّ نفسَه — على الملفّ الحقيقيّ.
-
-    (يُقاس بالحرس الحيّ لا بمثالٍ في الذاكرة: كان **أحمرَ** على الشجرة قبل تصحيح §١٧ — وهو ما دفع ثمنه.)
-    """
-    import render_claims as rc
-
-    snap = json.loads(rc.SNAPSHOT.read_text(encoding="utf-8"))
-    assert rc.duplicate_claim_drifts(snap) == [], \
-        "نسخةٌ متقادمةٌ من زوج بيئتَي الـCI لا تزال منشورةً في التقرير"
+    snap = json.loads((ROOT / "docs" / "claims.json").read_text(encoding="utf-8"))
+    assert not {"tests", "tests_by_env"} & set(snap), "عدّادُ الاختبارات عاد إلى اللقطة"
+    assert not hasattr(rc, "_test_count"), "عدّادُ الاختبارات عاد إلى أداة الدعاوى"
+    wf = (ROOT / ".github" / "workflows" / "publish-guard.yml").read_text(encoding="utf-8")
+    assert "render_claims.py --write" not in wf, "الـCI عاد يكتب اللقطةَ من قياسه"
+    assert "RAJHI_CLAIMS_ENV" not in wf, "مفتاحُ بيئة العدّاد عاد إلى الـCI"

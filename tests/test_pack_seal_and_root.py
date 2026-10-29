@@ -351,6 +351,7 @@ def test_amount_guard_pre_push_checks_bite_on_a_stale_manifest(tmp_path, monkeyp
     monkeypatch.setattr(ag, "MANIFEST", mf)
     assert ag.pre_push_checks() == 1, "مانيفستٌ متعفّنٌ مرّ من فحص ما قبل الدفع ⇒ الحارسُ لا يعضّ"
     monkeypatch.setattr(ag, "MANIFEST", tmp_path / "absent.json")
+    monkeypatch.delenv(ag.MANIFEST_ENV, raising=False)     # «غياب» = لا ملفَّ ولا بيئة
     assert ag.pre_push_checks() == 0, "غيابُ المانيفست = «سطحٌ بلا أدلّة» لا تعفّن — يُعلن في مسارٍ آخر"
 
 

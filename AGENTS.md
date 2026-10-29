@@ -13,6 +13,9 @@ keeps them out of this public repository; they exist only on the owner's machine
 - `docs/rajhi-rag-landing-work.md` (local-only) — landing rules: pre-push guards, protected `main`, worktree verification.
 - `docs/rajhi-rag-gate-engineering.md` · `docs/rajhi-rag-history.md` · `docs/rajhi-rag-product-decisions.md` (local-only).
 - `docs/product-journey.md` (tracked) — the eight phases and the six qualification conditions.
+- `docs/SHOWCASE_PLAN.md` (tracked) — the owner's 2026-10-28 decisions on the public face: HF Space engine ·
+  GitHub Pages front · React · the paper-brass-seal scene · checkpoints CP0/CP1/CP3 · ف١ closed (G3 rule 3 rewritten) · ف٢ open. Read it before
+  touching hosting, the front end, or the scene; do not re-derive it.
 
 - rajhi-rag (real Al Rajhi statements → OCR/parse → LangChain RAG agent): plan at
   `~/Projects/rajhi-rag/PLAN.md`. The owner pivoted this project onto the raw

@@ -277,22 +277,17 @@ def test_the_snapshot_gate_actually_fires(monkeypatch, tmp_path):
     monkeypatch.setattr(rc, "SNAPSHOT", tmp_path / "docs" / "claims.json")
     monkeypatch.setattr(rc, "REPORT", tmp_path / "no-such-report.json")   # بلا تقريرٍ حيّ = حالةُ CI
     (tmp_path / "docs").mkdir(parents=True, exist_ok=True)
-    doc = tmp_path / "docs" / "QA_CHECKLIST.md"
-    doc.write_text("حالياً 999 اختباراً\n", encoding="utf-8")
+    doc = tmp_path / "README.md"
+    doc.write_text("الصفحات الموثّقة 999/629\n", encoding="utf-8")
     (tmp_path / "docs" / "claims.json").write_text(
-        _json.dumps({"tests": 606, "tests_by_env": {rc.CLAIMS_ENV: 606}}, ensure_ascii=False),
-        encoding="utf-8")
+        _json.dumps({"documented_ratio": "606/629"}, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr(rc, "claims",
-                        lambda d: [("docs/QA_CHECKLIST.md", f"حالياً {d['tests']}", "عدد الاختبارات")])
-    # **ويُعلن المشهدُ قياسَه (R67-2 · مراجعة ٦٧):** البوّابةُ صارت تفشل **مُغلَقةً** حين لا يُقاس العدد،
-    # وهذا المشهدُ `PROJ` فيه مجلّدٌ مؤقّتٌ لا شجرةَ اختباراتٍ فيه ⇒ `_test_count()` تُعيد `None` ⇒
-    # الفحصُ يحمرّ لسببٍ لا يخصّ ما يقيسه هذا الضابط. فلا يُرخى الفحص، **بل يُعلَن المدخَلُ الناقص.**
-    monkeypatch.setattr(rc, "_test_count", lambda: 606)
+                        lambda d: [("README.md", d["documented_ratio"], "نسبة الصفحات الموثّقة")])
     monkeypatch.setattr(sys, "argv", ["render_claims.py", "--check"])
     with pytest.raises(SystemExit) as e:
         rc.main()
     assert e.value.code == 1, "البوّابةُ لا تحمرّ على وثيقةٍ تخالف لقطتها (وهي حالةُ CI بعينها)"
-    doc.write_text("حالياً 606 اختباراً\n", encoding="utf-8")
+    doc.write_text("الصفحات الموثّقة 606/629\n", encoding="utf-8")
     with pytest.raises(SystemExit) as e2:
         rc.main()
     assert e2.value.code == 0

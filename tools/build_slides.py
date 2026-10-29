@@ -48,7 +48,7 @@ SLIDES = [
      "<li><b>LangChain</b> في طبقة الفهم وحدها: وكيلٌ · أدواتٌ · استرجاعٌ · قالبُ تلقين · جوابٌ منظَّم.</li>"
      "<li><b>استرجاعٌ محلّيّ:</b> تضميناتٌ متعدّدةُ اللغات (e5) + <b>FAISS</b> عبر `langchain_huggingface`.</li>"
      "<li><b>الإكسل:</b> openpyxl من دفترٍ وسيط · <b>التقاريرُ والشرائح:</b> HTML ← Chrome headless (لأنّ العربية تُصاغ صحيحةً هناك).</li>"
-     "<li><b>والحراسة:</b> pytest في ثلاث بيئات ({{TESTS3}}) + بوّاباتُ دفعٍ ومبالغَ وكشفِ أسرار قبل أيّ التزام.</li></ul>"),
+     "<li><b>والحراسة:</b> pytest في الـCI عند كلّ دفع + بوّاباتُ دفعٍ ومبالغَ وكشفِ أسرار قبل أيّ التزام.</li></ul>"),
     ("LangChain في المشروع — أين، وأين لا",
      "<ul><li><b>ثمانيةُ مكوّناتٍ من أحدَ عشرَ مستعملة:</b> النموذج · Agents · Tools · Embeddings · Vector Store · "
      "Retrieval · <b>Prompt Templates</b> · <b>Structured Output</b>. وغيرُها: Chains · Document Loaders · Memory.</li>"
@@ -98,8 +98,8 @@ SLIDES = [
 
 def build_html() -> str:
     c = json.loads((ROOT / "docs" / "claims.json").read_text(encoding="utf-8"))
-    n = c["tests_by_env"]
-    # **والأرقامُ تُملأ من مصدرها (R93-6):** حصيلةُ الاختبارات من اللقطة، وزمنُ القراءة مشتقٌّ من
+    # (وعدّادُ الاختبارات لم يعد يُنشر منذ 2026-10-28 بقرار المالك.)
+    # **والأرقامُ تُملأ من مصدرها (R93-6):** زمنُ القراءة مشتقٌّ من
     # **وسيط الصفحة المقيس** — وكانت الشريحة تكتب «١:٣٠» لعشر صفحات، والقياسُ يقول ~٤٫٤ دقائق.
     median = float(c["median_page_s"])
     # **زمنُ القراءة من اللقطة** (`rehearsal_read_s` — مسارُ «المصدر القائم» بقرار المدقّق): مُنتِجُ
@@ -107,8 +107,6 @@ def build_html() -> str:
     # فاستُبدل بالمقيس من البروفة الكاملة — مراجعة ٩٨).
     read_s = int(c["rehearsal_read_s"])
     fills = {
-        "{{FULL}}": str(n["full"]),
-        "{{TESTS3}}": f"{n['full']} · {n['ci-light']} · {n['ci-claims']}",
         "{{MEDIAN_S}}": f"{median:g}",
         "{{READ_S}}": str(read_s),
         "{{PER_PAGE_S}}": f"{read_s / 10:g}",
@@ -120,7 +118,7 @@ def build_html() -> str:
             inner = inner.replace(key, value)
         mark = f"<div class='mk'>SECMARK{i}</div>" if i > 1 else ""
         body.append(f"<section>{mark}<h1>{title}</h1>{inner}"
-                    f"<div class='foot'>اختباراتٌ مقيسة: {n['full']} · والدفعُ بعد بوّابةٍ خضراء</div></section>")
+                    "<div class='foot'>الدفعُ بعد بوّابةٍ خضراء</div></section>")
     return ("<!DOCTYPE html><html lang='ar' dir='rtl'><head><meta charset='UTF-8'><style>\n"
             "@page{size:297mm 167mm;margin:0}body{margin:0;font-family:'Geeza Pro','Arial';direction:rtl}\n"
             "section{page-break-after:always;padding:18mm 16mm;height:167mm;box-sizing:border-box;"

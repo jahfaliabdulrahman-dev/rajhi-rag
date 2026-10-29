@@ -30,6 +30,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import gzip
 import hashlib
 import hmac
 import json
@@ -78,6 +80,8 @@ KEY_FILE = DATA_ROOT / "data" / ".amount-guard-key"                    # **غي�
 REDACTION_MAP = DATA_ROOT / "data" / "eval_pack" / "amount_redaction_map.json"
 BASELINE = ROOT / "docs" / "security" / "amount-baseline.json"         # **منشور**: أعدادٌ فقط
 DECLARED_BINARIES = ROOT / "docs" / "security" / "tracked-binaries.txt"
+#: **المانيفستُ محمولًا في البيئة** (gzip ثمّ base64) لسطحٍ لا `data/` فيه — الجلسةُ السحابيّة.
+MANIFEST_ENV = "AMOUNT_GUARD_MANIFEST_B64"
 BINARY_DIRS = ("data/", "digital/")
 BINARY = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".zip", ".xlsx", ".docx"}
 
@@ -363,18 +367,46 @@ def _mask(v) -> str:
     return s[0] + "#" * (len(s) - 1) if s else ""
 
 
+def _manifest_data() -> dict | None:
+    """المانيفست: الملفّ ⇒ البيئة (`AMOUNT_GUARD_MANIFEST_B64`) ⇒ None (والمستدعي يسقط مُغلَقًا).
+
+    **لماذا البيئة (قرارُ المالك 2026-10-28 · الخيار (أ)):** الجلسةُ السحابيّة بلا `data/` ⇒ كان كلُّ
+    التزامٍ فيها يسقط. فتحمل البيئةُ الأدلّةَ كاملةً بدل أن يُخفَّف الفحص (والتخفيفُ هو الخيار المرفوض).
+    **وما جاء من البيئة يُتحقَّق منه ببصمة المجموعة قبل أن يُستعمل:** متغيّرٌ مقطوعٌ يحمل بصماتٍ أقلّ
+    ⇒ يمرّ ما كان يجب أن يسقط. والخطأُ لا يطبع شيئًا من المحتوى.
+    **الرجوع:** `git revert <sha>` للالتزام الذي أدخل هذا المسار.
+    """
+    if MANIFEST.exists():
+        return json.loads(MANIFEST.read_text(encoding="utf-8"))
+    raw = os.environ.get(MANIFEST_ENV, "").strip()
+    if not raw:
+        return None
+    try:
+        data = json.loads(gzip.decompress(base64.b64decode(raw, validate=True)).decode("utf-8"))
+        fps = sorted(data["fingerprints"])
+    except Exception as e:
+        raise SystemExit(f"⛔ `{MANIFEST_ENV}` لا يُقرأ ({type(e).__name__}) ⇒ الحارسُ يفشل مُغلَقًا.")
+    digest = hmac.new(load_key(), "\n".join(fps).encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(digest, str(data.get("set_digest", ""))):
+        raise SystemExit(f"⛔ `{MANIFEST_ENV}`: بصمةُ المجموعة لا تطابق (متغيّرٌ مقطوع، أو مفتاحٌ آخر) "
+                         "⇒ الحارسُ يفشل مُغلَقًا.")
+    return data
+
+
 def load_deny() -> set[str] | None:
     """**None = سطحٌ عامٌّ بلا أدلّة** ⇒ يُعلن **ويسقط مُغلَقاً**، إلّا بعلَمٍ صريح `--ci`."""
-    if not MANIFEST.exists():
+    data = _manifest_data()
+    if data is None:
         return None
-    fps = set(json.loads(MANIFEST.read_text(encoding="utf-8"))["fingerprints"])
+    fps = set(data["fingerprints"])
     # **مانيفستٌ فارغٌ ليس أدلّة** (أمسكه مقعدُ المعايير): كان set() ⇒ كلُّ عدّادٍ صفر ⇒ PASS بلا فحص.
     return fps or None
 
 
 def _manifest_blind() -> str:
     return ("⚠ سطحٌ عامٌّ بلا أدلّة: لا مانيفستَ (لا يُنشر بالتصميم — بصمةٌ منشورةٌ معها سِرٌّ "
-            "تُجرَد). الإنفاذُ محليٌّ: في `.githooks/pre-push` حيث توجد `data/`.")
+            "تُجرَد). الإنفاذُ محليٌّ: في `.githooks/pre-push` حيث توجد `data/`، "
+            f"أو في جلسةٍ تحمل `{MANIFEST_ENV}` و`{KEY_ENV}` في بيئتها.")
 
 
 # ═══════════════════════ الفحص ═══════════════════════
@@ -820,9 +852,8 @@ def tracking_audit() -> list[str]:
     key = os.environ.get(KEY_ENV, "").strip()
     if not key and KEY_FILE.exists():
         key = KEY_FILE.read_text(encoding="utf-8").strip()
-    fps: set[str] = set()
-    if MANIFEST.exists():
-        fps = set(json.loads(MANIFEST.read_text(encoding="utf-8"))["fingerprints"])
+    data = _manifest_data()
+    fps: set[str] = set(data["fingerprints"]) if data else set()
     for rel in tracked_files():
         p = ROOT / rel
         if p.suffix.lower() in BINARY:
@@ -840,7 +871,7 @@ def tracking_audit() -> list[str]:
 
 def tracking_audit_message() -> str:
     """**لا يُدَّعى فحصٌ لم يُجرَ:** كانت الرسالةُ تقول «ولا بصماتٍ منشورة» في CI حيث لا مانيفست."""
-    if MANIFEST.exists():
+    if _manifest_data() is not None:
         return "PASS — المفتاحُ والمانيفستُ وخريطةُ التطهير غيرُ متتبَّعة ومُهمَلة واقعاً، ولا بصماتٍ منشورة"
     return ("PASS (بما أُمكن فحصُه) — الثلاثةُ غيرُ متتبَّعة ومُهمَلة واقعاً · "
             "**والبصماتُ لم تُفحَص: لا مانيفستَ على هذا السطح**")
@@ -854,9 +885,9 @@ def staleness() -> str | None:
     **تصحيحُ مراجعة ٣٨:** كان يقارن العددين وحدَهما ⇒ **تبديلُ قيمةٍ بأخرى يمرّ** (٤,٢٧٢ = ٤,٢٧٢).
     صار يقارن **بصمةَ المجموعة المرتّبة** كذلك، وهي تكشف أيَّ تبديل.
     """
-    if not MANIFEST.exists():
+    data = _manifest_data()
+    if data is None:
         return None
-    data = json.loads(MANIFEST.read_text(encoding="utf-8"))
     want = data["derivation"]["source_shape_ok"]
     src, _, total, _ = source_amounts()
     if total == 0:
@@ -938,7 +969,8 @@ def proof_inject() -> int:
             print(f"⛔ تعذّر إنشاءُ النسخة المؤقّتة: {r.stderr.strip()[:120]}", file=sys.stderr)
             return 5
         (wt / "data" / "eval_pack").mkdir(parents=True, exist_ok=True)
-        shutil.copy2(MANIFEST, wt / "data" / "eval_pack" / "amount-manifest.json")
+        (wt / "data" / "eval_pack" / "amount-manifest.json").write_text(   # الملفُّ أو البيئة
+            json.dumps(_manifest_data(), ensure_ascii=False), encoding="utf-8")
         # المفتاحُ يُكتب من الذاكرة: لا نفترض وجودَ ملفّ (قد يأتي من البيئة في CI)
         (wt / "data" / ".amount-guard-key").write_text(load_key().decode() + "\n", encoding="utf-8")
         # **درسٌ دُفع ثمنُه قبل هذه الجولة:** نسخةٌ مؤقّتةٌ مبنيةٌ من `HEAD` تقيس **ما التُزم** لا

@@ -8,8 +8,14 @@ old anchor count and an old cost. Every one of those was caught by a human
 reading two files at once — a mechanism that fails silently the moment nobody
 feels like reading.
 
-This derives the numbers from the report the run itself wrote (plus the live
-test count) and asserts the documents contain them. Local, no API, no cost.
+This derives the numbers from the report the run itself wrote and asserts the
+documents contain them. Local, no API, no cost.
+
+The test count is no longer published or guarded (owner's decision 2026-10-28,
+option (أ)): a number per environment that every new test turned red cost a
+round each time and protected nothing a green CI run does not already show.
+`pytest --collect-only -q` prints it when someone wants it. Rollback: `git revert <sha>`
+of the commit that removed it.
 
     python3 tools/render_claims.py            # show what it derives and checks
     python3 tools/render_claims.py --check    # exit 1 on any drift
@@ -21,10 +27,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import pathlib
-import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -40,113 +42,12 @@ RESULTS = PROJ / "data" / "local_sample" / "slice_629p_v2" / "results"
 # and calls the fresh document the drift (this happened with the test count).
 SNAPSHOT = PROJ / "docs" / "claims.json"
 
-# **وللرقم بيئةٌ تُعلَن (مراجعة ٦٧ · حصيلةُ R67-2):** العدُّ يتغيّر بما هو مُثبَّت **وبإصدار المفسّر
-# و`pytest` وبصورة العدّاء**؛ وخطوةُ `gate_claims` (`pytest` وحدَه) تجمع أقلَّ من خطوة المجموعة
-# (بعد `openpyxl`/`PyYAML`)، وكلتاهما أقلَّ من بيئة المالك الكاملة. **والأرقامُ تُقرأ من اللقطة
-# (`tests_by_env`) ولا تُنسَخ هنا (مقعدا المواصفة والبنية · ٦٨د):** قيمتان بقيتا في هذا التعليق
-# متقادمتين بعد تحديثهما في اللقطة ⇒ حُذفتا (إغلاقُ الصنف بالحذف لا بحراسة نسخة). **فمقابلةُ رقمَي بيئتين
-# مقابلةُ كمّيّتين مختلفتين** — وهي بعينها الخطأُ الذي كشفه إغلاقُ R67-2 أوّلَ مرّة. فاللقطةُ تحمل
-# **قياسَ كلّ بيئةٍ بمفتاحها** (`tests_by_env`)، والمفتاحُ تُعلنه الجهةُ المشغِّلة (`RAJHI_CLAIMS_ENV`)،
-# **والعددُ المنشور** (`tests`) هو قياسُ بيئة `full` وحدَها (وتُقابَل العلاقةُ داخل الأداة).
-CLAIMS_ENV = os.environ.get("RAJHI_CLAIMS_ENV", "full")
-
 # **كائنُ القرار يُستورد في أعلى الملفّ — بلا `try/except` يُخفي** (مقعدُ البنية · مراجعة ٦١): كان
 # يُستورد داخل دالّةٍ عبر `sys.path.insert` **ويبتلع الخطأ** فيُعيد `None` ⇒ تُصاغ الوثيقةُ بـ`{None}`
 # ويُكتب في اللقطة `null` بصمت. والآن الوحدةُ المجرّدةُ (`tools/gate3.py` — لا تبعيّةَ خارج المكتبة
 # القياسية، فلا خدمةَ ولا نموذج) تُستورد بنفس النمط المُعلَن المُستعمل لـ`scale_slice` أدناه.
 sys.path.insert(0, str(PROJ / "tools"))
 from gate3 import GATE3_DECISION                                    # noqa: E402
-
-
-#: صيغُ خطأِ الجمع التي تُبطل العدَّ — **والعدُّ يسقط إن وقع** (ملاحظةُ العدّ · P3).
-#: **والصيغةُ مُشتقّةٌ من مخرَج pytest الفعليّ لا من تخمين:** `--collect-only -q` مع محلولٍ لا يُجمَّع
-#: يطبع سطرَ الخطأ (`ERROR tests/test_x.py - …`) **ومع ذلك يطبع عدًّا** («… ٣ أخطاء في ٠٫٥٠ ثانية») ⇒
-#: فمطابقةُ «errors during collection» وحدَها **تُخطئ الشكلَ المقيس** (‏«3 errors in 0.50s»):
-_COLLECTION_ERROR_RE = re.compile(
-    r"^ERROR\b|\bERROR collecting\b|errors? during collection|Interrupted:|\b\d+ errors? in \d",
-    re.IGNORECASE | re.MULTILINE)
-
-
-def collection_errors(text: str) -> str:
-    """هل في مخرَج الجمع خطأُ جمعٍ؟ — يُعاد نصُّه، وفارغٌ معناه لا خطأ.
-
-    **والعلّةُ مقيسة (ملاحظةُ العدّ · P3):** كان العدُّ يقبل مخرَجًا فيه خطأُ جمعٍ **صامتًا** فيرى
-    الرقمَ ناقصًا ويقرؤه القارئُ «انزياحَ بيئة» — قِيس **−١٧** في `ci-claims` سببُها `NameError`
-    عند الاستيراد (غيابُ `ConfigDict` في المسار البديل). **فالعدُّ الآن يُعلن العطبَ ولا يُخرجه
-    رقمًا:** يُعاد `None` ⇒ واللقطةُ لا تُكتب، والحرسُ يسقط في موضع الخطوة.
-    """
-    m = _COLLECTION_ERROR_RE.search(text or "")
-    return m.group(0) if m else ""
-
-
-#: **المُعلَنُ لأخطاء الجمع: مجموعةُ أسماءٍ لا عدد** (ملاحظةُ الحدّ · P2).
-#: **والسببُ مقيسٌ:** كان العددَ وحدَه ⇒ **تبديلُ ملفٍّ مُعلَنٍ بملفٍّ مكسورٍ جديد يمرّ صامتًا**
-#: (قِيس: حُذف ملفٌّ من المُعلَنين وأُضيف ملفٌّ مكسور ⇒ بقي العددُ وقُبل الرقمُ المنشور).
-#: فالمقابلةُ الآن **بالأسماء المجرَّدة**، وأيُّ تبديلٍ يُسمّى بالاسم ⇒ **توقّفٌ مُعلَن.**
-#: **والقيمُ المطلقةُ في اللقطة لا هنا** (ولذلك لا رقمَ دعوى في هذا التعليق).
-_UNCOLLECTED_ENV = "RAJHI_CLAIMS_ALLOWED_UNCOLLECTED"
-
-
-def collection_error_lines(text: str) -> list[str]:
-    """أسطرُ الملفّات التي لم تُجمَّع — تُسمّى لتُقرأ (لا «خطأُ جمعٍ» مجهولًا)."""
-    return [ln for ln in (text or "").splitlines() if ln.startswith("ERROR")]
-
-
-def uncollected_names(lines: list[str]) -> set[str]:
-    """أسماءُ الملفّات من أسطر الخطأ — **بالاسم المجرَّد لا بالمسار** (‏`tests/test_x.py` ⇒ `test_x.py`).
-
-    **ولماذا المجرَّد؟** لأنّ قوائمَ الـCI (‏قائمةُ الخطوة ومسبارُ الهبوط وحارسُ السجلّ) تُقرأ بمسحٍ
-    نصّي عن `tests/*.py` في الـworkflow ⇒ فلو كُتبت المساراتُ في `env` لَدخلت القائمةَ الخفيّةَ
-    وقيست الخطوةُ ملفّاتٍ لم تُشغِّلها (قِيس: سقط حارسا السجلّ واللقطة بعد كتابتها بالمسارات).
-    """
-    out: set[str] = set()
-    for ln in lines:
-        parts = ln.split()
-        if len(parts) >= 2:
-            out.add(pathlib.PurePosixPath(parts[1].rstrip(":")).name)
-    return out
-
-
-def allowed_uncollected() -> set[str]:
-    """المجموعةُ المُعلَنة لبيئة هذه الخطوة (‏فارغةٌ = لا ملفَّ مُعفى ⇒ أيُّ خطأٍ يُسقِط العدَّ)."""
-    raw = os.environ.get(_UNCOLLECTED_ENV, "") or ""
-    return {x.strip() for x in raw.split(",") if x.strip()}
-
-
-def _test_count() -> int | None:
-    """عدُّ الاختبارات — ببيئةٍ نظيفة، **ويُبطل بخطأِ جمع**.
-
-    عطلٌ مُعلن كان يُعطي أرقاماً خاطئة (227 · 232 · 233) حين يُستدعى من عمليةٍ
-    أخرى: المتغيّرات الموروثة (`PYTHONPATH` خصوصاً) تُغيّر ما يُجمَع. **الوثائق
-    ليست البيئة** — فالقياس يُنزع من بيئة الاستدعاء قبل أن يُشغَّل.
-    """
-    env = {k: v for k, v in os.environ.items()
-           if k not in ("PYTHONPATH", "PYTHONHOME", "PYTEST_ADDOPTS")}
-    out = subprocess.run([sys.executable, "-m", "pytest", "tests/",
-                          "--collect-only", "-q"],
-                         cwd=PROJ, capture_output=True, text=True, env=env)
-    text = (out.stdout or "") + (out.stderr or "")
-    errs = collection_error_lines(out.stdout or "")
-    if collection_errors(text):
-        declared = allowed_uncollected()
-        actual = uncollected_names(errs)
-        summary = [ln for ln in (out.stdout or "").splitlines()
-                   if "collected" in ln or "Interrupted" in ln]
-        if actual != declared:
-            # **والعطبُ يُسمّى لا يُعلَن فقط (درسُ R120-2):** الفشلُ بلا اسمِ الملفّات يجبر القارئَ
-            # على تخمين السبب — ويُخرجه من الحكم («خطأُ جمعٍ» ≠ «عطبُ بيئةٍ ناقصةِ تبعيّات»).
-            print(f"⛔ أخطاءُ جمعٍ لا تطابق المُعلَن بالاسم (جديد: {sorted(actual - declared)} · "
-                  f"زائل: {sorted(declared - actual)}) ⇒ لا يُكتب رقمٌ (R121-1)", file=sys.stderr)
-            for ln in (errs[:25] + summary[-1:]):
-                print("   " + ln, file=sys.stderr)
-            return None
-        print(f"⚠ {len(errs)} ملفًّا خارجَ الجمع — **مُعلَنٌ بالاسم** لبيئة هذه الخطوة "
-              f"(`{_UNCOLLECTED_ENV}`) فيُقرأ العدُّ مع حدِّه لا بدونه.", file=sys.stderr)
-    for line in reversed(out.stdout.splitlines()):
-        parts = line.split()
-        if len(parts) >= 2 and parts[0].isdigit() and "test" in parts[1]:
-            return int(parts[0])
-    return None
 
 
 def _gate3_price_cap() -> int | None:
@@ -336,27 +237,12 @@ def derive() -> dict | None:
         "rereads": len(facts.get("rereads", [])),
         "arbitrations": len(facts.get("arbitrations", [])),
         "median_page_s": facts.get("median_page_s"),
-        "tests": _test_count(),
         # **ومصدرٌ ثالثٌ مُعلَن**: كائنُ قرار البوابة (٣) — يُشتقّ منه سقفُ الثمن ويُقابَل في الوثائق.
         "gate3_price_cap_pages": _gate3_price_cap(),
         # **ومصدرٌ رابعٌ مُعلَن** (توجيهُ المدقّق 2026-10-08): ملاحظةُ بروفة ٩٨ — نقلٌ يدويٌّ من متنٍّ
         # (مُعلَنٌ بمحدوده في `_rehearsal_read_s`)، ويُقابَل برقَمَي السيناريو في `claims()`.
         "rehearsal_read_s": _rehearsal_read_s(),
     }
-
-
-def _env_values(d: dict) -> dict:
-    """**دعاوى البيئات تُبنى في المسارين (مقعدُ المواصفة F3 · ٦٨د):** `derive()` — مسارُ شجرة المالك —
-    لا يحمل `tests_by_env`، فكانت دعاوى البيئات تُبنى في مسار اللقطة وحدَه ⇒ وثيقةٌ رقمُ بيئتها متقادمٌ
-    **تمرّ محليًّا** حتى يراها الـCI. فصار المصدرُ المُمرَّر، وإلّا فاللقطةُ الملتزمة: فالدعوى قائمةٌ في
-    المسارين، والانزياحُ يُحمرّ في الموضع الذي يُحرَّر فيه الرقم."""
-    tb = d.get("tests_by_env")
-    if not tb and SNAPSHOT.exists():
-        try:
-            tb = (json.loads(SNAPSHOT.read_text(encoding="utf-8")) or {}).get("tests_by_env")
-        except (OSError, ValueError):
-            tb = None
-    return tb or {}
 
 
 def snapshot_split_missing(d: dict) -> list[str]:
@@ -398,28 +284,6 @@ def claims(d: dict) -> list[tuple[str, str, str]]:
         ("PLAN.md", d["clean_ratio"], "نظافة السلسلة"),
         ("PLAN.md", f"{d['recoveries']} مرساة", "عدد المراسي المُستدركة"),
         ("PLAN.md", f"{d['rereads']} إعادة قراءة", "عدد إعادات القراءة"),
-        ("docs/QA_CHECKLIST.md", f"حالياً {d['tests']}", "عدد الاختبارات"),
-        # **وعدّادُ التقرير محروسٌ في اللقطة (R93-9):** كان §١٧ يكتب «مشتقّةٌ آليًّا من اللقطة» وهي
-        # **مكتوبةٌ بيدٍ** — ورقمُها القديم لا يشترطه شيء، و`--check` مرّ عليه — ⇒ التقريرُ كان
-        # **خارج الحراسة**. (ولا يُنسَخ الرقمُ في هذا التعليق: قاعدةُ الملفّ أنّه يُقرأ من اللقطة.)
-        # فهذا السطرُ يجعل الدعوى صادقة: انزياحُ العدّاد في §١٦/§١٧ يُسقط البوّابةَ بالاسم.
-        ("docs/DELIVERY_REPORT.md", f"**{d['tests']}** في بيئة المالك",
-         "عدّادُ الاختبارات في التقرير (§١٦ و§١٧)"),
-        # **وأرقامُ البيئات المنشورة تُقابَل بلقطتها (مقعدا المعايير والبنية · ٦٨د · T5):** كانت قيمتا
-        # `ci-light`/`ci-claims` مكتوبتين بيدٍ في الوثيقة **بلا ربطٍ باللقطة** ⇒ تتقادمان بصمت (وهو ما
-        # وقع فعلًا: بقيت قيمةٌ متقادمةٌ في موضعٍ وحدّثتُ الآخر). فالآن كلُّ مفتاحٍ في `tests_by_env` له دعوى
-        # على الوثيقة بصيغتها المنشورة، والانزياحُ يُحمرّ البوّابةَ.
-        *[("docs/QA_CHECKLIST.md", f"⇒ **{v}**", f"قيمةُ بيئة `{e}` المنشورة")
-          for e, v in sorted(_env_values(d).items())],
-        # **ونتائجُ R-1 (غلقُ مقعد المعايير F1 · 2026-10-09):** كان الرقمُ البيئيُّ في هاتين الوثيقتين
-        # **بلا حارس** ⇒ تقادم بصمتٍ حين تحرّكت `ci-light` بطلب المالك (P-2)، وفي الشجرة الواحدة
-        # «نسختان من الحقيقة». والقرارُ المُتَّخذ: **ناقلٌ محروس** لا حذفُ الرقم — فيُربَط كلُّ موضعٍ
-        # بصيغته المنشورة نفسِها، وانزياحُ أيٍّ منها يُسقط البوّابةَ بالاسم (`test_public_claims`).
-        ("docs/DELIVERY_REPORT.md", f"**{_env_values(d).get('ci-light')} · {_env_values(d).get('ci-claims')}**",
-         "قيمتا بيئتَي الـCI في التقرير (§١٦ و§١٧)"),
-        ("docs/COURSE_REQUIREMENTS.md",
-         f"({d['tests']} · {_env_values(d).get('ci-light')} · {_env_values(d).get('ci-claims')})",
-         "قيمُ البيئات الثلاث في متطلّبات المشروع (§٧)"),
         # The ABOUT screen said «about 1.6% of 629 pages» long after the project
         # accounted for every page: the number a stranger reads first had no
         # guard at all (external audit).
@@ -453,59 +317,7 @@ def check(d: dict) -> list[tuple[str, str, str]]:
         text = path.read_text(encoding="utf-8") if path.exists() else ""
         if needle not in text:
             drifts.append((rel, needle, label))
-    drifts.extend(duplicate_claim_drifts(d))
     return drifts
-
-
-# ————— **الحرسُ مربوطٌ بالموضع لا بالملفّ** (R108-4 · دفع ثمنَه قياس) —————
-# **العطبُ المقيس:** `docs/DELIVERY_REPORT.md` ينشر زوجَ بيئتَي الـCI **مرّتين** — في §١٦ وفي §١٧. والالتزامُ
-# `94d1bab` ورسالتُه كلُّها «ci-light is the measured value, not my projection» صحّح الموضعَ الأوّل وترك الثاني بزوجٍ
-# متقادم — و`check` مرّ **أخضر**.
-#
-# **والجذر:** `check` يسأل «هل النصُّ في الملفّ؟» (`needle in text`) **لا** «هل كلُّ موضعٍ يحمله يحمله صحيحًا»
-# ⇒ فحضورُ الموضع الصحيح **يُرخّص** كلَّ نسخةٍ مخالفةٍ له في الملفّ نفسه. وهو الصنفُ الذي سمّاه هذا المستودع
-# مرّتين («نسختان من الحقيقة» · والتصحيحُ المؤرَّخ R99-5 في `COURSE_REQUIREMENTS.md`) ⇒ مُسمًّى في موضعٍ
-# ومتروكٌ في آخر، وهذا ما يمنعه `--check` اليوم.
-#
-# **والنقيضُ يُقاس لا يُوصف** (قاعدةُ الحارس: لا يُصدَّق حرسٌ بلا حالةٍ تُسقطه):
-# `tests/test_public_claims.py` — `test_every_occurrence_of_the_ci_pair_must_carry_the_derived_number`.
-#
-# **وحدُّه المُعلَن (لا يُدَّعى عمومًا):**
-#   · **النطاقُ ملفٌّ واحد**: `docs/DELIVERY_REPORT.md`. و`docs/QA_CHECKLIST.md` يحمل عشرَ أزواجٍ بالصيغة
-#     نفسها، كلُّها **تاريخيّةٌ مشروعة** (سلسلةُ العدّادات) ⇒ فمقابلتُها كلَّها بالمشتقّ تُحمرّ زورًا.
-#   · **والصيغةُ وحدَها**: زوجٌ بين نجمتين. وأرقامٌ منشورةٌ مفردةً لا تُقاس بهذا الحرس — **ثقبٌ مُعلَن**،
-#     وسدُّه العامّ ألّا يُكرَّر الرقمُ في وثيقةٍ مرّتين (وهو ما لا يُحكم فيه هنا بدل أن يُدَّعى).
-_PAIR_SHAPE = re.compile(r"\*\*(\d+)\s*·\s*(\d+)\*\*")
-PAIR_CLAIM_DOC = "docs/DELIVERY_REPORT.md"
-
-
-def pair_occurrences(text: str) -> list[tuple[str, str]]:
-    """**كلُّ** مواضع صيغة الزوج («**1134 · 851**») في نصّ — لا موضعٌ واحدٌ يكفي."""
-    return [(m.group(1), m.group(2)) for m in _PAIR_SHAPE.finditer(text)]
-
-
-def conflicting_pairs(text: str, light, env_claims) -> list[tuple[str, str]]:
-    """المواضعُ التي تحمل زوجًا **غيرَ** المشتقّ `(light, env_claims)` — والقائمةُ الفارغةُ تعني «كلُّ موضعٍ صحيح».
-
-    (دالّةٌ خالصةٌ تُقاس بسمٍّ في `tests/test_public_claims.py`، ولا تُقاس بقراءة نصّها.)
-    """
-    want = (str(light), str(env_claims))
-    return [found for found in pair_occurrences(text) if found != want]
-
-
-def duplicate_claim_drifts(d: dict) -> list[tuple[str, str, str]]:
-    """انزياحاتُ **النسخة الثانية**: كلُّ موضعٍ يحمل الزوجَ يجب أن يحمل المشتقَّ نفسَه (R108-4)."""
-    env = _env_values(d)
-    light, env_claims = env.get("ci-light"), env.get("ci-claims")
-    if light is None or env_claims is None:
-        return []                       # بلا بيئتين مُعلَنتين لا دعوى على أزواجهما
-    path = PROJ / PAIR_CLAIM_DOC
-    if not path.exists():               # فشلٌ مُغلَق: وثيقةٌ غائبةٌ ليست نظافة
-        return [(PAIR_CLAIM_DOC, "الوثيقة", "غيرُ موجودة ⇒ لا قياسَ على «كلّ موضع»")]
-    return [(PAIR_CLAIM_DOC, f"**{' · '.join(found)}**",
-             f"موضعٌ يحمل زوجًا غيرَ المشتقّ (**{light} · {env_claims}**) — الحرسُ يقابل كلَّ موضع، "
-             f"لا الملفَّ مرّةً واحدة")
-            for found in conflicting_pairs(path.read_text(encoding="utf-8"), light, env_claims)]
 
 
 def snapshot_drift(d: dict) -> list[tuple[str, object, object]]:
@@ -540,72 +352,10 @@ def main() -> None:
             print(f"لا تقرير مقيس هنا ({REPORT}) ولا لقطةٌ ملتزمة — لا شيء يُحرس.")
             sys.exit(0)
         snapdoc = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
-        # **«المنشور = قياسُ بيئة `full`» محروسًا (مقعدُ البنية · جولة ٦٧):** كان `tests` مربوطًا
-        # بالوثيقة، و`tests_by_env[البيئة النشطة]` بالسياق، **ولا شيءَ يربط الاثنين** ⇒ فتعديلٌ يدويّ
-        # متزامن في اللقطة والوثيقة يمرّ أخضرَ في الـCI (لأنّ الـCI يقيس `ci-light`، والوثيقةَ تُقابَل
-        # بـ`tests`). فالعلاقةُ المُعلَنة تُقابَل هاهنا، فلا يبقى فراغٌ في مسار الـCI.
-        _full = (snapdoc.get("tests_by_env") or {}).get("full")
-        if _full is not None and snapdoc.get("tests") != _full:
-            print(f"⛔ فشلٌ مُغلَق — العددُ المنشور `tests`={snapdoc.get('tests')!r} ≠ قياسُ بيئة `full` "
-                  f"({_full!r}): الاثنان يجب أن يتطابقا (تُصحَّح اللقطةُ بـ`--write` في بيئة `full`).")
-            sys.exit(1)
-        # **وللقطةِ كاتبٌ حتى بلا تقريرٍ مقيس (R66-1 · مراجعة ٦٦):** كان `--write` لا يعمل إلّا بتقريرٍ
-        # مقيس ⇒ فاللقطةُ في بيئة الـCI **بلا كاتب**، وتُقابَل بالوثيقة وحدَها ⇒ يتقادمان معًا بصمت.
-        # **وحدُّ الكتابة يُعلَن:** يُحدَّث ما يُقاس هنا (`tests` من `_test_count()`)، وبقيةُ الحقول لا تُمسّ.
         if args.write:
-            if CLAIMS_ENV == "off":
-                print("⚠ بيئةٌ تُعلن أنّها لا تقيس (`off`) ⇒ لا كتابة.")
-                sys.exit(2)
-            live = _test_count()
-            if live is None:
-                print(f"⚠ تعذّر العدُّ الحيُّ في بيئة `{CLAIMS_ENV}` ⇒ لا كتابة. [الرمز ٢ = تعذّرُ القياس]")
-                sys.exit(2)
-            env_map = dict(snapdoc.get("tests_by_env") or {})
-            before = env_map.get(CLAIMS_ENV)
-            env_map[CLAIMS_ENV] = live
-            snapdoc["tests_by_env"] = env_map
-            if CLAIMS_ENV == "full":
-                snapdoc["tests"] = live            # «العددُ المنشور» = قياسُ البيئة الكاملة
-            SNAPSHOT.write_text(json.dumps(snapdoc, ensure_ascii=False, indent=1) + "\n",
-                                encoding="utf-8")
-            print(f"[claims] كُتبت اللقطةُ بلا تقريرٍ مقيس: tests_by_env[{CLAIMS_ENV}] "
-                  f"{before!r} ⇒ {live!r}"
-                  + (" · و`tests` (العددُ المنشور) تبعه" if CLAIMS_ENV == "full" else "")
-                  + f" | **وحدُّ الكتابة مُعلَن:** بقيةُ الحقول تحتاج تقريرًا مقيسًا "
-                    f"(`{REPORT.relative_to(PROJ)}`) ولم تُمسّ.")
-        # **والعددُ المنشور يُقاس حيًّا حتى بلا تقرير (R66-1 · مراجعة ٦٦):** مقابلةُ الوثيقةِ باللقطة
-        # وحدَهما تجعل الانزياحَ **غيرَ مرئيٍّ في CI** — لقطةٌ متقادمةٌ توافق وثيقةً متقادمةً بالعدد نفسه —
-        # و`_test_count()` لا يحتاج كاشَ التصريح. **قِيس قبل الإغلاق:** لقطةٌ متقادمةٌ والعدُّ الحيّ مخالفٌ لها
-        # والحكمُ «توافق» (`rc=0`) ⇒ صار يُقاس.
-        if CLAIMS_ENV == "off":
-            # **وبيئةٌ تُعلن أنّها لا تقيس (R67-2 · حصيلةُ القياس):** خطوةُ `gate_claims` تجري **قبل**
-            # تثبيت `openpyxl`/`PyYAML` ⇒ جمعُها جزئيٌّ: في **مهمّة الـCI نفسِها** تجمع هذه الخطوةُ أقلَّ
-            # من خطوة المجموعة (وكان الرقمان قبل ثلاثة ضوابط أقلَّ — والقياسُ يتحرّك مع المدى،
-            # ولذلك يُقاس ولا يُنقل؛ ومقعدُ المعايير قاس أنّ هذين الرقمين بقيا متقادمين هنا في جولةٍ
-            # حدّثت الموضعَ الآخر ⇒ فصارا معًا من قياس الـCI نفسه). فمقابلةُ أيّ منهما بالرقم المنشور
-            # مقابلةُ كمّيّتين مختلفتين.
-            # فالقياسُ الحيّ هنا **مُعلَّقٌ بإعلانٍ** (لا تخطٍّ صامت)، والوثيقةُ تُقابَل بلقطتها، والقياسُ
-            # الحيّ يجري في الخطوة التي **أعلنت بيئتها** (وتحرسها ضابطةُ المجموعة).
-            print("ℹ القياسُ الحيُّ **مُعلَّقٌ بإعلان** في هذه الخطوة (RAJHI_CLAIMS_ENV=off · تبعيّاتٌ جزئيّة): "
-                  "تُقابَل الوثيقةُ بلقطتها، والقياسُ الحيّ في الخطوة التي أعلنت بيئتها.")
-        else:
-            live = _test_count()
-            if live is None:
-                # **ورمحُ الخروج ٢ لا ١ (مقعدُ المعايير · جولة ٦٧):** قاعدتُنا المُعلَنة في `docs/GATES.md`
-                # تفصل: «١ = تحوّل/غياب · ٢ = تعذّرُ القياس» — وهذا تعذُّرُ قياسٍ لا تحوّل ⇒ رمزُه ٢.
-                print("⛔ فشلٌ مُغلَق — تعذّر قياسُ العدد حيًّا (لا `pytest` في هذه البيئة): لا يُقابَل "
-                      "رقمٌ برقمٍ لا يُقاس. ثبّت `pytest` في الخطوة نفسِها التي تُشغّل هذا الفحص (R67-2). "
-                      "[الرمز ٢ = تعذّرُ القياس — `docs/GATES.md`]")
-                sys.exit(2)
-            expected = (snapdoc.get("tests_by_env") or {}).get(CLAIMS_ENV)
-            if expected is None:
-                print(f"⛔ فشلٌ مُغلَق — بيئةُ القياس `{CLAIMS_ENV}` غيرُ مُعلَنةٍ في اللقطة "
-                      f"(المُعلَن: {sorted((snapdoc.get('tests_by_env') or {}))}) ⇒ سجِّل قياسَها بـ`--write`.")
-                sys.exit(1)
-            if expected != live:
-                print(f"⚠ عددُ `{CLAIMS_ENV}` في اللقطة {expected!r} ≠ المعدود حيًّا {live!r} "
-                      f"⇒ `--write` (والوثيقةُ تُصحَّح في سطرها)")
-                sys.exit(1)
+            # **بلا تقريرٍ مقيس لا رقمَ يُشتقّ هنا** — كان هذا الفرعُ يكتب عدّادَ الاختبارات وحدَه، وقد
+            # أُزيل العدّادُ بقرار المالك (2026-10-28) ⇒ فلا كتابة، ويُعلَن ذلك بدل أن يُكتب شيءٌ لم يُقس.
+            print("ℹ بلا تقريرٍ مقيس لا رقمَ يُشتقّ هنا ⇒ لا كتابة. والمقابلةُ بالوثائق تجري أدناه.")
         sdrifts = check(snapdoc)
         if sdrifts:
             print("⚠ الوثائقُ تخالف لقطتها الملتزمة:")
@@ -618,27 +368,10 @@ def main() -> None:
     for k, v in d.items():
         print(f"  {k}: {v}")
     if args.write:
-        # **الكاتبُ لا يمحو ما أُعلِن (مقعدا المعايير والبنية · جولة ٦٧):** كان هذا الفرعُ يكتب مخرَجَ
-        # `derive()` كما هو، وهو لا يحمل `tests_by_env` ⇒ فـ`--write` (وهو العلاجُ الذي توصي به رسالةُ
-        # الانزياح نفسُها) **يمحو خريطةَ البيئات**، ثم تفشل خطوةُ الـCI مُغلَقةً على «بيئةٍ غير مُعلَنة»
-        # — أي أنّ الكاتبَ يهدم ما يحرسه الفشلُ المُغلَق. فالمفاتيحُ المُعلَنة تنجو، ويُسجَّل فيها
-        # قياسُ البيئة النشطة (والمنشورُ `tests` يبقى قياسَ `full` وحدَه).
-        if CLAIMS_ENV == "off":
-            print("⚠ بيئةٌ تُعلن أنّها لا تقيس (`off`) ⇒ لا كتابة.")
-            sys.exit(2)
-        # **والعدّادُ الغائبُ لا يُكتب مقامُه** (قاسه مُشغِّلٌ بمفسّرٍ بلا `pytest` ⇒ `tests: None`
-        # لُوِّثت به اللقطةُ صامتةً): الكاتبُ في المسار بلا تقريرٍ يرفض هذه الحال برمز ٢، وهذا
-        # الكاتبُ كان يكتبها. فالأخوّةُ الآن على السياسة نفسها: لا كتابةَ بلا معدود.
-        if d.get("tests") is None:
-            print("⛔ تعذّر قياسُ العدد حيًّا (`tests: None`) ⇒ **لا كتابة**: لقطةٌ بلا عدّادٍ تُفسد "
-                  "العقودَ التي تقرأه. شغّل بمفسّرٍ فيه `pytest`. [الرمز ٢ = تعذّرُ القياس]")
-            sys.exit(2)
-        d["tests_by_env"] = {**(json.loads(SNAPSHOT.read_text(encoding="utf-8")).get("tests_by_env") or {}),
-                             CLAIMS_ENV: d.get("tests", _test_count())}
         SNAPSHOT.write_text(json.dumps(d, ensure_ascii=False, indent=1) + "\n",
                             encoding="utf-8")
         print(f"\nكُتبت اللقطة: {SNAPSHOT.relative_to(PROJ)} "
-              f"(مشتقّة من التقرير، لا مكتوبة بيد) · وقياسُ بيئة `{CLAIMS_ENV}` سُجِّل في المفاتيح.")
+              f"(مشتقّة من التقرير، لا مكتوبة بيد).")
     # **اللقطةُ شاهدٌ يُقابَل** (مراجعة ٥٠ · CI): كانت `check` تقابل الوثائقَ بالاشتقاق الحيّ وحده،
     # فلا ترى لقطةً متقادمة يقرأها CI ⇒ البوّابةُ تمرّ محليًّا وتسقط هناك.
     snap = snapshot_drift(d)
