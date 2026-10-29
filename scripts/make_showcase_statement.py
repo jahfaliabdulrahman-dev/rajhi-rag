@@ -12,8 +12,9 @@ scans, beside ``statement_sample.pdf``, which stays as it is for the controls th
 * a description cut at a page bottom **continues at the top of the next page**;
 * page 1 opens with the «الرصيد الافتتاحي» row (balance, no date, no amount) and a stamp
   near the footer; the last page is a **summary page** — balances with no dates;
-* the cumulative totals row and the «العملة» label in the footer, Arabic-Indic digits,
-  and no text layer (the sheets are rasterised, like the scans).
+* the cumulative totals row and the «العملة» label in the footer; Arabic-Indic digits with
+  a comma between thousands (shape «#,###.##», as measured on the real prints); and no text
+  layer (the sheets are rasterised, like the scans).
 
 **One declared difference:** the real date cell prints the Hijri date before the
 Gregorian one. Only the Gregorian run is printed here: no Hijri converter is among the
@@ -147,7 +148,11 @@ def paginate(rows: list[dict], pages: int, per_page: int = LINES_PER_PAGE) -> li
 
 
 def _amount(v: Decimal | None) -> str:
-    return ar(f"{v:.2f}") if v is not None else ""
+    """Printed like the real statement: Arabic-Indic digits, a comma between thousands and
+    a full stop before the halalas (shape «#,###.##»). Measured on the owner's word (2026-10-30):
+    3834 of 3859 values of a thousand or more in the 629-page reads carry the comma, every
+    year 2013–2024, and the glyphs were confirmed on two real page images."""
+    return ar(f"{v:,.2f}") if v is not None else ""
 
 
 def footer_totals(sheets: list[list[dict]]) -> list[dict]:

@@ -52,6 +52,22 @@ def test_the_footer_totals_are_cumulative_and_the_summary_closes_them():
     assert summary["اجمالي السحوبات"] == ms._amount(totals[-1]["debits"])
 
 
+def test_amounts_print_like_the_real_statement_and_read_back_exactly():
+    """The real prints put a comma between thousands (measured 2026-10-30: 3834 of 3859
+    values of a thousand or more), and the pipeline's own parser must read the printed
+    form back to the exact value — a form the reader cannot parse is not «closer»."""
+    from statement_qa.vlm_reader import _parse_amount
+
+    values = [r[k] for r in ROWS for k in ("debit", "credit", "balance") if r[k] is not None]
+    for t in ms.footer_totals(SHEETS):
+        values += [t[k] for k in ("debits", "credits", "balance")]
+    assert any(v >= 1000 for v in values), "لا قيمةَ بالآلاف ⇒ لا تُقاس الفاصلة"
+    for v in values:
+        printed = ms._amount(v)
+        assert ("," in printed) == (abs(v) >= 1000), f"فاصلةُ الآلاف في غير موضعها: {v}"
+        assert _parse_amount(printed) == v, f"المطبوعُ لا يُقرأ إلى قيمته: {v}"
+
+
 def test_no_printed_figure_equals_a_real_amount():
     """The PDF is images, so the amount guard cannot read it once rendered — the figures
     are screened here, from the generator, against the deny manifest."""
