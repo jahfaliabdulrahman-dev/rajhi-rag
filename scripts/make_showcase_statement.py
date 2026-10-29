@@ -21,8 +21,12 @@ Gregorian one. Only the Gregorian run is printed here: no Hijri converter is amo
 project's dependencies, and nothing downstream reads the Hijri run (the frozen prompt
 asks for ``greg`` alone, and ``ordering.parse_gregorian`` keeps the Gregorian run).
 
-Public-safe by construction: fixed seed, an invented bank with no logo, an invented
-customer and a masked account, «بيانات اصطناعية» on every page. Whether an invented
+Public-safe by construction: fixed seed, **no bank name and no logo**, an invented customer
+and a masked account, «بيانات اصطناعية» on every page. No bank is named on purpose (owner,
+2026-10-30): naming the supported bank would impersonate it, and an invented name is «another bank»
+to the app's bank gate (``bank_check.verdict_from_name``), which stops the read before it
+starts — measured on the first paid attempt. With no name the gate lets the read through,
+as it does for ``statement_sample.pdf``. Whether an invented
 amount happens to equal a real one is not decided here — the generator has no access
 to the evidence — but by ``tests/test_showcase_statement.py`` against the amount guard.
 
@@ -49,8 +53,7 @@ OUT = ROOT / "data" / "sample" / "statement_showcase.pdf"
 SEED = 2026
 
 MM = 25.4 / 100            # one template pixel (100 dpi) in millimetres
-BANK = "مصرف العرض التجريبي"
-SYNTHETIC = "بيانات اصطناعية للعرض — لا تمثّل عميلًا ولا مصرفًا حقيقيًّا"
+SYNTHETIC = "بيانات اصطناعية للعرض — ليست كشفًا حقيقيًّا لأيّ عميل"
 
 # --- the template's columns (row_bands.py, pixels at 100 dpi) as cells (x, w) in mm ---
 BALANCE = (24.5, 21.0)     # BALANCE_X 95–180: the running balance, the row's anchor
@@ -214,9 +217,6 @@ def _header(pdf: FPDF, page_no: int) -> None:
     pdf.set_font_size(8)
     pdf.set_xy(22, 12)
     pdf.cell(46, 7, "بداية ونهاية معاملات الصفحة", border=1, align="C")
-    pdf.set_font_size(13)
-    pdf.set_xy(110, 12)
-    pdf.cell(88, 7, BANK, align="R")
     pdf.set_font_size(15)
     pdf.set_xy(0, 24)
     pdf.cell(210, 8, "كشف حساب", align="C")
@@ -259,7 +259,7 @@ def _stamp(pdf: FPDF) -> None:
         pdf.cell(2 * r, 4, "مُدقَّق", align="C")
         pdf.set_font_size(6)
         pdf.set_xy(cx - r, cy + 0.5)
-        pdf.cell(2 * r, 4, "مصرف العرض", align="C")
+        pdf.cell(2 * r, 4, "تجريبي", align="C")
 
 
 def build_pdf(rows: list[dict], sheets: list[list[dict]], out: Path) -> None:

@@ -22,6 +22,16 @@ import make_showcase_statement as ms  # noqa: E402
 ROWS, SHEETS = ms.build()
 
 
+def test_the_statement_names_no_bank():
+    """**The boundary the owner set (2026-10-30, «احذف اسم البنك»):** no bank is named — Al Rajhi
+    would be impersonated, and an invented name is «another bank» to the app's gate, which
+    refused the first paid read before it started. Every word the sheets print lives in the
+    generator, so the generator's own text is what is held here."""
+    text = (ROOT / "scripts" / "make_showcase_statement.py").read_text(encoding="utf-8")
+    for word in ("مصرف", "بنك", "راجح", "rajhi"):
+        assert word not in text.lower(), f"اسمُ بنكٍ أو لفظُه عاد إلى المولّد: {word}"
+
+
 def test_the_balance_chain_is_exact():
     for prev, row in zip(ROWS, ROWS[1:]):
         assert row["balance"] == prev["balance"] + (row["credit"] or 0) - (row["debit"] or 0)
