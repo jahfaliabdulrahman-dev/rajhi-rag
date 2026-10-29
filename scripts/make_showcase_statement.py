@@ -63,9 +63,16 @@ DESC = (95.0, 62.5)        # DESC_X 330–712, kept left of the date band on eve
 DATE = (160.0, 20.5)       # DATE_X 625–712
 IBAN_Y = 84.0              # HEADER_Y 300–378: the IBAN line ends the header (measured ≈338–344)
 TABLE_TOP = 98.0           # below the header window (378 px = 96 mm): a row inside it reads as header
-FOOTER_Y = 248.0           # «العملة» label, 976–986 on every measured page
+# The footer stands apart from the table, as on the real form — measured 2026-10-30 on four real
+# pages (positions only): the last row ends at ≈912–916 px and the totals line with «العملة» sits
+# at ≈994–1008, about 20 mm lower, with nothing printed below it. The first layout put the totals
+# straight after the last row, and the paid read took them for a transaction on one page of four
+# (on the real reads: 5 totals-line rows in 5809, all on one page); and a stamp and a line BELOW
+# the footer hid it from page_gate's referee, which looks for the footer as the last printed line.
+TABLE_END = 232.0          # ≈912–916 px: where the last row ends on a full real page
+FOOTER_Y = 252.5           # ≈994–1004 px: the totals line and «العملة»
 LINE = 4.0                 # the print's lines nearly touch
-LINES_PER_PAGE = int((FOOTER_Y - 2.0 - TABLE_TOP) // LINE)
+LINES_PER_PAGE = int((TABLE_END - TABLE_TOP) // LINE)
 
 # Amounts carry cents on purpose, even a cash withdrawal: a round figure is the likeliest to
 # equal a real amount, and roundness is not evidence that a figure is synthetic (the amount
@@ -237,24 +244,25 @@ def _footer(pdf: FPDF, totals: dict) -> None:
     _cell(pdf, BALANCE, FOOTER_Y, _amount(totals["balance"]))
     _cell(pdf, CREDIT, FOOTER_Y, _amount(totals["credits"]))
     _cell(pdf, DEBIT, FOOTER_Y, _amount(totals["debits"]))
-    _cell(pdf, (100.0, 50.0), FOOTER_Y, "الإجمالي التراكمي حتى نهاية الصفحة", align="R")
+    # two lines in the description band, as measured on the real footer
+    _cell(pdf, (100.0, 50.0), FOOTER_Y, "الإجمالي التراكمي", align="R")
+    _cell(pdf, (100.0, 50.0), FOOTER_Y + 4.0, "حتى نهاية الصفحة", align="R")
     _cell(pdf, (150.0, 33.0), FOOTER_Y, "العملة: ريال سعودي", align="R")
-    pdf.set_font_size(7)
-    pdf.set_xy(0, 286)
-    pdf.cell(210, 4, SYNTHETIC, align="C")
+    # nothing below: the footer is the last printed line (the «بيانات اصطناعية» line is at the top)
 
 
 def _stamp(pdf: FPDF) -> None:
-    """The bank stamp near the footer of page 1 (measured on the real first page) —
-    below the table zone and away from the balance band, so it adds no anchor."""
-    cx, cy, r = 132.0, 271.0, 10.0
+    """The stamp near the footer of page 1 (measured on the real first page) — in the gap
+    above the footer and right of every column band (x > 181 mm), so it adds no anchor, joins
+    no description, and leaves the footer the last printed line."""
+    cx, cy, r = 196.0, 241.0, 9.0
     with pdf.rotation(-12, x=cx, y=cy):
         pdf.set_line_width(0.6)
         # x, y is the CENTRE in the pinned fpdf2 2.8.8 — measured from the drawn ink; its
         # docstring still says «upper-left of bounding box», and the ink is what counts.
         pdf.circle(x=cx, y=cy, radius=r)
         pdf.circle(x=cx, y=cy, radius=r - 1.5)
-        pdf.set_font_size(9)
+        pdf.set_font_size(8)
         pdf.set_xy(cx - r, cy - 4.5)
         pdf.cell(2 * r, 4, "مُدقَّق", align="C")
         pdf.set_font_size(6)

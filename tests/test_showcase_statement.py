@@ -99,7 +99,9 @@ def rendered(tmp_path_factory):
         ms.rasterize(raw, pdf)
         from pdf2image import convert_from_path
 
-        return pdf, convert_from_path(str(pdf), dpi=200, grayscale=True)
+        # the app's own rendering (app._render_pages: RENDER_DPI, colour) — a grayscale render
+        # hid the page-1 referee warning that the app raised on the first paid read
+        return pdf, convert_from_path(str(pdf), dpi=200)
     except Exception as exc:  # poppler missing (CI) — the check is local
         pytest.skip(f"لا مُصيّر PDF هنا: {type(exc).__name__}")
 
@@ -111,13 +113,35 @@ def test_the_template_reader_finds_the_layout(rendered):
     from statement_qa.row_bands import analyze_page
 
     _pdf, pages = rendered
-    found = [analyze_page(np.asarray(img), 200) for img in pages]
+    found = [analyze_page(np.asarray(img.convert("L")), 200) for img in pages]
     assert [p.kind for p in found] == ["first"] + ["transactions"] * (len(SHEETS) - 1) + ["summary"]
     for n, (sheet, page) in enumerate(zip(SHEETS, found), 1):
         assert len(page.bands) == sum(1 for i in sheet if not i.get("continued")), f"ص{n}: عددُ المراسي"
         assert bool(page.orphan) == any(i.get("continued") for i in sheet), f"ص{n}: التكملة"
         assert page.suspects() == [], f"ص{n}: مرساةٌ بلا تاريخ"
     assert len(found[-1].bands) == len(ms.summary_lines(ROWS)), "صفحةُ الملخّص"
+
+
+def test_the_footer_stands_apart_and_closes_the_page(rendered, tmp_path):
+    """**What the first paid read exposed (2026-10-30):** a totals row printed straight after
+    the last transaction was read as a transaction, and a stamp below the footer hid it from
+    the page gate's referee. On the real form the footer stands ≈20 mm below the table and is
+    the last printed line — so every page must keep that gap and give the gate its referee."""
+    np = pytest.importorskip("numpy")
+    import page_gate
+    from statement_qa.row_bands import analyze_page
+
+    _pdf, pages = rendered
+    modal = page_gate.modal_page_size([{"size": list(img.size)} for img in pages])  # as app._local_checks
+    for n, img in enumerate(pages, 1):
+        png = tmp_path / f"p{n}.png"
+        img.save(png)
+        reasons = page_gate.check_page(png, modal_size=modal).get("reasons", [])
+        assert page_gate.R_NO_REFEREE not in reasons, f"ص{n}: الحارسُ لا يجد سطرَ الإطار"
+        page = analyze_page(np.asarray(img.convert("L")), 200)
+        if page.bands:
+            gap_mm = (page.zone[1] - page.bands[-1].bottom) * 25.4 / 200
+            assert gap_mm >= 12, f"ص{n}: الإجماليُّ ملاصقٌ لآخر صفّ ({gap_mm:.1f} مم)"
 
 
 def test_the_statement_has_no_text_layer(rendered):
