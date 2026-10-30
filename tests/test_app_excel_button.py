@@ -276,17 +276,17 @@ def test_the_button_leaves_no_statement_copy_behind(tmp_path, monkeypatch) -> No
                          "verdict": (per_page.get(int(pg), {}) or {}).get("footer") or "unchecked"}
                for pg in per_page}
     printed = {int(pg): (per_page.get(int(pg)) or {}).get("page_no") for pg in per_page}
-    app.STATE.clear()
+    sess = app._new_session()
     # **وسطحُ العقد هو ما يقرؤه الزرّ (F2 · SPEC-96-4):** حُذف الرداءُ `or STATE["rows"]` فلا يُعاد إدخالُ
     # سطح العرض (٩ حقول) إلى الكاتب — وهو المسارُ الذي كان يرفع `IntegrityError`. وصفوفُ هذا الضابط من
     # مسار سطر الأوامر (بعقدٍ كامل)، **ووفاءُ مسار التطبيق نفسِه** يحرسه
     # `tests/test_contract_rows_conformance.py` (واختبارُ المدقّق يحرس الزرَّ والأوراق).
-    app.STATE.update({"rows": rows, "rows_contract": rows, "footers": footers,
+    sess.state.update({"rows": rows, "rows_contract": rows, "footers": footers,
                       "printed_pages": {k: v for k, v in printed.items() if isinstance(v, int)}})
     app_tmp = tmp_path / "tmpapp"          # **معزولٌ عن مجلّد العيّنة** (fixture له run/ خاصٌّ به)
     app_tmp.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(app_tmp))       # كلُّ المجلّدات المؤقّتة هنا
-    out, note = app.export_xlsx()
+    out, note = app.export_xlsx(sess)
     assert out and Path(out).exists(), f"الزرُّ لم يُنتج ملفًّا: {note}"
     assert Path(out).suffix == ".xlsx"
     assert not list(app_tmp.rglob("ledger.db")), "نسخةُ الدفتر بقيت في مجلّدٍ مؤقّت"

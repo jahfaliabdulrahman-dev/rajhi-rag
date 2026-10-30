@@ -45,7 +45,7 @@ def _page_of(image_path) -> int:
 
 
 @pytest.fixture
-def read_sample(monkeypatch):
+def read_sample(monkeypatch, sess):
     """يشغّل مسارَ القراءة في `app.py` على العيّنة المصطنعة — والنموذجُ وحده مستبدَل، والشبكةُ مغلقة."""
     import app
     from statement_qa.footer_oracle import FooterReading
@@ -78,45 +78,44 @@ def read_sample(monkeypatch):
     # **وفهرسُ البحث خارج سؤال الزرّ:** يُحمّل نموذجَ تضمينٍ قد يسأل الشبكة (أمسكه قفلُ الشبكة هنا)،
     # والزرُّ لا يقرؤه ⇒ يُستبدَل فلا يبقى في الضابط إلّا ما يبني الصفوفَ والملفّ.
     monkeypatch.setattr(app, "build_index", lambda _chunks: None)
-    app.STATE.clear()
-    app._process_pdf_locked(str(SAMPLE), progress=lambda *_a, **_k: None)
+    app._process_pdf_locked(sess, str(SAMPLE), progress=lambda *_a, **_k: None)
     yield app
-    app.STATE.clear()
 
 
-def test_the_read_path_holds_the_rows_the_app_builds(read_sample) -> None:
+def test_the_read_path_holds_the_rows_the_app_builds(read_sample, sess) -> None:
     """**المُدخَلُ صفوفُ التطبيق لا صفوفُ تشغيلة:** القراءةُ أنتجت حالةً، وصفوفُها من كود `app.py`."""
-    rows = read_sample.STATE.get("rows") or []
+    rows = sess.state.get("rows") or []
     assert len(rows) == sum(len(v) for v in _ROWS.values()), f"عددُ الصفوف: {len(rows)}"
     assert {r.get("page") for r in rows} == {1, 2}
 
 
-def test_the_download_button_builds_a_workbook_from_the_app_state(read_sample) -> None:
+def test_the_download_button_builds_a_workbook_from_the_app_state(read_sample, sess) -> None:
     """**الدعوى الحاكمة (R96-1):** زرُّ التنزيل على حالة التطبيق ⇒ ملفٌّ بأوراقه السبع، بلا «None»."""
     from openpyxl import load_workbook
 
-    path, _note = read_sample.export_xlsx()
+    path, _note = read_sample.export_xlsx(sess)
     assert path, "الزرُّ لم يُنتج ملفًّا على حالة التطبيق"
     wb = load_workbook(path)
     assert len(wb.sheetnames) == 7, wb.sheetnames
     moves = wb["الحركات"]
-    assert moves.max_row - 1 == len(read_sample.STATE["rows"]), "صفوفُ الحركات لا تساوي صفوفَ الحالة"
+    assert moves.max_row - 1 == len(sess.state["rows"]), "صفوفُ الحركات لا تساوي صفوفَ الحالة"
     for row in wb["كيف تُقرأ هذه الأوراق"].iter_rows(values_only=True):
         assert "None" not in " ".join(str(v) for v in row if v is not None), row
 
 
-def test_the_ledger_buttons_build_refresh_and_answer(read_sample, tmp_path, monkeypatch) -> None:
+def test_the_ledger_buttons_build_refresh_and_answer(read_sample, sess, tmp_path,
+                                                     monkeypatch) -> None:
     """**زرّا الدفتر (R98-1 · مراجعة ٩٨ · وعُدِّلا R130):** «أعد بناء الدفتر» ثمّ «حدّث» ثمّ سؤالٌ ثابت.
 
     سقطت الثلاثةُ في كلّ ضغطةٍ منذ 10-04 (`_ledger_ui.pages_of` لا وجودَ له)، ولم يضغطها اختبارٌ عبر
     التطبيق. **والدفترُ يُكتب في مجلّد بيانات المستخدم** (`DATA_HOME`)، فتُستبدل هنا بمجلّدٍ مؤقّت.
     """
     app = read_sample
-    monkeypatch.setattr(app, "DATA_HOME", tmp_path)
-    msg, status = app._ledger_build_click()
+    monkeypatch.setattr(sess, "home", tmp_path)
+    msg, status = app._ledger_build_click(sess)
     assert msg and status, "زرُّ «أعد بناء الدفتر» لم يُعِد رسالةً ولا حالة"
     assert list(tmp_path.rglob("*.sqlite")), f"لم يُكتب دفتر: {msg}"
-    assert app._ledger_refresh_click(), "زرُّ «حدّث» لم يُعِد حالة"
-    df, note = app._ledger_ask_click("تغطيةُ الكشف (صفوف · صفحات · بلا إثبات)", "")
+    assert app._ledger_refresh_click(sess), "زرُّ «حدّث» لم يُعِد حالة"
+    df, note = app._ledger_ask_click("تغطيةُ الكشف (صفوف · صفحات · بلا إثبات)", "", sess)
     assert note and "تعذّر" not in note, note[:200]
     assert not df.empty and "صفوف" in list(df.iloc[:, 0]), df

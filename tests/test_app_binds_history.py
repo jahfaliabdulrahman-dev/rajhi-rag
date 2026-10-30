@@ -61,10 +61,16 @@ def test_the_current_question_is_not_fed_back_as_history() -> None:
     assert '{"role": "user", "content": q}' in prep, "تغيّر موضعُ إضافة السؤال — راجع prepare_ask"
 
 
+def _is_session_state(node) -> bool:
+    """`sess.state` — حالةُ الجلسة (المرحلة ١) التي حلّت محلّ `STATE` العامّة؛ والضابطان يقرآنها هي."""
+    return (isinstance(node, ast.Attribute) and node.attr == "state"
+            and getattr(node.value, "id", "") == "sess")
+
+
 def test_the_scope_never_raises_on_a_missing_key() -> None:
-    """**النطاقُ لا يُسقط الجواب:** لا اشتراكَ (`STATE["x"]`) داخل `_scope_text` — كلُّها `.get`."""
+    """**النطاقُ لا يُسقط الجواب:** لا اشتراكَ (`sess.state["x"]`) داخل `_scope_text` — كلُّها `.get`."""
     bad = [n for n in ast.walk(_fn("_scope_text"))
-           if isinstance(n, ast.Subscript) and getattr(n.value, "id", "") == "STATE"]
+           if isinstance(n, ast.Subscript) and _is_session_state(n.value)]
     assert not bad, f"قراءةٌ بلا حماية في النطاق (سطر {bad[0].lineno})"
 
 
@@ -76,7 +82,7 @@ def test_the_memory_key_is_the_statement_fingerprint() -> None:
     """
     read = APP.read_text(encoding="utf-8")
     ask = ast.get_source_segment(read, _fn("ask_followup")) or ""
-    assert "key = _ledger_key()" in ask and "thread_id=key" in ask, \
+    assert "key = _ledger_key(sess)" in ask and "thread_id=key" in ask, \
         "المعرّفُ ليس بصمةَ الكشف — والذاكرةُ تلتصق بغير صاحبها"
     key = ast.get_source_segment(read, _fn("_ledger_key")) or ""
     assert "statement_key(" in key, "مفتاحُ البصمة انقطع عن مصدره (`statement_key`)"
@@ -119,6 +125,6 @@ def test_the_reader_records_the_scope_the_prompt_reads() -> None:
     `_scope_text`. (والقياسُ السلوكيُّ على حالة القارئ في `tests/test_intake.py`.)"""
     body = _fn("_process_pdf_locked")
     written = {n.slice.value for n in ast.walk(body)
-               if isinstance(n, ast.Subscript) and getattr(n.value, "id", "") == "STATE"
+               if isinstance(n, ast.Subscript) and _is_session_state(n.value)
                and isinstance(n.ctx, ast.Store) and isinstance(n.slice, ast.Constant)}
     assert {"n_pages", "source_name"} <= written, f"مفتاحٌ لا يُكتب: {sorted(map(str, written))}"

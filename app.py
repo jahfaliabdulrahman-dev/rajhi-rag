@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import tempfile
 from decimal import Decimal
 from pathlib import Path
@@ -80,6 +81,7 @@ from statement_qa.intake import (
 )
 from statement_qa.job_lock import JobBusyError, job_lock
 from statement_qa import ledger as _ledger
+from statement_qa.session import Session
 from statement_qa import ledger_ui as _ledger_ui
 from statement_qa.row_bands import analyze_page
 from statement_qa.ordering import (
@@ -87,8 +89,6 @@ from statement_qa.ordering import (
     summarize_ar as summarize_order_ar,
     summarize_footer_order, summarize_page_numbers,
 )
-
-STATE = {}
 
 # **بياناتُ المستخدم خارج المستودع (R130 · قرارُ المالك):** الدفترُ والمحادثةُ والملفّاتُ في مجلّد
 # بيانات المستخدم وحده؛ والمستودعُ يُقرأ ويُنشر ولا يحمل بياناتِ كشف. والمسارُ يُقرأ من
@@ -103,6 +103,28 @@ LOCK_PATH = DATA_HOME / "job.lock"
 # **والافتراضُ هو العامّ (فشلٌ مُغلَق):** السطحُ المحلّيُّ يُعلَن صراحةً بـ`RAJHI_SURFACE=local` في
 # مشغّل المالك؛ فـ Space نسي المتغيّرَ يعمل عامًّا (يطلب مفتاحَ الزائر)، ولا يعمل محلّيًّا بمفتاح التطبيق.
 SURFACE = "local" if os.environ.get("RAJHI_SURFACE", "").strip().lower() == "local" else "public"
+
+
+def _new_session() -> Session:
+    """جلسةٌ جديدةٌ بحسب السطح: العامّ مجلّدٌ مؤقّتٌ خاصٌّ بها، والمحلّيُّ مجلّدُ بيانات المالك."""
+    return Session.local(DATA_HOME) if SURFACE == "local" else Session.public()
+
+
+def _start_session():
+    """`demo.load`: لكلّ زائرٍ جلستُه — تُكتب في `gr.State` فتعرفها Gradio وتحذفها بانتهاء الجلسة."""
+    sess = _new_session()
+    return sess, _ledger_ui.status_text(sess.home, None, 0)
+
+
+def _end_session(sess) -> None:
+    """`delete_callback` لحالة الجلسة: تناديه Gradio حين تحذف حالةَ الزائر (انتهاءُ جلسته)."""
+    if isinstance(sess, Session):
+        sess.close()
+
+
+def _session(sess) -> Session:
+    """جلسةُ الحدث — أو جلسةٌ جديدة إن لم تُنشئها الصفحة (نداءٌ مباشرٌ بلا `load`)، لا جلسةَ غيره أبدًا."""
+    return sess if isinstance(sess, Session) and not sess.closed else _new_session()
 
 
 def _read_key(api_key: str | None) -> str | None:
@@ -369,20 +391,20 @@ def _date_cell(r: dict) -> str:
     return render_date_cell(r)
 
 
-def _row_record(no: int, r: dict) -> dict:
+def _row_record(no: int, r: dict, verdicts: dict) -> dict:
     """Delegates to the tested pure implementation (statement_qa.render).
 
     Callers keep the same shape; the logic that decides the columns — including
     the new «التحقق» column, which is the page's oracle verdict — lives in the
     module the tests can reach (audit P1-5, P3-4).
     """
-    return render_row_record(no, r, STATE.get("verdicts") or {})
+    return render_row_record(no, r, verdicts or {})
 
 
-def _rows_df(rows: list[dict]) -> pd.DataFrame:
+def _rows_df(rows: list[dict], verdicts: dict) -> pd.DataFrame:
     """جدولُ العرض: رقمُ الصفّ من `seq` (رقمُ العقد STATEMENT-WIDE) لا من ترتيب العرض (R130) —
     وترقيمُ العرض بالتسلسل كان يُزيح كلَّ اقتباسٍ بعد أوّل صفٍّ بلا رصيد."""
-    return pd.DataFrame([_row_record(int(r.get("seq") or i), r)
+    return pd.DataFrame([_row_record(int(r.get("seq") or i), r, verdicts)
                          for i, r in enumerate(rows, start=1)])
 
 
@@ -400,7 +422,7 @@ FILTER_COLUMNS: tuple[str, ...] = ("كل الأعمدة", "#", "الصفحة", "
 
 
 def filter_rows(column: str = "", value: str = "",
-                date_from: str = "", date_to: str = "") -> pd.DataFrame:
+                date_from: str = "", date_to: str = "", sess=None) -> pd.DataFrame:
     """فلترةُ الجدول **بعمودٍ مختار** (البند ٧) وبمدى تاريخٍ من/إلى (البند ٨) — خادميًّا.
 
     **العِلّة:** كان صندوقًا واحدًا يبحث في كلّ الأعمدة معًا، فطلبُ «النوع = سحب» يطابق أيضًا
@@ -410,9 +432,11 @@ def filter_rows(column: str = "", value: str = "",
     **وحدُّ التاريخ المُعلَن:** صفٌّ بلا تاريخٍ مقروء يُستبعَد حين يُحدَّد مدى (لا يُخمَّن له تاريخ).
     **والجدولُ يُعاد مبنيًّا من النتيجة** فلا يُنسخ ما لم يُعرض (عطبُ النسخ الذي أُغلق قبل).
     """
-    rows = STATE.get("rows") or []
+    state = sess.state if isinstance(sess, Session) else {}
+    rows = state.get("rows") or []
+    verdicts = state.get("verdicts") or {}
     # **والرقمُ من `seq`** كسطح الجدول نفسه (R130) — وإلا اختلف ما يُفلتر عمّا يُعرض رقمُه.
-    records = [(int(r.get("seq") or i), _row_record(int(r.get("seq") or i), r))
+    records = [(int(r.get("seq") or i), _row_record(int(r.get("seq") or i), r, verdicts))
                for i, r in enumerate(rows, start=1)]
     col = (column or "كل الأعمدة").strip()
     q = (value or "").strip()
@@ -443,7 +467,7 @@ def filter_rows(column: str = "", value: str = "",
         out.append(rec)
     # **والأعمدةُ تبقى حين لا مطابقة** (إصلاحُ مقعد المعيار P3): إطارٌ بلا أعمدة يُظهر جدولًا
     # بلا رؤوس فيُقرأ عطبًا، لا «صفرَ نتيجة».
-    columns = list(_row_record(1, rows[0]).keys()) if rows else []
+    columns = list(_row_record(1, rows[0], verdicts).keys()) if rows else []
     return pd.DataFrame(out, columns=columns or None)
 
 
@@ -498,9 +522,18 @@ class _PageImages(list):
             self.tmp = None
 
 
-def _cache_path(component, path) -> str:
-    """مخرجٌ في حافظة Gradio (مكوّنُ المكتبة) قبل حذف مجلّد العمل — تديرها `delete_cache` لا يدنا."""
-    return component.move_resource_to_block_cache(str(path))
+def _cache_path(sess, component, path) -> str:
+    """مخرجٌ في حافظة Gradio (مكوّنُ المكتبة) قبل حذف مجلّد العمل — **نسخةٌ تخصّ الجلسة وتُحذف معها.**
+
+    **ولماذا يُنسخ باسمٍ يحمل رمزَ الجلسة (المرحلة ١ · الشرط ٣):** الحافظةُ تعنون الملفَّ **بمحتواه واسمه**
+    (`processing_utils.save_file_to_cache`: مجلّدٌ ببصمة المحتوى ثمّ الاسم) ⇒ زائران قرآ الكشفَ نفسَه
+    كانا يتشاركان صورةَ الصفحة نفسَها، فيمحو حذفُ أحدهما صورةَ الآخر (قِيس في
+    `tests/test_public_session.py`). فلكلّ جلسةٍ نسختُها، وتُسجَّل فيها فتُحذف معها وحدَها.
+    """
+    src = Path(path)
+    own = src.with_name(f"{src.stem}-{sess.token}{src.suffix}")
+    shutil.copyfile(src, own)
+    return sess.keep(component.move_resource_to_block_cache(str(own)))
 
 
 def _pages_to_pngs(pdf_path: str, dpi: int = RENDER_DPI):
@@ -616,7 +649,7 @@ def _desc_pass(order: list[int], pages: list[str], all_rows: list[dict],
 
 
 def process_pdf(pdf_path: str, skip_rejected: bool = False, api_key: str = "",
-                progress=gr.Progress()):
+                sess=None, progress=gr.Progress()):
     """Tab 1 handler — single-job lock → read all pages → chain-audit →
     footer oracle + era/order checks → chunks+index → **قاعدةُ الكشف تُكتب تلقائيًّا**.
 
@@ -634,10 +667,16 @@ def process_pdf(pdf_path: str, skip_rejected: bool = False, api_key: str = "",
     """
     if not pdf_path:
         raise gr.Error("ارفع ملف PDF أولاً ثم اضغط «قراءة الكشف».")
+    sess = _session(sess)
+    # **والملفُّ المرفوعُ لا يُحذف مع الجلسة — حدٌّ مُعلَن:** مسارُ الرفع في Gradio ببصمة المحتوى
+    # (`route_utils.upload_fn`) ⇒ زائران رفعا الكشفَ نفسَه يتشاركان نسخةً واحدة، وحذفُها مع جلسة
+    # أحدهما يمحوها من تحت الآخر. فتحذفها المكتبةُ بعمرها (`delete_cache=(600, 600)`: عشرُ دقائق،
+    # تُفحص كلَّ عشر) — وهو ما يُقال في «قاعدة الخصوصية».
     try:
         with job_lock(LOCK_PATH):
-            return _process_pdf_locked(pdf_path, progress, skip_rejected=bool(skip_rejected),
-                                       api_key=api_key)
+            return (*_process_pdf_locked(sess, pdf_path, progress,
+                                         skip_rejected=bool(skip_rejected), api_key=api_key),
+                    sess)
     except JobBusyError:
         raise gr.Error("يوجد تشغيل جارٍ الآن (نافذة أو طلب آخر) — "
                        "انتظر انتهاءه ثم أعد المحاولة.")
@@ -682,9 +721,9 @@ def _view_rows_from_contract(contract: list[dict]) -> list[dict]:
     return _view_rows([{**r, "page": r.get("page", r.get("pg"))} for r in contract])
 
 
-def _ledger_path_for(key: str | None = None) -> Path:
+def _ledger_path_for(sess, key: str | None = None) -> Path:
     """ملفُّ قاعدةِ الكشف الحاليّ — **في مجلّد بيانات المستخدم** لا في المستودع."""
-    return _ledger_ui.ledger_file(DATA_HOME, key or _ledger_key())
+    return _ledger_ui.ledger_file(sess.home, key or _ledger_key(sess))
 
 
 def _file_sha256(path) -> str:
@@ -696,7 +735,7 @@ def _file_sha256(path) -> str:
     return _ledger.source_sha256(path)
 
 
-def _ledger_write() -> dict:
+def _ledger_write(sess) -> dict:
     """**القراءةُ تكتب القاعدةَ عند انتهائها (R130 · الخيار ١)** — لا زرٍّ منفصل.
 
     تُكتب صفوفُ العقد (٢٢ عمودًا) وأحكامُ الصفحات وأرقامُ تذييلها المطبوعة. والنَّصُّ على صفوف
@@ -707,26 +746,26 @@ def _ledger_write() -> dict:
     وحدَها، فتَبقى الشاشةُ والقاعدةُ والأدواتُ على الترقيم نفسه. والصفحةُ المتعثّرة **تُسمّى** في
     سطر الحالة، ولا تُخدَم صفوفٌ من قراءةٍ سابقة (لا رقمَ لصفّين).
     """
-    rows = _ledger_rows()
+    rows = _ledger_rows(sess)
     if not rows:
         return {"ok": False, "message": "لا صفوفَ لكتابة قاعدةٍ منها."}
-    old_key = STATE.get("ledger_key")
-    if not STATE.get("source_sha"):
+    old_key = sess.state.get("ledger_key")
+    if not sess.state.get("source_sha"):
         return {"ok": False, "message": "لا هويّةَ للمصدر — لا تُكتب قاعدةٌ بلا بايتاتِ الكشف."}
-    key = _ledger.statement_key(STATE["source_sha"])
-    path = _ledger_ui.ledger_file(DATA_HOME, key)
+    key = _ledger.statement_key(sess.state["source_sha"])
+    path = _ledger_ui.ledger_file(sess.home, key)
     try:
         conn = _ledger.open_ledger(path)
         try:
-            stats = _ledger.ingest(conn, rows, _ledger.pages_from_state(rows, STATE.get("footers") or {}),
-                                   n_pages=STATE.get("n_pages"))
+            stats = _ledger.ingest(conn, rows, _ledger.pages_from_state(rows, sess.state.get("footers") or {}),
+                                   n_pages=sess.state.get("n_pages"))
         finally:
             conn.close()
     except _ledger.LedgerUnavailable as e:
         return {"ok": False, "key": key, "path": str(path), "message": f"تعذّرت كتابةُ القاعدة — {e}"}
-    STATE["ledger_key"] = key
+    sess.state["ledger_key"] = key
     try:
-        _ledger_ui.active_set(DATA_HOME, key, STATE.get("source_name") or "")
+        _ledger_ui.active_set(sess.home, key, sess.state.get("source_name") or "")
     except OSError as e:                       # المؤشّرُ فشل وحدَه — القراءةُ والقاعدةُ سليمتان
         return {"ok": False, "key": key, "path": str(path), "stats": stats,
                 "message": f"كُتبت القاعدةُ ({stats['rows']} صفًّا) لكن تعذّر تثبيتُ المؤشّر — {e}"}
@@ -736,7 +775,7 @@ def _ledger_write() -> dict:
         try:
             from statement_qa.qa import reset_memory   # noqa: PLC0415 — يفتح الحافظةَ عند الحاجة وحدها
 
-            reset_memory(_ledger_ui.ledger_file(DATA_HOME, old_key))
+            reset_memory(_ledger_ui.ledger_file(sess.home, old_key))
         except Exception:                      # noqa: BLE001 — لا يُسقط كتابةً تمّت
             pass
     note = (f"قاعدةُ الكشف: **{stats['rows']}** صفًّا · **{stats['pages']}** صفحة · "
@@ -744,15 +783,15 @@ def _ledger_write() -> dict:
     return {"ok": True, "key": key, "path": str(path), "stats": stats, "message": note}
 
 
-def _load_from_ledger(key: str | None = None) -> bool:
+def _load_from_ledger(sess, key: str | None = None) -> bool:
     """يُعيد بناء أسطح السؤال من **القاعدة وحدها** — لتبقى بعد إغلاق التطبيق (قبولُ R130).
 
     يُنادى حين لا `store` في الحالة (بعد إعادة تشغيل) وقبل أيّ سؤال: الصفوفُ من `rows_verified`،
     والتذييلاتُ من `pages`، والقطعُ/الفهرسُ يُعاد بناؤهما من الصفوف نفسِها (بلا نموذجٍ مدفوع).
     وما لا قاعدةَ له يُعلَن بلا اختراع.
     """
-    key = key or _ledger_key()
-    path = _ledger_ui.ledger_file(DATA_HOME, key)
+    key = key or _ledger_key(sess)
+    path = _ledger_ui.ledger_file(sess.home, key)
     try:
         conn = _ledger.read_ledger(path)
     except _ledger.LedgerUnavailable:
@@ -765,22 +804,22 @@ def _load_from_ledger(key: str | None = None) -> bool:
     if not contract:
         return False
     view = _view_rows_from_contract(contract)
-    STATE["rows"] = view
-    STATE["rows_contract"] = contract
-    STATE["footers"] = footers
+    sess.state["rows"] = view
+    sess.state["rows_contract"] = contract
+    sess.state["footers"] = footers
     # **وأحكامُ الصفحات تُستعاد من القاعدة** (يقرؤها عمودُ «التحقق» في الجدول) — لا تُترك فارغة.
-    STATE["verdicts"] = {int(pg): (f or {}).get("verdict") or "unchecked"
+    sess.state["verdicts"] = {int(pg): (f or {}).get("verdict") or "unchecked"
                          for pg, f in footers.items()}
-    STATE["printed_pages"] = {int(pg): (f or {}).get("printed_page")
+    sess.state["printed_pages"] = {int(pg): (f or {}).get("printed_page")
                               for pg, f in footers.items()}
     # **وأرقامُ الصفوف من العقد:** `_view_rows` تُرقّم بـ`seq` (موضعَ الصفّ في العقد) فيتّفق الاقتباسُ
     # مع الشاشة، ولا حاجةَ لترقيمٍ ثانٍ. **وعددُ الصفحات من جدول `pages`** لا من صفوف العرض: الصفحةُ
     # التي لا صفَّ لها (غلاف/ملخّص) كانت تُنقص العدّ ⇒ فيُقال «ينتهي عند 626» في كشفٍ من 629 (R115-7).
-    STATE["chunks"] = chunk_rows([{**r, "row_no": int(r.get("seq") or i + 1)}
+    sess.state["chunks"] = chunk_rows([{**r, "row_no": int(r.get("seq") or i + 1)}
                                   for i, r in enumerate(view)])
-    STATE["store"] = build_index(STATE["chunks"])
-    STATE["n_pages"] = len(footers) if footers else len({r["page"] for r in view})
-    STATE["ledger_key"] = key
+    sess.state["store"] = build_index(sess.state["chunks"])
+    sess.state["n_pages"] = len(footers) if footers else len({r["page"] for r in view})
+    sess.state["ledger_key"] = key
     return True
 
 
@@ -835,7 +874,7 @@ def _footer_delta_nonzero(now, prev) -> bool:
     return False
 
 
-def _close_pages(pages) -> list[str]:
+def _close_pages(sess, pages) -> list[str]:
     """ينسخ صورَ المعرض إلى حافظة Gradio **ثمّ يُغلق** مجلّدَ الصور المؤقّت (R130-2).
 
     والنسخُ قبل الإغلاق شرطٌ: `move_resource_to_block_cache` تقرأ الملفّ الآن؛ وبعده يصير المجلّدُ
@@ -844,7 +883,7 @@ def _close_pages(pages) -> list[str]:
     out = []
     for p in pages:
         try:
-            out.append(_cache_path(gallery, p))
+            out.append(_cache_path(sess, gallery, p))
         except Exception:                    # noqa: BLE001 — صورةٌ تعذّرت لا تُسقط القراءة
             continue                          # **ولا يُعاد مسارٌ داخل مجلّدٍ سيُحذف** (كان صورةً مكسورة صامتة)
     close = getattr(pages, "close", None)
@@ -853,7 +892,7 @@ def _close_pages(pages) -> list[str]:
     return out
 
 
-def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False,
+def _process_pdf_locked(sess, pdf_path: str, progress, skip_rejected: bool = False,
                         api_key: str | None = None):
     # **مفتاحُ هذه القراءة يُحسم أوّلًا (المرحلة ١):** على السطح العامّ بلا مفتاح زائرٍ لا يقع شيء —
     # لا مسحَ لمحادثةٍ ولا تحويلَ صفحاتٍ ولا نداء — والمفتاحُ يُمرَّر إلى كلّ نداءٍ مدفوعٍ أدناه.
@@ -864,13 +903,13 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False,
     # رجوعٌ إلى قديم) **بالترتيب لا بالتُّخمَّن**.
     from statement_qa.qa import clear_conversation
 
-    old_key = _ledger_key()
-    old_path = _ledger_ui.ledger_file(DATA_HOME, old_key) if old_key else None
+    old_key = _ledger_key(sess)
+    old_path = _ledger_ui.ledger_file(sess.home, old_key) if old_key else None
     clear_conversation(old_key, memory_path=old_path if old_path and old_path.exists() else None)
     # **هويّةُ الكشف من الملفّ نفسه (R131-2):** تُجزّأ بايتاتُ الـPDF مرّةً هنا، فيُشتقّ منها مفتاحُ
     # القاعدة — كشفان بصيغةٍ وطولٍ واحدين لا يتصادمان بعد اليوم. وإن غاب الملفُ (مسارٌ وهميّ في
     # ضابط) يُترك فارغًا فتعمل البصمةُ الاحتياطيّة — والحدُّ مُعلَن: هويّةٌ بلا محتوى ليست هويّة.
-    STATE["source_sha"] = (_file_sha256(pdf_path)
+    sess.state["source_sha"] = (_file_sha256(pdf_path)
                            if Path(pdf_path).exists() else None)
     pages = _pages_to_pngs(pdf_path)
 
@@ -885,11 +924,11 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False,
     decision = plan(intake, bool(skip_rejected))
     intake_note = _intake_outcome(intake, decision)
     if decision["blocked"]:
-        STATE.clear()   # لا تُجيب الأسئلةُ عن ملفٍّ سابقٍ بعد رفعِ ملفٍّ لم يُقرأ
-        STATE["intake"] = {"gate": intake.gate, "kinds": intake.kinds, **decision}
-        return (blocked_message_ar(intake), _rows_df([]), "", _close_pages(pages),
+        sess.state.clear()   # لا تُجيب الأسئلةُ عن ملفٍّ سابقٍ بعد رفعِ ملفٍّ لم يُقرأ
+        sess.state["intake"] = {"gate": intake.gate, "kinds": intake.kinds, **decision}
+        return (blocked_message_ar(intake), _rows_df([], {}), "", _close_pages(sess, pages),
                 "كل الأعمدة", "", "", "",
-                _ledger_ui.status_text(DATA_HOME, None, 0), intake_note)
+                _ledger_ui.status_text(sess.home, None, 0), intake_note)
 
     # «بنك غير مدعوم» جملة واضحة بدل فشل غامض — فحص واحد للصفحة الأولى،
     # ويفشل مفتوحاً: أي التباس يمرّر التشغيل (لا قرار على تخمين).
@@ -971,7 +1010,7 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False,
                             f"{fail_streak} إخفاقات متتالية في قراءة الإطارات (انقطاع المزوّد؟).")
             break
     if abort_reason:
-        STATE.clear()   # لا تُجيب الأسئلةُ عن ملفٍّ سابق
+        sess.state.clear()   # لا تُجيب الأسئلةُ عن ملفٍّ سابق
         raise gr.Error("⛔ " + abort_reason + " لم يُقرأ صفٌّ واحد.")
 
     # ٢) الصفوفُ بترتيب الملف — والترتيبُ يُقرَّر بعدها، لأن شاهدَيه الثانيين (الرقمُ المطبوع والتجاورُ
@@ -1121,7 +1160,7 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False,
              "reread": any(x.get("page") == pg for x in page_rereads)},
             page_no=page_no)
         rows_contract += page_contract
-        # **والموضعُ في العقد يُمرَّر** فيحمل صفُّ العرض رقمَه STATEMENT-WIDE كما تحمله الأدوات (R130).
+        # **والموضعُ في العقد يُمرَّر** فيحمل صفُّ العرض رقمَه sess.stateMENT-WIDE كما تحمله الأدوات (R130).
         all_rows += _view_rows(page_contract, offset=len(rows_contract) - len(page_contract))
         # **و`prev_closing` كما كان:** آخرُ رصيدٍ مقروءٍ في الصفحة يقود سلسلةَ التالية — كان يُحدَّث
         # صفًّا صفًّا في حلقة العرض، ويُقرأ الآن من الصفوف نفسِها فلا يُفقد أثرُه.
@@ -1139,17 +1178,21 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False,
                           lambda: usage["cost"] > MAX_UI_COST_USD, api_key=key)
     # والتصنيفُ بعد البيان الأصحّ.
     annotate_types(all_rows)
-    rows_view = _rows_df(all_rows)
+    # **وأحكامُ الصفحات تُحسب قبل الجدول (المرحلة ١):** كان الجدولُ يُبنى قبل كتابة أحكام هذه القراءة،
+    # فيقرأ عمودُ «التحقق» أحكامَ ما في الحالة قبلها (قراءةٍ سابقةٍ أو لا شيء) — ظهر حين صار الحكمُ
+    # وسيطًا صريحًا بدل قراءةٍ من الحالة العامّة. والأحكامُ لا تتغيّر بعد هذا الموضع (`footer_checks` تمّت).
+    verdicts = verdicts_from_checks(footer_checks)
+    rows_view = _rows_df(all_rows, verdicts)
 
     progress(0.95, "بناء الفهرس…")
-    STATE["rows"] = all_rows
+    sess.state["rows"] = all_rows
     # **وسطحُ العقد يُكتب باسمه (لا يُخلط بسطح العرض):** يقرؤه زرُّ التنزيل وحده، فيبقى التحويلُ
     # في الدفتر على عقدٍ كامل — وهذا ما كان غائبًا فسقط الزرُّ.
-    STATE["rows_contract"] = rows_contract
+    sess.state["rows_contract"] = rows_contract
     # **نطاقُ الكشف يُكتب حيث يُعرَف (R93-1):** `_scope_text` يقرأ `n_pages` و`source_name`، ولم يكن
     # يكتبهما أحد ⇒ كان يقول للنموذج «0 صفحة» في **كلّ** سؤال، وهو نصٌّ كاذبٌ يبلغ التلقين. فيُكتبان
     # هنا من الملفّ المقروء نفسِه — لا من افتراضٍ، ولا من عددٍ ثابت.
-    STATE["n_pages"] = len(pages)
+    sess.state["n_pages"] = len(pages)
     # **ولا سطرَ ولا مُساعدَ من الأداة المحذوفة (أغلقه مقعدُ المواصفة · SPEC-96-2):** كان هنا شرحٌ
     # بنصّ الحاضر («يحتاجها زرُّ التنزيل…») و`_page_no` الجاهزةُ لإعادة شبكها — بعد أن حُذف مفتاحُ
     # `read_pages` ومَن يناديه. فالسطرُ الذي يصف آليةً محذوفةً كنصّ حاضر يُعيد بناءَها، والمُساعدُ الذي
@@ -1158,34 +1201,34 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False,
     # يُبنى من عدّ الصفحات المقروءة ليُمرَّر إلى ناقل الإكسل، وقِيس أنّه **لا يُحرّك الخليّةَ المُسلَّمة**
     # (٤ = ٤ = ٤، وهو عددُ ملفّ سطر الأوامر) — فالعدُّ من أحكام الدفتر، **وأخطرُ منه** أنّه كان يُلصق
     # وسمَ «لا حركات» على ما يُسمّيه التطبيقُ نفسُه «قراءةٌ فاشلة». فبقي المعنى في مصدره الواحد.
-    STATE["source_name"] = Path(pdf_path).name
+    sess.state["source_name"] = Path(pdf_path).name
     # **وخريطةُ الأرقام المطبوعة (R93-4):** يُمرّرها زرُّ التنزيل إلى ناقل الإكسل، فيُكتب رقمُ
     # الصفحة المطبوع من **مصدره** (قراءةُ الورقة) لا من خريطةٍ محلّيّةٍ ولا `None`.
-    STATE["printed_pages"] = dict(page_no_by_pg)
-    STATE["chunks"] = chunk_rows(
+    sess.state["printed_pages"] = dict(page_no_by_pg)
+    sess.state["chunks"] = chunk_rows(
         [{**r, "row_no": int(r.get("seq") or i + 1)} for i, r in enumerate(all_rows, start=1)])
-    STATE["store"] = build_index(STATE["chunks"])
+    sess.state["store"] = build_index(sess.state["chunks"])
     # **التذييلاتُ المطبوعةُ بصيغةٍ واحدة (R77):** تُبنى من القراءات والأحكام في موضعٍ واحد —
     # `statement_qa.page_footers` — فيرثها مسارُ القراءة (هنا) ومسارُ القياس معًا، ولا نسخةَ ثانيةَ
     # تزيغ بصمت. الأرقامُ كما ظهرت في الورقة، وحكمُها معها.
     printed_footers = printed_footers_from(footers, footer_checks, money=_money)
-    STATE["footer_checks"] = footer_checks
-    STATE["footers"] = printed_footers
+    sess.state["footer_checks"] = footer_checks
+    sess.state["footers"] = printed_footers
     # أحكام الصفحة بلغة واحدة تُقرأ في كل سطح: الجدول والتصدير والأسئلة
-    STATE["verdicts"] = verdicts_from_checks(footer_checks)
-    STATE["usage"] = usage
-    STATE["boundary_recoveries"] = recoveries
-    STATE["page_rereads"] = page_rereads
-    STATE["page_numbers"] = check_page_numbers(sorted(page_nos))   # بمواضع الملف
+    sess.state["verdicts"] = verdicts
+    sess.state["usage"] = usage
+    sess.state["boundary_recoveries"] = recoveries
+    sess.state["page_rereads"] = page_rereads
+    sess.state["page_numbers"] = check_page_numbers(sorted(page_nos))   # بمواضع الملف
     era_fp = fingerprint_pages(era_pages)
     order = check_order(page_dates)
-    STATE["era"] = era_fp
-    STATE["order"] = order
-    STATE["footer_order"] = fo
-    STATE["order_held"] = order_held
-    STATE["footer_failed"] = footer_failed
-    STATE["desc_pass"] = desc_rep
-    STATE["intake"] = {"gate": intake.gate, "kinds": intake.kinds, **decision}
+    sess.state["era"] = era_fp
+    sess.state["order"] = order
+    sess.state["footer_order"] = fo
+    sess.state["order_held"] = order_held
+    sess.state["footer_failed"] = footer_failed
+    sess.state["desc_pass"] = desc_rep
+    sess.state["intake"] = {"gate": intake.gate, "kinds": intake.kinds, **decision}
     n_ok = sum(1 for r in all_rows if r["ok"])
     n_susp = len(all_rows) - n_ok
     last_bal = next((r["balance"] for r in reversed(all_rows)
@@ -1222,7 +1265,7 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False,
             ok_pages = {c["page"] for c in f_ok}
             f_group = [p for p in from_checks(footer_checks, all_rows)
                        if p not in ok_pages]   # a page is counted once
-            STATE["group_verified"] = f_group
+            sess.state["group_verified"] = f_group
             won = set(f_group)
             f_absent = [c for c in f_absent if c["page"] not in won]
             f_unchecked = [c for c in f_unchecked if c["page"] not in won]
@@ -1268,7 +1311,7 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False,
                           + "، ".join(_page_label(c, label) for c in group))
     else:
         seg_f = "تقرير الفوتر: تعذرت قراءة الإطارات — لا حكم على أي صفحة"
-    _verdicts = STATE.get("verdicts") or {}
+    _verdicts = sess.state.get("verdicts") or {}
     _suspect_pages = sorted({r["page"] for r in all_rows if not r.get("ok")})
     # **الكلفةُ في الملخّص (R74-4 · مراجعة ٧٤):** كانت تُحسب في `usage` ولا تُعرَض في أيّ مكان ⇒ تعذّر
     # تسجيل كلفة تشغيلٍ مدفوع (ووقع فعلًا في بروفة ٢٠٢٦-٠٩-٣٠). وتُوضع **قبل** سطر الفوتر كي لا تدخل
@@ -1310,9 +1353,9 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False,
     # **وسياسةٌ واحدة (R131-3):** التقليمُ دائمًا، والصفحةُ المتعثّرة تُسمّى أدناه — لا صفوفَ من
     # قراءةٍ سابقة تبقى بأرقامها فتشير إلى صفّين.
     incomplete = bool(failed_pages or pages_without_rows)
-    written = _ledger_write()
-    ledger_status = _ledger_ui.status_text(DATA_HOME, _ledger_key(), len(_ledger_rows()),
-                                           _ledger.rows_without_page(_ledger_rows()))
+    written = _ledger_write(sess)
+    ledger_status = _ledger_ui.status_text(sess.home, _ledger_key(sess), len(_ledger_rows(sess)),
+                                           _ledger.rows_without_page(_ledger_rows(sess)))
     if not written.get("ok"):
         ledger_status = f"### دفترُ الكشف\n**{written.get('message') or 'تعذّرت الكتابة'}**"
     elif incomplete:
@@ -1322,23 +1365,24 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False,
         ledger_status += ("\n\n**قاعدةٌ غيرُ مكتملة** — لم تُقرأ هذه المرّة: "
                           + "، ".join(f"ص{p}" for p in missed)
                           + ". أرقامُ الصفوف من هذه القراءة وحدَها (لا صفوفَ من قراءةٍ سابقة).")
-    gallery_out = _close_pages(pages)
+    gallery_out = _close_pages(sess, pages)
     return (summary, rows_view,
             _kpi_html(len(all_rows), n_ok, n_susp, last_bal), gallery_out,
             "كل الأعمدة", "", "", "", ledger_status, intake_note)
 
 
-def prepare_ask(question: str, history):
+def prepare_ask(question: str, history, sess=None):
     """Phase 1 (instant): the question appears in the chat immediately and the
     input clears; the heavy answering runs in the chained phase 2 — the owner
     asked for the text to move at once, not after the countdown."""
+    sess = _session(sess)
     history = list(history or [])
     q = (question or "").strip()
-    STATE["pending_q"] = q
+    sess.state["pending_q"] = q
     if not q:
-        return history, ""
+        return history, "", sess
     history.append({"role": "user", "content": q})
-    return history, ""
+    return history, "", sess
 
 
 _ARG_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
@@ -1354,28 +1398,28 @@ def _answer_refs(answer: str) -> list[tuple[int | None, int, int]]:
     return render_answer_refs(answer)
 
 
-def _rows_for_refs(refs, cap: int = 60) -> pd.DataFrame:
-    rows = STATE.get("rows") or []
+def _rows_for_refs(sess, refs, cap: int = 60) -> pd.DataFrame:
+    rows = sess.state.get("rows") or []
     return pd.DataFrame(render_rows_for_refs(
-        rows, refs, cap, STATE.get("verdicts") or {}))
+        rows, refs, cap, sess.state.get("verdicts") or {}))
 
 
-def _evidence_rows(answer: str, sources) -> pd.DataFrame:
+def _evidence_rows(sess, answer: str, sources) -> pd.DataFrame:
     """FALLBACK evidence only (no tool trace — prose answers): rows the ANSWER
     cites, else the retrieval pages. Trace-first lives in ask_followup."""
     refs = _answer_refs(answer)
     if refs:
-        df = _rows_for_refs(refs)
+        df = _rows_for_refs(sess, refs)
         if not df.empty:
             return df
-    if not STATE.get("rows"):
+    if not sess.state.get("rows"):
         return pd.DataFrame()
     frames, seen = [], set()
     for h in sources:
         if h["page"] in seen:
             continue
         seen.add(h["page"])
-        frames.append(STATE_rows_to_df(h))
+        frames.append(_page_rows_df(sess, h))
         if len(frames) == 2:
             break
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
@@ -1402,7 +1446,7 @@ def _hide_note():
     return gr.update(value="", visible=False)
 
 
-def _reset_qa_surfaces():
+def _reset_qa_surfaces(sess=None):
     """**كشفٌ جديد ⇒ لا سؤالَ من القديم (R93-2):** المحادثةُ صارت **مُدخَلًا** للنموذج (R92)، فبقاؤها
     يحمل سؤالَ الكشف السابق وجوابَه — بمبلغه واستشهاده («صفحة ٧») — إلى أسئلة الكشف الجديد، وهو الصنفُ
     نفسه الذي أُغلق قبل ٩٢: رقمٌ يُنسب إلى كشفٍ آخر.
@@ -1417,16 +1461,18 @@ def _reset_qa_surfaces():
     """
     from statement_qa.qa import clear_conversation
 
-    key = _ledger_key()
-    path = _ledger_ui.ledger_file(DATA_HOME, key) if key else None
+    if not isinstance(sess, Session):
+        return [], "", pd.DataFrame(), _hide_note()
+    key = _ledger_key(sess)
+    path = _ledger_ui.ledger_file(sess.home, key) if key else None
     clear_conversation(key, memory_path=path if path and path.exists() else None)
     return [], "", pd.DataFrame(), _hide_note()
 
 
-def _evidence_from_numbers(nos: list[int]) -> tuple[pd.DataFrame, str]:
+def _evidence_from_numbers(sess, nos: list[int]) -> tuple[pd.DataFrame, str]:
     """Rows by their GLOBAL statement numbers — the SAME numbers the tools
     cite and the main table shows, so # stays identical across surfaces."""
-    rows = STATE.get("rows") or []
+    rows = sess.state.get("rows") or []
     pairs = [(i, rows[i - 1]) for i in nos if 1 <= i <= len(rows)]
     if not pairs:
         return pd.DataFrame(), ""
@@ -1435,18 +1481,19 @@ def _evidence_from_numbers(nos: list[int]) -> tuple[pd.DataFrame, str]:
         note = (f" عُرضت أول {_EVIDENCE_CAP} من أصل "
                 f"{_n_rows_ar(len(pairs))} دخلت في حساب الجواب.")
         pairs = pairs[:_EVIDENCE_CAP]
-    return (pd.DataFrame([_row_record(i, r) for i, r in pairs]), note)
+    verdicts = sess.state.get("verdicts") or {}
+    return (pd.DataFrame([_row_record(i, r, verdicts) for i, r in pairs]), note)
 
 
-def _scope_n_pages(rows: list[dict]) -> int:
+def _scope_n_pages(sess, rows: list[dict]) -> int:
     """عددُ صفحات الكشف المُعلَن للوكيل: من الحالة، وإلّا من **صفحات الصفوف**، وإلّا **صفرٌ بمعنى «غيرُ معروف»**.
 
     **ولماذا لا يُنشر الصفرُ كما هو (R93-1):** الصفرُ هنا يُقرأ «كشفٌ بلا صفحات»، وهي حقيقةٌ كاذبةٌ تدخل
     تلقينَ الوكيل في كلّ سؤال — والحدُّ الذي يُسقط صنفًا بصمتٍ أسوأُ من توقّفٍ مسموع. فصفرٌ ⇒ يُسمّى
     الغيابُ في `_scope_text` صراحةً، ولمصدرٍ واحدٍ للعدّ يُستعمل `ledger.pages_of` (كما في الدفتر).
     """
-    raw = STATE.get("pages")
-    n = len(raw) if isinstance(raw, (list, tuple)) else (STATE.get("n_pages") or 0)
+    raw = sess.state.get("pages")
+    n = len(raw) if isinstance(raw, (list, tuple)) else (sess.state.get("n_pages") or 0)
     try:
         n = int(n)
     except (TypeError, ValueError):
@@ -1454,7 +1501,7 @@ def _scope_n_pages(rows: list[dict]) -> int:
     return n if n > 0 else _ledger.pages_of(rows)
 
 
-def _scope_text() -> str:
+def _scope_text(sess) -> str:
     """نطاقُ الكشف — يُشتقّ من الحالة **بلا افتراض مفتاح**: كلُّ قراءةٍ `.get` ⇒ لا `KeyError`.
 
     وهذا النطاقُ هو ما يُعلن الوكيلُ عملَه عليه، فسؤالٌ عن «الصفحة ٤» لا يُجاب من كشفٍ آخر.
@@ -1463,16 +1510,16 @@ def _scope_text() -> str:
     أيضًا، والحزمةُ كانت تُقاس بنطاقٍ فارغٍ بينما التطبيقُ يرسل نصًّا كاملًا. فالواجهةُ تجمع المدخلاتِ
     من حالتها وحدَها، والصيغةُ واحدة.
     """
-    rows = STATE.get("rows") or []
+    rows = sess.state.get("rows") or []
     return _scope_text_of(
-        name=STATE.get("source_name") or STATE.get("pdf_name") or "",
-        n_pages=_scope_n_pages(rows),
+        name=sess.state.get("source_name") or sess.state.get("pdf_name") or "",
+        n_pages=_scope_n_pages(sess, rows),
         n_rows=len(rows),
-        kind=STATE.get("reader_mode") or "",
+        kind=sess.state.get("reader_mode") or "",
     )
 
 
-def export_xlsx():
+def export_xlsx(sess=None):
     """زرُّ التنزيل: **بنفس كاتب سطر الأوامر**، مَرندَرًا من دفترٍ يُكتب من الحالة — **والفرقُ
     المعروفُ محدودٌ ومُسمًّى** (كلفةُ الصفحة وزمنُها: لا يملكهما التطبيق؛ وصفوفُ دعم الجواب
     المبنيّةُ من مخبّآت الصفحات المحكَّمة) — وكلُّ فرقٍ خارج الأصناف المُعلَنة يُسقط البوّابة.
@@ -1486,6 +1533,9 @@ def export_xlsx():
     """
     from statement_qa.export_from_state import export_xlsx_from_state
 
+    if not isinstance(sess, Session):
+        return None, _note_update("**لا كشفَ بعد** — اقرأ كشفًا أوّلًا.")
+
     # **ولا تبقى نسخةُ الكشف في مجلّدٍ مؤقّت (R93-8 · وأُغلق العمرُ كاملًا في R130-2):** كان كلُّ
     # نقرةٍ تترك في مجلّدٍ **دائم** `ledger.db` (كلُّ الصفوف) و`run/results/pg-*.json` (الصفوفَ
     # الخامّة) وملفَّ الإكسل — أي نسخةً كاملةً من الكشف مقابل كلّ نقرة. فصار البناءُ في
@@ -1493,17 +1543,17 @@ def export_xlsx():
     # (`move_resource_to_block_cache`) التي يديرها `delete_cache` — لا منظّفٌ يدويّ.
     with tempfile.TemporaryDirectory(prefix="rajhi_xlsx_") as work:
         out, msg = export_xlsx_from_state(
-            STATE.get("rows_contract") or [], STATE.get("footers"),
-            printed_pages=STATE.get("printed_pages"),
+            sess.state.get("rows_contract") or [], sess.state.get("footers"),
+            printed_pages=sess.state.get("printed_pages"),
             out_dir=Path(work))
         if out is None:
             return None, _note_update(msg)
-        kept = _cache_path(xlsx_file, out)     # نسخةٌ واحدةٌ في حافظة Gradio
+        kept = _cache_path(sess, xlsx_file, out)     # نسخةٌ واحدةٌ في حافظة Gradio
     return str(kept), _note_update(msg + " · ونُظّف مجلّدُ العمل (لا نسخةَ صفوفٍ باقية)")
 
 
-def ask_followup(history, api_key: str = ""):
-    """Phase 2: answer STATE['pending_q'] and append the reply to the chat.
+def ask_followup(history, api_key: str = "", sess=None):
+    """Phase 2: answer sess.state['pending_q'] and append the reply to the chat.
 
     Evidence panel = the rows the TOOLS actually selected (execution trace),
     not the examples the answer prose happens to quote (owner report: a
@@ -1511,12 +1561,14 @@ def ask_followup(history, api_key: str = ""):
     evidenced only its second segment).
     """
     history = list(history or [])
-    q = STATE.pop("pending_q", "")
+    if not isinstance(sess, Session):
+        return gr.skip(), gr.skip(), gr.skip(), gr.skip()
+    q = sess.state.pop("pending_q", "")
     if not q:
         return gr.skip(), gr.skip(), gr.skip(), gr.skip()
     # **والقاعدةُ تُعيد بناءَ الأسطح بعد إعادة التشغيل (R130):** بلا `store` في الذاكرة تُقرأ
     # الصفوفُ من القاعدة ويُبنى الفهرسُ منها — فالسؤالُ يُجاب ولو فرغت الذاكرة (شرطُ القبول).
-    if "store" not in STATE and not _load_from_ledger():
+    if "store" not in sess.state and not _load_from_ledger(sess):
         history.append({"role": "assistant",
                         "content": "ارفع الكشف في تبويب «قراءة وتحقق» أولاً."})
         return history, "", pd.DataFrame(), _hide_note()
@@ -1534,9 +1586,9 @@ def ask_followup(history, api_key: str = ""):
             return history, "", pd.DataFrame(), _hide_note()
         llm = build_llm(api_key=visitor)
 
-    key = _ledger_key()
-    memory_path = _memory_path()
-    ledger_path = _ledger_ui.ledger_file(DATA_HOME, key) if key else None
+    key = _ledger_key(sess)
+    memory_path = _memory_path(sess)
+    ledger_path = _ledger_ui.ledger_file(sess.home, key) if key else None
     if ledger_path is not None and not ledger_path.exists():
         ledger_path = None
 
@@ -1549,17 +1601,17 @@ def ask_followup(history, api_key: str = ""):
     # نصّ النطاق) ولا يُدَّعى انتهاءُ الكشف. **وهذا هو الشقُّ الغائب الذي قاسه المدقّق:** `classify`
     # كان يقبل `n_pages` ولا مُنادٍ يمرّره ⇒ فالنصُّ يقول للمستخدم «لم تُقرأ سطورُ ٧٠٠ بعد» عن
     # صفحةٍ لا وجودَ لها في كشفٍ من ٦٢٩ صفحة.
-    res = answer_question(STATE["store"], q,
-                          rows=None if ledger_path else STATE.get("rows"),
-                          chunks=STATE.get("chunks"),
-                          footers=None if ledger_path else STATE.get("footers"),
-                          thread_id=key, scope=_scope_text(),
-                          n_pages=_scope_n_pages(STATE.get("rows") or []),
+    res = answer_question(sess.state["store"], q,
+                          rows=None if ledger_path else sess.state.get("rows"),
+                          chunks=sess.state.get("chunks"),
+                          footers=None if ledger_path else sess.state.get("footers"),
+                          thread_id=key, scope=_scope_text(sess),
+                          n_pages=_scope_n_pages(sess, sess.state.get("rows") or []),
                           ledger_path=ledger_path, memory_path=memory_path, llm=llm)
-    rows_now = STATE.get("rows") or []
+    rows_now = sess.state.get("rows") or []
     # **وخريطةُ الصفحة تُبنى برقم الصفّ نفسه** الذي تحمله الأدوات (`seq`) — لا بترتيب العرض (R130).
     page_of = {int(r.get("seq") or i): r.get("page") for i, r in enumerate(rows_now, start=1)}
-    verdicts = STATE.get("verdicts") or {}
+    verdicts = sess.state.get("verdicts") or {}
     displayed = render_answer_text(res, page_of, verdicts)
     history.append({"role": "assistant", "content": displayed})
     # **والحفظُ عند بوّابة العرض — موضعُ الكتابة الواحد** (R99-1 · قرار 98ب · تصحيحُ مقعد المواصفة):
@@ -1570,7 +1622,7 @@ def ask_followup(history, api_key: str = ""):
     remember(key, q, displayed, memory_path=memory_path)
     # **والتبادلُ يُسجَّل في القاعدة أيضًا (R130):** قصدُ «الأسئلة المسجَّلة» يعرض ما سُئل فعلًا،
     # وأدلّتُه صفوفُ الأثر — لا رسائلُ الحافظة (وهي مقصوصةٌ إلى ثلاثِ دورات).
-    _record_qa_row(res, q, displayed)
+    _record_qa_row(sess, res, q, displayed)
     sources_md = "\n".join(
         f"- {s['chunk_id']} (صفحة {s['page']}، صفوف {s['row_start']}–{s['row_end']})"
         for s in res.sources)
@@ -1585,26 +1637,27 @@ def ask_followup(history, api_key: str = ""):
     if mode == "typed":
         # **الاستشهادُ المُصرَّح به من النوع (أ-٤)** — يُعرض هو، وكلُّ استشهادٍ لا شاهدَ له في
         # الأثرِ **يُسمّى في اللوحة** بدل أن يُمرَّر كأنّه مُثبت.
-        df, note = _evidence_from_numbers(res.cited_row_ids)
+        df, note = _evidence_from_numbers(sess, res.cited_row_ids)
         if getattr(res, "unsupported_citations", None):
             note = ((note + " · ") if note else "") + (
                 "⚠ استشهادٌ بلا شاهدِ أثر: "
                 + ", ".join(f"صف {n}" for n in res.unsupported_citations))
         return history, sources_md, df, _note_update(note)
     if mode == "tools":
-        df, note = _evidence_from_numbers(res.used_row_nos)
+        df, note = _evidence_from_numbers(sess, res.used_row_nos)
         return history, sources_md, df, _note_update(note)
     return (history, sources_md,
-            _evidence_rows(res.answer, res.sources), _hide_note())
+            _evidence_rows(sess, res.answer, res.sources), _hide_note())
 
 
-def STATE_rows_to_df(hit):
+def _page_rows_df(sess, hit):
     """One page's rows with GLOBAL # — same numbers the tools cite and the
     main table shows (real النوع + مدين/دائن split via the shared builder)."""
-    rows = STATE.get("rows") or []
+    rows = sess.state.get("rows") or []
     pairs = [(i, r) for i, r in enumerate(rows, start=1)
              if r["page"] == hit["page"]]
-    return pd.DataFrame([_row_record(i, r) for i, r in pairs])
+    verdicts = sess.state.get("verdicts") or {}
+    return pd.DataFrame([_row_record(i, r, verdicts) for i, r in pairs])
 
 
 ABOUT = """# عن المشروع
@@ -1623,39 +1676,39 @@ ABOUT = """# عن المشروع
 **الإصدار:** دفتر الأستاذ — ورق دافئ، حبر زمردي، إبر نحاسية، وختم التدقيق.
 """
 
-def _ledger_rows() -> list:
-    """صفوفُ الدفتر = **صفوفُ العقد** (`STATE["rows_contract"]`) — لا سطحُ العرض (R98-1).
+def _ledger_rows(sess) -> list:
+    """صفوفُ الدفتر = **صفوفُ العقد** (`sess.state["rows_contract"]`) — لا سطحُ العرض (R98-1).
 
     سطحُ العرض بلا رقم صفّ ولا حقول العقد ⇒ كان «ابنِ الدفتر» يسقط بـ`IntegrityError … row_no` (كما سقط
     زرُّ Excel قبل ٩٧). وزرُّ Excel يكتب الدفترَ من صفوف العقد نفسِها ⇒ مصدرٌ واحدٌ للزرّين.
     """
-    return STATE.get("rows_contract") or []
+    return sess.state.get("rows_contract") or []
 
 
-def _ledger_key() -> str:
-    """مفتاحُ الدفتر: من **بصمة الكشف** (STATE["era"]) ⇒ الكشفُ نفسُه يُعطي المفتاحَ نفسَه.
+def _ledger_key(sess) -> str:
+    """مفتاحُ الدفتر: من **بصمة الكشف** (`sess.state["source_sha"]`) ⇒ الكشفُ نفسُه يُعطي المفتاحَ نفسَه.
 
     **وبعد إعادة التشغيل لا بصمةَ في الذاكرة (R130):** يُقرأ المؤشّرُ النشِط من مجلّد بيانات
     المستخدم — فتعرف الواجهةُ أيَّ قاعدةٍ تفتح، ويعمل تنزيلُ المحادثة والأسئلةُ بلا حالةٍ حيّة.
     """
     # **الموضعُ الواحد (R132-2):** الهويّةُ من بايتات الملفّ التي حسبها مسارُ القراءة؛ وبعد إعادة
     # التشغيل لا بايتاتَ في الذاكرة ⇒ المؤشّرُ النشِط. ولا مفتاحَ مُصطنعًا من عددِ صفحات.
-    sha = STATE.get("source_sha")
+    sha = sess.state.get("source_sha")
     if sha:
         return _ledger.statement_key(sha)
-    return _ledger_ui.active_key(DATA_HOME) or ""
+    return _ledger_ui.active_key(sess.home) or ""
 
 
-def _memory_path():
+def _memory_path(sess):
     """ملفُّ `SqliteSaver` = **قاعدةُ الكشف نفسُها** — أو `None` إن لم تُقرأ بعد (لا ملفَّ يُنشأ).
 
     **ويُتحقّق من قابليّتها للقراءة قبل تسليمها للحافظة:** قاعدةٌ v1 (قديمة) أو تالفةٌ لا يُضاف إليها
     مخطَّطُ الحافظة، بل تُترك للتشخيص المسمّى (`status_text`) ولإعادة القراءة.
     """
-    key = _ledger_key()
+    key = _ledger_key(sess)
     if not key:
         return None
-    path = _ledger_ui.ledger_file(DATA_HOME, key)
+    path = _ledger_ui.ledger_file(sess.home, key)
     if not path.exists():
         return None
     # **قراءةٌ خفيفةٌ للترقيم لا فتحٌ كامل:** `read_ledger` يُنفّذ المخطَّطَ كلَّه (كتابةً) في كلّ
@@ -1673,57 +1726,46 @@ def _memory_path():
     return path if ver == _ledger.SCHEMA_VERSION else None
 
 
-def _ledger_refresh_click() -> str:
-    rows = _ledger_rows()
-    return _ledger_ui.status_text(DATA_HOME, _ledger_key(), len(rows),
+def _ledger_refresh_click(sess=None) -> str:
+    if not isinstance(sess, Session):
+        return "### دفترُ الكشف\n**لا كشفَ في هذه الجلسة بعد.**"
+    rows = _ledger_rows(sess)
+    return _ledger_ui.status_text(sess.home, _ledger_key(sess), len(rows),
                                   _ledger.rows_without_page(rows))
 
 
-def _ledger_build_click():
-    rows = _ledger_rows()
-    msg = _ledger_ui.build(DATA_HOME, rows, STATE.get("footers") or {}, _ledger_key(),
-                           n_pages=STATE.get("n_pages"))
-    return msg, _ledger_refresh_click()
+def _ledger_build_click(sess=None):
+    if not isinstance(sess, Session):
+        return "لا صفوفَ في هذه الجلسة بعد.", _ledger_refresh_click(sess)
+    rows = _ledger_rows(sess)
+    msg = _ledger_ui.build(sess.home, rows, sess.state.get("footers") or {}, _ledger_key(sess),
+                           n_pages=sess.state.get("n_pages"))
+    return msg, _ledger_refresh_click(sess)
 
 
-def _ledger_ask_click(label: str, value: str):
-    got = _ledger_ui.ask(DATA_HOME, _ledger_key(), label, value)
+def _ledger_ask_click(label: str, value: str, sess=None):
+    if not isinstance(sess, Session):
+        return pd.DataFrame(), "**لا كشفَ في هذه الجلسة بعد.**"
+    got = _ledger_ui.ask(sess.home, _ledger_key(sess), label, value)
     return pd.DataFrame(got["rows"], columns=got["headers"]), got["note"]
 
 
-def _display_copies() -> set[str]:
-    """نسخُ العرض التي وضعها التطبيقُ في حافظة Gradio وما زالت على القرص — **بقائمة المكتبة نفسِها.**
+def _delete_display_copies(sess) -> str:
+    """**يحذف نسخَ العرض التي أنتجتها هذه الجلسة وحدَها، ويعدّ ما حذفه وما بقي (R131-10 · المرحلة ١).**
 
-    هي ما يمرّ عليه `delete_files_created_by_app`: `demo.temp_file_sets` ناقصًا ما تحتفظ به المكوّنات
-    (`keep_in_cache`). فالعدُّ على ما يحذفه المكوّنُ نفسُه، لا على قائمةٍ ثانيةٍ نبنيها.
+    الصورُ والإكسلُ والمحادثةُ المنزَّلة تحمل بياناتِ كشف. كان الحذفُ بـ`delete_files_created_by_app(demo,
+    None)` — دالّةُ المكتبة التي تمرّ على `demo.temp_file_sets` **لكلّ الجلسات** ⇒ على السطح العامّ يمحو
+    حذفُ زائرٍ نسخَ عرضِ زائرٍ آخر (قِيس في `tests/test_public_session.py`). فالمكتبةُ لا تخدم الحذفَ
+    لجلسةٍ واحدة، **وهذا سببُ البناء هنا مع قياسه**: كلُّ نسخةٍ تُسجَّل في جلستها عند إنشائها
+    (`_cache_path`) وتُحذف معها. **والعدُّ قبلُ وبعدُ في السطر نفسِه** — لا «صفرُ ملفّ» بلا عدّ.
     """
-    keep: set = set()
-    for comp in demo.blocks.values():
-        keep.update(getattr(comp, "keep_in_cache", set()))
-    return {f for s in demo.temp_file_sets for f in s if f not in keep and os.path.exists(f)}
+    before = len(sess.files)
+    removed, left = sess.drop_files()
+    failure = f"⚠ تعذّر حذفُ {left} من نسخ العرض المؤقّتة · " if left else ""
+    return f"{failure}نسخُ العرض المؤقّتة: حُذف **{removed}** من **{before}** · بقي **{left}**"
 
 
-def _delete_display_copies() -> str:
-    """**يحذف نسخَ العرض بمكوّن المكتبة ويعدّ ما حذفه وما بقي (R131-10 · مراجعة ١٣١).**
-
-    الصورُ والإكسلُ والمحادثةُ المنزَّلة تحمل بياناتٍ حقيقيّة. و`delete_files_created_by_app(demo, None)`
-    هي الدالّةُ التي يناديها `delete_cache` وعند الإغلاق، فتُحذف **الآن** لا بعد عشر دقائق.
-    **والعِلّةُ المقيسة:** كان فشلُها يُبتلع (`except Exception: pass`) والرسالةُ تعدّ ملفّاتِ القاعدة وحدَها
-    ⇒ «صفرُ ملفّ» عن نسخ العرض دعوى بلا عدّ. فالفشلُ يُسمّى بصنفه، والعدُّ قبلُ وبعدُ في السطر نفسِه.
-    """
-    before = _display_copies()
-    failure = ""
-    try:
-        from gradio.route_utils import delete_files_created_by_app   # noqa: PLC0415
-
-        delete_files_created_by_app(demo, age=None)
-    except Exception as e:                     # noqa: BLE001 — يُسمّى في الرسالة ولا يُسقط حذفَ البيانات
-        failure = f"⚠ تعذّر حذفُ نسخ العرض المؤقّتة ({type(e).__name__}) · "
-    left = _display_copies()
-    return f"{failure}نسخُ العرض المؤقّتة: حُذف **{len(before - left)}** · بقي **{len(left)}**"
-
-
-def _delete_statement_click():
+def _delete_statement_click(sess=None):
     """**زرُّ الحذف الظاهر (R130):** يمحو القاعدةَ ومحادثتَها وملفّاتِها، ويعدّ ما حذفه وما بقي.
 
     **والترتيبُ مقصود:** إغلاقُ الحافظة (`qa.reset_memory`) **قبل** الحذف — متّصلٌ مفتوحٌ يُعيد إنشاء
@@ -1731,8 +1773,12 @@ def _delete_statement_click():
     """
     from statement_qa.qa import reset_memory
 
-    key = _ledger_key()
-    path = _ledger_ui.ledger_file(DATA_HOME, key) if key else None
+    if not isinstance(sess, Session):
+        return ("**لا كشفَ في هذه الجلسة — لم يُحذف شيء.**",
+                gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
+                gr.update(), gr.update(), gr.update(), gr.update())
+    key = _ledger_key(sess)
+    path = _ledger_ui.ledger_file(sess.home, key) if key else None
     # **الحذفُ تحت قفل المهمّة نفسِه (R131-5):** كان يزيل ملفَّ القفل بلا شرط، فيأخذه مَن بعده
     # وقراءةٌ جاريةٌ ما زالت تعمل ⇒ مهمّتان وكتابةٌ تُعيد البيانات بعد «حُذفت». والعقدُ: إن كان
     # تشغيلٌ جارٍ **لا يُحذف شيء** ويُقال ذلك؛ وملفُّ القفل ليس بياناتِ كشفٍ فلا يُحسب في «صفر ملفّ».
@@ -1740,19 +1786,19 @@ def _delete_statement_click():
         with job_lock(LOCK_PATH):
             if path is not None:
                 reset_memory(path)
-            got = _ledger_ui.delete(DATA_HOME, key)
-            display = _delete_display_copies()
-            STATE.clear()
+            got = _ledger_ui.delete(sess.home, key)
+            display = _delete_display_copies(sess)
+            sess.state.clear()
     except JobBusyError:
         return ("**لم يُحذف شيء — يوجد تشغيلٌ جارٍ الآن.** انتظر انتهاءه ثمّ أعد المحاولة.",
                 gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
                 gr.update(), gr.update(), gr.update(), gr.update())
     return (f"{got['message']}\n\n{display}", "", pd.DataFrame(), _kpi_html(0, 0, 0, None), [],
             "", "", pd.DataFrame(), _hide_note(),
-            _ledger_ui.status_text(DATA_HOME, None, 0))
+            _ledger_ui.status_text(sess.home, None, 0))
 
 
-def _conversation_export() -> tuple[str | None, str]:
+def _conversation_export(sess=None) -> tuple[str | None, str]:
     """**تنزيلُ المحادثة (البند ١٠ · وإصلاحُ R131-6):** سؤالٌ وجوابٌ وأدلّةٌ من **القاعدة**، في
     **مصنَّف Excel** بكاتبٍ منظَّم (`openpyxl`) — لا جدولَ Markdown يُبنى باليد.
 
@@ -1764,10 +1810,10 @@ def _conversation_export() -> tuple[str | None, str]:
     نافذةِ ثلاثِ دورات، والسجلُّ المقصودُ «ما سُئل فعلًا» يبقى كاملًا. فالحذفُ/إعادةُ التشغيل لا
     يقطعان التنزيل.
     """
-    key = _ledger_key()
+    key = _ledger_key(sess) if isinstance(sess, Session) else ""
     if not key:
         return None, "**لا كشفَ بعد** — اقرأ كشفًا أو افتح قاعدةً محفوظة."
-    path = _ledger_ui.ledger_file(DATA_HOME, key)
+    path = _ledger_ui.ledger_file(sess.home, key)
     try:
         conn = _ledger.read_ledger(path)
     except _ledger.LedgerUnavailable as e:
@@ -1808,19 +1854,19 @@ def _conversation_export() -> tuple[str | None, str]:
     with tempfile.TemporaryDirectory(prefix="rajhi_chat_") as work:
         out = Path(work) / "conversation.xlsx"
         wb.save(out)
-        kept = _cache_path(conv_file, out)
+        kept = _cache_path(sess, conv_file, out)
     return kept, f"**{len(qa_rows)}** سؤالًا وجوابًا · ملفّ Excel (ورقةُ المحادثة وورقةُ الأدلّة)"
 
 
-def _record_qa_row(res, question: str, displayed: str) -> None:
+def _record_qa_row(sess, res, question: str, displayed: str) -> None:
     """يسجّل السؤالَ والجوابَ وأدلّةَ الأثر في `qa`/`qa_evidence` — **وقصدُ «الأسئلة المسجَّلة»** يقرؤه.
 
     **العِلّة:** `record_qa` كانت **صفرَ مُنادٍ** (قِيس في مراجعة ١٣٠) ⇒ فالقصدُ يعرض فراغًا أبدًا.
     والصفوفُ المسجّلة هي **ما بنى الجواب** (`used_row_nos`) لا ما ذكره النثر. وأرقامُ الصفوف
     العامّةُ تُترجَم إلى `(pg, row_no)` من نفسِ ترتيب الحالة (وهو ترتيبُ `seq` في القاعدة).
     """
-    key = _ledger_key()
-    path = _ledger_ui.ledger_file(DATA_HOME, key) if key else None
+    key = _ledger_key(sess)
+    path = _ledger_ui.ledger_file(sess.home, key) if key else None
     if path is None:
         return
     try:
@@ -1830,7 +1876,7 @@ def _record_qa_row(res, question: str, displayed: str) -> None:
     try:
         # **الترجمةُ من صفوف العقد لا من سطح العرض:** العرضُ بلا `row_no`، والعقدُ يحمله؛ والصفّان
         # متوازيان بالبناء (`_view_rows(contract)`) ⇒ فالمؤشّرُ نفسه.
-        contract = STATE.get("rows_contract") or []
+        contract = sess.state.get("rows_contract") or []
         nos = (res.used_row_nos or []) or (res.cited_row_ids or [])
         pairs = [(contract[n - 1].get("page"), contract[n - 1].get("row_no"))
                  for n in nos if 1 <= n <= len(contract)]
@@ -1848,6 +1894,9 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي", delete_cache=(600, 
     # (صورُ المعرض · الإكسل · المحادثة) يحذفها **مكوّنُ Gradio** بعد عشر دقائق، وكلَّها عند إغلاق
     # الخادم (`route_utils.create_lifespan_handler`، مقروءٌ من النسخة المثبَّتة) — لا منظّفٌ يدويّ.
     gr.HTML(HERO)
+    # **جلسةُ الزائر (المرحلة ١ · شروطُ (ب)):** حالتُه ومجلّدُه في مكوّن حالة الجلسة؛ و`delete_callback`
+    # تناديه Gradio حين تحذف حالةَ الزائر — فيُمحى دفترُه ومحادثتُه ونسخُ عرضه معها.
+    sess_state = gr.State(None, delete_callback=_end_session)
     with gr.Tabs():
         with gr.Tab("١. قراءة وتحقق"):
             with gr.Row():
@@ -1900,9 +1949,10 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي", delete_cache=(600, 
                                  interactive=False, elem_classes=["ledger-table"])
             _filter_inputs = [filter_col, filter_value, filter_from, filter_to]
             for _c in _filter_inputs:
-                _c.input(filter_rows, inputs=_filter_inputs, outputs=table)
-                _c.change(filter_rows, inputs=_filter_inputs, outputs=table)
-            filter_clear.click(lambda: ("كل الأعمدة", "", "", "", filter_rows("")),
+                _c.input(filter_rows, inputs=_filter_inputs + [sess_state], outputs=table)
+                _c.change(filter_rows, inputs=_filter_inputs + [sess_state], outputs=table)
+            filter_clear.click(lambda s: ("كل الأعمدة", "", "", "", filter_rows("", sess=s)),
+                               inputs=[sess_state],
                                outputs=[filter_col, filter_value, filter_from, filter_to, table])
             with gr.Accordion("صفحات الكشف (معاينة بصرية)", open=False):
                 gallery = gr.Gallery(columns=5, show_label=False)
@@ -1940,35 +1990,36 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي", delete_cache=(600, 
                 xlsx_btn = gr.Button("تنزيل الكشف - Excel", variant="secondary", scale=2)
                 xlsx_note = gr.Markdown(rtl=True, scale=3)
             xlsx_file = gr.File(label="ملفّ الكشف (xlsx)")
-            xlsx_btn.click(export_xlsx, inputs=[], outputs=[xlsx_file, xlsx_note],
+            xlsx_btn.click(export_xlsx, inputs=[sess_state], outputs=[xlsx_file, xlsx_note],
                            api_name="export_xlsx")
             # **البند ١٠ — تنزيلُ المحادثة:** سؤالٌ وجوابٌ وأدلّةٌ من القاعدة (تبقى بعد الإغلاق).
             with gr.Row():
                 conv_btn = gr.Button("تنزيل المحادثة (سؤال · جواب · أدلّة)", scale=2)
                 conv_note = gr.Markdown(rtl=True, scale=3)
             conv_file = gr.File(label="ملفّ المحادثة (Excel)")
-            conv_btn.click(_conversation_export, inputs=[], outputs=[conv_file, conv_note],
+            conv_btn.click(_conversation_export, inputs=[sess_state], outputs=[conv_file, conv_note],
                            api_name="download_conversation")
-            ask.click(prepare_ask, inputs=[q, chat], outputs=[chat, q],
+            ask.click(prepare_ask, inputs=[q, chat, sess_state], outputs=[chat, q, sess_state],
                       show_progress="hidden", api_name="ask_question"
-                      ).then(ask_followup, inputs=[chat, key_in],
+                      ).then(ask_followup, inputs=[chat, key_in, sess_state],
                              outputs=[chat, src, raw, raw_note],
                              show_progress_on=[chat])
-            q.submit(prepare_ask, inputs=[q, chat], outputs=[chat, q],
+            q.submit(prepare_ask, inputs=[q, chat, sess_state], outputs=[chat, q, sess_state],
                      show_progress="hidden"
-                     ).then(ask_followup, inputs=[chat, key_in],
+                     ).then(ask_followup, inputs=[chat, key_in, sess_state],
                             outputs=[chat, src, raw, raw_note],
                             show_progress_on=[chat])
             # **R93-2 · حدثٌ ثانٍ على زرّ القراءة:** يمسح أسطحَ السؤال الأربعة. وموضعُه هذا لأنّ
             # الأسطحَ تُعرَّف في هذا التبويب، وهو مستقلٌّ عن مسار القراءة فلا يقف في طريقه ولا يُنتظره.
-            btn.click(_reset_qa_surfaces, outputs=[chat, src, raw, raw_note],
+            btn.click(_reset_qa_surfaces, inputs=[sess_state], outputs=[chat, src, raw, raw_note],
                       show_progress="hidden")
             # **دفترُ الكشف — أسئلةٌ بلا نموذج وبلا كلفة:** الأسئلةُ البنيويّةُ (مجاميع · تغطية ·
             # بلا إثبات · أحكام صفحات · بحث · سجلّ الأسئلة) تُجاب من SQL وحدَه. والمنطقُ في
             # `statement_qa.ledger_ui` (نقيٌّ يُختبر بلا شاشة)، وهنا التوصيلُ فقط. **والنتائجُ في
             # `gr.Dataframe` (R130-3)** فلا يكسر وصفٌ فيه سطرٌ جديد جدولَ Markdown.
             with gr.Accordion("دفترُ الكشف — أسئلةٌ بلا نموذج وبلا كلفة", open=False):
-                ledger_state = gr.Markdown(_ledger_ui.status_text(DATA_HOME, None, 0), rtl=True)
+                # **حالةُ الدفتر تُملأ عند فتح الصفحة** (`demo.load` ⇒ `_start_session`) من مجلّد جلستها.
+                ledger_state = gr.Markdown("", rtl=True)
                 with gr.Row():
                     l_intent = gr.Dropdown(choices=list(_ledger_ui.INTENT_LABELS),
                                            value=next(iter(_ledger_ui.INTENT_LABELS)),
@@ -1980,19 +2031,21 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي", delete_cache=(600, 
                 ledger_out = gr.Dataframe(interactive=False, label="نتيجةُ القصد")
                 ledger_note = gr.Markdown(rtl=True)
                 l_refresh = gr.Button("حدّث الحالة", size="sm")
-                l_build.click(_ledger_build_click, outputs=[ledger_note, ledger_state])
-                l_ask.click(_ledger_ask_click, inputs=[l_intent, l_value],
+                l_build.click(_ledger_build_click, inputs=[sess_state],
+                              outputs=[ledger_note, ledger_state])
+                l_ask.click(_ledger_ask_click, inputs=[l_intent, l_value, sess_state],
                             outputs=[ledger_out, ledger_note])
-                l_refresh.click(_ledger_refresh_click, outputs=[ledger_state])
+                l_refresh.click(_ledger_refresh_click, inputs=[sess_state], outputs=[ledger_state])
             # **توصيلُ زرّ القراءة (٣):** بعد تعريف كلّ مخرجاتِه، ومنها `ledger_state`.
-            btn.click(process_pdf, inputs=[pdf_in, skip_rejected_in, key_in],
+            btn.click(process_pdf, inputs=[pdf_in, skip_rejected_in, key_in, sess_state],
                       outputs=[ticker, table, kpi, gallery, filter_col, filter_value,
-                               filter_from, filter_to, ledger_state, intake_note],
+                               filter_from, filter_to, ledger_state, intake_note, sess_state],
                       show_progress_on=[ticker])
-            delete_btn.click(_delete_statement_click, outputs=[
+            delete_btn.click(_delete_statement_click, inputs=[sess_state], outputs=[
                 delete_note, ticker, table, kpi, gallery, chat, src, raw, raw_note, ledger_state])
         with gr.Tab("٣. عن المشروع"):
             gr.Markdown(ABOUT, rtl=True)
+    demo.load(_start_session, outputs=[sess_state, ledger_state])
 
 if __name__ == "__main__":
     # **البصمةُ تُكتب هنا وحدَه (R78-1):** هذا الموضعُ هو الذي تصير فيه هذه العمليةُ *هي التي تُجيب*

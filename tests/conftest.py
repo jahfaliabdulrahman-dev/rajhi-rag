@@ -51,3 +51,18 @@ def _no_real_data_left_behind(tmp_path):
             f.unlink()
         except OSError:                      # ملفٌّ قيد الفتح على نظامٍ يمنع الحذف ⇒ يُعلَن لا يُسكَت
             print(f"تعذّر حذفُ {f.name} — يُفحَص يدويًّا")
+
+
+@pytest.fixture
+def sess():
+    """جلسةُ واجهةٍ واحدة (المرحلة ١): الحالةُ والمجلّدُ لجلسةٍ لا للعمليّة — وتُغلق بعد الضابط.
+
+    **هنا لا في ملفّ ضابط:** يطلبها `read_sample` وضوابطُ تستورد `read_sample` من ملفّه؛ واستيرادُ
+    الاسم نفسه ثمّ استعمالُه معاملًا يوقفه حارسُ الأسماء (`redefinition of unused`). والسطحُ محلّيٌّ
+    بإعلان هذا الملفّ ⇒ مجلّدُ الجلسة هو مجلّدُ بيانات الضابط (`tmp_path/userdata`).
+    """
+    import app
+
+    s = app._new_session()
+    yield s
+    s.close()

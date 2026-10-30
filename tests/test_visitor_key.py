@@ -179,27 +179,27 @@ def public_app(monkeypatch, app_key_forbidden):
     monkeypatch.setattr(app, "read_page_descriptions", read_page_descriptions)
     monkeypatch.setattr(app, "build_index", lambda _chunks: None)
     monkeypatch.setattr(app, "SURFACE", "public")
-    app.STATE.clear()
-    yield app, keys
-    app.STATE.clear()
+    sess = app._new_session()
+    yield app, keys, sess
+    sess.close()
 
 
 def test_a_public_read_without_a_key_is_refused_before_any_call(public_app):
     import gradio as gr
     from test_button_builds_a_workbook import SAMPLE
 
-    app, keys = public_app
+    app, keys, sess = public_app
     for empty in ("", "   ", None):
         with pytest.raises(gr.Error):
-            app._process_pdf_locked(str(SAMPLE), lambda *_a, **_k: None, api_key=empty)
+            app._process_pdf_locked(sess, str(SAMPLE), lambda *_a, **_k: None, api_key=empty)
     assert keys == [], f"نداءٌ مدفوعٌ بلا مفتاح زائر: {keys}"
 
 
 def test_a_public_read_hands_the_visitor_key_to_every_paid_call(public_app):
     from test_button_builds_a_workbook import SAMPLE
 
-    app, keys = public_app
-    app._process_pdf_locked(str(SAMPLE), lambda *_a, **_k: None, api_key=f"  {VISITOR}  ")
+    app, keys, sess = public_app
+    app._process_pdf_locked(sess, str(SAMPLE), lambda *_a, **_k: None, api_key=f"  {VISITOR}  ")
     called = {name for name, _k in keys}
     assert {"probe_bank", "read_footer", "read_rows_vlm"} <= called, called
     wrong = [(n, k) for n, k in keys if k != VISITOR]
@@ -209,9 +209,9 @@ def test_a_public_read_hands_the_visitor_key_to_every_paid_call(public_app):
 def test_a_public_question_builds_the_agent_with_the_visitor_key(public_app, monkeypatch):
     from test_button_builds_a_workbook import SAMPLE
 
-    app, _keys = public_app
-    app._process_pdf_locked(str(SAMPLE), lambda *_a, **_k: None, api_key=VISITOR)
-    app.STATE["store"] = object()
+    app, _keys, sess = public_app
+    app._process_pdf_locked(sess, str(SAMPLE), lambda *_a, **_k: None, api_key=VISITOR)
+    sess.state["store"] = object()
     got: dict = {}
 
     def answer_question(_store, _q, llm=None, **_k):
@@ -221,24 +221,24 @@ def test_a_public_question_builds_the_agent_with_the_visitor_key(public_app, mon
     import statement_qa.qa as qa
 
     monkeypatch.setattr(qa, "answer_question", answer_question)
-    app.STATE["pending_q"] = "كم مجموع السحوبات؟"
+    sess.state["pending_q"] = "كم مجموع السحوبات؟"
     with pytest.raises(_Stop):
-        app.ask_followup([], api_key=VISITOR)
+        app.ask_followup([], api_key=VISITOR, sess=sess)
     assert got == {"key": VISITOR}, got
 
 
 def test_a_public_question_without_a_key_is_refused_before_the_model(public_app, monkeypatch):
     from test_button_builds_a_workbook import SAMPLE
 
-    app, _keys = public_app
-    app._process_pdf_locked(str(SAMPLE), lambda *_a, **_k: None, api_key=VISITOR)
-    app.STATE["store"] = object()
+    app, _keys, sess = public_app
+    app._process_pdf_locked(sess, str(SAMPLE), lambda *_a, **_k: None, api_key=VISITOR)
+    sess.state["store"] = object()
     import statement_qa.qa as qa
 
     def answer_question(*_a, **_k):
         raise AssertionError("نُودي الوكيلُ بلا مفتاح زائر")
 
     monkeypatch.setattr(qa, "answer_question", answer_question)
-    app.STATE["pending_q"] = "كم مجموع السحوبات؟"
-    history, *_rest = app.ask_followup([], api_key="")
+    sess.state["pending_q"] = "كم مجموع السحوبات؟"
+    history, *_rest = app.ask_followup([], api_key="", sess=sess)
     assert "مفتاح" in history[-1]["content"], history[-1]

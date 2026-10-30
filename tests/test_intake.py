@@ -185,9 +185,10 @@ def app_run(monkeypatch, tmp_path):
         monkeypatch.setattr(app, "_pages_to_pngs", lambda _pdf: pages)
         # **الحافظةُ خارج هذه الضوابط (R130):** نسخُ الصور إلى حافظة Gradio يكتب ملفّاتٍ في مجلّد
         # النظام؛ فتُستبدل الدالّةُ بنقلٍ شكليّ — والقياسُ هنا للقراءة لا لحياة الصور.
-        monkeypatch.setattr(app, "_close_pages", lambda ps: list(ps))
-        app.STATE.clear()
-        app.STATE["store"] = "ملفٌّ سابق"
+        monkeypatch.setattr(app, "_close_pages", lambda _sess, ps: list(ps))
+        sess = app._new_session()
+        sess.state["store"] = "ملفٌّ سابق"
+        run.sess = sess        # جلسةُ التشغيل الأخير — تقرؤها الضوابطُ التي تسأل النطاق
         # **ملفٌّ حقيقيٌّ صغير (R132-2):** الهويّةُ من بايتات المصدر، وبلا هويّةٍ لا مفتاح — فلا
         # يُمرَّر مسارٌ وهميّ (كان الإنتاجُ يحتفظ باحتياطيٍّ لخدمة الضوابط).
         src = tmp_path / "upload.pdf"
@@ -195,10 +196,10 @@ def app_run(monkeypatch, tmp_path):
             src.write_bytes(b"%PDF-1.4\n% test statement\n")
         if via_handler:        # معالجُ الزرّ نفسه (بقفل التشغيل) — القفلُ في مجلّدٍ مؤقت
             monkeypatch.setattr(app, "LOCK_PATH", tmp_path / "job.lock")
-            out = app.process_pdf(str(src), progress=lambda *a, **k: None)
+            out = app.process_pdf(str(src), sess=sess, progress=lambda *a, **k: None)
         else:
-            out = app._process_pdf_locked(str(src), lambda *a, **k: None, skip_rejected=skip)
-        return out, calls, pages, app.STATE
+            out = app._process_pdf_locked(sess, str(src), lambda *a, **k: None, skip_rejected=skip)
+        return out, calls, pages, sess.state
     run.calls = calls          # سجلُّ الاستدعاءات يبقى مقروءًا حين يرفع التشغيلُ خطأً
     return run
 
@@ -309,9 +310,10 @@ def test_the_read_button_carries_the_skip_choice_at_false_by_default():
     fns = app.demo.fns.values() if isinstance(app.demo.fns, dict) else app.demo.fns
     wired = [f for f in fns if getattr(f, "fn", None) is app.process_pdf]
     assert len(wired) == 1
-    # **والمدخلُ الثالث مفتاحُ الزائر (المرحلة ١):** خانةُ كلمة مرور تُمرَّر مع القراءة — فالقائمةُ ثلاثة.
-    assert [type(i).__name__ for i in wired[0].inputs] == ["File", "Checkbox", "Textbox"], \
-        "مسارُ القراءة لا يحمل قرارَ الاستبعاد (R131-7) ومفتاحَ الزائر (المرحلة ١)"
+    # **والمدخلان الأخيران مفتاحُ الزائر وجلستُه (المرحلة ١):** خانةُ كلمة مرور تُمرَّر مع القراءة،
+    # وحالةُ الجلسة (`gr.State`) التي تحمل دفترَ هذا الزائر وحدَه.
+    assert [type(i).__name__ for i in wired[0].inputs] == ["File", "Checkbox", "Textbox", "State"], \
+        "مسارُ القراءة لا يحمل قرارَ الاستبعاد (R131-7) ومفتاحَ الزائر وجلستَه (المرحلة ١)"
     box = [i for i in wired[0].inputs if type(i).__name__ == "Checkbox"][0]
     assert box.value is False, "الافتراضُ يجب أن يكون التوقّف (لا دفعَ بلا فعلٍ صريح)"
 
@@ -384,7 +386,7 @@ def test_the_reader_writes_the_scope_the_agent_reads(app_run):
     _out, _calls, pages, state = app_run([("10", "0"), ("20", "0"), ("30", "0")])
     assert state["n_pages"] == len(pages) == 3, "القارئُ لا يكتب عددَ الصفحات ⇒ النطاقُ يقول «0 صفحة»"
     assert state["source_name"] == "upload.pdf", state.get("source_name")
-    scope = app._scope_text()
+    scope = app._scope_text(app_run.sess)
     assert "3 صفحة" in scope and "0 صفحة" not in scope, scope
 
 
@@ -393,13 +395,14 @@ def test_the_scope_says_unknown_instead_of_a_false_zero(app_run):
     يُسمّى الغيابُ («غيرُ معروف») ولا يُنشر «0 صفحة»."""
     import app
 
-    _out, _calls, _pages, _state = app_run([("10", "0")])
-    app.STATE.pop("n_pages")                                    # كأنّ كاتبَ المفتاح غاب
-    app.STATE.pop("source_name")
-    assert "1 صفحة" in app._scope_text(), app._scope_text()      # الاشتقاقُ من الصفوف
+    _out, _calls, _pages, state = app_run([("10", "0")])
+    state.pop("n_pages")                                        # كأنّ كاتبَ المفتاح غاب
+    state.pop("source_name")
+    scope = app._scope_text(app_run.sess)
+    assert "1 صفحة" in scope, scope                              # الاشتقاقُ من الصفوف
 
-    app.STATE.clear()
-    scope = app._scope_text()
+    state.clear()
+    scope = app._scope_text(app_run.sess)
     assert "0 صفحة" not in scope and "غيرُ معروف" in scope, scope
 
 
@@ -409,7 +412,7 @@ def test_a_new_read_clears_the_surfaces_the_next_answer_is_built_on():
         pytest.skip("حزمة التطبيق غير مثبّتة هنا (CI خفيف) — فحص محلي فقط")
     import app
 
-    chat, src, raw, note = app._reset_qa_surfaces()
+    chat, src, raw, note = app._reset_qa_surfaces(app._new_session())
     assert chat == [] and src == "", "المحادثةُ أو تفاصيلُ الاسترجاع لم تُمسح"
     assert getattr(raw, "empty", False), "الصفوفُ التي بُني عليها الجواب لم تُمسّح"
     assert note["visible"] is False and note["value"] == "", "ملاحظةُ الصفوف لم تُطوَ"

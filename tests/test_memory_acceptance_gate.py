@@ -86,28 +86,29 @@ def chat(request, monkeypatch):
     # **بالاسم لا بالمعامل:** الـ fixture مستوردةٌ في رأس الملف ليجدها pytest، ومعاملٌ بالاسم نفسه
     # يُعيد تعريفها فيوقفه حارسُ الأسماء (`redefinition of unused`) — فتُطلب هنا باسمها.
     app = request.getfixturevalue("read_sample")
+    sess = request.getfixturevalue("sess")           # جلسةُ العيّنة نفسُها (المرحلة ١)
 
     rec = _Recorder()
     monkeypatch.setattr(qa, "build_llm", lambda *_a, **_k: rec)
     monkeypatch.setattr(qa, "retrieve", lambda _s, _q, k=4, pages=None: [
         {"chunk_id": c.chunk_id, "page": c.page, "row_start": c.start_row,
          "row_end": c.end_row, "text": c.text, "score": 0.0}
-        for c in (app.STATE.get("chunks") or [])[:k]])
-    app.STATE.setdefault("store", None)
+        for c in (sess.state.get("chunks") or [])[:k]])
+    sess.state.setdefault("store", None)
     if hasattr(qa, "clear_conversation"):
-        qa.clear_conversation(app._ledger_key(), app._memory_path())
+        qa.clear_conversation(app._ledger_key(sess), app._memory_path(sess))
 
     def ask(history, q):
-        history, _ = app.prepare_ask(q, history)
-        return app.ask_followup(history)[0]
+        history, _, _sess = app.prepare_ask(q, history, sess)
+        return app.ask_followup(history, sess=sess)[0]
 
-    return app, rec, ask
+    return app, rec, ask, sess
 
 
 def test_the_second_question_sees_the_first_turn_as_messages(chat) -> None:
     """**الدعوى الحاكمة (الشرط ١):** في السؤال الثاني يرى النموذجُ السؤالَ الأوّلَ **رسالةً بشريّة**
     وجوابَه **رسالةً من المساعد** — لا نصًّا داخل التعليمات."""
-    _app, rec, ask = chat
+    _app, rec, ask, _sess = chat
     h = ask([], Q1)
     answer1 = h[-1]["content"]
     ask(h, Q2)
@@ -123,10 +124,10 @@ def test_the_second_question_sees_the_first_turn_as_messages(chat) -> None:
 
 def test_a_new_read_starts_a_clean_conversation(chat) -> None:
     """**الشرط ٢ (R93-2):** نقرُ «اقرأ» على كشفٍ ⇒ المحادثةُ السابقةُ لا تبلغ النموذج."""
-    app, rec, ask = chat
+    app, rec, ask, sess = chat
     ask([], Q1)
-    app._reset_qa_surfaces()                     # الحدثُ الثاني على زرّ القراءة
-    app._process_pdf_locked(str(SAMPLE), progress=lambda *_a, **_k: None)
+    app._reset_qa_surfaces(sess)                 # الحدثُ الثاني على زرّ القراءة
+    app._process_pdf_locked(sess, str(SAMPLE), progress=lambda *_a, **_k: None)
     ask([], Q2)
     assert not any(Q1 in _text(m) for m in rec.calls[-1]), "سؤالُ القراءة السابقة بلغ النموذج"
 
@@ -144,7 +145,7 @@ def test_a_refused_number_does_not_reach_the_next_call(chat) -> None:
     """
     from statement_qa import qa
 
-    app, rec, ask = chat
+    app, rec, ask, sess = chat
     h = ask([], NUMERIC_Q)                       # محاولةٌ بلا أداةٍ ⇒ رفضٌ معروض
     assert "لم أستطع" in h[-1]["content"], f"التطبيقُ لم يعرض رفضًا: {h[-1]['content'][:60]}"
     assert REFUSED not in h[-1]["content"], "التطبيقُ عرض رقمًا لم يُحسَب"
@@ -154,8 +155,8 @@ def test_a_refused_number_does_not_reach_the_next_call(chat) -> None:
     assert REFUSED not in seen, \
         "الرقمُ المرفوضُ بلغ نداءَ السؤال التالي — الذاكرةُ حفظت ما قاله النموذجُ لا ما عُرض"
 
-    stored = qa._thread_messages({"configurable": {"thread_id": app._ledger_key()}},
-                        app._memory_path())
+    stored = qa._thread_messages({"configurable": {"thread_id": app._ledger_key(sess)}},
+                        app._memory_path(sess))
     humans = [str(m.content) for m in stored if m.type == "human"]
     assert humans == [NUMERIC_Q, Q2], \
         f"سؤالُ مستخدمٍ واحد ⇒ دورةٌ واحدة، والمحفوظُ السؤالُ كما سأله: {humans}"
@@ -175,7 +176,7 @@ def test_each_question_carries_only_its_own_chunks(chat, monkeypatch) -> None:
     """
     from statement_qa import qa
 
-    app, rec, ask = chat
+    app, rec, ask, sess = chat
     monkeypatch.setattr(qa, "retrieve", lambda _s, q, k=4, pages=None: [
         {"chunk_id": f"c-{len(q)}", "page": 1, "row_start": 1, "row_end": 1,
          "text": f"قطعةُ السؤال: {q}", "score": 0.0}])
@@ -190,8 +191,8 @@ def test_each_question_carries_only_its_own_chunks(chat, monkeypatch) -> None:
         assert f"قطعةُ السؤال: {older}" not in seen, \
             f"قطعةُ سؤالٍ سابق («{older}») بلغت النداء الثالث — فالقطعُ تُحفظ وتتراكم"
 
-    stored = qa._thread_messages({"configurable": {"thread_id": app._ledger_key()}},
-                        app._memory_path())
+    stored = qa._thread_messages({"configurable": {"thread_id": app._ledger_key(sess)}},
+                        app._memory_path(sess))
     assert len(stored) == 2 * len(qs), f"دوراتٌ غيرُ متوقّعة في الحافظة: {len(stored)}"
     assert all("قطعةُ السؤال" not in str(m.content) for m in stored), \
         "قطعُ الاسترجاع دخلت الحافظة — والمحفوظُ السؤالُ وحدَه"
