@@ -1,5 +1,5 @@
 # The Space's Python packages: requirements.lock (the environment every measured number came from),
-# with two declared differences and nothing else. tests/test_space_files.py holds them.
+# with three declared differences and nothing else. tests/test_space_files.py holds them.
 #
 # 1. gradio is left out: the Space installs it itself at `sdk_version` in space/README.md, and the test
 #    ties that version to the lock's gradio pin. Its client and huggingface_hub stay pinned as measured
@@ -10,8 +10,13 @@
 #    default strategy takes every package that index also hosts from it (certifi first), and the whole
 #    file fails to resolve (measured 2026-10-31). The reference moves torch alone. The wheel is for
 #    CPython 3.11 on x86-64 Linux, the `python_version` in space/README.md.
+# 3. pydantic 2.12.5 (and its pydantic_core 2.41.5) instead of 2.13.5: the Space installs this file in one
+#    pip command together with `gradio[oauth,mcp]==<sdk_version>`, and the mcp extra of that release
+#    allows pydantic up to 2.12.5 only. The first build failed on it (ResolutionImpossible, 2026-10-31).
+#    Measured before the change: the full suite on the lock with these two pins alone gives the same
+#    result, failure by failure, as on the lock.
 #
-#   regenerate:  the lock's lines without gradio, and the torch line
+#   regenerate:  the lock's lines without gradio, the two pydantic pins of difference 3, and the torch line
 #                replaced by the link (with its #sha256) for that release from https://download.pytorch.org/whl/cpu/torch/
 Jinja2==3.1.6
 MarkupSafe==3.0.3
@@ -98,8 +103,8 @@ polars==1.44.2
 propcache==0.5.2
 pycparser==3.0
 pydantic-settings==2.15.0
-pydantic==2.13.5
-pydantic_core==2.46.5
+pydantic==2.12.5
+pydantic_core==2.41.5
 pydub==0.25.1
 pymupdf==1.28.2
 pypdf==6.18.1

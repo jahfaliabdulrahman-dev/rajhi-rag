@@ -19,6 +19,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 #: Installed by the Space itself at `sdk_version`; the README test ties that version to the lock.
 LEFT_TO_THE_SPACE = {"gradio"}
+#: The Space installs `gradio[oauth,mcp]` in the same pip command, and its mcp extra caps pydantic
+#: (difference 3 in the header of space/requirements.txt, with the measurement behind it).
+HELD_BY_THE_SPACE = {"pydantic": "2.12.5", "pydantic-core": "2.41.5"}
 
 
 def _lines(path: Path) -> list[str]:
@@ -47,7 +50,7 @@ def test_the_space_installs_the_lock_with_only_the_declared_differences():
     lock = _pins(ROOT / "requirements.lock")
     space = _pins(SPACE / "requirements.txt")
     expected = {name: version for name, version in lock.items()
-                if name not in LEFT_TO_THE_SPACE and name != "torch"}
+                if name not in LEFT_TO_THE_SPACE and name != "torch"} | HELD_BY_THE_SPACE
     rest = {name: version for name, version in space.items() if name != "torch"}
     assert rest == expected, (
         "space/requirements.txt انزاح عن requirements.lock: "
