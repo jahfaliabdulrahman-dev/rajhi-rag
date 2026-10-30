@@ -19,7 +19,8 @@ scans, beside ``statement_sample.pdf``, which stays as it is for the controls th
 **One declared difference:** the real date cell prints the Hijri date before the
 Gregorian one. Only the Gregorian run is printed here: no Hijri converter is among the
 project's dependencies, and nothing downstream reads the Hijri run (the frozen prompt
-asks for ``greg`` alone, and ``ordering.parse_gregorian`` keeps the Gregorian run).
+asks for ``greg`` alone, and ``contract_rows.normalize_date``, the one date reader, keeps the
+Gregorian run).
 
 Public-safe by construction: fixed seed, **no bank name and no logo**, an invented customer
 and a masked account, «بيانات اصطناعية» on every page. No bank is named on purpose (owner,

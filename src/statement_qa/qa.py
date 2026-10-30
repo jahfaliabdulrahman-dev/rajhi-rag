@@ -909,12 +909,12 @@ def _data_facts(rows) -> tuple[set, int | None, frozenset, set]:
     max_page: int | None = None
     pages_read: set[int] = set()
     amounts: set[Decimal] = set()
-    from statement_qa.ordering import parse_gregorian
+    from statement_qa.contract_rows import normalize_date
 
     for r in rows or ():
-        g = parse_gregorian(r.get("date"))
-        if g:
-            years.add(int(g[:4]))
+        year = normalize_date(r.get("date"))[2]
+        if year:
+            years.add(year)
         page = r.get("page")
         if isinstance(page, int):
             max_page = page if max_page is None else max(max_page, page)

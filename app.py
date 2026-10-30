@@ -343,8 +343,9 @@ def _kpi_html(n_rows: int, n_clean: int, n_susp: int, last_bal) -> str:
 def _date_cell(r: dict) -> str:
     """Date for the table/export: Gregorian `YYYY/MM/DD`; `*` = inherited.
 
-    The printed cell may carry both calendars (hijri first) — parse_gregorian
-    picks the gregorian run; unparseable cells show as printed (never dropped).
+    The printed cell may carry both calendars (hijri first) or separators —
+    `contract_rows.normalize_date`, the one date reader, reads either;
+    unparseable cells show as printed (never dropped).
     """
     return render_date_cell(r)
 

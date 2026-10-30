@@ -30,17 +30,17 @@ def money(v) -> str:
 def date_cell(row: dict) -> str:
     """Gregorian `YYYY/MM/DD` for the table and the export; `*` = inherited.
 
-    The printed cell may carry both calendars (hijri first) — parse_gregorian
-    picks the gregorian run — and an unparseable cell is shown as printed,
-    never dropped.
+    The printed cell may carry both calendars (hijri first) or separators —
+    `contract_rows.normalize_date`, the one date reader, reads either — and an
+    unparseable cell is shown as printed, never dropped.
     """
-    from statement_qa.ordering import parse_gregorian
+    from statement_qa.contract_rows import normalize_date
 
     d = str(row.get("date") or "").strip()
     if not d:
         return "—"
-    g = parse_gregorian(d)
-    shown = f"{g[:4]}/{g[4:6]}/{g[6:]}" if g else d
+    iso = normalize_date(d)[0]
+    shown = iso.replace("-", "/") if iso else d
     return shown + ("*" if row.get("date_source") == "inherited" else "")
 
 

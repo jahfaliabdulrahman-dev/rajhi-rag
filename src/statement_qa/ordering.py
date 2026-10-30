@@ -6,7 +6,8 @@ do — every sheet prints its number in the header, `tools/page_numbers.py` —
 but a vision model reads it on a minority of pages, so it cannot carry the
 order alone.) The check is built on deterministic signals instead:
 
-1. Printed dates (gregorian part, YYYYMMDD after digit translation):
+1. Printed dates, read by the project's one date reader
+   (`contract_rows.normalize_date`: any digit set, `YYYYMMDD` or `YYYY/MM/DD`):
    open a statement bundle reversed and dates march BACKWARD page over page;
    a single misordered pair shows as first-date(next) < last-date(prev).
    This is a cross-page check; intra-page inversions are counted separately
@@ -28,35 +29,17 @@ Output feeds the app summary; nothing here blocks a run — it NAMES what it saw
 """
 from __future__ import annotations
 
-import re
 from bisect import bisect_left
 
-_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
-_DATE_RUN = re.compile(r"\d{8}")
-
-
-def parse_gregorian(date_str) -> str | None:
-    """Printed date cell -> 'YYYYMMDD' gregorian, or None.
-
-    Cells like «١٤٣٤١٢٢٦ ۲۰۱۳۱۰۳۱» carry BOTH calendars (hijri first).
-    A valid gregorian run has a 19xx–21xx year passing month/day range
-    checks; when several qualify, the LAST one wins (greg prints second).
-    """
-    if not date_str:
-        return None
-    s = str(date_str).translate(_DIGITS)
-    candidates = []
-    for m in _DATE_RUN.finditer(s):
-        v = m.group(0)
-        year, month, day = int(v[:4]), int(v[4:6]), int(v[6:8])
-        if 1900 <= year <= 2199 and 1 <= month <= 12 and 1 <= day <= 31:
-            candidates.append(v)
-    return candidates[-1] if candidates else None
+from statement_qa.contract_rows import normalize_date
 
 
 def check_order(per_page_dates: dict[int, list]) -> dict:
-    """{page: [date cells]} -> cross/intra inversions + date coverage."""
-    parsed = {pg: [parse_gregorian(d) for d in ds]
+    """{page: [date cells]} -> cross/intra inversions + date coverage.
+
+    Dates are ISO strings from `normalize_date`, so they compare in order as text.
+    """
+    parsed = {pg: [normalize_date(d)[0] for d in ds]
               for pg, ds in per_page_dates.items()}
     total = sum(len(v) for v in parsed.values())
     with_date = sum(1 for v in parsed.values() for d in v if d)

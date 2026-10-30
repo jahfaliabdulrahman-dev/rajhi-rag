@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 
 from statement_qa.row_audit import DEBIT_ONLY_DESCRIPTIONS
@@ -31,7 +32,15 @@ def to_ascii_digits(raw: str) -> str:
 
 
 def normalize_date(raw: str | None) -> tuple[str, str, int | None]:
-    """(ISO date | '', status, year) — YYYYMMDD كما طُبع، بمجموعة أرقام أيّاً كانت.
+    """(ISO date | '', status, year) — **قارئُ التاريخ الوحيد** في المشروع.
+
+    يقرأ الخانةَ بأيّ مجموعة أرقام: ثماني خاناتٍ `YYYYMMDD`، أو مفصولةً (`YYYY/MM/DD` · `YYYY-MM-DD`)،
+    أو خانةً تجمع التقويمين (هجريٌّ ثمّ ميلاديّ ⇒ يُؤخذ آخرُ ما يصحّ ميلاديًّا). والصحّةُ بـ`datetime.date`
+    من المكتبة القياسيّة، فيومٌ لا يوجد في شهره ليس تاريخًا.
+
+    **ولماذا واحدٌ (قرارُ المالك 2026-10-30، الحلّ ١):** كانت أربعةُ قرّاء — هذا، و`ordering.parse_gregorian`،
+    و`vlm_reader._is_gregorian`، و`legacy.gdate` — وكلٌّ يفوته ما يقرؤه غيره. قِيس على ٦٢٩ صفحةً حقيقيّة
+    (٥٧٩١ خانة): ١٣٧ خانةً بشكل `dddd/dd/dd` في ١٥ صفحةً لم يرها فحصُ الترتيب، وكانت تُعرض كما طُبعت.
 
     Returns `iso=''` when the value cannot honestly be called a date; the status
     says which kind of failure it is, so the summary can count them instead of
@@ -39,13 +48,24 @@ def normalize_date(raw: str | None) -> tuple[str, str, int | None]:
     """
     if raw is None or not str(raw).strip():
         return "", "missing", None
-    digits = "".join(ch for ch in to_ascii_digits(str(raw)) if ch.isdigit())
-    if len(digits) != 8:
+    text = to_ascii_digits(str(raw))
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if len(digits) == 8:
+        candidates = [digits]
+    else:                       # تقويمان في خانة: كلُّ كلمةٍ بثماني خاناتٍ مرشّح
+        words = ("".join(ch for ch in w if ch.isdigit()) for w in text.split())
+        candidates = [w for w in words if len(w) == 8]
+    if not candidates:
         return "", "incomplete", None
-    year, month, day = int(digits[:4]), int(digits[4:6]), int(digits[6:8])
-    if not (1900 <= year <= 2100) or not (1 <= month <= 12) or not (1 <= day <= 31):
-        return "", "implausible", None
-    return f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}", "ok", year
+    for d in reversed(candidates):
+        year = int(d[:4])
+        if not 1900 <= year <= 2100:
+            continue
+        try:
+            return date(year, int(d[4:6]), int(d[6:8])).isoformat(), "ok", year
+        except ValueError:
+            continue
+    return "", "implausible", None
 
 
 def _dec(value) -> Decimal | None:

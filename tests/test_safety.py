@@ -6,7 +6,8 @@ import pytest
 from statement_qa.bank_check import verdict_from_name
 from statement_qa.era import fingerprint_pages, page_fingerprint, token_style
 from statement_qa.job_lock import JobBusyError, job_lock
-from statement_qa.ordering import check_order, parse_gregorian
+from statement_qa.contract_rows import normalize_date
+from statement_qa.ordering import check_order
 from statement_qa.chunking import Chunk
 
 
@@ -45,11 +46,12 @@ def test_fingerprint_pages_transition_and_outlier():
 
 # ————— ordering —————
 
-def test_parse_gregorian_picks_gregorian_of_two_calendars():
-    assert parse_gregorian("١٤٣٤١٢٢٦ ۲۰۱۳۱۰۳۱") == "20131031"
-    assert parse_gregorian("۲۰۱۳۱۱۰۷") == "20131107"
-    assert parse_gregorian("١٤٣٤١٢٢٦") is None      # hijri-only -> None
-    assert parse_gregorian(None) is None
+def test_the_date_reader_picks_gregorian_of_two_calendars():
+    """The rule `ordering.parse_gregorian` held, now held by the one date reader."""
+    assert normalize_date("١٤٣٤١٢٢٦ ۲۰۱۳۱۰۳۱")[:2] == ("2013-10-31", "ok")
+    assert normalize_date("۲۰۱۳۱۱۰۷")[:2] == ("2013-11-07", "ok")
+    assert normalize_date("١٤٣٤١٢٢٦")[0] == ""      # hijri-only -> no date
+    assert normalize_date(None)[0] == ""
 
 
 def test_check_order_flags_reversed_pages():

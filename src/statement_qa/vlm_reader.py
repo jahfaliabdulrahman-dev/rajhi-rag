@@ -32,6 +32,7 @@ from statement_qa.legacy.prompts import (  # noqa: E402
 )
 from statement_qa.legacy.arabic_digit_parser import norm_num as _legacy_norm_num
 from statement_qa.api_key import get_api_key
+from statement_qa.contract_rows import normalize_date
 
 MODEL = os.environ.get("OPENROUTER_MODEL_VLM", "google/gemini-3.7-flash")
 
@@ -457,28 +458,6 @@ _JUNK_DATES = {"none", "null", "nan", "nil", "غير مقروء", "غير واض
 _DATE_IN_TEXT = re.compile(r"[0-9٠-٩۰-۹]{8}")
 
 
-def _ascii_digits(text: str) -> str:
-    out = []
-    for ch in text:
-        o = ord(ch)
-        if 0x0660 <= o <= 0x0669:
-            out.append(chr(ord("0") + o - 0x0660))
-        elif 0x06F0 <= o <= 0x06F9:
-            out.append(chr(ord("0") + o - 0x06F0))
-        else:
-            out.append(ch)
-    return "".join(out)
-
-
-def _is_gregorian(candidate: str) -> bool:
-    """8 خانات تُقرأ سنة-شهر-يوم في نطاق معقول (1900–2100)."""
-    d = _ascii_digits(candidate)
-    if len(d) != 8 or not d.isdigit():
-        return False
-    year, month, day = int(d[:4]), int(d[4:6]), int(d[6:8])
-    return 1900 <= year <= 2100 and 1 <= month <= 12 and 1 <= day <= 31
-
-
 def _norm_col(value) -> str | None:
     """العمود المطبوع → debit/credit. لا تخمين: ما لا يُفهم يعود None."""
     t = str(value or "").strip().lower()
@@ -501,7 +480,8 @@ def _clean_date(value, desc=None) -> str | None:
 
     والورق يطبع **تاريخين** في الوصف (هجري ثم ميلادي)، فيُختار الأول الذي يُقرأ
     ميلادياً في نطاق معقول — لا أول ثماني خانات، لأنها الهجرية (١٤٤٥…) فتُرفض
-    لاحقاً وتُحتسب الصفحة بلا تواريخ.
+    لاحقاً وتُحتسب الصفحة بلا تواريخ. والحكمُ «يُقرأ ميلاديًّا» لقارئ التاريخ الوحيد
+    (`contract_rows.normalize_date`).
     """
     text = str(value or "").strip()
     if text.lower() in _JUNK_DATES:
@@ -509,7 +489,7 @@ def _clean_date(value, desc=None) -> str | None:
     if not text and desc:
         for hit in _DATE_IN_TEXT.finditer(str(desc)):
             cand = hit.group(0)
-            if _is_gregorian(cand):
+            if normalize_date(cand)[1] == "ok":
                 text = cand
                 break
         else:

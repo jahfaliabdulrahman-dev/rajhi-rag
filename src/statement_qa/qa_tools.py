@@ -92,7 +92,6 @@ def _number_rows(rows: list[dict]) -> list[dict]:
 #: **العلّة:** سؤالُ «الرصيد في تاريخ» كان يُجاب «لا توجد حركات» **بلا أداةٍ سألت التاريخ** — دعوى
 #: عن الكشف لا يدعمها شيء. والعلاجُ قدرةٌ لا قائمةُ عبارات: التاريخُ يُقرأ ويُرشَّح ويُجمَّع، وما
 #: لا تقدر عليه الأداةُ يُقال **حدَّ أداة**.
-_DATE_AR = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 _ISO = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -114,24 +113,19 @@ def _iso_date(row: dict) -> str:
 def _parse_date_arg(value, name: str) -> str | None:
     """تاريخُ وسيطٍ (من/إلى) ⇒ `YYYY-MM-DD` — أو `None`، أو **خطأُ أداةٍ مسمّى**.
 
-    والقبول: `2026-03-15` · `2026/03/15` · `20260315` · أرقامٌ عربيةٌ-هنديةٌ أو ممتدّة. وما سواها
+    والقبول: `2026-03-15` · `2026/03/15` · `20260315` · أرقامٌ عربيةٌ-هنديةٌ أو ممتدّة — وهو قبولُ
+    قارئ التاريخ الوحيد `contract_rows.normalize_date` (لا قارئَ للوسائط غيرُ قارئ الخانات). وما سواها
     **يُرفض بحدِّ الأداة**: «صيغةُ التاريخ غيرُ مفهومة — استعمل YYYY-MM-DD». ولا يُقرأ تاريخٌ
     تخمينًا، ولا يُحوَّل فشلُ القراءة إلى «لا توجد حركات».
     """
-    raw = str(value or "").translate(_DATE_AR).strip()
+    raw = str(value or "").strip()
     if not raw:
         return None
-    digits = re.sub(r"[^\d]", "", raw)
-    fmt = ""
-    if _ISO.match(raw.replace("/", "-")):
-        fmt = raw.replace("/", "-")
-    elif len(digits) == 8:
-        fmt = f"{digits[:4]}-{digits[4:6]}-{digits[6:]}"
-    if fmt:
-        try:
-            return _date.fromisoformat(fmt).isoformat()
-        except ValueError:
-            pass
+    from statement_qa.contract_rows import normalize_date     # noqa: PLC0415 — خفيفٌ بلا تبعيّات
+
+    iso = normalize_date(raw)[0]
+    if iso:
+        return iso
     raise ValueError(
         f"{name}={value!r} تاريخٌ غيرُ مفهوم — حدُّ الأداة: تواريخُ ميلاديّةٌ بصيغة YYYY-MM-DD")
 

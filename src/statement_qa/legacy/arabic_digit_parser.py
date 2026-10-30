@@ -63,17 +63,6 @@ def norm_num(s):
         return f(float(a)) if a else None
     return f(float(t))
 
-def gdate(s):
-    """Gregorian date from a Gemini date cell like '١٤٣٩٠٧٢٢ ٢٠١٨٠٤٠٨'.
-    Prefers the 8-digit run starting with '20' (Hijri runs start with '14')."""
-    if not s:
-        return None
-    nums = re.findall(r"[0-9]{8}", str(s).translate(DIGITS))
-    for n in nums:
-        if n.startswith("20"):
-            return n
-    return nums[-1] if nums else None
-
 if __name__ == "__main__":
     cases = {
         "۳۰۰,۰۰": 300.00, "۱۰۰,۰۰": 100.00, "٥٠,٠٠": 50.00,       # قديمة: فاصلة عشرية
