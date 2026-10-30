@@ -87,7 +87,26 @@
 
 **ما يحتاجه الـSpace (مقيس):** رأسُ README للـSpace: `sdk_version: 6.27.0` و`python_version: "3.11"` (الافتراضيّ 3.10)
 و`preload_from_hub` للنموذج، فيُنزَّل وقتَ البناء لا عند أوّل سؤال · `packages.txt`: `poppler-utils` · torch من فهرس المعالج المركزيّ ·
-**بلا أيّ سرّ**.
+**بلا أيّ سرّ**. ⇒ **كُتب في `space/` (خ٤ أدناه).**
+
+**خ٤ — ملفّاتُ الـSpace (2026-10-31 · الاسمُ بكلمة المالك: «arabic-statement-reader»، عامٌّ لا يُربط ببنك):**
+- `space/README.md`: ترويسةُ الـSpace — Gradio `6.27.0` (نسخةُ القفل) · Python 3.11 · `preload_from_hub` لملفّات نموذج البحث العشرة
+  (قائمتُها من ذاكرة HF المحلّيّة التي ملأها التطبيقُ نفسُه) · `license: other` لأنّ `LICENSE` «كلُّ الحقوق محفوظة». ونصٌّ قصير: المدعومُ
+  الآن كشوفُ الراجحي الممسوحةُ وحدها، ولا يُفتح بنكٌ قبل تأهيله، والمشروعُ مستقلٌّ عن المصرف.
+- `space/requirements.txt`: **القفلُ نفسُه** بفرقين معلَنين في رأسه: Gradio يثبّته الـSpace بـ`sdk_version`، وtorch عجلةُ المعالج
+  المركزيّ للنسخة نفسها **بمرجعٍ مباشر** (مع بصمة sha256) لا بفهرسٍ إضافيّ. **والسببُ مقيس:** بفهرسٍ إضافيٍّ يأخذ `uv` بإعداده
+  الافتراضيّ كلَّ حزمةٍ يحملها فهرسُ PyTorch منه، فيسقط الحلُّ كلُّه على `certifi`. وبالمرجع المباشر يُحَلّ الملفُّ على Linux وPython 3.11:
+  ١٣٥ حزمة، وصفرُ حزمة CUDA، وhuggingface_hub على نسخة القفل. (تركُ huggingface_hub للـSpace جرّبتُه أوّلًا فأخذ الحلُّ نسخةً أحدث
+  ممّا قِيست عليه الأرقام، فبقي مثبّتًا.) و`tests/test_space_files.py` (٧) يحرس التطابقَ وعجلةَ torch ونسخةَ Gradio ونموذجَ البحث
+  وحزمةَ poppler. **عضّ في نسخةٍ مؤقّتة:** نسخةٌ منزاحة ⇒ أحمرُ يسمّيها · عجلةٌ لـPython آخر ⇒ أحمر · فهرسٌ إضافيّ ⇒ أحمر.
+  **حدُّه المعلن:** في الحزمة الكاملة لا في قائمة الـCI، فليس بوّابةَ نشر.
+- `space/packages.txt`: `poppler-utils`.
+- **الرفعُ من نسخةٍ نقيّةٍ لـ`main` المهبوط**، بالملفّات التي يقرؤها التطبيقُ وحدها (لا الاختبارات ولا الوثائق ولا صندوقُ المراسلات):
+  ```bash
+  hf repos create jahfaliabdulrahman-dev/arabic-statement-reader --type space --sdk gradio --private --flavor cpu-basic
+  S=$(mktemp -d); git archive HEAD app.py src tools data/sample/statement_showcase.pdf data/sample/statement_showcase.ledger.json LICENSE | tar -x -C "$S"; cp space/* "$S"/
+  hf upload jahfaliabdulrahman-dev/arabic-statement-reader "$S" . --type space
+  ```
 
 **ملاحظةٌ لا يلزم إصلاحُها قبل CP1:** النموذجُ يُبنى في كلّ جلسة (`HuggingFaceEmbeddings` في `build_index`). مشاركتُه في العمليّة كلّها
 لا تكشف شيئًا بين الزائرين، فالفهرسُ يبقى لكلّ جلسة. وتوفّر نحو ١٠ ث وذاكرةَ نسخةٍ لكلّ زائر. لكنّها تعديلٌ في الاسترجاع، فتُعرض
