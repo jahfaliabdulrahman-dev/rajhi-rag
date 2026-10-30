@@ -208,6 +208,23 @@ def test_the_index_is_not_built_until_a_question_needs_it(public, monkeypatch):
     assert "store" not in sess.state
 
 
+def test_a_question_without_a_key_does_not_build_the_index(public, monkeypatch):
+    """**مراجعةُ الكود (2026-10-30):** السؤالُ بلا مفتاحٍ بعد «جرّب الآن» كان يبني الفهرسَ (نموذجُ التضمين،
+    ~110MB عند أوّل نداء) **ثمّ** يطلب المفتاح — عملٌ لا يخدم شيئًا قبل جملة «ضع مفتاحك»."""
+    app, visitor = public
+
+    def _built(_chunks):
+        raise AssertionError("بُني الفهرسُ لسؤالٍ بلا مفتاح")
+
+    monkeypatch.setattr(app, "build_index", _built)
+    sess = visitor()
+    app.try_now(sess)
+    history, _q, sess = app.prepare_ask("كم مجموع الإيداعات؟", [], sess)
+    history, *_rest = app.ask_followup(history, "", sess)
+    assert "مفتاح OpenRouter" in history[-1]["content"], history[-1]
+    assert "store" not in sess.state
+
+
 def test_the_owners_surface_does_not_offer_it(monkeypatch, tmp_path):
     """**المحلّيّ مجلّدُ بيانات المالك الدائم:** «جرّب الآن» كان سيكتب فيه ويحوّل مؤشّرَ كشفه النشِط."""
     import gradio as gr

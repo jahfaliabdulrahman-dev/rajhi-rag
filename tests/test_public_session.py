@@ -128,6 +128,55 @@ def test_condition_1_nothing_the_session_wrote_survives_it(public):
     assert sess.state == {}, "حالةُ الجلسة في الذاكرة لم تُفرَّغ"
 
 
+def test_condition_1_stopping_the_server_leaves_no_session_folder(tmp_path):
+    """**الشرط ١ عند إيقاف الخادم (2026-10-30 · قِيس حيًّا مرّتين):** جلسةٌ مفتوحةٌ ثمّ `SIGTERM` (ما يرسله
+    مضيفٌ يُعيد التشغيل) ⇒ كان مجلّدُ الجلسة بدفترها يبقى في مجلّد النظام المؤقّت: حذفُ Gradio بعد ساعةٍ لا
+    يقع، والإشارةُ تُنهي العمليّةَ قبل أن ينظّف بايثون مجلّداتِه المؤقّتة. يُقاس على **خادمٍ حقيقيّ** (عمليّةٌ
+    منفصلة، السطحُ العامّ، بلا مفتاح)، والجلسةُ تُفتح بحدث السؤال (لا يحتاج نموذجًا ولا مُصيّر PDF).
+    """
+    import os
+    import signal
+    import subprocess
+    import time
+
+    pytest.importorskip("gradio_client")
+    from gradio_client import Client
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    tmp = tmp_path / "system-tmp"
+    tmp.mkdir()
+    env = {k: v for k, v in os.environ.items() if k not in ("OPENROUTER_API_KEY", "RAJHI_SURFACE")}
+    env.update(TMPDIR=str(tmp), RAJHI_DATA_HOME=str(tmp_path / "home"), GRADIO_SERVER_PORT=str(port),
+               GRADIO_TEMP_DIR=str(tmp_path / "gradio"), GRADIO_ANALYTICS_ENABLED="False")
+    log = tmp_path / "server.log"
+    proc = subprocess.Popen([sys.executable, str(ROOT / "app.py")], cwd=str(ROOT), env=env,
+                            stdout=log.open("w"), stderr=subprocess.STDOUT, start_new_session=True)
+    try:
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            with socket.socket() as s:
+                if s.connect_ex(("127.0.0.1", port)) == 0:
+                    break
+            assert proc.poll() is None, log.read_text(encoding="utf-8", errors="replace")[-2000:]
+            time.sleep(0.5)
+        else:
+            pytest.fail("الخادمُ لم يفتح منفذه")
+        Client(f"http://127.0.0.1:{port}", verbose=False).predict(
+            "سؤال", [], api_name="/ask_question")
+        opened = list(tmp.glob("rajhi_session_*"))
+        assert len(opened) == 1, f"لم تُفتح جلسةٌ واحدة: {opened}"
+        (opened[0] / "ledger.sqlite").write_bytes(b"stands for the visitor's ledger")
+        proc.send_signal(signal.SIGTERM)
+        proc.wait(timeout=60)
+    finally:
+        if proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGKILL)
+    left = sorted(str(p) for p in tmp.glob("rajhi_session_*"))
+    assert not left, f"مجلّدُ جلسةٍ بقي بعد إيقاف الخادم: {left}"
+
+
 def test_condition_1_the_conversation_memory_is_closed_with_the_session(public):
     """حافظةُ المحادثة (`SqliteSaver`) متّصلٌ مفتوحٌ في العمليّة — يُغلق مع الجلسة فلا يُعيد إنشاءَ ملفّها."""
     from statement_qa import qa
@@ -226,6 +275,34 @@ def test_condition_3_a_session_never_sees_another_sessions_ledger(public):
     thread = {"configurable": {"thread_id": app._ledger_key(b)}}
     assert qa._thread_messages(thread, app._memory_path(a)), "ذاكرةُ أ فارغة — الضابطُ لا يقيس شيئًا"
     assert not qa._thread_messages(thread, app._memory_path(b)), "ب ترى رسائلَ محادثة أ"
+
+
+def test_condition_3_a_session_without_its_ledger_shares_no_conversation(public, monkeypatch):
+    """**مراجعةُ الأمان (2026-10-30 · ملاحظةٌ دون عتبة الإبلاغ، وتُغلق من جذرها):** جلسةٌ تعثّرت كتابةُ
+    دفترها لا ملفَّ لذاكرتها (`_memory_path` ⇒ `None`)، فكان سؤالُها يقع على **حافظةٍ واحدةٍ للعمليّة كلّها**
+    (`qa._MEMORY_KEY_DEFAULT`) بخيطٍ هو بصمةُ الكشف — فزائران رفعا الملفَّ نفسَه يتشاركان المحادثة.
+    والقاعدة: الذاكرةُ في ملفّ الجلسة وحده، فبلا ملفٍّ لا ذاكرة.
+    """
+    from statement_qa import qa
+
+    app, visitor = public
+    a, b = visitor(), visitor()
+    for s in (a, b):
+        _read(app, s)
+        app._ledger_path_for(s).unlink()                 # كتابةُ الدفتر «تعثّرت»
+        assert app._memory_path(s) is None
+    seen: list = []
+
+    def answer(*_a, **kw):
+        seen.append(kw.get("thread_id"))
+        return qa.QAResult(answer="جوابٌ مصطنع", sources=[], used_row_nos=[])
+
+    monkeypatch.setattr(qa, "answer_question", answer)
+    history, _q, a = app.prepare_ask("سؤالُ الزائر الأوّل", [], a)
+    app.ask_followup(history, VISITOR, a)
+    assert seen == [None], f"سؤالٌ بلا ملفِّ ذاكرةٍ حمل خيطًا: {seen}"
+    thread = {"configurable": {"thread_id": app._ledger_key(b)}}
+    assert not qa._thread_messages(thread, None), "حافظةُ العمليّة تحمل محادثةَ زائرٍ يراها غيرُه"
 
 
 def test_condition_3_one_sessions_delete_and_end_leave_the_other_whole(public):

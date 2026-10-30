@@ -1632,16 +1632,12 @@ def ask_followup(history, api_key: str = "", sess=None):
     q = sess.state.pop("pending_q", "")
     if not q:
         return gr.skip(), gr.skip(), gr.skip(), gr.skip()
-    # **والقاعدةُ تُعيد بناءَ الأسطح بعد إعادة التشغيل (R130):** بلا `store` في الذاكرة تُقرأ
-    # الصفوفُ من القاعدة ويُبنى الفهرسُ منها — فالسؤالُ يُجاب ولو فرغت الذاكرة (شرطُ القبول).
-    if "store" not in sess.state and not _load_from_ledger(sess):
-        history.append({"role": "assistant",
-                        "content": "ارفع الكشف في تبويب «قراءة وتحقق» أولاً."})
-        return history, "", pd.DataFrame(), _hide_note()
     from statement_qa.qa import answer_question, build_llm, remember
 
     # **والوكيلُ بمفتاح الزائر وحده على السطح العامّ (المرحلة ١):** يُبنى العميلُ بمفتاحه هنا، وغيابُه
     # جوابٌ يُقرأ في المحادثة قبل أيّ نداء. والمحلّيُّ يترك `llm=None` فيبنيه الوكيلُ بمفتاح التطبيق.
+    # **وقبل إعادة بناء الأسطح** (مراجعةُ الكود 2026-10-30): بعد «جرّب الآن» لا فهرسَ، وبناؤه يُحمّل
+    # نموذجَ التضمين — فلا يُبنى لسؤالٍ يُجاب بـ«ضع مفتاحك».
     llm = None
     if SURFACE == "public":
         visitor = (api_key or "").strip()
@@ -1651,12 +1647,23 @@ def ask_followup(history, api_key: str = "", sess=None):
                                        "السؤالُ هنا بمفتاحك وحدَه، ولا يُحفظ ولا يُسجَّل."})
             return history, "", pd.DataFrame(), _hide_note()
         llm = build_llm(api_key=visitor)
+    # **والقاعدةُ تُعيد بناءَ الأسطح بعد إعادة التشغيل (R130):** بلا `store` في الذاكرة تُقرأ
+    # الصفوفُ من القاعدة ويُبنى الفهرسُ منها — فالسؤالُ يُجاب ولو فرغت الذاكرة (شرطُ القبول).
+    if "store" not in sess.state and not _load_from_ledger(sess):
+        history.append({"role": "assistant",
+                        "content": "ارفع الكشف في تبويب «قراءة وتحقق» أولاً."})
+        return history, "", pd.DataFrame(), _hide_note()
 
     key = _ledger_key(sess)
     memory_path = _memory_path(sess)
     ledger_path = _ledger_ui.ledger_file(sess.home, key) if key else None
     if ledger_path is not None and not ledger_path.exists():
         ledger_path = None
+    # **والذاكرةُ في ملفّ الجلسة وحده — فبلا ملفٍّ لا ذاكرة (الشرط ٣ · مراجعةُ الأمان 2026-10-30):**
+    # `memory_path=None` كان يقع على حافظةٍ واحدةٍ للعمليّة كلّها (`qa._MEMORY_KEY_DEFAULT`، للضوابط وأدوات
+    # القياس) بخيطٍ هو بصمةُ الكشف ⇒ جلستان رفعتا الملفَّ نفسَه وتعثّرت كتابةُ دفترَيهما تتشاركان المحادثة.
+    # وبلا خيطٍ يُجاب السؤالُ بلا سجلٍّ سابق ولا يُحفظ (`_run_agent` · `remember`).
+    thread = key if memory_path is not None else None
 
     # **والذاكرةُ في مكوّنها (قرار 98ب · شرط ١ و٢):** السجلُّ **رسائلُ** خيطٍ في الحافظة بمعرّف
     # الكشف (`_ledger_key` = بصمةُ الكشف — ومصدرُها واحدٌ مع مفتاح الدفتر)، والنطاقُ يُسمّى.
@@ -1671,7 +1678,7 @@ def ask_followup(history, api_key: str = "", sess=None):
                           rows=None if ledger_path else sess.state.get("rows"),
                           chunks=sess.state.get("chunks"),
                           footers=None if ledger_path else sess.state.get("footers"),
-                          thread_id=key, scope=_scope_text(sess),
+                          thread_id=thread, scope=_scope_text(sess),
                           n_pages=_scope_n_pages(sess, sess.state.get("rows") or []),
                           ledger_path=ledger_path, memory_path=memory_path, llm=llm)
     rows_now = sess.state.get("rows") or []
@@ -1685,7 +1692,7 @@ def ask_followup(history, api_key: str = "", sess=None):
     # وبراياتِه التي تُضاف هنا (تعذُّرُ الأدوات · «رقمٌ بلا شاهد»). فالمحفوظُ = ما رآه المستخدم
     # بالبناء، لا نصُّ النموذج ثمّ يُعرض غيرُه. ووحدتُه سؤالُ المستخدم ⇒ **دورةٌ واحدةٌ** لكلّ سؤال
     # (لا المحاولةَ المرفوضة، ولا نصفَ سؤالٍ مركّب، ولا توجيهَ «استخدم أداة»).
-    remember(key, q, displayed, memory_path=memory_path)
+    remember(thread, q, displayed, memory_path=memory_path)
     # **والتبادلُ يُسجَّل في القاعدة أيضًا (R130):** قصدُ «الأسئلة المسجَّلة» يعرض ما سُئل فعلًا،
     # وأدلّتُه صفوفُ الأثر — لا رسائلُ الحافظة (وهي مقصوصةٌ إلى ثلاثِ دورات).
     _record_qa_row(sess, res, q, displayed)
@@ -2122,14 +2129,13 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي", delete_cache=DELETE
                             outputs=[ledger_out, ledger_note])
                 l_refresh.click(_ledger_refresh_click, inputs=[sess_state], outputs=[ledger_state])
             # **توصيلُ زرّ القراءة (٣):** بعد تعريف كلّ مخرجاتِه، ومنها `ledger_state`.
+            # **ومخرجاتُ كشفٍ محمَّل** — قائمةٌ واحدة لزرّ القراءة و«جرّب الآن» (يُعيدان الصيغةَ نفسَها).
+            statement_outputs = [ticker, table, kpi, gallery, filter_col, filter_value,
+                                 filter_from, filter_to, ledger_state, intake_note, sess_state]
             btn.click(process_pdf, inputs=[pdf_in, skip_rejected_in, key_in, sess_state],
-                      outputs=[ticker, table, kpi, gallery, filter_col, filter_value,
-                               filter_from, filter_to, ledger_state, intake_note, sess_state],
-                      show_progress_on=[ticker])
-            # **«جرّب الآن»:** مخرجاتُ زرّ القراءة نفسُها، ومعه مسحُ أسطح السؤال (كشفٌ آخر ⇒ لا سؤالَ من القديم).
-            try_btn.click(try_now, inputs=[sess_state],
-                          outputs=[ticker, table, kpi, gallery, filter_col, filter_value,
-                                   filter_from, filter_to, ledger_state, intake_note, sess_state],
+                      outputs=statement_outputs, show_progress_on=[ticker])
+            # **«جرّب الآن»:** ومعه مسحُ أسطح السؤال (كشفٌ آخر ⇒ لا سؤالَ من القديم).
+            try_btn.click(try_now, inputs=[sess_state], outputs=statement_outputs,
                           show_progress_on=[ticker])
             try_btn.click(_reset_qa_surfaces, inputs=[sess_state], outputs=[chat, src, raw, raw_note],
                           show_progress="hidden")
@@ -2143,4 +2149,12 @@ if __name__ == "__main__":
     # **البصمةُ تُكتب هنا وحدَه (R78-1):** هذا الموضعُ هو الذي تصير فيه هذه العمليةُ *هي التي تُجيب*
     # على المنفذ — فتصدق البصمةُ على الكود الذي يُنتج الأرقامَ فعلًا، لا على كودٍ استورَد الملفَّ للحظة.
     APP_CODE_STAMP = _write_code_stamp()
+    # **إيقافُ الخادم خروجٌ عاديّ (الشرط ١ · 2026-10-30):** `SIGTERM` (ما يرسله مضيفٌ يُعيد التشغيل) كان
+    # يُنهي العمليّةَ بلا خروج ⇒ مجلّداتُ الجلسات المفتوحة (`TemporaryDirectory`) تبقى بدفاترها. فتُوجَّه إلى
+    # معالج Ctrl-C في المكتبة القياسيّة (`signal.default_int_handler`)، وGradio تُغلق خادمَها عليه
+    # (`Blocks.block_thread`)، ثمّ يمحو بايثون عند الخروج كلَّ مجلّدٍ مؤقّتٍ ما زال حيًّا. **وحدُّه:**
+    # القتلُ القسريّ (`SIGKILL`) لا يُلتقط. يحرسه `test_condition_1_stopping_the_server_leaves_no_session_folder`.
+    import signal
+
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
     demo.launch(theme=THEME, css=RTL_CSS, head=HEAD)

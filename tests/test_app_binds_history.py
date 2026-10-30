@@ -79,10 +79,15 @@ def test_the_memory_key_is_the_statement_fingerprint() -> None:
 
     **والتغييرُ في R130 مُعلَن:** صار `key` متغيّرًا محليًّا (لأنّه يُمرَّر مرّتين: خيطًا ومسارَ حافظةٍ)،
     فيُقاس المعنى: `key = _ledger_key()` ثمّ `thread_id=key` — لا الاسمُ الحرفيّ القديم.
+    **وتغييرٌ مُعلَنٌ ثانٍ (2026-10-30 · مراجعةُ الأمان):** الخيطُ هو البصمةُ **أو لا خيط** — جلسةٌ بلا ملفّ
+    ذاكرةٍ لا تُعطى خيطًا يقع على حافظة العمليّة المشتركة (`test_condition_3_a_session_without_its_ledger…`).
+    فيُقاس: `thread = key if memory_path is not None else None` ثمّ `thread_id=thread` — ولا معرّفَ ثالث.
     """
     read = APP.read_text(encoding="utf-8")
     ask = ast.get_source_segment(read, _fn("ask_followup")) or ""
-    assert "key = _ledger_key(sess)" in ask and "thread_id=key" in ask, \
+    assert ("key = _ledger_key(sess)" in ask
+            and "thread = key if memory_path is not None else None" in ask
+            and "thread_id=thread" in ask), \
         "المعرّفُ ليس بصمةَ الكشف — والذاكرةُ تلتصق بغير صاحبها"
     key = ast.get_source_segment(read, _fn("_ledger_key")) or ""
     assert "statement_key(" in key, "مفتاحُ البصمة انقطع عن مصدره (`statement_key`)"

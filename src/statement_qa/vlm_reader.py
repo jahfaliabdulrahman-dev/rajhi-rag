@@ -92,8 +92,6 @@ def stamp_conflict(cached: dict | None, current: dict) -> str | None:
 _ATTEMPTS = 4
 
 
-
-
 def _parse_amount(tok: str | None) -> Decimal | None:
     """Printed Arabic-Indic money token -> Decimal (Western digits, dot halalas).
 
