@@ -228,7 +228,7 @@ footer { direction: ltr; }
 .hero { position: relative; overflow: hidden; border: 1px solid var(--border-color-primary);
         border-radius: 12px; background: var(--background-fill-primary);
         padding: 26px 30px 18px; }
-.hero h1 { font-family: 'Amiri', 'Noto Naskh Arabic', serif !important; font-weight: 700;
+.hero h1 { font-family: 'Noto Naskh Arabic', serif !important; font-weight: 700;
            font-size: 2.1rem; line-height: 1.3; margin: 0 0 8px; }
 .hero .sub { color: var(--body-text-color-subdued); font-size: .97rem; max-width: 78%; }
 .hero .rule { height: 1px; background: #A98A4A; opacity: .45; margin-top: 16px; }
@@ -348,7 +348,7 @@ THEME.set(
 HEAD = """
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;700&display=swap" rel="stylesheet">
 """
 
 HERO = """
@@ -362,7 +362,7 @@ HERO = """
     <text font-size="7.6" fill="#A98A4A" letter-spacing="0.6">
       <textPath href="#sealArc" startOffset="25%" text-anchor="middle">السلسلة الرصيدية · حَكَم لا يخطئ</textPath>
     </text>
-    <text x="50" y="54" text-anchor="middle" font-family="Amiri, serif" font-size="21" fill="#0E6B57">مُدقَّق</text>
+    <text x="50" y="54" text-anchor="middle" font-family="'Noto Naskh Arabic', serif" font-size="21" fill="#0E6B57">مُدقَّق</text>
     <text x="50" y="70" text-anchor="middle" font-size="8.5" fill="#6B6355">آلياً</text>
   </svg>
   <h1>مُدقّق كشوف الراجحي</h1>
