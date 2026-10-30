@@ -1,8 +1,9 @@
 """Retriever: local multilingual embeddings + FAISS (bank-agnostic core).
 
-Model: intfloat/multilingual-e5-small (~110MB, strong Arabic, CPU-free tier
-compatible). e5 expects the 'query: ' / 'passage: ' prefixes — handled here
-so callers pass raw text.
+Model: intfloat/multilingual-e5-small (470MB downloaded: 449MB of weights plus
+the tokenizer, measured 2026-10-30 in an empty HF cache; strong Arabic; runs on
+CPU). e5 expects the 'query: ' / 'passage: ' prefixes — handled here so callers
+pass raw text.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ _E5_PREFIX_QUERY = "query: "
 
 def build_index(chunks: list[Chunk]):
     """Chunks -> FAISS index (+ stored chunk list). First call downloads
-    the model (~110MB) into the local HF cache."""
+    the model (470MB, see the module docstring) into the local HF cache."""
     from langchain_huggingface import HuggingFaceEmbeddings
     from langchain_community.vectorstores import FAISS
 

@@ -210,7 +210,7 @@ def test_the_index_is_not_built_until_a_question_needs_it(public, monkeypatch):
 
 def test_a_question_without_a_key_does_not_build_the_index(public, monkeypatch):
     """**مراجعةُ الكود (2026-10-30):** السؤالُ بلا مفتاحٍ بعد «جرّب الآن» كان يبني الفهرسَ (نموذجُ التضمين،
-    ~110MB عند أوّل نداء) **ثمّ** يطلب المفتاح — عملٌ لا يخدم شيئًا قبل جملة «ضع مفتاحك»."""
+    ٤٧٠ ميغابايت عند أوّل نداء — مقيسٌ 2026-10-30) **ثمّ** يطلب المفتاح — عملٌ لا يخدم شيئًا قبل جملة «ضع مفتاحك»."""
     app, visitor = public
 
     def _built(_chunks):
