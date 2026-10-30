@@ -568,8 +568,12 @@ def read_rows(conn: sqlite3.Connection, pg: int | None = None) -> list[dict]:
     # تسمّي العمود `pg`، وكلُّ مستهلكٍ (إعادةُ بناء الحالة · حاجزُ النطاق · `ingest` عند إعادة البناء)
     # يقرأ `page` ⇒ كانت الصفوفُ تعود بلا صفحة فتُسقَط كلُّها وتُقلَّم. فالسطحُ يُخرج الاسمَين:
     # `page` للقرّاء (كما وعد تعليقُ الدالّة أصلاً) و`pg` لمن يخاطب SQL.
+    # **و`source` كذلك (2026-10-30):** عكسُ الترجمتين في `_row_values` هنا بجانبها — كان `proof_source`
+    # يعود باسم العمود وحدَه، فصفوفٌ مقروءةٌ تُعاد كتابتُها تكتب كلَّ إثباتٍ فارغًا (قِيس في
+    # `test_a_ledger_rebuilt_from_its_own_rows_is_the_same_ledger`).
     return [{**{c: _typed(c, row[c]) for c in COLUMNS},
-             "page": int(row["pg"]), "seq": int(row["seq"])} for row in conn.execute(sql, args)]
+             "page": int(row["pg"]), "source": row["proof_source"], "seq": int(row["seq"])}
+            for row in conn.execute(sql, args)]
 
 
 def read_footers(conn: sqlite3.Connection) -> dict[int, dict]:

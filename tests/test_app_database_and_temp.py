@@ -178,6 +178,35 @@ def test_rebuilding_the_ledger_after_a_restart_does_not_wipe_the_rows(app, sess)
     assert "0 صفًّا" not in msg, msg
 
 
+def test_rebuilding_after_a_restart_keeps_every_rows_proof(app, sess):
+    """**الصنفُ نفسُه في عمودٍ آخر (2026-10-30):** الضابطُ أعلاه عدَّ الصفوفَ وحدَها، فمرّ عطبُ
+    `proof_source`: `read_rows` يُعيده باسم العمود، و`_row_values` يقرأ اسمَ الرندر `source` ⇒ إعادةُ
+    البناء بعد إعادة التشغيل تكتب كلَّ إثباتٍ فارغًا، فيصير كلُّ صفٍّ «بلا إثبات» والرسالةُ «بُني ✅».
+    فيُقاس الإثباتُ صفًّا صفًّا، ومعه عددُ «بلا إثبات».
+    """
+    key = app._ledger_key(sess)
+    path = _db(app, sess)
+
+    def proofs():
+        conn = L.read_ledger(path)
+        try:
+            return ([r["proof_source"] for r in L.read_rows(conn)],
+                    L.answer(conn, "coverage")["unproven"])
+        finally:
+            conn.close()
+
+    before, unproven_before = proofs()
+    assert any(before), "العيّنةُ بلا إثباتٍ أصلًا — الضابطُ لا يقيس شيئًا"
+
+    sess.state.clear()                          # إعادةُ تشغيل
+    assert app._load_from_ledger(sess, key)
+    app._ledger_build_click(sess)
+
+    after, unproven_after = proofs()
+    assert after == before, f"إعادةُ البناء محت الإثبات: {before} ⇒ {after}"
+    assert unproven_after == unproven_before, (unproven_before, unproven_after)
+
+
 def test_pages_are_counted_from_the_database_not_from_rows(app, sess):
     """**عددُ الصفحات بعد إعادة التشغيل (مقعدُ المواصفة P2):** ٦٢٦ صفًّا لا تعني ٦٢٦ صفحة — الصفحةُ
     بلا صفٍّ (غلاف/ملخّص) تبقى في جدول `pages`، و`n_pages` من الصفوف كان يقول «ينتهي عند 626»."""

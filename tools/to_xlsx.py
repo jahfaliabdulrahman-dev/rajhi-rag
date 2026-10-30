@@ -696,8 +696,10 @@ def rows_from_ledger(db: Path) -> list[dict]:
     ⇒ فبدون مسارِ رندرٍ من الدفتر لا تُقاس البوّابةُ أصلًا (قاسه مقعدا المواصفة والبنية: كان القياسُ
     طوطولوجيًّا يقابل الدفترَ بمصدره). والآن يُرندَر الملفُّ من القاعدة، ويُقابَل خليّةً بخليّة.
 
-    **والترجمةُ عكسُ `ledger._row_values` في موضعٍ واحدٍ معلَن:** `page` ⇐ `pg` و`source` ⇐
-    `proof_source`. **والمبالغُ تعود نصوصًا** كما خُزّنت (عقدُ `TEXT`) — والمستهلكُ يقرؤها بـ`Decimal`
+    **والترجمةُ عكسُ `ledger._row_values` في موضعٍ واحدٍ معلَن — `ledger.read_rows` نفسُه**
+    (`page` ⇐ `pg` و`source` ⇐ `proof_source`)، وهنا يُحذف الاسمان القاعديّان وحدهما. كانت الترجمةُ
+    منسوخةً هنا، وغيابُها من `read_rows` محا الإثباتَ في كلّ إعادة كتابة (2026-10-30).
+    **والمبالغُ تعود نصوصًا** كما خُزّنت (عقدُ `TEXT`) — والمستهلكُ يقرؤها بـ`Decimal`
     عند الحاجة نفسِها (`_num0`), فلا رقمَ يمرّ عائمًا في الطريق.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -708,8 +710,7 @@ def rows_from_ledger(db: Path) -> list[dict]:
         rows = L.read_rows(conn)
     finally:
         conn.close()
-    return [{"page": r["pg"], "source": r["proof_source"],
-             **{k: v for k, v in r.items() if k not in ("pg", "proof_source")}} for r in rows]
+    return [{k: v for k, v in r.items() if k not in ("pg", "proof_source")} for r in rows]
 
 
 def build(run: Path, out: Path, gate: Path | None,

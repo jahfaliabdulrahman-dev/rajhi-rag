@@ -178,6 +178,30 @@ def test_the_scope_gate_reads_the_page_dimension_from_the_database(tmp_path):
     assert pages_read == {1, 2}, pages_read
 
 
+def test_a_ledger_rebuilt_from_its_own_rows_is_the_same_ledger(tmp_path):
+    """**`read_rows` عكسُ `_row_values` تمامًا (2026-10-30):** صفوفٌ تُقرأ من القاعدة ثمّ تُكتب في
+    قاعدةٍ جديدة تُعطي القاعدةَ نفسَها عمودًا عمودًا. كان `proof_source` يعود باسم العمود والكاتبُ
+    يقرأ `source` ⇒ كلُّ إثباتٍ يُكتب فارغًا. ويقرأ هذا المسارَ: إعادةُ البناء بعد إعادة التشغيل ·
+    الإكسلُ من حالةٍ مستعادة · ودفترُ «جرّب الآن» المبنيُّ من ملفٍّ نصّيّ.
+    """
+    first = L.open_ledger(tmp_path / "first.sqlite")
+    second = L.open_ledger(tmp_path / "second.sqlite")
+    try:
+        L.ingest(first, _rows((1, 2)), _pages((1, 2)))
+        rows = L.read_rows(first)
+        L.ingest(second, rows, L.pages_from_state(rows, L.read_footers(first)))
+        again = L.read_rows(second)
+        unproven = (L.answer(first, "coverage")["unproven"], L.answer(second, "coverage")["unproven"])
+    finally:
+        first.close()
+        second.close()
+    assert len(again) == len(rows) == 6
+    for want, have in zip(rows, again, strict=True):
+        for col in L.COLUMNS:
+            assert have[col] == want[col], f"صفّ {want['seq']} عمود {col}: {want[col]!r} ⇒ {have[col]!r}"
+    assert unproven[1] == unproven[0], f"«بلا إثبات» تغيّر بإعادة البناء: {unproven}"
+
+
 def test_two_different_sources_never_share_a_key(tmp_path):
     """**R131-2 (P1):** الهويّةُ من محتوى المصدر لا من صيغة الطباعة. كشفان بالصيغة والطول نفسَيهما
     كانا يتصادمان (البصمةُ أنماطُ طباعةٍ لا هويّة) ⇒ قراءةُ الثاني تمحو صفوفَ الأوّل. والآن
