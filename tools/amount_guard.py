@@ -927,8 +927,40 @@ def _strata(in_scope: list[str]) -> dict[str, str | None]:
     }
 
 
+def is_binary(rel: str) -> bool:
+    """«ثنائيّ» = ما لا يقرؤه الماسحُ نصًّا: امتدادٌ في `BINARY`، أو بايتاتٌ لا تُفكّ `utf-8`
+    (خطٌّ · قاعدةُ بيانات) — وهو التخطّي نفسُه الذي تفعله `pushed_counts` و`tracking_audit`."""
+    if Path(rel).suffix.lower() in BINARY:
+        return True
+    try:
+        (ROOT / rel).read_bytes().decode("utf-8")
+    except UnicodeDecodeError:
+        return True
+    return False
+
+
 def probe(rel: str, deny: set[str]) -> int:
-    """يفحص **ملفًّا واحدًا** بمكانه النسبيّ — تستعمله حزمةُ الحقن داخل نسخةٍ مؤقّتة."""
+    """يفحص **ملفًّا واحدًا** بمكانه النسبيّ — يستعمله `pre-commit` على كلّ مُدرَج، وحزمةُ الحقن.
+
+    **والثنائيُّ يُحكم بقاعدته لا بالنصّ (2026-10-30، كلمةُ المالك «اصلح خلل الحارس من الجذر»):**
+    كان يُقرأ نصًّا فيفشل الفكُّ فيُقال «لا ملفَّ للفحص» (5) — على كلّ ثنائيٍّ، **ومنه المُعلَنُ نفسُه**
+    (`statement_sample.pdf`)، فلا يُلتزم ثنائيٌّ إلا بتجاوز الخطّاف. والحكمُ الآن: يمرّ بسطرِه في
+    `tracked-binaries.txt` (سببٌ مكتوبٌ لفحصٍ بصريّ، إذ لا يرى الماسحُ ما في البكسلات)، ويُرفض
+    **باسمه** بلا سطر (1) أينما كان مسارُه — فلا يمرّ عند الالتزام ثنائيٌّ كان يُرفض إلا المُعلَن.
+    والملفُّ الغائبُ وحده «لا ملفَّ» (5). رجوعٌ: `git revert` للالتزام الذي أدخل `def is_binary`
+    (`git log -S'def is_binary' -- tools/amount_guard.py`)، والضابط
+    `test_the_probe_judges_a_binary_by_its_declaration` يحرس الحدّ.
+    """
+    if not (ROOT / rel).is_file():
+        print(f"⛔ لا ملفَّ للفحص: {rel}", file=sys.stderr)
+        return 5
+    if is_binary(rel):
+        if rel in declared_set(DECLARED_BINARIES):
+            print(f"   ثنائيٌّ مُعلَنٌ بسببه في {_shown(DECLARED_BINARIES)} · {rel}")
+            return 0
+        print(f"⛔ ثنائيٌّ بلا إعلان: {rel} — لا يقرؤه الماسحُ نصًّا، فلا يمرّ إلا بسطرٍ يحمل سببَه "
+              f"في {_shown(DECLARED_BINARIES)}", file=sys.stderr)
+        return 1
     txt = _text_of_rel(rel)
     if txt is None:
         print(f"⛔ لا ملفَّ للفحص: {rel}", file=sys.stderr)

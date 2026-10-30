@@ -338,6 +338,39 @@ def test_tracked_binaries_under_data_must_be_declared():
     assert ag.undeclared_binaries() == []
 
 
+def test_the_probe_judges_a_binary_by_its_declaration(tmp_path, monkeypatch, capsys):
+    """**الحدُّ الذي يحرسه (2026-10-30):** كان `--probe` يقرأ الثنائيَّ نصًّا فيُعيد «لا ملفَّ للفحص» (5)
+    — على المُعلَن نفسِه — فيرفض `pre-commit` كلَّ ثنائيّ. والآن: المُعلَنُ يمرّ (0)، وغيرُ المُعلَن يُرفض
+    **باسمه** (1) أينما كان مسارُه وبامتدادٍ معروفٍ أو بايتاتٍ لا تُفكّ، والغائبُ وحده 5، والنصُّ يُمسح كما كان."""
+    monkeypatch.setattr(ag, "ROOT", tmp_path)
+    declared = tmp_path / "docs" / "security" / "tracked-binaries.txt"
+    declared.parent.mkdir(parents=True)
+    monkeypatch.setattr(ag, "DECLARED_BINARIES", declared)
+    pdf, font = tmp_path / "data" / "sample" / "x.pdf", tmp_path / "assets" / "f.woff2"
+    for path, raw in ((pdf, b"%PDF-1.4\n\xff\xfe\x00"), (font, b"wOF2\x00\x01\xff\xfe")):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw)
+    (tmp_path / "notes.md").write_text("نصٌّ بلا مبالغ\n", encoding="utf-8")
+
+    declared.write_text("# رأس\n", encoding="utf-8")
+    for rel in ("data/sample/x.pdf", "assets/f.woff2"):
+        assert ag.probe(rel, set()) == 1, f"ثنائيٌّ بلا إعلانٍ مرّ: {rel}"
+        assert rel in capsys.readouterr().err, "الرفضُ لا يُسمّي الملفّ"
+
+    declared.write_text("data/sample/x.pdf   # سبب\nassets/f.woff2   # سبب\n", encoding="utf-8")
+    assert ag.probe("data/sample/x.pdf", set()) == 0
+    assert ag.probe("assets/f.woff2", set()) == 0
+    assert ag.probe("missing.pdf", set()) == 5
+    assert ag.probe("notes.md", set()) == 0
+
+
+def test_every_declared_binary_passes_the_commit_probe():
+    """والمُعلَنُ في المستودع نفسِه يمرّ — `statement_sample.pdf` كان يُرفض بـ5 قبل الإصلاح."""
+    for rel in sorted(ag.declared_set(ag.DECLARED_BINARIES)):
+        if (ag.ROOT / rel).is_file():
+            assert ag.probe(rel, set()) == 0, rel
+
+
 # ═══════════ أبوابُ مراجعة ٣٩ الأربعة: كلٌّ منها سقط فعلًا، وكلٌّ منها مُختبَرٌ الآن ═══════════
 
 
