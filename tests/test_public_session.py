@@ -314,6 +314,39 @@ def test_condition_4_the_key_is_kept_nowhere(public):
         assert VISITOR.encode() not in f.read_bytes(), f"المفتاحُ في ملفٍّ كتبته الجلسة: {f.name}"
 
 
+# ————— نصُّ «قاعدة الخصوصية» يصف ما بُني (شرطُ CP1) —————
+
+def test_the_privacy_text_states_the_measured_lifetimes(monkeypatch):
+    """**بحكم المالك 2026-10-30 «بعد ساعة (Gradio)»:** النصُّ العامّ يقول «خلال ساعة» — وهي مهلةُ Gradio
+    المثبَّتة لحالة صفحةٍ أُغلقت؛ ودقائقُ المرفوع من `DELETE_CACHE` الذي تعمل به الواجهةُ فعلًا. فإن
+    تغيّرت قيمةُ المكتبة أو الإعداد سقط هذا الضابطُ قبل أن يكذب النصّ."""
+    from gradio.state_holder import SessionState
+
+    import app
+
+    monkeypatch.delenv("GRADIO_IS_E2E_TEST", raising=False)
+    assert SessionState(app.demo).STATE_TTL_WHEN_CLOSED == 3600, "تغيّرت مهلةُ Gradio — حدِّث النصّ"
+    assert "خلال ساعةٍ من آخر قراءةٍ أو سؤالٍ لك" in app.PRIVACY_PUBLIC
+    assert app.demo.delete_cache == app.DELETE_CACHE, "الواجهةُ لا تعمل بالإعداد الذي يقرؤه النصّ"
+    minutes = sum(app.DELETE_CACHE) // 60
+    assert minutes == 20 and f"خلال {minutes} دقيقةً من رفعه" in app.PRIVACY_PUBLIC
+    for clause in ("بمفتاح OpenRouter الذي تضعه أنت", "لا يُحفظ ولا يُسجَّل",
+                   "مجلّدٍ مؤقّتٍ لجلستك وحدها", "ولو رفع الكشفَ نفسَه", "لا سجلّ"):
+        assert clause in app.PRIVACY_PUBLIC, clause
+
+
+def test_each_surface_shows_its_own_privacy_text():
+    """المحلّيُّ يصف قاعدةَ المالك على جهازه، والعامّ يصف الجلسة؛ والقديمُ «اصطناعيّة فقط» لا يبقى في أيّهما
+    (البندُ الذي أعاد المالكُ كتابتَه 2026-10-28)."""
+    import app
+
+    assert app.SURFACE == "local"                      # الضوابطُ محلّيّةٌ بإعلان conftest
+    assert app.PRIVACY_LOCAL.strip() in app.ABOUT and app.PRIVACY_PUBLIC.strip() not in app.ABOUT
+    assert "على جهازك" in app.PRIVACY_LOCAL
+    for text in (app.PRIVACY_LOCAL, app.PRIVACY_PUBLIC, app.UPLOAD_NOTE_LOCAL, app.UPLOAD_NOTE_PUBLIC):
+        assert "اصطناعية** فقط" not in text and "إلى سطح عام" not in text, text[:60]
+
+
 # ————— ما كشفه نزعُ الحالة العامّة —————
 
 def test_the_table_shows_the_verdicts_of_this_read(public):
