@@ -101,14 +101,17 @@
   `gradio[oauth,mcp]==6.27.0`، وإضافةُ mcp في هذه النسخة تقبل pydantic حتى 2.12.5 فقط، والقفلُ على 2.13.5 ⇒ `ResolutionImpossible`.
   أُعيد إنتاجُه محلّيًّا بالأمر نفسه، وبـpydantic 2.12.5 وpydantic_core 2.41.5 يُحَلّ (١٤٧ حزمة) ولا تتحرّك نسخةٌ غيرُهما. **وقِيس قبل
   التغيير:** الحزمةُ الكاملةُ في بيئةٍ من القفل بهذين وحدهما ⇒ السبعةَ عشرَ أنفسُها بأسمائها والباقي ناجح (الفرقُ في العدد عشرةُ ضوابط
-  للفحص الثابت تحتاج pyflakes وليس في القفل؛ أُضيف إلى تلك البيئة فنجحت العشرة). و`tests/test_space_files.py` (٧) يحرس التطابقَ وعجلةَ torch ونسخةَ Gradio ونموذجَ البحث
+  للفحص الثابت تحتاج pyflakes وليس في القفل؛ أُضيف إلى تلك البيئة فنجحت العشرة). و`tests/test_space_files.py` (٨) يحرس التطابقَ وعجلةَ torch ونسخةَ Gradio ونموذجَ البحث
   وحزمةَ poppler. **عضّ في نسخةٍ مؤقّتة:** نسخةٌ منزاحة ⇒ أحمرُ يسمّيها · عجلةٌ لـPython آخر ⇒ أحمر · فهرسٌ إضافيّ ⇒ أحمر.
   **حدُّه المعلن:** في الحزمة الكاملة لا في قائمة الـCI، فليس بوّابةَ نشر.
 - `space/packages.txt`: `poppler-utils`.
-- **الرفعُ من نسخةٍ نقيّةٍ لـ`main` المهبوط**، بالملفّات التي يقرؤها التطبيقُ وحدها (لا الاختبارات ولا الوثائق ولا صندوقُ المراسلات):
+- **الرفعُ من نسخةٍ نقيّةٍ لـ`main` المهبوط**، بالملفّات التي يقرؤها التطبيقُ وحدها (لا الاختبارات ولا الوثائق ولا صندوقُ المراسلات)،
+  وقائمتُها ملفٌّ واحدٌ متتبَّع: `space/include.txt`. **وكشف البناءُ الحيُّ نقصًا فيها:** «تصدير Excel» رفض لأنّ `profiles/al-rajhi.json`
+  لم يُرفع (رفضٌ مُغلَق، لا ملفٌّ يخالف عقده). فأُضيف `profiles`، وضابطٌ يتبع ما يقرؤه الكودُ من مجلّدات الجذر (`X / "<مجلّد>"`
+  و`from tools.…` تتبُّعًا إلى أدوات التطبيق وحدها) ويسقط إن غاب أحدُها عن القائمة. **عضّ:** حذفُ `profiles` منها ⇒ أحمرُ يسمّيه.
   ```bash
   hf repos create jahfaliabdulrahman-dev/arabic-statement-reader --type space --sdk gradio --private --flavor cpu-basic
-  S=$(mktemp -d); git archive HEAD app.py src tools data/sample/statement_showcase.pdf data/sample/statement_showcase.ledger.json LICENSE | tar -x -C "$S"; cp space/* "$S"/
+  S=$(mktemp -d); git archive HEAD $(grep -v '^#' space/include.txt) | tar -x -C "$S"; cp space/README.md space/requirements.txt space/packages.txt "$S"/
   hf upload jahfaliabdulrahman-dev/arabic-statement-reader "$S" . --type space
   ```
 

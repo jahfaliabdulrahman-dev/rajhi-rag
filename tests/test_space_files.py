@@ -92,6 +92,46 @@ def test_the_short_description_fits_the_hub_limit():
     assert len(_front_matter()["short_description"]) <= 60
 
 
+def _top_level_reads(path: Path, roots: set[str]) -> tuple[set[str], set[str]]:
+    """Top-level repository entries a module reaches (`X / "<entry>"` path joins and `from <entry>.…`
+    imports), and the `tools` modules it imports, so the app's own tools are followed and no other."""
+    import ast
+
+    found: set[str] = set()
+    tools: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div) \
+                and isinstance(node.right, ast.Constant) and isinstance(node.right.value, str):
+            head = node.right.value.split("/")[0]
+            if head in roots:
+                found.add(head)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.module.split(".")[0] in roots:
+            found.add(node.module.split(".")[0])
+            if node.module.startswith("tools."):
+                tools.add(node.module.split(".")[1])
+    return found, tools
+
+
+def test_every_top_level_folder_the_app_reads_is_uploaded():
+    """The first live build refused the Excel export: `profiles/` was read by the code and not uploaded."""
+    roots = {p.name for p in ROOT.iterdir() if not p.name.startswith(".")}
+    uploaded = {line.split("/")[0] for line in _lines(SPACE / "include.txt")}
+    todo = [ROOT / "app.py", *sorted((ROOT / "src").rglob("*.py"))]
+    seen: set[Path] = set()
+    read: set[str] = set()
+    while todo:
+        module = todo.pop()
+        if module in seen or not module.is_file():
+            continue
+        seen.add(module)
+        found, tools = _top_level_reads(module, roots)
+        read |= found
+        todo += [ROOT / "tools" / f"{name}.py" for name in tools]
+    missing = sorted(read - uploaded)
+    assert missing == [], f"الكودُ يقرأ {missing} ولا يُرفع إلى الـSpace (space/include.txt)"
+    assert {"app.py", "src"} <= uploaded
+
+
 def test_poppler_is_installed_because_the_app_reads_pages_with_pdf2image():
     assert "from pdf2image import" in (ROOT / "app.py").read_text(encoding="utf-8")
     packages = (SPACE / "packages.txt").read_text(encoding="utf-8").split()

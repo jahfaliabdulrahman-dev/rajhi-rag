@@ -1,0 +1,10 @@
+# What the Space receives from the repository: the files the app reads at run time and nothing else
+# (no tests, no docs, no mailbox). tests/test_space_files.py fails when the code reads a top-level
+# folder that is not listed here. Used by the upload recipe in docs/CP1_STEPS.md (step 4).
+app.py
+LICENSE
+data/sample/statement_showcase.pdf
+data/sample/statement_showcase.ledger.json
+profiles
+src
+tools
