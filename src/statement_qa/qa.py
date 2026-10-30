@@ -266,9 +266,11 @@ def build_llm(model_name: str | None = None, *, callbacks: list | None = None,
     """
     from langchain_openai import ChatOpenAI
 
-    from statement_qa.api_key import get_api_key
+    from statement_qa.api_key import resolve_key
 
-    key = api_key or get_api_key()
+    # **ومفتاحُ الزائر كما هو (المرحلة ١ · G3 البند ٣):** `None` وحدَه يقرأ مفتاحَ التطبيق؛ والفارغُ
+    # يُرفض — كان `api_key or get_api_key()` يُعيد الخانةَ الفارغة إلى مفتاح التطبيق بصمت.
+    key = resolve_key(api_key)
     model = effective_model(model_name)
     # **حدُّ السعر يُرسَل مع كلّ طلب** (`provider.max_price` · قرار 20261014-184500 §٢): لا يُشترى
     # نداءٌ من مضيفٍ أغلى منه ⇒ **الضمانُ من المزوّد لا من حاجزٍ يتنبّأ**، وطلبٌ لا مضيفَ تحت حدّه

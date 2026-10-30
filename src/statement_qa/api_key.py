@@ -62,3 +62,20 @@ def get_api_key(name: str = _ENV_NAME) -> str:
         f"{name} غير موجود. ضعه في ملف .env في جذر المشروع "
         f"(انسخ .env.example ثم أضف المفتاح) أو في متغيّر بيئة."
     )
+
+
+def resolve_key(given: str | None) -> str:
+    """The key a request carries — **the visitor's key passes as given, and only ``None`` reads the app key.**
+
+    The public surface (G3 item 3, owner's word 2026-10-28) reads with the visitor's
+    key alone and never with the app key. So an empty or blank key — a field left
+    empty — is refused here instead of falling back to the app key in silence (the
+    old ``api_key or get_api_key()`` did exactly that). ``None`` means "no visitor"
+    (the command line and the evaluation tools), and only then is the app key read.
+    """
+    if given is None:
+        return get_api_key()
+    key = given.strip()
+    if not key:
+        raise ValueError("المفتاحُ فارغ — لا يُرسَل طلبٌ بلا مفتاح، ولا يُستبدَل به مفتاحُ التطبيق.")
+    return key

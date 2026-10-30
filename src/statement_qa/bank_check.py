@@ -64,9 +64,10 @@ def _probe_from_content(content: str) -> dict:
     return {"verdict": verdict_from_name(name), "bank": name}
 
 
-def probe_bank(image_path: str, stats: dict | None = None) -> dict:
+def probe_bank(image_path: str, stats: dict | None = None,
+               api_key: str | None = None) -> dict:
     """Page 1 -> {'verdict': ..., 'bank': ...}. Callers catch exceptions."""
     crops = [base64.b64encode(_band_png(image_path, *CROP_TOP_BAND)).decode(),
              base64.b64encode(_band_png(image_path, *CROP_BOTTOM_BAND)).decode()]
     return chat_vlm_image(crops, BANK_PROMPT, max_tokens=800, stats=stats,
-                          parse=_probe_from_content)
+                          parse=_probe_from_content, api_key=api_key)

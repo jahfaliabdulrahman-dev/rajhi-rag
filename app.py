@@ -98,6 +98,25 @@ DATA_HOME = _ledger.data_home()
 # قفل «مهمة واحدة» — نافذتان متزامنتان كانتا تخلطان النتائج والسجلات.
 LOCK_PATH = DATA_HOME / "job.lock"
 
+# **السطحُ: محلّيٌّ للمالك أو عامٌّ للزائر (المرحلة ١ · G3 البند ٣ · قرارُ المالك 2026-10-28):** على
+# السطح العامّ تُقرأ الكشوفُ ويُسأل الوكيلُ **بمفتاح الزائر وحده**، ولا يُقرأ مفتاحُ التطبيق أبدًا.
+# **والافتراضُ هو العامّ (فشلٌ مُغلَق):** السطحُ المحلّيُّ يُعلَن صراحةً بـ`RAJHI_SURFACE=local` في
+# مشغّل المالك؛ فـ Space نسي المتغيّرَ يعمل عامًّا (يطلب مفتاحَ الزائر)، ولا يعمل محلّيًّا بمفتاح التطبيق.
+SURFACE = "local" if os.environ.get("RAJHI_SURFACE", "").strip().lower() == "local" else "public"
+
+
+def _read_key(api_key: str | None) -> str | None:
+    """مفتاحُ النداءات المدفوعة لهذه القراءة — **يُحسم قبل أيّ عملٍ أو نداء.**
+
+    العامّ: مفتاحُ الزائر وحده، وغيابُه خطأٌ مسمًّى ولا يُدفع شيء. المحلّيّ: مفتاحُ الزائر إن وُضع،
+    وإلّا `None` فيقرأ الناقلُ مفتاحَ التطبيق (`api_key.resolve_key`) — المالكُ على جهازه.
+    """
+    key = (api_key or "").strip()
+    if SURFACE == "public" and not key:
+        raise gr.Error("ضع مفتاح OpenRouter الخاصّ بك أوّلًا — القراءةُ هنا بمفتاحك وحدَه، "
+                       "ولا يُحفظ ولا يُسجَّل.")
+    return key or None
+
 # ————— بصمةُ الكود (R74-3 · مراجعة ٧٤ · أُوصي بها المدقّق قبل البروفة) —————
 # **العلّةُ التي وُلدت منها:** الفحصُ الشامل يقيس **العمليةَ الجارية** لا الشجرة، وقد قاس فعلًا كودًا
 # عمرُه اثنا عشر يومًا وأعلن نجاحًا (٢٠٢٦-٠٩-٢٦)، ثمّ قاس كودًا مُصلَحًا وأعلن فشلًا — والحكمُ واحد:
@@ -549,7 +568,8 @@ def _own_sums(order: list[int], raw_by_pg: dict[int, list]) -> dict[int, tuple]:
     return own
 
 
-def _page_descriptions(path: str, next_path: str | None, stats: dict):
+def _page_descriptions(path: str, next_path: str | None, stats: dict,
+                       api_key: str | None = None):
     """(بياناتُ صفوف الصفحة من عمود البيان، هل لُصقت تكملة؟) — استدعاءٌ واحد (statement_qa.desc_reader)."""
     img = Image.open(path).convert("RGB")
     pb = analyze_page(np.asarray(img.convert("L")), RENDER_DPI)
@@ -559,11 +579,11 @@ def _page_descriptions(path: str, next_path: str | None, stats: dict):
     if next_path:
         nimg = Image.open(next_path).convert("RGB")
         cont = continuation_for(pb, analyze_page(np.asarray(nimg.convert("L")), RENDER_DPI), nimg)
-    return read_page_descriptions(img, pb, cont, stats), cont is not None
+    return read_page_descriptions(img, pb, cont, stats, api_key=api_key), cont is not None
 
 
 def _desc_pass(order: list[int], pages: list[str], all_rows: list[dict],
-               pairs: dict, charge, over_budget) -> dict:
+               pairs: dict, charge, over_budget, api_key: str | None = None) -> dict:
     """البيانُ لكلّ صفحة من عمود البيان، والأرقامُ لا تُمسّ.
 
     التكملةُ تُلصق بالصفّ الأخير **فقط** حين يُثبت الحسابُ أن الصفحةَ التالية في الترتيب الحقيقي
@@ -581,7 +601,7 @@ def _desc_pass(order: list[int], pages: list[str], all_rows: list[dict],
         nxt_path = pages[nxt - 1] if nxt and pairs.get((pg, nxt)) == "adjacent" else None
         st: dict = {}
         try:
-            descs, stitched = _page_descriptions(pages[pg - 1], nxt_path, st)
+            descs, stitched = _page_descriptions(pages[pg - 1], nxt_path, st, api_key=api_key)
         except Exception:  # noqa: BLE001
             rep["failed"].append(pg)
             continue
@@ -595,7 +615,8 @@ def _desc_pass(order: list[int], pages: list[str], all_rows: list[dict],
     return rep
 
 
-def process_pdf(pdf_path: str, skip_rejected: bool = False, progress=gr.Progress()):
+def process_pdf(pdf_path: str, skip_rejected: bool = False, api_key: str = "",
+                progress=gr.Progress()):
     """Tab 1 handler — single-job lock → read all pages → chain-audit →
     footer oracle + era/order checks → chunks+index → **قاعدةُ الكشف تُكتب تلقائيًّا**.
 
@@ -615,7 +636,8 @@ def process_pdf(pdf_path: str, skip_rejected: bool = False, progress=gr.Progress
         raise gr.Error("ارفع ملف PDF أولاً ثم اضغط «قراءة الكشف».")
     try:
         with job_lock(LOCK_PATH):
-            return _process_pdf_locked(pdf_path, progress, skip_rejected=bool(skip_rejected))
+            return _process_pdf_locked(pdf_path, progress, skip_rejected=bool(skip_rejected),
+                                       api_key=api_key)
     except JobBusyError:
         raise gr.Error("يوجد تشغيل جارٍ الآن (نافذة أو طلب آخر) — "
                        "انتظر انتهاءه ثم أعد المحاولة.")
@@ -831,7 +853,11 @@ def _close_pages(pages) -> list[str]:
     return out
 
 
-def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
+def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False,
+                        api_key: str | None = None):
+    # **مفتاحُ هذه القراءة يُحسم أوّلًا (المرحلة ١):** على السطح العامّ بلا مفتاح زائرٍ لا يقع شيء —
+    # لا مسحَ لمحادثةٍ ولا تحويلَ صفحاتٍ ولا نداء — والمفتاحُ يُمرَّر إلى كلّ نداءٍ مدفوعٍ أدناه.
+    key = _read_key(api_key)
     # **ومسحُ ذاكرة المحادثة هنا لا يتوقّف على ترتيب مستمعَي الزرّ** (تصحيحُ مقعد البنية 2026-10-08):
     # الحالةُ **قبل استبدالها** في كلِّ ترتيبٍ ⇒ يُمسح خيطُ الكشف المُغادَر فعلًا؛ ومع مسحِ
     # `_reset_qa_surfaces` عند النقر تُغطّى كلُّ سيناريوهات العودة (كشفٌ جديد · إعادةُ قراءة ·
@@ -869,7 +895,7 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
     # ويفشل مفتوحاً: أي التباس يمرّر التشغيل (لا قرار على تخمين).
     bank_usage: dict = {}
     try:
-        bank = probe_bank(pages[0], stats=bank_usage)
+        bank = probe_bank(pages[0], stats=bank_usage, api_key=key)
     except Exception:
         bank = {"verdict": "unknown", "bank": None}
     if bank["verdict"] == "other":
@@ -932,7 +958,7 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
         progress(0.05 * i / n_proc, f"قراءة إطار الإجماليات {i + 1}/{n_proc}…")
         fst: dict = {}
         try:
-            footers[pg] = read_footer(pages[pg - 1], stats=fst)
+            footers[pg] = read_footer(pages[pg - 1], stats=fst, api_key=key)
             fail_streak = 0
         except Exception:
             footers[pg] = None
@@ -964,7 +990,7 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
         attempted.append(pg)
         st: dict = {}
         try:
-            raw_by_pg[pg] = read_rows_vlm(pages[pg - 1], stats=st)
+            raw_by_pg[pg] = read_rows_vlm(pages[pg - 1], stats=st, api_key=key)
             page_no_by_pg[pg] = st.get("page_no")
             fail_streak = 0
             # **وصفحةٌ بلا صفوفٍ ليست صفحةً فارغةً بالضرورة (قاسه قياسُ البروفة ٢٠٢٦-٠٩-٣٠):**
@@ -1025,7 +1051,7 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
         if i > 0 and rows and rows[0].get("boundary") == "anchor" and not over_cap():
             rst: dict = {}
             raw_rows, recovered = recover_anchor(
-                raw_rows, prev_closing, img, pg, rst)
+                raw_rows, prev_closing, img, pg, rst, api_key=key)
             _merge_usage(rst)
             if recovered is not None:
                 rows = chain_derive(raw_rows, prev_balance=prev_closing)
@@ -1037,7 +1063,7 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
                 and page_diverged(rows, cum, prev_footer, footer, cum_broken)):
             pst: dict = {}
             fresh_raw, accepted, note = try_page_reread(
-                img, cum, prev_footer, footer, prev_closing, pst)
+                img, cum, prev_footer, footer, prev_closing, pst, api_key=key)
             _merge_usage(pst)
             if accepted and fresh_raw is not None:
                 raw_rows = fresh_raw
@@ -1045,7 +1071,7 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
                 if i > 0 and rows and rows[0].get("boundary") == "anchor" and not over_cap():
                     rst2: dict = {}
                     raw_rows, rec = recover_anchor(
-                        raw_rows, prev_closing, img, pg, rst2)
+                        raw_rows, prev_closing, img, pg, rst2, api_key=key)
                     _merge_usage(rst2)
                     if rec is not None:
                         rows = chain_derive(raw_rows,
@@ -1110,7 +1136,7 @@ def _process_pdf_locked(pdf_path: str, progress, skip_rejected: bool = False):
                       {pg: (f.debits, f.credits) if f else None for pg, f in footers.items()},
                       own_by_pg, {pos: n for pos, n in page_nos if isinstance(n, int)})
     desc_rep = _desc_pass(order_now, pages, all_rows, pairs, _merge_usage,
-                          lambda: usage["cost"] > MAX_UI_COST_USD)
+                          lambda: usage["cost"] > MAX_UI_COST_USD, api_key=key)
     # والتصنيفُ بعد البيان الأصحّ.
     annotate_types(all_rows)
     rows_view = _rows_df(all_rows)
@@ -1476,7 +1502,7 @@ def export_xlsx():
     return str(kept), _note_update(msg + " · ونُظّف مجلّدُ العمل (لا نسخةَ صفوفٍ باقية)")
 
 
-def ask_followup(history):
+def ask_followup(history, api_key: str = ""):
     """Phase 2: answer STATE['pending_q'] and append the reply to the chat.
 
     Evidence panel = the rows the TOOLS actually selected (execution trace),
@@ -1494,7 +1520,19 @@ def ask_followup(history):
         history.append({"role": "assistant",
                         "content": "ارفع الكشف في تبويب «قراءة وتحقق» أولاً."})
         return history, "", pd.DataFrame(), _hide_note()
-    from statement_qa.qa import answer_question, remember
+    from statement_qa.qa import answer_question, build_llm, remember
+
+    # **والوكيلُ بمفتاح الزائر وحده على السطح العامّ (المرحلة ١):** يُبنى العميلُ بمفتاحه هنا، وغيابُه
+    # جوابٌ يُقرأ في المحادثة قبل أيّ نداء. والمحلّيُّ يترك `llm=None` فيبنيه الوكيلُ بمفتاح التطبيق.
+    llm = None
+    if SURFACE == "public":
+        visitor = (api_key or "").strip()
+        if not visitor:
+            history.append({"role": "assistant",
+                            "content": "ضع مفتاح OpenRouter الخاصّ بك في خانة المفتاح أوّلًا — "
+                                       "السؤالُ هنا بمفتاحك وحدَه، ولا يُحفظ ولا يُسجَّل."})
+            return history, "", pd.DataFrame(), _hide_note()
+        llm = build_llm(api_key=visitor)
 
     key = _ledger_key()
     memory_path = _memory_path()
@@ -1517,7 +1555,7 @@ def ask_followup(history):
                           footers=None if ledger_path else STATE.get("footers"),
                           thread_id=key, scope=_scope_text(),
                           n_pages=_scope_n_pages(STATE.get("rows") or []),
-                          ledger_path=ledger_path, memory_path=memory_path)
+                          ledger_path=ledger_path, memory_path=memory_path, llm=llm)
     rows_now = STATE.get("rows") or []
     # **وخريطةُ الصفحة تُبنى برقم الصفّ نفسه** الذي تحمله الأدوات (`seq`) — لا بترتيب العرض (R130).
     page_of = {int(r.get("seq") or i): r.get("page") for i, r in enumerate(rows_now, start=1)}
@@ -1818,6 +1856,12 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي", delete_cache=(600, 
                                      file_types=[".pdf"], elem_id="file-panel")
                     btn = gr.Button("قراءة الكشف وبناء الفهرس", variant="primary",
                                     interactive=False)
+                    # **مفتاحُ الزائر (المرحلة ١):** خانةُ كلمة مرور على السطح العامّ وحدَه — تُمرَّر قيمتُها
+                    # مع كلّ قراءةٍ وسؤال ولا تُحفظ في حالة. والمحلّيُّ يخفيها (مفتاحُ التطبيق على جهاز المالك).
+                    key_in = gr.Textbox(label="مفتاح OpenRouter الخاصّ بك", type="password",
+                                        placeholder="sk-or-…", visible=SURFACE == "public",
+                                        info="يُستعمل لقراءة كشفك والإجابة عن أسئلتك في هذه الجلسة "
+                                             "وحدها، ولا يُحفظ ولا يُسجَّل.")
                     # **خانةُ المتابعة (R131-7):** تعود بقيمتها التصميميّة `False` — التوقّفُ هو
                     # الافتراض، والاستبعادُ فعلٌ صريحٌ يُعلَّم فلا يُدفع مقابل كشفٍ ناقصٍ بلا قرار.
                     skip_rejected_in = gr.Checkbox(
@@ -1907,12 +1951,12 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي", delete_cache=(600, 
                            api_name="download_conversation")
             ask.click(prepare_ask, inputs=[q, chat], outputs=[chat, q],
                       show_progress="hidden", api_name="ask_question"
-                      ).then(ask_followup, inputs=[chat],
+                      ).then(ask_followup, inputs=[chat, key_in],
                              outputs=[chat, src, raw, raw_note],
                              show_progress_on=[chat])
             q.submit(prepare_ask, inputs=[q, chat], outputs=[chat, q],
                      show_progress="hidden"
-                     ).then(ask_followup, inputs=[chat],
+                     ).then(ask_followup, inputs=[chat, key_in],
                             outputs=[chat, src, raw, raw_note],
                             show_progress_on=[chat])
             # **R93-2 · حدثٌ ثانٍ على زرّ القراءة:** يمسح أسطحَ السؤال الأربعة. وموضعُه هذا لأنّ
@@ -1941,7 +1985,7 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي", delete_cache=(600, 
                             outputs=[ledger_out, ledger_note])
                 l_refresh.click(_ledger_refresh_click, outputs=[ledger_state])
             # **توصيلُ زرّ القراءة (٣):** بعد تعريف كلّ مخرجاتِه، ومنها `ledger_state`.
-            btn.click(process_pdf, inputs=[pdf_in, skip_rejected_in],
+            btn.click(process_pdf, inputs=[pdf_in, skip_rejected_in, key_in],
                       outputs=[ticker, table, kpi, gallery, filter_col, filter_value,
                                filter_from, filter_to, ledger_state, intake_note],
                       show_progress_on=[ticker])

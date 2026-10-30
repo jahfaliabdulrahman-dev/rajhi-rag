@@ -31,7 +31,7 @@ from statement_qa.legacy.prompts import (  # noqa: E402
     FRONTIER_PROMPT, FRONTIER_PROMPT_V2, TOP_BAND_PROMPT,
 )
 from statement_qa.legacy.arabic_digit_parser import norm_num as _legacy_norm_num
-from statement_qa.api_key import get_api_key
+from statement_qa.api_key import resolve_key
 from statement_qa.contract_rows import normalize_date
 
 MODEL = os.environ.get("OPENROUTER_MODEL_VLM", "google/gemini-3.7-flash")
@@ -92,9 +92,6 @@ def stamp_conflict(cached: dict | None, current: dict) -> str | None:
 _ATTEMPTS = 4
 
 
-def _api_key() -> str:
-    """Resolution lives in one place — statement_qa.api_key."""
-    return get_api_key()
 
 
 def _parse_amount(tok: str | None) -> Decimal | None:
@@ -183,7 +180,7 @@ def reasoning_mark(*stats: dict | None) -> str | None:
 
 def chat_vlm_image(image_b64: str | list[str], prompt: str,
                    max_tokens: int = 4000, stats: dict | None = None,
-                   parse=None):
+                   parse=None, api_key: str | None = None):
     """One prompt + one-or-more images -> parsed answer. THE single transport.
 
     Every vision call (row read, footer oracle, bank probe) goes through here,
@@ -197,6 +194,11 @@ def chat_vlm_image(image_b64: str | list[str], prompt: str,
 
     When `stats` is a dict, the API `usage` object (tokens + cost) is merged
     into it — the measured cost/time evidence for scale slices.
+
+    `api_key` is the key this request carries: the visitor's key on the public
+    surface, sent as given; `None` alone reads the app key (command line and
+    evaluation). A blank key is refused before any request — resolution lives in
+    `statement_qa.api_key.resolve_key`.
     """
     images = [image_b64] if isinstance(image_b64, str) else list(image_b64)
     base_payload = {
@@ -210,7 +212,8 @@ def chat_vlm_image(image_b64: str | list[str], prompt: str,
                        for b in images]}],
     }
     url = "https://openrouter.ai/api/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {_api_key()}", "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {resolve_key(api_key)}",
+               "Content-Type": "application/json"}
     delay = 10
     last_error: Exception | None = None
     # **نطاقُ الحدّ — قرارُ المالك (ب) في مراجعة ٨١:** القراءةُ الأولى **بالتفكير الافتراضيّ كما هي
@@ -349,7 +352,8 @@ def _rows_from_content(content: str) -> list[dict]:
 
 
 def read_rows_vlm(image_path: str, prompt: str | None = None,
-                  max_tokens: int = 4000, stats: dict | None = None) -> list[dict]:
+                  max_tokens: int = 4000, stats: dict | None = None,
+                  api_key: str | None = None) -> list[dict]:
     """One page image -> [{'movement': Decimal|None, 'balance': Decimal|None,
                            'desc': str|None, 'date': str|None,
                            'raw_movement': str|None, 'raw_balance': str|None}].
@@ -375,14 +379,15 @@ def read_rows_vlm(image_path: str, prompt: str | None = None,
                 stats["page_no"] = int(val)   # printed number = scan-order truth
         return rows
 
-    return chat_vlm_image(b64, user_prompt, max_tokens, stats, parse=_parse)
+    return chat_vlm_image(b64, user_prompt, max_tokens, stats, parse=_parse,
+                          api_key=api_key)
 
 
 _OPENING_MARKERS = ("افتتاح", "سابق")
 
 
 def reread_boundary(image_path: str, prev_closing, page_no: int = 1,
-                    stats: dict | None = None):
+                    stats: dict | None = None, api_key: str | None = None):
     """Targeted top-band re-read for an unverifiable page-start row.
 
     The workshop's «reread بالجوار» mechanism applied automatically: when the
@@ -408,7 +413,7 @@ def reread_boundary(image_path: str, prev_closing, page_no: int = 1,
         return pairs
 
     pairs = chat_vlm_image(b64, prompt, max_tokens=1200, stats=stats,
-                           parse=_pairs)
+                           parse=_pairs, api_key=api_key)
     for mv, bal in pairs or []:
         delta = bal - prev_closing
         if delta != 0 and abs(delta) == mv:
@@ -417,7 +422,7 @@ def reread_boundary(image_path: str, prev_closing, page_no: int = 1,
 
 
 def recover_anchor(raw_rows: list[dict], prev_closing, image_path: str,
-                   page_no: int, stats: dict | None = None):
+                   page_no: int, stats: dict | None = None, api_key: str | None = None):
     """Resolve an anchor's missing movement through a verified re-read.
 
     Acceptance is triple-strict: the re-read must produce a self-consistent
@@ -434,7 +439,7 @@ def recover_anchor(raw_rows: list[dict], prev_closing, image_path: str,
     if delta == 0:
         return raw_rows, None  # carry — not an anchor case
     try:
-        got = reread_boundary(image_path, prev_closing, page_no, stats)
+        got = reread_boundary(image_path, prev_closing, page_no, stats, api_key=api_key)
     except Exception:  # noqa: BLE001 — recovery must never kill a run
         got = None
     if got is None or got != abs(delta):

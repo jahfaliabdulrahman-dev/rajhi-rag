@@ -133,11 +133,11 @@ def app_run(monkeypatch, tmp_path):
     verdicts: dict[int, str] = {}
     knobs = {"printed": {}, "footer_cost": 0.0, "footer_fail": False}
 
-    def probe(img, stats=None):
+    def probe(img, stats=None, api_key=None):
         calls.append(("bank", img))
         return {"verdict": "rajhi", "bank": None}
 
-    def footer(img, stats=None):
+    def footer(img, stats=None, api_key=None):
         calls.append(("footer", img))
         if stats is not None:
             stats["cost"] = knobs["footer_cost"]
@@ -154,7 +154,7 @@ def app_run(monkeypatch, tmp_path):
         return [{"movement": D("1.00"), "balance": D(n), "desc": "حركة ٢٠٢٣٠٢٢٥", "date": None,
                  "raw_movement": "1.00", "raw_balance": str(n)}]
 
-    def descriptions(path, next_path, stats):
+    def descriptions(path, next_path, stats, api_key=None):
         calls.append(("desc", path))
         return [f"بيانُ العمود {Path(path).stem}"], False
 
@@ -309,8 +309,9 @@ def test_the_read_button_carries_the_skip_choice_at_false_by_default():
     fns = app.demo.fns.values() if isinstance(app.demo.fns, dict) else app.demo.fns
     wired = [f for f in fns if getattr(f, "fn", None) is app.process_pdf]
     assert len(wired) == 1
-    assert [type(i).__name__ for i in wired[0].inputs] == ["File", "Checkbox"], \
-        "مسارُ القراءة لا يحمل قرارَ الاستبعاد (R131-7)"
+    # **والمدخلُ الثالث مفتاحُ الزائر (المرحلة ١):** خانةُ كلمة مرور تُمرَّر مع القراءة — فالقائمةُ ثلاثة.
+    assert [type(i).__name__ for i in wired[0].inputs] == ["File", "Checkbox", "Textbox"], \
+        "مسارُ القراءة لا يحمل قرارَ الاستبعاد (R131-7) ومفتاحَ الزائر (المرحلة ١)"
     box = [i for i in wired[0].inputs if type(i).__name__ == "Checkbox"][0]
     assert box.value is False, "الافتراضُ يجب أن يكون التوقّف (لا دفعَ بلا فعلٍ صريح)"
 
@@ -333,7 +334,7 @@ def _desc_pass_setup(monkeypatch, fail=()):
 
     seen: list[tuple[str, str | None]] = []
 
-    def descriptions(path, next_path, stats):
+    def descriptions(path, next_path, stats, api_key=None):
         seen.append((path, next_path))
         stats["cost"] = 0.01
         if path in fail:

@@ -122,7 +122,8 @@ def parse_descriptions(content: str, n: int) -> list[str]:
 
 
 def read_page_descriptions(img, pb: PageBands, continuation=None,
-                           stats: dict | None = None) -> list[str]:
+                           stats: dict | None = None,
+                           api_key: str | None = None) -> list[str]:
     """استدعاءٌ واحد: صورةُ الصفحة ⇒ بياناتُ صفوفها بالترتيب."""
     from statement_qa.vlm_reader import chat_vlm_image
 
@@ -131,7 +132,7 @@ def read_page_descriptions(img, pb: PageBands, continuation=None,
     image.save(buf, format="PNG")
     return chat_vlm_image(base64.b64encode(buf.getvalue()).decode(), DESC_PROMPT.format(n=n),
                           max_tokens=3000, stats=stats,
-                          parse=lambda c: parse_descriptions(c, n))
+                          parse=lambda c: parse_descriptions(c, n), api_key=api_key)
 
 
 def merge_descriptions(rows: list[dict], descs: list[str]) -> bool:

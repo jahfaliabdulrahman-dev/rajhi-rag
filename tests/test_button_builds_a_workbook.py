@@ -55,14 +55,14 @@ def read_sample(monkeypatch):
 
     monkeypatch.setattr(socket.socket, "connect", _no_network)
 
-    def probe_bank(_img, stats=None):
+    def probe_bank(_img, stats=None, api_key=None):
         return {"verdict": "alrajhi", "bank": "مصرف الراجحي"}
 
-    def read_footer(img, stats=None):
+    def read_footer(img, stats=None, api_key=None):
         dr, cr, bal = _FOOTERS[_page_of(img)]
         return FooterReading(debits=dr, credits=cr, balance=bal)
 
-    def read_rows_vlm(img, stats=None):
+    def read_rows_vlm(img, stats=None, api_key=None):
         pg = _page_of(img)
         if stats is not None:
             stats["page_no"] = pg

@@ -15,6 +15,10 @@ import pytest
 _TEST_HOME = Path(tempfile.mkdtemp(prefix="rajhi_test_home_"))
 os.environ["RAJHI_DATA_HOME"] = str(_TEST_HOME)
 atexit.register(shutil.rmtree, _TEST_HOME, ignore_errors=True)
+#: **والسطحُ في الضوابط محلّيٌّ صراحةً (المرحلة ١):** التطبيقُ يفترض السطحَ العامّ (فشلٌ مُغلَق) فيطلب
+#: مفتاحَ الزائر؛ والضوابطُ القائمة تقيس سطحَ المالك المحلّيّ، وضوابطُ السطح العامّ تضبط `app.SURFACE`
+#: بنفسها في كلّ ضابط. والقيمةُ تُفرَض لا تُقترح، فلا يغيّر متغيّرٌ في بيئة الطرفيّة ما يقيسه الضابط.
+os.environ["RAJHI_SURFACE"] = "local"
 
 
 @pytest.fixture(autouse=True)

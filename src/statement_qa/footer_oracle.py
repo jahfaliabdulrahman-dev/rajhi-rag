@@ -117,7 +117,8 @@ def _reading_from_content(content: str) -> FooterReading | None:
 
 
 def read_footer(image_path: str, stats: dict | None = None,
-                referee_y: int | None = None) -> FooterReading | None:
+                referee_y: int | None = None,
+                api_key: str | None = None) -> FooterReading | None:
     """Bottom band of the page -> FooterReading (None = nothing readable).
 
     `referee_y` = the page gate's measured position of the printed band, when it
@@ -128,7 +129,7 @@ def read_footer(image_path: str, stats: dict | None = None,
     im.close()
     b64 = base64.b64encode(_footer_crop_png(image_path, top)).decode()
     return chat_vlm_image(b64, FOOTER_PROMPT, max_tokens=1600, stats=stats,
-                          parse=_reading_from_content)
+                          parse=_reading_from_content, api_key=api_key)
 
 
 def page_totals(rows: list[dict]) -> dict:
@@ -353,7 +354,8 @@ def page_diverged(rows: list[dict], prior: dict,
 def try_page_reread(image_path: str, prior: dict,
                     prev_footer: "FooterReading | None",
                     footer: "FooterReading | None",
-                    prev_closing, stats: dict | None = None):
+                    prev_closing, stats: dict | None = None,
+                    api_key: str | None = None):
     """ONE fresh page read — accepted ONLY on strict reconciliation.
 
     Acceptance (both required):
@@ -365,7 +367,7 @@ def try_page_reread(image_path: str, prior: dict,
     error (402/429/timeout) must reject it, not crash the run.
     """
     try:
-        fresh_raw = read_rows_vlm(image_path, stats=stats)
+        fresh_raw = read_rows_vlm(image_path, stats=stats, api_key=api_key)
     except Exception as e:  # noqa: BLE001 — repair must never kill a run
         return None, False, f"فشل محاولة الاستدراك: {e}"
     fresh = chain_derive(fresh_raw, prev_balance=prev_closing)
