@@ -10,6 +10,8 @@
     python tools/ledger.py build --run data/local_sample/slice_629p_v2 --db ~/دفتر.sqlite
     python tools/ledger.py ask --db ~/دفتر.sqlite totals
     python tools/ledger.py ask --db ~/دفتر.sqlite search --q "حوالة صادرة" --json
+    python tools/ledger.py export --db <دفتر قراءة الكشف> --source data/sample/statement_showcase.pdf \
+        --read-on 2026-10-30 --out data/sample/statement_showcase.ledger.json
 
 **والكتابةُ في مسارٍ مُهمَل**: الدفترُ بياناتٌ مُشتقّةٌ من كشف العميل، ومسارُه الافتراضيّ
 (`data/ledgers/<اسم>.sqlite`) مُهمَلٌ في `.gitignore` ويحرسه `publish_guard` بامتداد `.sqlite`.
@@ -117,6 +119,35 @@ def _ask(args) -> int:
     return 0
 
 
+def _export(args) -> int:
+    """**القراءةُ المسجَّلة نصًّا (دفترُ «جرّب الآن» · قرارُ المالك 2026-10-30):** يُصدِّر دفترًا إلى النصّ
+    الذي يُبنى منه — ويرفض دفترًا يحمل اسمَ كشفٍ آخر، فلا تُنسب قراءةٌ إلى غير ملفّها.
+    """
+    from statement_qa import showcase              # noqa: PLC0415
+
+    db, source = Path(args.db).expanduser(), Path(args.source).expanduser()
+    key = L.statement_key(L.source_sha256(source))
+    if db.stem.startswith("st_") and db.stem != key:
+        print(f"⛔ الدفترُ `{db.name}` دفترُ كشفٍ آخر — مفتاحُ `{source.name}` هو `{key}`. "
+              f"لا تُصدَّر قراءةٌ باسم غير ملفّها.", file=sys.stderr)
+        return 2
+    try:
+        conn = L.read_ledger(db)
+    except L.LedgerUnavailable as e:
+        print(f"تعذّر فتحُ الدفتر — {e}", file=sys.stderr)
+        return 2
+    try:
+        doc = showcase.export(conn, source, args.read_on)
+    finally:
+        conn.close()
+    out = Path(args.out).expanduser()
+    out.write_text(showcase.dumps(doc), encoding="utf-8")
+    flagged = sum(1 for r in doc["rows"] if r.get("chain_ok") is False)
+    print(f"النصّ: {out} · {len(doc['rows'])} صفًّا · {doc['n_pages']} صفحات · "
+          f"مشبوهٌ بالسلسلة {flagged} · المفتاح {key}")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="دفترُ الكشوف (أ-٣): بناءٌ وسؤالٌ بأقصدٍ ثابتة")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -136,6 +167,13 @@ def main(argv=None) -> int:
     a.add_argument("--limit", type=int, default=20)
     a.add_argument("--json", action="store_true")
     a.set_defaults(fn=_ask)
+
+    e = sub.add_parser("export", help="صدِّر دفترًا إلى نصٍّ يُبنى منه («جرّب الآن»)")
+    e.add_argument("--db", required=True, help="دفترُ قراءة الكشف")
+    e.add_argument("--source", required=True, help="ملفّ الكشف الذي قُرئ (تُجزّأ بايتاتُه)")
+    e.add_argument("--read-on", required=True, help="تاريخُ القراءة YYYY-MM-DD")
+    e.add_argument("--out", required=True)
+    e.set_defaults(fn=_export)
 
     args = ap.parse_args(argv)
     return args.fn(args)

@@ -83,6 +83,7 @@ from statement_qa.job_lock import JobBusyError, job_lock
 from statement_qa import ledger as _ledger
 from statement_qa.session import Session
 from statement_qa import ledger_ui as _ledger_ui
+from statement_qa import showcase as _showcase
 from statement_qa.row_bands import analyze_page
 from statement_qa.ordering import (
     adjacency, check_order, check_page_numbers, decide_order, footer_order,
@@ -391,6 +392,13 @@ def _kpi_html(n_rows: int, n_clean: int, n_susp: int, last_bal) -> str:
     return f'<div class="ledger-kpi">{inner}</div>'
 
 
+def _kpi_of(rows: list[dict]) -> str:
+    """بطاقاتُ الأرقام من صفوف العرض — **عدٌّ واحد** تقرؤه القراءةُ و«جرّب الآن» معًا."""
+    n_ok = sum(1 for r in rows if r["ok"])
+    last_bal = next((r["balance"] for r in reversed(rows) if r["balance"] is not None), None)
+    return _kpi_html(len(rows), n_ok, len(rows) - n_ok, last_bal)
+
+
 def _date_cell(r: dict) -> str:
     """Date for the table/export: Gregorian `YYYY/MM/DD`; `*` = inherited.
 
@@ -692,6 +700,56 @@ def process_pdf(pdf_path: str, skip_rejected: bool = False, api_key: str = "",
                        "انتظر انتهاءه ثم أعد المحاولة.")
 
 
+def try_now(sess=None):
+    """**«جرّب الآن» (المرحلة ١ · قرارُ المالك 2026-10-30: «يعيش دفتر «جرّب الآن»: 1»):** الكشفُ الاصطناعيّ
+    المتتبَّع وقراءتُه المسجَّلة — يُبنى دفترُه من النصّ (`statement_qa.showcase`) في مجلّد **هذه** الجلسة
+    بمسار الكتابة الواحد (`_ledger_write`)، ثمّ تُعاد الأسطحُ منه بمسار إعادة التشغيل (`_load_from_ledger`).
+
+    **بلا مفتاحٍ وبلا نداء:** لا قارئَ مدفوعًا، ولا نموذجَ تضمين (الفهرسُ يُبنى عند أوّل سؤالٍ في المحادثة،
+    وهي بمفتاح الزائر). **والسطحُ العامّ وحده:** المحلّيُّ مجلّدُ بيانات المالك الدائم، وكان الزرُّ سيكتب
+    فيه ويحوّل مؤشّرَ كشفه النشِط. **وبلا قفل المهمّة:** القفلُ للعمليّة كلّها (`LOCK_PATH`)، فكان سيرفض
+    «جرّب الآن» لكلّ زائرٍ ما دامت قراءةُ زائرٍ آخر جارية، والكتابةُ هنا في مجلّد الجلسة وحدها.
+    **وحدُّه المُعلَن:** ضغطُه أثناء قراءةٍ جاريةٍ في الجلسة نفسِها غيرُ محروس.
+    """
+    if SURFACE != "public":
+        raise gr.Error("«جرّب الآن» على السطح العامّ وحده — هنا مجلّدُ بياناتك الدائم، والكشفُ "
+                       "الاصطناعيّ يُقرأ فيه برفعه كأيّ كشف.")
+    from statement_qa.qa import clear_conversation, reset_memory
+
+    sess = _session(sess)
+    try:
+        rec = _showcase.recorded()
+    except _showcase.RecordMismatch as e:
+        raise gr.Error(str(e))
+    # **الكشفُ السابقُ في الجلسة يُغادَر كما تغادره قراءةٌ جديدة:** خيطُ محادثته يُمسح وحافظتُه تُغلق
+    # (الترتيبُ نفسُه في `_process_pdf_locked` و`_ledger_write`)، وحالتُه كلُّها تُفرَّغ — فلا يُقرأ
+    # حكمٌ من كشفٍ آخر (فحصُ التذييل · الترتيب · الكلفة) على هذا.
+    old_key = _ledger_key(sess)
+    if old_key:
+        old_path = _ledger_ui.ledger_file(sess.home, old_key)
+        clear_conversation(old_key, memory_path=old_path if old_path.exists() else None)
+        reset_memory(old_path)
+    sess.state.clear()
+    sess.state.update(source_sha=rec["source_sha256"], source_name=rec["source"],
+                      rows_contract=rec["rows"], footers=rec["footers"], n_pages=rec["n_pages"])
+    written = _ledger_write(sess)
+    if not written.get("ok") or not _load_from_ledger(sess, index=False):
+        raise gr.Error(f"تعذّر بناءُ دفتر «جرّب الآن» — {written.get('message') or 'الدفترُ لا يُقرأ'}")
+    rows = sess.state["rows"]
+    n_susp = sum(1 for r in rows if not r["ok"])
+    summary = (f"**قراءةٌ مسجَّلة لا حيّة** — قرأ النظامُ هذا الكشفَ الاصطناعيّ (`{rec['source']}`) مرّةً "
+               f"يوم {rec['read_on']}، ودفترُه بُني الآن في جلستك من نصٍّ في المستودع. "
+               f"**بلا مفتاحٍ وبلا كلفة:** الجدولُ وأسئلةُ الدفتر وتنزيلُ Excel؛ والمحادثةُ في التبويب ٢ "
+               f"بمفتاحك. • {len(rows)} صفًّا · {sess.state['n_pages']} صفحات · مشبوهٌ بالسلسلة {n_susp}")
+    ledger_status = _ledger_ui.status_text(sess.home, _ledger_key(sess), len(_ledger_rows(sess)),
+                                           _ledger.rows_without_page(_ledger_rows(sess)))
+    intake_note = ("**فحصُ الصفحات قبل القراءة:** لا قراءةَ في هذه الجلسة — القراءةُ مسجَّلة، "
+                   "فلا فحصَ ولا نداء.")
+    gallery_out = _close_pages(sess, _pages_to_pngs(str(_showcase.PDF)))
+    return (summary, filter_rows(sess=sess), _kpi_of(rows), gallery_out,
+            "كل الأعمدة", "", "", "", ledger_status, intake_note, sess)
+
+
 def _view_rows(contract: list[dict], offset: int = 0) -> list[dict]:
     """**صفوفُ العرض/الأسئلة مشتقّةٌ من صفوف العقد — لا بناءٌ ثانٍ (F5 · مقعدُ البنية):**
 
@@ -793,12 +851,14 @@ def _ledger_write(sess) -> dict:
     return {"ok": True, "key": key, "path": str(path), "stats": stats, "message": note}
 
 
-def _load_from_ledger(sess, key: str | None = None) -> bool:
+def _load_from_ledger(sess, key: str | None = None, *, index: bool = True) -> bool:
     """يُعيد بناء أسطح السؤال من **القاعدة وحدها** — لتبقى بعد إغلاق التطبيق (قبولُ R130).
 
     يُنادى حين لا `store` في الحالة (بعد إعادة تشغيل) وقبل أيّ سؤال: الصفوفُ من `rows_verified`،
     والتذييلاتُ من `pages`، والقطعُ/الفهرسُ يُعاد بناؤهما من الصفوف نفسِها (بلا نموذجٍ مدفوع).
     وما لا قاعدةَ له يُعلَن بلا اختراع.
+    **و`index=False` («جرّب الآن»):** الفهرسُ الدلاليّ يخدم المحادثةَ وحدها، فلا يُحمَّل نموذجُ التضمين
+    (~110MB عند أوّل نداء) لزائرٍ لم يسأل بعد؛ وغيابُ `store` يجعل أوّلَ سؤالٍ يُعيد هذا البناءَ كاملًا.
     """
     key = key or _ledger_key(sess)
     path = _ledger_ui.ledger_file(sess.home, key)
@@ -827,7 +887,8 @@ def _load_from_ledger(sess, key: str | None = None) -> bool:
     # التي لا صفَّ لها (غلاف/ملخّص) كانت تُنقص العدّ ⇒ فيُقال «ينتهي عند 626» في كشفٍ من 629 (R115-7).
     sess.state["chunks"] = chunk_rows([{**r, "row_no": int(r.get("seq") or i + 1)}
                                   for i, r in enumerate(view)])
-    sess.state["store"] = build_index(sess.state["chunks"])
+    if index:
+        sess.state["store"] = build_index(sess.state["chunks"])
     sess.state["n_pages"] = len(footers) if footers else len({r["page"] for r in view})
     sess.state["ledger_key"] = key
     return True
@@ -1239,10 +1300,6 @@ def _process_pdf_locked(sess, pdf_path: str, progress, skip_rejected: bool = Fal
     sess.state["footer_failed"] = footer_failed
     sess.state["desc_pass"] = desc_rep
     sess.state["intake"] = {"gate": intake.gate, "kinds": intake.kinds, **decision}
-    n_ok = sum(1 for r in all_rows if r["ok"])
-    n_susp = len(all_rows) - n_ok
-    last_bal = next((r["balance"] for r in reversed(all_rows)
-                     if r["balance"] is not None), None)
     if not all_rows:
         raise gr.Error("تعذرت قراءة الكشف — انقطاع مؤقت من خدمة القراءة. أعد المحاولة.")
     n_pages = len(pages)
@@ -1376,8 +1433,7 @@ def _process_pdf_locked(sess, pdf_path: str, progress, skip_rejected: bool = Fal
                           + "، ".join(f"ص{p}" for p in missed)
                           + ". أرقامُ الصفوف من هذه القراءة وحدَها (لا صفوفَ من قراءةٍ سابقة).")
     gallery_out = _close_pages(sess, pages)
-    return (summary, rows_view,
-            _kpi_html(len(all_rows), n_ok, n_susp, last_bal), gallery_out,
+    return (summary, rows_view, _kpi_of(all_rows), gallery_out,
             "كل الأعمدة", "", "", "", ledger_status, intake_note)
 
 
@@ -1929,6 +1985,10 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي", delete_cache=DELETE
         with gr.Tab("١. قراءة وتحقق"):
             with gr.Row():
                 with gr.Column(scale=1, min_width=340):
+                    # **«جرّب الآن» (المرحلة ١):** على السطح العامّ وحده — الكشفُ الاصطناعيّ وقراءتُه
+                    # المسجَّلة، بلا مفتاحٍ وبلا كلفة (`try_now`). والمحلّيُّ يخفيه (مجلّدُ بيانات المالك).
+                    try_btn = gr.Button("جرّب الآن — كشفٌ اصطناعيّ قُرئ مسبقًا (بلا مفتاح)",
+                                        variant="primary", visible=SURFACE == "public")
                     pdf_in = gr.File(label="كشف PDF (عينة تجريبية موصى بها)",
                                      file_types=[".pdf"], elem_id="file-panel")
                     btn = gr.Button("قراءة الكشف وبناء الفهرس", variant="primary",
@@ -2066,6 +2126,13 @@ with gr.Blocks(title="مُدقّق كشوف الراجحي", delete_cache=DELETE
                       outputs=[ticker, table, kpi, gallery, filter_col, filter_value,
                                filter_from, filter_to, ledger_state, intake_note, sess_state],
                       show_progress_on=[ticker])
+            # **«جرّب الآن»:** مخرجاتُ زرّ القراءة نفسُها، ومعه مسحُ أسطح السؤال (كشفٌ آخر ⇒ لا سؤالَ من القديم).
+            try_btn.click(try_now, inputs=[sess_state],
+                          outputs=[ticker, table, kpi, gallery, filter_col, filter_value,
+                                   filter_from, filter_to, ledger_state, intake_note, sess_state],
+                          show_progress_on=[ticker])
+            try_btn.click(_reset_qa_surfaces, inputs=[sess_state], outputs=[chat, src, raw, raw_note],
+                          show_progress="hidden")
             delete_btn.click(_delete_statement_click, inputs=[sess_state], outputs=[
                 delete_note, ticker, table, kpi, gallery, chat, src, raw, raw_note, ledger_state])
         with gr.Tab("٣. عن المشروع"):
