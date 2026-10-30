@@ -128,52 +128,27 @@ def test_condition_1_nothing_the_session_wrote_survives_it(public):
     assert sess.state == {}, "حالةُ الجلسة في الذاكرة لم تُفرَّغ"
 
 
-def test_condition_1_stopping_the_server_leaves_no_session_folder(tmp_path):
+def test_condition_1_stopping_the_server_leaves_no_session_folder(tmp_path, start_app_server):
     """**الشرط ١ عند إيقاف الخادم (2026-10-30 · قِيس حيًّا مرّتين):** جلسةٌ مفتوحةٌ ثمّ `SIGTERM` (ما يرسله
     مضيفٌ يُعيد التشغيل) ⇒ كان مجلّدُ الجلسة بدفترها يبقى في مجلّد النظام المؤقّت: حذفُ Gradio بعد ساعةٍ لا
     يقع، والإشارةُ تُنهي العمليّةَ قبل أن ينظّف بايثون مجلّداتِه المؤقّتة. يُقاس على **خادمٍ حقيقيّ** (عمليّةٌ
     منفصلة، السطحُ العامّ، بلا مفتاح)، والجلسةُ تُفتح بحدث السؤال (لا يحتاج نموذجًا ولا مُصيّر PDF).
     """
-    import os
     import signal
-    import subprocess
-    import time
 
     pytest.importorskip("gradio_client")
     from gradio_client import Client
 
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
-    tmp = tmp_path / "system-tmp"
-    tmp.mkdir()
-    env = {k: v for k, v in os.environ.items() if k not in ("OPENROUTER_API_KEY", "RAJHI_SURFACE")}
-    env.update(TMPDIR=str(tmp), RAJHI_DATA_HOME=str(tmp_path / "home"), GRADIO_SERVER_PORT=str(port),
-               GRADIO_TEMP_DIR=str(tmp_path / "gradio"), GRADIO_ANALYTICS_ENABLED="False")
-    log = tmp_path / "server.log"
-    proc = subprocess.Popen([sys.executable, str(ROOT / "app.py")], cwd=str(ROOT), env=env,
-                            stdout=log.open("w"), stderr=subprocess.STDOUT, start_new_session=True)
-    try:
-        deadline = time.time() + 120
-        while time.time() < deadline:
-            with socket.socket() as s:
-                if s.connect_ex(("127.0.0.1", port)) == 0:
-                    break
-            assert proc.poll() is None, log.read_text(encoding="utf-8", errors="replace")[-2000:]
-            time.sleep(0.5)
-        else:
-            pytest.fail("الخادمُ لم يفتح منفذه")
-        Client(f"http://127.0.0.1:{port}", verbose=False).predict(
-            "سؤال", [], api_name="/ask_question")
-        opened = list(tmp.glob("rajhi_session_*"))
-        assert len(opened) == 1, f"لم تُفتح جلسةٌ واحدة: {opened}"
-        (opened[0] / "ledger.sqlite").write_bytes(b"stands for the visitor's ledger")
-        proc.send_signal(signal.SIGTERM)
-        proc.wait(timeout=60)
-    finally:
-        if proc.poll() is None:
-            os.killpg(proc.pid, signal.SIGKILL)
-    left = sorted(str(p) for p in tmp.glob("rajhi_session_*"))
+    srv = start_app_server(tmp_path)
+    visitor = Client(srv.url, verbose=False)
+    visitor.predict("سؤال", [], api_name="/add_question")
+    visitor.close()
+    opened = list(srv.tmp.glob("rajhi_session_*"))
+    assert len(opened) == 1, f"لم تُفتح جلسةٌ واحدة: {opened}"
+    (opened[0] / "ledger.sqlite").write_bytes(b"stands for the visitor's ledger")
+    srv.proc.send_signal(signal.SIGTERM)
+    srv.proc.wait(timeout=60)
+    left = sorted(str(p) for p in srv.tmp.glob("rajhi_session_*"))
     assert not left, f"مجلّدُ جلسةٍ بقي بعد إيقاف الخادم: {left}"
 
 
@@ -389,6 +364,24 @@ def test_condition_4_the_key_is_kept_nowhere(public):
     assert VISITOR not in repr(sess.state), "المفتاحُ في حالة الجلسة"
     for f in _files(sess.home) | {Path(p) for p in sess.files}:
         assert VISITOR.encode() not in f.read_bytes(), f"المفتاحُ في ملفٍّ كتبته الجلسة: {f.name}"
+
+
+def test_condition_4_no_run_history_is_kept(tmp_path, start_app_server):
+    """**الشرطان ١ و٤ في متصفّح الزائر (2026-10-30 · قِيس في متصفّحٍ قبل الإصلاح):** Gradio 6 تحفظ افتراضًا
+    مدخلاتِ كلّ نقطةٍ عامّة ومخرجاتِها في `localStorage` (`run_history`) — ما كُتب في خانة المفتاح كان في مدخلات
+    `/answer`، وجدولُ الكشف في مخرجات «جرّب الآن»، وكلاهما يبقى بعد إغلاق الصفحة.
+
+    **ما يُقاس:** المتصفّحُ يأخذ القرارَ من إعداد الخادم (`/config`)، فيُقرأ الإعدادُ من خادمٍ حقيقيّ يُقلَع كما
+    يُقلعه الـSpace — **وفي بيئته `GRADIO_RUN_HISTORY=True`**، فلا يمرّ الضابطُ لأنّ بيئةَ الجهاز أطفأت السجلّ.
+    **وحدُّه:** يقيس ما يقوله الخادمُ للمتصفّح، لا ذاكرةَ المتصفّح نفسَها (قيست بيدي قبل الإصلاح وبعده).
+    """
+    import json
+    import urllib.request
+
+    srv = start_app_server(tmp_path, GRADIO_RUN_HISTORY="True")
+    config = json.loads(urllib.request.urlopen(f"{srv.url}/config", timeout=30).read())
+    assert config["run_history"] is False, "المتصفّحُ يُؤمَر بحفظ المدخلات والمخرجات (ومنها المفتاح)"
+    assert "runs" not in config.get("footer_links", []), "صفحةُ سجلّ التشغيلات ظاهرةٌ للزائر"
 
 
 # ————— نصُّ «قاعدة الخصوصية» يصف ما بُني (شرطُ CP1) —————

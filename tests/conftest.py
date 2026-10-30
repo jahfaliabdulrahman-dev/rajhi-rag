@@ -53,6 +53,51 @@ def _no_real_data_left_behind(tmp_path):
             print(f"تعذّر حذفُ {f.name} — يُفحَص يدويًّا")
 
 
+@pytest.fixture(scope="session")
+def start_app_server():
+    """يُقلع `app.py` **خادمًا حقيقيًّا كما يُقلعه الـSpace** (`python app.py` في عمليّةٍ منفصلة · السطحُ العامّ ·
+    بلا مفتاح التطبيق في البيئة) — ومجلّدُ النظام المؤقّت ومجلّدا البيانات وGradio تحت المجلّد المُعطى.
+
+    **دالّةٌ لا خادم:** الضابطُ يختار عمرَه (خادمٌ لضابطٍ يُوقفه بنفسه، أو خادمٌ لملفٍّ كامل)، وما بقي حيًّا
+    يُقتل بعد الجولة. ومتغيّراتُ بيئةٍ إضافيّة تُمرَّر بالاسم (`GRADIO_RUN_HISTORY="True"` مثلًا).
+    """
+    import signal
+    import socket
+    import subprocess
+    import time
+    from types import SimpleNamespace
+
+    root = Path(__file__).resolve().parents[1]
+    procs = []
+
+    def start(base: Path, **extra_env) -> SimpleNamespace:
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        tmp = base / "system-tmp"
+        tmp.mkdir(parents=True)
+        env = {k: v for k, v in os.environ.items() if k not in ("OPENROUTER_API_KEY", "RAJHI_SURFACE")}
+        env.update(TMPDIR=str(tmp), RAJHI_DATA_HOME=str(base / "home"), GRADIO_SERVER_PORT=str(port),
+                   GRADIO_TEMP_DIR=str(base / "gradio"), GRADIO_ANALYTICS_ENABLED="False", **extra_env)
+        log = base / "server.log"
+        proc = subprocess.Popen([sys.executable, str(root / "app.py")], cwd=str(root), env=env,
+                                stdout=log.open("w"), stderr=subprocess.STDOUT, start_new_session=True)
+        procs.append(proc)
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            with socket.socket() as s:
+                if s.connect_ex(("127.0.0.1", port)) == 0:
+                    return SimpleNamespace(proc=proc, url=f"http://127.0.0.1:{port}", tmp=tmp, log=log)
+            assert proc.poll() is None, log.read_text(encoding="utf-8", errors="replace")[-2000:]
+            time.sleep(0.5)
+        pytest.fail("الخادمُ لم يفتح منفذه")
+
+    yield start
+    for proc in procs:
+        if proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGKILL)
+
+
 @pytest.fixture
 def sess():
     """جلسةُ واجهةٍ واحدة (المرحلة ١): الحالةُ والمجلّدُ لجلسةٍ لا للعمليّة — وتُغلق بعد الضابط.
