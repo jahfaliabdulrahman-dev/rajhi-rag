@@ -72,7 +72,7 @@ def monitor_age_minutes(log_text: str, now=None) -> float | None:
 
 def main() -> None:
     failures = 0
-    print("— فحص صحة مُدقّق كشوف الراجحي —\n")
+    print("— فحص صحة AI Bank Statement Auditor (التشغيل المحلّي) —\n")
 
     try:
         status, _ = _http(7860)

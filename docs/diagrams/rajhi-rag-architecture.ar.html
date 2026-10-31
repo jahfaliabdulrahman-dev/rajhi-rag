@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="generator" content="archify 3.1.0">
+  <meta name="generator" content="archify 3.2.1-dev.1">
   <meta name="archify-reader-contract" content="declared-wide-v1">
-  <title>المكوّنات والحدود — مُدقّق كشوف الراجحي — مخطّط</title>
+  <title>المكوّنات والحدود — مخطّط</title>
   <script>
     // Resolve the theme before first paint so light-preference users don't
     // see a dark flash. The toolbar script below re-applies with UI state.
@@ -581,13 +581,18 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       display: flex;
       flex: 1 1 auto;
       align-items: center;
-      justify-content: center;
+      /* Centring an oversized scene makes its start-side overflow unreachable.
+         Start alignment plus auto inline margins centres the scene when it fits
+         and collapses to zero when it overflows, so the first edge stays
+         scrollable without a keyword the delta validator reads as a claim. */
+      justify-content: flex-start;
       min-height: 0;
       padding: 0.75rem;
       padding-bottom: calc(0.75rem + var(--archify-nav-reserve));
     }
     html[data-present="true"]:not([data-embed="true"]) .diagram-container > svg {
       flex: 1 1 auto;
+      margin-inline: auto;
       height: 100%;
       min-height: 0;
       width: 100%;
@@ -1374,6 +1379,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
        direct authored relationships. Geometry and the canonical SVG stay put. */
     .semantic-lens {
       position: absolute;
+      display: flex;
+      flex-direction: column;
       right: 1rem;
       bottom: calc(4.15rem + var(--archify-nav-reserve));
       z-index: 24;
@@ -1440,6 +1447,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     .semantic-lens-kinds {
       display: grid;
       grid-template-columns: 1fr 1fr;
+      flex: 1 1 auto;
+      min-height: 0;
       gap: 0.3rem;
       max-height: min(15rem, 40vh);
       padding: 0 0.5rem 0.5rem;
@@ -1551,7 +1560,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       position: absolute;
       left: 1rem;
       bottom: calc(1rem + var(--archify-nav-reserve));
-      z-index: 12;
+      z-index: 24;
       width: min(46rem, calc(100% - 25rem));
       min-width: 18rem;
       overflow: hidden;
@@ -2736,19 +2745,31 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     }
     html[data-reader-rail="bottom"] .node-outline-head { padding: 1rem 2.5rem 0.375rem 0.25rem; }
     html[data-reader-rail="bottom"] .node-outline-list {
-      columns: 15rem;
-      column-gap: 1.75rem;
+      display: grid;
+      gap: 0.5rem;
       padding: 0;
       overflow: visible;
       -webkit-mask-image: none;
       mask-image: none;
     }
-    /* Named groups stay whole; a single unnamed group may split across columns,
-       where a continuous spine would read as a broken line. */
     html[data-reader-rail="bottom"] .node-outline-group + .node-outline-group { margin-top: 0; }
-    html[data-reader-rail="bottom"] .node-outline-group:has(> .node-outline-heading) { break-inside: avoid; padding-bottom: 0.25rem; }
-    html[data-reader-rail="bottom"] .node-outline-group:not(:has(> .node-outline-heading)) > ul::before { display: none; }
-    html[data-reader-rail="bottom"] .node-outline-group li { break-inside: avoid; }
+    html[data-reader-rail="bottom"] .node-outline-group:has(> .node-outline-heading) { padding-bottom: 0.25rem; }
+    html[data-reader-rail="bottom"] .node-outline-group > ul {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem 0.5rem;
+    }
+    html[data-reader-rail="bottom"] .node-outline-group > ul::before { display: none; }
+    html[data-reader-rail="bottom"] .node-outline-group li {
+      flex: 0 1 auto;
+      min-width: min(100%, 12rem);
+      max-width: min(100%, 32rem);
+    }
+    html[data-reader-rail="bottom"] .node-outline-heading {
+      justify-content: flex-start;
+      gap: 0.5rem;
+    }
+    html[data-reader-rail="bottom"] .node-outline-heading > span { overflow-wrap: anywhere; }
     .rail-controls { display: none; }
     html:is([data-reader-rail="true"], [data-reader-rail="overlay"], [data-reader-rail="bottom"]) .rail-controls {
       display: flex;
@@ -2965,6 +2986,37 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     .node-outline-item[data-previewing] small,
     .node-outline-item[aria-current="true"] small { color: var(--text-muted); }
 
+    /* The desktop bottom rail is an index: compact rows keep related nodes
+       together while allowing full names and descriptions to wrap naturally. */
+    html[data-reader-rail="bottom"] .node-outline-item {
+      grid-template-columns: 0.625rem minmax(0, 1fr) 0.75rem;
+      align-items: first baseline;
+      column-gap: 0.375rem;
+      min-height: 0;
+      padding-block: 0.375rem;
+    }
+    html[data-reader-rail="bottom"] .node-outline-item strong,
+    html[data-reader-rail="bottom"] .node-outline-item small {
+      overflow: visible;
+      text-overflow: clip;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+    html[data-reader-rail="bottom"] .node-outline-item strong {
+      grid-column: 2;
+      grid-row: 1;
+    }
+    html[data-reader-rail="bottom"] .node-outline-item small {
+      grid-column: 2;
+      grid-row: 2;
+      text-align: left;
+    }
+    html[data-reader-rail="bottom"] .node-outline-item::after {
+      grid-column: 3;
+      grid-row: 1;
+      align-self: center;
+    }
+
     .card-header {
       display: flex;
       align-items: center;
@@ -2999,14 +3051,14 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     .card li {
       position: relative;
       margin-bottom: 0.3rem;
-      padding-left: 0.9rem;
+      padding-inline-start: 0.9rem;
     }
     .card li:last-child { margin-bottom: 0; }
     /* Hanging markers take the card's tone so wrapped lines align under text. */
     .card li::before {
       position: absolute;
       top: calc(0.8em - 2px);
-      left: 0.2rem;
+      inset-inline-start: 0.2rem;
       width: 4px;
       height: 4px;
       border-radius: 50%;
@@ -3854,8 +3906,9 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         padding: 0.75rem;
         border-radius: 0.75rem;
       }
+      .diagram-container { --archify-dock-h: 6.25rem; }
       html:not([data-embed="true"]) .diagram-container {
-        padding: 0.75rem 0.75rem 4.25rem;
+        padding: 0.75rem 0.75rem calc(1rem + var(--archify-dock-h));
       }
       html:not([data-embed="true"]) .diagram-container[data-wide-diagram="true"] {
         overflow-x: auto;
@@ -3876,7 +3929,16 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       html:not([data-embed="true"]) .diagram-container[data-wide-diagram="true"] .node-finder {
         transform: translateX(var(--archify-scroll-x, 0px));
       }
-      .diagram-nav { right: 0.5rem; bottom: 0.5rem; }
+      .diagram-nav {
+        right: 0.5rem;
+        bottom: 0.5rem;
+        /* Narrow phones: let the controls wrap instead of hiding the zoom-in
+           button past the scrollable edge. */
+        flex-wrap: wrap;
+        justify-content: center;
+        overflow-x: visible;
+        max-width: calc(100% - 1rem);
+      }
       .diagram-nav button {
         min-width: 2.75rem;
         height: 2.75rem;
@@ -3885,7 +3947,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       .diagram-nav [data-view="reset"][data-detail-visible] { min-width: 4.35rem; }
       .overview-map {
         right: 0.5rem;
-        bottom: 3.7rem;
+        bottom: calc(1rem + var(--archify-dock-h));
         width: min(10.25rem, calc(100% - 1rem));
       }
       .overview-map[data-docked="true"] {
@@ -3899,12 +3961,12 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         left: var(--archify-radar-left, 0.5rem);
       }
       .overview-map-surface { height: 4rem; }
-      .overview-map-feedback { right: 0.5rem; bottom: 3.7rem; }
+      .overview-map-feedback { right: 0.5rem; bottom: calc(1rem + var(--archify-dock-h)); }
       .semantic-lens {
         right: 0.5rem;
-        bottom: 3.7rem;
+        bottom: calc(1rem + var(--archify-dock-h));
         width: calc(100% - 1rem);
-        max-height: calc(100% - 4.2rem);
+        max-height: calc(100% - var(--archify-dock-h) - 2rem);
       }
       .semantic-lens[data-dock-side] { left: auto; right: 0.5rem; }
       .semantic-lens-kinds { max-height: min(12rem, 34vh); }
@@ -3976,7 +4038,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       .node-finder-results { max-height: min(16rem, 38vh); }
       .route-probe {
         left: 0.5rem;
-        bottom: 3.7rem;
+        bottom: calc(1rem + var(--archify-dock-h));
         width: calc(100% - 1rem);
         min-width: 0;
       }
@@ -4059,7 +4121,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         white-space: nowrap;
       }
       
-      html[data-present="true"]:not([data-embed="true"]) .diagram-container { padding: 0.5rem 0.5rem 3.75rem; }
+      html[data-present="true"]:not([data-embed="true"]) .diagram-container { padding: 0.5rem 0.5rem calc(1rem + var(--archify-dock-h)); }
       html[data-present="true"]:not([data-embed="true"]) .diagram-container[data-wide-diagram="true"] > svg {
         width: 720px;
         height: auto;
@@ -5099,8 +5161,6 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
        Pro, Windows Segoe UI / Tahoma) before any monospace fallback. */
     [dir="rtl"] svg { font-family: 'JetBrains Mono', 'Noto Sans Arabic', 'Geeza Pro', 'SF Arabic', 'Segoe UI', Tahoma, Arial, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     [dir="rtl"] .subtitle { margin-left: 0; margin-right: 0; text-align: center; }
-    [dir="rtl"] .card li { padding-left: 0; padding-right: 0.9rem; }
-    [dir="rtl"] .card li::before { left: auto; right: 0.2rem; }
   </style></head>
 <body>
   <!-- Toolbar: theme, live visual style, trace motion, presentation stage, and export.
@@ -5211,19 +5271,19 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
            data-preset-badge-blueprint="مخطّط هندسي / إصدار ٠١"
            data-preset-badge-editorial="تحريري / ملاحظة ميدانية">
         <div class="pulse-dot"></div>
-        <h1>المكوّنات والحدود — مُدقّق كشوف الراجحي</h1>
+        <h1>المكوّنات والحدود</h1>
       </div>
-      <p class="subtitle">من المسح الضوئي إلى جوابٍ موثّق</p>
+      <p class="subtitle">AI Bank Statement Auditor · من المسح الضوئي إلى جوابٍ موثّق</p>
     </div>
 
     <script id="archify-source-evidence-data" type="application/json">{"schemaVersion":1,"verified":true,"repository":{"url":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag","revision":"6350289e311bb8f8e642db4ff4cbdd851d6246ab","shortRevision":"6350289","label":"jahfaliabdulrahman-dev/rajhi-rag","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/tree/6350289e311bb8f8e642db4ff4cbdd851d6246ab"},"referenceCount":28,"nodes":{"owner":[{"path":"docs/WHO_IS_THIS_FOR.md","line":1,"endLine":4,"label":"لمن بُني هذا","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/docs/WHO_IS_THIS_FOR.md#L1-L4"}],"ui":[{"path":"app.py","line":1302,"endLine":1302,"label":"كتلة الواجهة","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/app.py#L1302"},{"path":"app.py","line":1415,"endLine":1415,"label":"الإطلاق على المنفذ","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/app.py#L1415"}],"intake":[{"path":"src/statement_qa/intake.py","line":36,"endLine":66,"label":"Intake والفحص المحلي","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/src/statement_qa/intake.py#L36-L66"},{"path":"src/statement_qa/job_lock.py","line":30,"endLine":30,"label":"قفل التشغيلة","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/src/statement_qa/job_lock.py#L30"}],"chain":[{"path":"src/statement_qa/verification.py","line":15,"endLine":15,"label":"verify_statement","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/src/statement_qa/verification.py#L15"},{"path":"src/statement_qa/page_footers.py","line":32,"endLine":32,"label":"الإجماليات المطبوعة","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/src/statement_qa/page_footers.py#L32"},{"path":"src/statement_qa/footer_oracle.py","line":198,"endLine":198,"label":"check_page_footer","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/src/statement_qa/footer_oracle.py#L198"}],"ledger":[{"path":"src/statement_qa/ledger.py","line":324,"endLine":324,"label":"فتح السجل","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/src/statement_qa/ledger.py#L324"},{"path":"src/statement_qa/ledger.py","line":384,"endLine":384,"label":"ingest","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/src/statement_qa/ledger.py#L384"},{"path":"src/statement_qa/ledger.py","line":505,"endLine":546,"label":"answer · pages_of","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/src/statement_qa/ledger.py#L505-L546"}],"provider":[{"path":"src/statement_qa/vlm_reader.py","line":183,"endLine":211,"label":"نداء VLM","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/src/statement_qa/vlm_reader.py#L183-L211"},{"path":"src/statement_qa/qa.py","line":121,"endLine":135,"label":"build_llm","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/src/statement_qa/qa.py#L121-L135"}],"svc":[{"path":"tools/health_check.py","line":73,"endLine":96,"label":"health_check","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/tools/health_check.py#L73-L96"},{"path":"tools/launchd/com.jahfali.rajhi-rag.plist.tpl","line":1,"endLine":1,"label":"خدمة launchd","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/tools/launchd/com.jahfali.rajhi-rag.plist.tpl#L1"},{"path":"tools/redirect_7867.py","line":22,"endLine":24,"label":"تحويلُ 302","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/tools/redirect_7867.py#L22-L24"}],"faiss":[{"path":"src/statement_qa/retriever.py","line":12,"endLine":12,"label":"نموذج التضمين","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/src/statement_qa/retriever.py#L12"},{"path":"src/statement_qa/retriever.py","line":18,"endLine":29,"label":"build_index","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/src/statement_qa/retriever.py#L18-L29"},{"path":"src/statement_qa/chunking.py","line":48,"endLine":48,"label":"chunk_rows","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/src/statement_qa/chunking.py#L48"}],"agent":[{"path":"src/statement_qa/qa.py","line":434,"endLine":438,"label":"create_agent · invoke","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/src/statement_qa/qa.py#L434-L438"},{"path":"src/statement_qa/qa.py","line":645,"endLine":645,"label":"بوّابةُ النطاق قبل النموذج","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/src/statement_qa/qa.py#L645"},{"path":"src/statement_qa/qa.py","line":558,"endLine":558,"label":"مبلغٌ بلا أداة","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/src/statement_qa/qa.py#L558"}],"tools":[{"path":"src/statement_qa/qa_tools.py","line":161,"endLine":161,"label":"make_qa_tools","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/src/statement_qa/qa_tools.py#L161"},{"path":"src/statement_qa/qa_tools.py","line":260,"endLine":261,"label":"sum_movements","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/src/statement_qa/qa_tools.py#L260-L261"},{"path":"src/statement_qa/qa_tools.py","line":346,"endLine":356,"label":"page_footer · page_rows","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/src/statement_qa/qa_tools.py#L346-L356"}],"xlsx":[{"path":"tools/to_xlsx.py","line":778,"endLine":1016,"label":"سبع أوراق","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/tools/to_xlsx.py#L778-L1016"},{"path":"tools/to_xlsx.py","line":37,"endLine":39,"label":"openpyxl","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/tools/to_xlsx.py#L37-L39"},{"path":"tools/to_xlsx.py","line":390,"endLine":390,"label":"ورقة الملخّص","href":"https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/6350289e311bb8f8e642db4ff4cbdd851d6246ab/tools/to_xlsx.py#L390"}]}}</script>
-    <script id="archify-i18n-data" type="application/json">{"locale":"ar","messages":{"viewer.kind.frontend":"واجهة","viewer.kind.backend":"خدمة","viewer.kind.database":"قاعدة بيانات","viewer.kind.cloud":"سحابة","viewer.kind.security":"حماية","viewer.kind.messagebus":"ناقل رسائل","viewer.kind.external":"خارجي","viewer.kind.neutral":"محايد","viewer.kind.node":"عقدة","viewer.kind.start":"بداية","viewer.kind.active":"نشِط","viewer.kind.waiting":"منتظِر","viewer.kind.decision":"قرار","viewer.kind.success":"نجاح","viewer.kind.failure":"فشل","viewer.toolbar.actions":"إجراءات المخطّط","viewer.theme.toggle.title":"تبديل الثيم (T)","viewer.theme.toggle":"تبديل ثيم الألوان","viewer.theme.dark":"داكن","viewer.theme.light":"فاتح","viewer.preset.choose.title":"اختر الهوية البصرية (S للتدوير)","viewer.preset.choose":"اختر الهوية البصرية","viewer.preset.style":"الهوية","viewer.preset.menu":"الهوية البصرية","viewer.preset.identity":"الهوية البصرية","viewer.preset.cycles":"للتدوير","viewer.preset.classic":"كلاسيكي","viewer.preset.classic.short":"كلاسيكي","viewer.preset.classic.hint":"الافتراضي التقني المستقر","viewer.preset.flow":"تدفّق الإشارة","viewer.preset.flow.short":"تدفّق","viewer.preset.flow.hint":"عرضٌ حركي","viewer.preset.blueprint":"مخطّط هندسي","viewer.preset.blueprint.hint":"مراجعة هندسية","viewer.preset.editorial":"تحريري","viewer.preset.editorial.hint":"ملاحظاتُ النشر والإطلاق","viewer.preset.badge.signalFlow":"تدفّق الإشارة","viewer.preset.badge.blueprint":"مخطّط هندسي / إصدار ٠١","viewer.preset.badge.editorial":"تحريري / ملاحظة ميدانية","viewer.preset.badge.editorialPlate":"ARCHIFY / لوحة ٠٤","viewer.preset.current":"الهوية البصرية: {style}. اختر الهوية البصرية","viewer.motion.live":"حيّ","viewer.motion.still":"ساكن","viewer.motion.pause":"أوقف الحركة","viewer.motion.resume":"استأنف الحركة","viewer.motion.reduced":"الحركةُ متوقّفة بسبب تفضيل تقليل الحركة","viewer.motion.hidden":"الحركةُ متوقّفة ما دامت الصفحة مخفيّة","viewer.motion.yielding":"أوقف الحركة؛ تُسلّم الآن إلى {owner}","viewer.motion.yielding.title":"المعاينةُ الحيّة مفعّلة · تُسلّم إلى {owner}","viewer.owner.route":"مسبار المسار","viewer.owner.lens":"العدسة الدلالية","viewer.owner.relationship":"معاينة العلاقة","viewer.owner.intent":"تتبّع النيّة","viewer.owner.focus":"إبرازٌ دلالي","viewer.owner.legend":"معاينة المفتاح","viewer.owner.reader":"تفاعلُ القارئ","viewer.present.enter":"ادخل منصّة العرض","viewer.present.enter.title":"منصّة العرض (F)","viewer.present.exit":"اخرج من منصّة العرض","viewer.present.exit.title":"اخرج من منصّة العرض (F أو Escape)","viewer.present.present":"عرض","viewer.present.exit.label":"خروج","viewer.export.button":"تصدير","viewer.export.button.title":"تصدير المخطّط (E)","viewer.export.diagram":"تصدير المخطّط","viewer.export.menu":"تصدير","viewer.export.subtitle":"مخرجاتٌ نظيفة ومتنقّلة","viewer.export.share":"مشاركة","viewer.export.shareCard":"بطاقة مشاركة","viewer.export.routeShareCard":"بطاقة مشاركة مسار","viewer.export.reachShareCard":"بطاقة مشاركة امتداد","viewer.export.copyDiagram":"انسخ المخطّط","viewer.export.clipboardPng":"PNG إلى الحافظة","viewer.export.raster":"صور نقطية","viewer.export.image":"صورة","viewer.export.lossless":"صورة بلا فقد","viewer.export.compact":"صورة مضغوطة","viewer.export.modern":"صورة حديثة","viewer.export.vectorMotion":"متجهاتٌ وحركة","viewer.export.vectorMotion.heading":"متجهاتٌ وحركة","viewer.export.editable":"متجهٌ قابل للتحرير","viewer.export.svg.auto":"SVG · تلقائي","viewer.export.svg.auto.hint":"يطابق ثيم المضيف","viewer.export.svg.light":"SVG · فاتح","viewer.export.svg.light.hint":"فاتحٌ دومًا","viewer.export.svg.dark":"SVG · داكن","viewer.export.svg.dark.hint":"داكنٌ دومًا","viewer.export.motion6s":"حركة ٦ ثوانٍ","viewer.export.unsupported":"لا يدعمه هذا المتصفح","viewer.export.clipboardUnsupported":"كتابةُ صورة في الحافظة لا يدعمها هذا المتصفح","viewer.export.clipboardUnsupported.short":"كتابةُ صورة في الحافظة لا يدعمها هذا المتصفح.","viewer.export.motionUnavailable":"التقاطُ الحركة غير متاح في هذا المتصفح","viewer.export.webmUnavailable":"WebM غير متاح في هذا المتصفح","viewer.export.failed":"فشل التصدير: {message}","viewer.export.unknownVariant":"نوعُ بطاقة مشاركة غير معروف: {variant}","viewer.export.routeRequired":"تتبّع مسارًا قبل تصدير بطاقة مشاركة مسار","viewer.export.reachRequired":"تتبّع امتدادًا مُؤَلَّفًا قبل تصدير بطاقة مشاركة امتداد","viewer.export.unknown":"غير معروف","viewer.export.routeFailed":"فشل تصدير بطاقة مشاركة مسار: {message}","viewer.export.reachFailed":"فشل تصدير بطاقة مشاركة امتداد: {message}","viewer.export.copyFailed":"فشل النسخ: {message}","viewer.export.copiedPng":"نُسخ PNG إلى الحافظة","viewer.export.downloadedRoute":"نُزّلت بطاقة مشاركة مسار","viewer.export.downloadedReach":"نُزّلت بطاقة مشاركة امتداد","viewer.export.downloadedWebm":"نُزّل WebM","viewer.export.recording":"يُسجّل ٦ ثوانٍ من الحركة…","viewer.export.card.routeSummary.one":"المسار: من {source} إلى {target} · {count} خطوة","viewer.export.card.routeSummary.other":"المسار: من {source} إلى {target} · {count} خطوات","viewer.export.card.reachSummary":"المُؤَلَّف {direction} من {origin} · {nodes} · {links} · أقصر مسافة {hops}","viewer.export.card.node.one":"{count} عقدة","viewer.export.card.node.other":"{count} عقدة","viewer.export.card.link.one":"{count} رابط","viewer.export.card.link.other":"{count} روابط","viewer.export.card.hop.one":"{count} قفزة","viewer.export.card.hop.other":"{count} قفزات","viewer.export.card.routeBadge":"ARCHIFY · مسار · {hops}","viewer.export.card.reachBadge":"ARCHIFY · امتداد {direction}","viewer.export.direction.upstream":"المنبع","viewer.export.direction.downstream":"المصبّ","viewer.export.error.canvasUnavailable":"لوحة الرسم غير متاحة لـ{label}","viewer.export.error.contextUnavailable":"سياقُ لوحة الرسم الثنائي غير متاح لـ{label}","viewer.export.error.toBlobUnavailable":"canvas.toBlob غير متاح لـ{label}","viewer.export.error.toBlobNull":"canvas.toBlob لم يُعِد بياناتٍ لـ{label}","viewer.export.error.variantsCombined":"لا يمكن جمع أنواع بطاقة المشاركة","viewer.export.error.viewerState":"لم يستطع تصديرُ بطاقة المشاركة إزالةَ حالة العارض المؤقّتة","viewer.export.error.routeState":"لم تستطع بطاقة المسار حفظَ المسار المحسوم بأمان","viewer.export.error.reachState":"لم تستطع بطاقة الامتداد حفظَ الامتداد المُؤَلَّف بأمان","viewer.export.error.webmRequirements":"تصديرُ حركة WebM يحتاج حركةَ تتبّع ودعمَ MediaRecorder في المتصفح","viewer.export.error.mediaRecorder":"فشل MediaRecorder","viewer.export.error.emptyWebm":"أنتج MediaRecorder ملفَّ WebM فارغًا","viewer.export.error.webmBackground":"لم تُحمَّل خلفيةُ SVG لتصدير WebM","viewer.guide.title":"استكشف هذا النظام","viewer.focus.selectedNodes":"{count} عقدة مختارة","viewer.guide.eyebrow":"دليلُ المخطّط","viewer.guide.close":"أغلق دليل المخطّط","viewer.guide.inspecting":"يفحص الدلالاتِ المُصرَّفة","viewer.guide.actions":"إجراءاتُ استكشاف المخطّط","viewer.guide.find":"ابحث عن أي عقدة","viewer.guide.find.hint":"ابحث في التسميات والمسؤوليات والأنواع والمعرّفات الثابتة.","viewer.guide.route":"تتبّع مسارًا","viewer.guide.route.aria":"تتبّع مسارًا موجَّهًا","viewer.guide.route.hint":"اسأل كيف تتّصل عقدتان دلاليتان في الاتجاه المُؤَلَّف.","viewer.guide.map":"شاهد النظام كاملًا","viewer.guide.map.hint":"افتح الرادار الدلالي بنافذةٍ حيّة وعُقدٍ ثابتة.","viewer.guide.lens":"قارن الأنواع الدلالية","viewer.guide.lens.hint":"عُدّ الأدوار، واكشف حركتها، وقارن الروابط المُؤَلَّفة المباشرة.","viewer.guide.present":"ادخل منصّة العرض","viewer.guide.present.hint":"امنح المخطّطَ الحيّ نافذةَ العرض بلا تغيير التصدير.","viewer.guide.shortcuts":"اختصاراتُ لوحة المفاتيح الإضافية","viewer.guide.shortcut.export":"تصدير","viewer.guide.shortcut.theme":"الثيم","viewer.guide.shortcut.style":"الهوية","viewer.guide.shortcut.reset":"إعادة الضبط","viewer.guide.shortcut.zoomIn":"تكبير","viewer.guide.shortcut.zoomOut":"تصغير","viewer.guide.shortcut.close":"إغلاق","viewer.guide.credit":"أفادك Archify؟ نجمةٌ على GitHub تُساعد","viewer.guide.star":"نجمة","viewer.guide.facts":"{nodes} · {relationships}","viewer.guide.fact.node.one":"{count} عقدة دلالية","viewer.guide.fact.node.other":"{count} عقدة دلالية","viewer.guide.fact.relationship.one":"{count} علاقة","viewer.guide.fact.relationship.other":"{count} علاقة","viewer.guide.open":"افتح دليل المخطّط","viewer.finder.title":"ابحث عن عقدة","viewer.finder.close":"أغلق باحث العُقد","viewer.finder.placeholder":"ابحث في التسميات أو المعرّفات","viewer.finder.search":"ابحث في عُقد المخطّط","viewer.finder.results":"عُقد المخطّط","viewer.finder.empty":"لا عُقدَ مطابقة","viewer.finder.result.focus":"إبراز {label}","viewer.finder.result.routeStart":"اختر {label} بدايةً للمسار","viewer.finder.result.routeTarget":"اختر {label} نهايةً للمسار، {links}","viewer.finder.status.empty":"لا عُقدَ مطابقة","viewer.finder.status.count.one":"{count} عقدة مطابقة","viewer.finder.status.count.other":"{count} عقدة مطابقة","viewer.finder.noun.nodes":"عقدة","viewer.finder.link.one":"{count} رابط","viewer.finder.link.other":"{count} روابط","viewer.finder.result.focus.one":"إبراز {label}، {count} اتّصالٌ مرتبط","viewer.finder.result.focus.other":"إبراز {label}، {count} اتّصالًا مرتبطًا","viewer.finder.status.filtered":"{visible} من {available} {noun}","viewer.finder.status.all":"{available} {noun}","viewer.passport.eyebrow":"الجواز الدلالي","viewer.passport.metadata":"بياناتُ العقدة","viewer.passport.evidence":"أدلةٌ مصدرية مُتحقَّق منها","viewer.passport.verified":"مصدرٌ مُتحقَّق منه","viewer.passport.verificationScope":"مُتحقَّق منه مقابل Git المحلي عند الالتزام المثبَّت. ولم يُفحَص الوصولُ إلى الريموت.","viewer.passport.reach":"امتدادٌ مُؤَلَّف","viewer.passport.reach.trace":"تتبّعُ الوصول المُؤَلَّف","viewer.passport.upstream":"المنبع","viewer.passport.downstream":"المصبّ","viewer.passport.upstream.trace":"تتبّعُ الوصول المُؤَلَّف نحو المنبع","viewer.passport.downstream.trace":"تتبّعُ الوصول المُؤَلَّف نحو المصبّ","viewer.passport.close":"أغلق الجواز الدلالي","viewer.passport.move":"حرّك الجواز الدلالي. اسحب، أو استخدم أسهم المفاتيح، أو اضغط Home لإعادته.","viewer.passport.copy":"انسخ الرابط","viewer.passport.copy.focus":"انسخ رابط العقدة المُبرَزة","viewer.passport.relations":"العلاقات","viewer.passport.relations.show":"أظهر العلاقات المتّصلة","viewer.passport.relations.hide":"أخفِ العلاقات المتّصلة","viewer.passport.relations.list":"العلاقات المتّصلة","viewer.passport.copyRelation":"انسخ العلاقة","viewer.passport.copyNode":"انسخ العقدة","viewer.passport.copyPinned":"انسخ رابط العلاقة المثبَّتة","viewer.passport.copySource":"انسخ رابط عقدة المصدر","viewer.passport.copy.focused.success":"نُسخ رابط العقدة المُبرَزة","viewer.passport.copy.pinned.success":"نُسخ رابط العلاقة المثبَّتة","viewer.passport.copy.focused.failed":"تعذّر نسخُ رابط العقدة المُبرَزة","viewer.passport.copy.pinned.failed":"تعذّر نسخُ رابط العلاقة المثبَّتة","viewer.passport.relationship.none":"لا علاقاتٍ متّصلة","viewer.passport.relationship.count.one":"{count} علاقة","viewer.passport.relationship.count.other":"{count} علاقة","viewer.passport.relationship.show.one":"أظهر {count} علاقة متّصلة","viewer.passport.relationship.show.other":"أظهر {count} علاقة متّصلة","viewer.passport.relationship.summary":"{out} صادر · {in} وارد{loops}","viewer.passport.relationship.loops":" · {count} حلقة","viewer.passport.relationship.explorer":"مستكشفُ العلاقات المباشر","viewer.passport.relationship.help":"استخدم أسهم المفاتيح لاستكشاف العلاقات. اضغط Enter أو Space لتثبيت التفاصيل، وEscape للمسح.","viewer.passport.relationship.loopsBack":"يعود إلى نفسه","viewer.passport.relationship.connectsTo":"يتّصل بـ","viewer.passport.relationship.connectsFrom":"يتّصل منه","viewer.passport.relationship.pinned":"علاقةٌ مثبَّتة · من {from} إلى {to} · {label}","viewer.passport.relationship.inspect":"افحص العلاقة {index} من {total}: من {from} إلى {to}، {label}. اضغط Enter للتفاصيل.","viewer.passport.relationship.group.out":"صادر","viewer.passport.relationship.group.in":"وارد","viewer.passport.relationship.group.loop":"حلقاتٌ ذاتية","viewer.passport.relationship.row":"{group}: {relationship}، {neighbor}","viewer.passport.relationship.direction.out":"صادر","viewer.passport.relationship.direction.in":"وارد","viewer.passport.relationship.direction.loop":"حلقة","viewer.passport.sourceCount.one":"{count} مرجعٌ مصدري مُتحقَّق منه","viewer.passport.sourceCount.other":"{count} مراجعَ مصدرية مُتحقَّق منها","viewer.passport.repository.open":"افتح رأسَ المستودع المُتحقَّق منه {revision}","viewer.passport.source.open":"افتح المصدرَ المُتحقَّق منه {path} عند الالتزام {revision}","viewer.passport.source.openLink":"افتح ↗","viewer.passport.reach.upstream.one":"تتبّع {count} عقدةً مُؤَلَّفة نحو المنبع","viewer.passport.reach.upstream.other":"تتبّع {count} عقدةً مُؤَلَّفة نحو المنبع","viewer.passport.reach.downstream.one":"تتبّع {count} عقدةً مُؤَلَّفة نحو المصبّ","viewer.passport.reach.downstream.other":"تتبّع {count} عقدةً مُؤَلَّفة نحو المصبّ","viewer.passport.reach.noUpstream":"لا عُقدَ مُؤَلَّفة نحو المنبع","viewer.passport.reach.noDownstream":"لا عُقدَ مُؤَلَّفة نحو المصبّ","viewer.passport.reach.status":"{direction} · {nodes} عقدة · {links} رابطًا · أقصر مسافة {hops} قفزة","viewer.route.eyebrow":"مسار","viewer.route.start":"انقر حيث يبدأ المسار","viewer.route.start.find":"ابحث عن بداية","viewer.route.start.find.aria":"ابحث عن بداية مسار","viewer.route.copy":"انسخ الرابط","viewer.route.copy.aria":"انسخ رابط المسار المتتبَّع","viewer.route.clear":"مسح","viewer.route.clear.aria":"امسح مسبار المسار","viewer.route.traced":"المسار","viewer.route.pickTwo":"انقر عقدتين على المخطّط","viewer.route.pickOne":"انقر عقدةً على المخطّط","viewer.route.controls":"أدواتُ رحلة المسار","viewer.route.previous":"موضعُ المسار السابق","viewer.route.play":"شغّل رحلة المسار","viewer.route.pause":"أوقف رحلة المسار","viewer.route.replay":"أعِد رحلة المسار","viewer.route.next":"موضعُ المسار التالي","viewer.route.journey":"الرحلة","viewer.route.pause.label":"إيقاف","viewer.route.replay.label":"إعادة","viewer.route.overview":"نظرة عامة","viewer.route.overview.aria":"أظهر نظرة المسار الكاملة","viewer.route.instructions":"انقر بدايةً ثم نهاية. المسارات تتبع الأسهم.","viewer.route.destination":"إلى أين ينتهي المسار من {label}؟","viewer.route.destination.find":"ابحث عن وجهة","viewer.route.destination.find.aria":"ابحث عن وجهةِ مسارٍ يمكن الوصول إليها","viewer.route.differentDestination":"اختر وجهةً أخرى","viewer.route.distinct":"اختر عقدتين مختلفتين.","viewer.route.unreachable":"لا يمكن الوصول إلى {label} من هنا","viewer.route.unreachable.detail":"لا يمكن الوصول من {source} إلى {target} عبر الأسهم. اختر عقدةً مُضاءة.","viewer.route.start.instructions":"بعدها اختر النهاية. ستُضاء العُقد التي يمكن الوصول إليها فقط.","viewer.route.copy.success":"نُسخ رابط المسار المتتبَّع","viewer.route.copy.failed":"تعذّر نسخُ رابط المسار المتتبَّع","viewer.route.position":"موضعُ المسار {index} من {total}: {label}","viewer.route.step":"الخطوة {index} من {total} · {phase} · {label}","viewer.route.motionRequired":"الرحلةُ التلقائية تحتاج الحركة الحيّة","viewer.route.trigger.clear":"امسح المسار المتتبَّع","viewer.route.overview.status":"{nodes} · {hops} · أقصر مسار","viewer.route.overview.node.one":"{count} عقدة","viewer.route.overview.node.other":"{count} عقدة","viewer.route.overview.hop.one":"{count} خطوة","viewer.route.overview.hop.other":"{count} خطوات","viewer.route.phase.playing":"قيد التشغيل","viewer.route.phase.complete":"مكتمل","viewer.route.phase.inspecting":"قيد الفحص","viewer.route.destination.count.one":"{count} عقدة قابلة للوصول مُضاءة. انقرها.","viewer.route.destination.count.other":"{count} عقدة قابلة للوصول مُضاءة. انقر إحداها.","viewer.route.noOutgoing":"لا أسهمَ تخرج من هذه العقدة. امسحها واختر بدايةً أخرى.","viewer.route.result.title":"من {source} إلى {target}","viewer.route.finder.source.title":"اختر بداية المسار","viewer.route.finder.source.placeholder":"ابحث في بدايات المسار","viewer.route.finder.source.empty":"لا بداياتِ مسارٍ مطابقة","viewer.route.finder.source.results":"عُقدٌ تصلح بدايةً للمسار","viewer.route.finder.source.noun":"بداياتُ المسار","viewer.route.finder.source.badge":"بداية","viewer.route.finder.target.title":"الوجهة من {label}","viewer.route.finder.target.placeholder":"ابحث في الوجهات القابلة للوصول","viewer.route.finder.target.empty":"لا وجهاتٍ مطابقة قابلة للوصول","viewer.route.finder.target.results":"وجهاتُ المسار القابلة للوصول","viewer.route.finder.target.noun":"وجهاتٌ قابلة للوصول","viewer.route.hop.one":"{count} قفزة","viewer.route.hop.other":"{count} قفزات","viewer.lens.eyebrow":"العدسة الدلالية","viewer.lens.title":"قارن أدوار النظام","viewer.lens.close":"أغلق العدسة الدلالية","viewer.lens.instruction":"اختر نوعين دلاليين على الأكثر. الواحد يكشف حركته الحقيقية، والاثنان يقارنان الروابط المُؤَلَّفة المباشرة فقط.","viewer.lens.kinds":"الأنواع الدلالية","viewer.lens.choose":"اختر نوعًا لتفحص عُقده وعلاقاته الملامسة.","viewer.lens.copy":"انسخ رابط العدسة الدلالية","viewer.lens.clear":"أفرغ العدسة الدلالية","viewer.lens.open":"افتح العدسة الدلالية","viewer.lens.openActive":"افتح العدسة الدلالية النشطة","viewer.lens.legend":"المفتاح الدلالي","viewer.lens.legend.inspect.one":"افحص {label}، {count} عقدة","viewer.lens.legend.inspect.other":"افحص {label}، {count} عقدة","viewer.lens.kind.count.one":"{label}، {count} عقدة","viewer.lens.kind.count.other":"{label}، {count} عقدة","viewer.lens.compare.one":"{first} إلى {second}: {forward} · {second} إلى {first}: {reverse} · {count} علاقة مباشرة","viewer.lens.compare.other":"{first} إلى {second}: {forward} · {second} إلى {first}: {reverse} · {count} علاقة مباشرة","viewer.lens.single":"{nodes} · {relationships} · تبقى الأقران المتّصلة ظاهرة","viewer.lens.node.one":"{count} عقدة {label}","viewer.lens.node.other":"{count} عقدة {label}","viewer.lens.relationship.one":"{count} علاقةٌ ملامسة","viewer.lens.relationship.other":"{count} علاقةٌ ملامسة","viewer.radar.title":"رادار دلالي","viewer.radar.building":"يُبني المنظر العام","viewer.radar.openFull":"افتح الرادار الدلالي الكامل","viewer.radar.open":"افتح الرادار","viewer.radar.close":"أغلق الرادار الدلالي","viewer.radar.surface":"نظرةٌ عامة على المخطّط. انقر عقدةً لإبرازها، أو حرّك بأسهم المفاتيح.","viewer.radar.click":"انقر عقدة","viewer.radar.drag":"اسحب للتحريك","viewer.radar.space":"الرادار الدلالي يحتاج مساحةَ خريطةٍ أكبر.","viewer.radar.nodes":"عُقد الرادار الدلالي في المخطّط","viewer.radar.focus":"أبرِز {label} من الرادار الدلالي","viewer.radar.status":"{count} عقدة · {viewport}","viewer.radar.fullMap":"{count} عقدة · الخريطة كاملة","viewer.radar.compacted":"طُوي الرادار لئلّا يغطّي جوازَ المخطّط أو أدوات الخريطة.","viewer.radar.cancelWaiting":"ألغِ انتظار الرادار الدلالي مساحةَ خريطةٍ أكبر","viewer.radar.needsSpace":"الرادار الدلالي يحتاج مساحةَ خريطةٍ مرئية أكبر","viewer.radar.viewport.full":"الخريطة كاملة","viewer.radar.viewport.width":"{percent}% عرضًا","viewer.radar.viewport.scale":"{percent}% من نافذة العرض","viewer.nav.controls":"أدواتُ عرض المخطّط","viewer.nav.route":"تتبّع مسارًا موجَّهًا","viewer.nav.route.title":"تتبّع مسار (R)","viewer.nav.route.short":"مسار","viewer.nav.radar":"افتح الرادار الدلالي","viewer.nav.radar.title":"الرادار الدلالي (M)","viewer.nav.radar.short":"خريطة","viewer.nav.lens":"افتح العدسة الدلالية","viewer.nav.lens.title":"العدسة الدلالية (L)","viewer.nav.lens.short":"عدسة","viewer.nav.find":"ابحث عن عقدة","viewer.nav.find.title":"ابحث عن عقدة (/)","viewer.outline.title":"فهرسُ العُقد","viewer.rail.show":"ملاحظاتٌ وفهرس","viewer.rail.controls":"لوحةٌ جانبية","viewer.rail.collapse":"اطوِ اللوحة الجانبية","viewer.rail.bottom":"انقل اللوحة أسفل المخطّط","viewer.rail.right":"انقل اللوحة بجانب المخطّط","viewer.nav.guide":"افتح دليل المخطّط","viewer.nav.guide.title":"دليل المخطّط (?)","viewer.nav.zoomOut":"تصغير","viewer.nav.zoomOut.title":"تصغير (-)","viewer.nav.reset":"أعِد ضبط عرض المخطّط","viewer.nav.reset.title":"أعِد الضبط (0)","viewer.nav.read":"قراءة","viewer.nav.zoomIn":"تكبير","viewer.nav.zoomIn.title":"تكبير (+)","viewer.nav.camera":"{hint}. إعادةُ ضبط عرض المخطّط","viewer.nav.camera.title":"{semantic}{hint} · إعادة الضبط (0)","viewer.nav.camera.semantic":"كاميرا دلالية نشطة · ","viewer.nav.level.map":"خريطة","viewer.nav.level.read":"قراءة","viewer.nav.level.full":"كامل","viewer.nav.level.auto":"تلقائي","viewer.nav.detail.map":"كبّر لتكشف تسميات العلاقات وسياق العُقد","viewer.nav.detail.read":"كبّر مرةً أخرى لتكشف الوسوم والتعليقات","viewer.nav.detail.full":"تفاصيل المخطّط كاملة","viewer.intent.summary":"{label}. {out} صادر، {in} وارد{loops}. {total} اتّصالًا. اضغط Enter للتفاصيل.","viewer.intent.loops":"، {count} حلقة ذاتية","viewer.common.copied":"نُسخ","viewer.common.copyFailed":"فشل النسخ","viewer.common.copyLink":"انسخ الرابط","viewer.common.clear":"مسح","viewer.common.close":"إغلاق"}}</script>
+    <script id="archify-i18n-data" type="application/json">{"locale":"ar","messages":{"viewer.kind.frontend":"واجهة","viewer.kind.backend":"خدمة","viewer.kind.database":"قاعدة بيانات","viewer.kind.cloud":"سحابة","viewer.kind.security":"حماية","viewer.kind.messagebus":"ناقل رسائل","viewer.kind.external":"خارجي","viewer.kind.neutral":"محايد","viewer.kind.node":"عقدة","viewer.kind.start":"بداية","viewer.kind.active":"نشِط","viewer.kind.waiting":"منتظِر","viewer.kind.decision":"قرار","viewer.kind.success":"نجاح","viewer.kind.failure":"فشل","viewer.toolbar.actions":"إجراءات المخطّط","viewer.theme.toggle.title":"تبديل الثيم (T)","viewer.theme.toggle":"تبديل ثيم الألوان","viewer.theme.dark":"داكن","viewer.theme.light":"فاتح","viewer.preset.choose.title":"اختر الهوية البصرية (S للتدوير)","viewer.preset.choose":"اختر الهوية البصرية","viewer.preset.style":"الهوية","viewer.preset.menu":"الهوية البصرية","viewer.preset.identity":"الهوية البصرية","viewer.preset.cycles":"للتدوير","viewer.preset.classic":"كلاسيكي","viewer.preset.classic.short":"كلاسيكي","viewer.preset.classic.hint":"الافتراضي التقني المستقر","viewer.preset.flow":"تدفّق الإشارة","viewer.preset.flow.short":"تدفّق","viewer.preset.flow.hint":"عرضٌ حركي","viewer.preset.blueprint":"مخطّط هندسي","viewer.preset.blueprint.hint":"مراجعة هندسية","viewer.preset.editorial":"تحريري","viewer.preset.editorial.hint":"ملاحظاتُ النشر والإطلاق","viewer.preset.badge.signalFlow":"تدفّق الإشارة","viewer.preset.badge.blueprint":"مخطّط هندسي / إصدار ٠١","viewer.preset.badge.editorial":"تحريري / ملاحظة ميدانية","viewer.preset.badge.editorialPlate":"ARCHIFY / لوحة ٠٤","viewer.preset.current":"الهوية البصرية: {style}. اختر الهوية البصرية","viewer.motion.live":"حيّ","viewer.motion.still":"ساكن","viewer.motion.pause":"أوقف الحركة","viewer.motion.resume":"استأنف الحركة","viewer.motion.reduced":"الحركةُ متوقّفة بسبب تفضيل تقليل الحركة","viewer.motion.hidden":"الحركةُ متوقّفة ما دامت الصفحة مخفيّة","viewer.motion.yielding":"أوقف الحركة؛ تُسلّم الآن إلى {owner}","viewer.motion.yielding.title":"المعاينةُ الحيّة مفعّلة · تُسلّم إلى {owner}","viewer.owner.route":"مسبار المسار","viewer.owner.lens":"العدسة الدلالية","viewer.owner.relationship":"معاينة العلاقة","viewer.owner.intent":"تتبّع النيّة","viewer.owner.focus":"إبرازٌ دلالي","viewer.owner.legend":"معاينة المفتاح","viewer.owner.reader":"تفاعلُ القارئ","viewer.present.enter":"ادخل منصّة العرض","viewer.present.enter.title":"منصّة العرض (F)","viewer.present.exit":"اخرج من منصّة العرض","viewer.present.exit.title":"اخرج من منصّة العرض (F أو Escape)","viewer.present.present":"عرض","viewer.present.exit.label":"خروج","viewer.export.button":"تصدير","viewer.export.button.title":"تصدير المخطّط (E)","viewer.export.diagram":"تصدير المخطّط","viewer.export.menu":"تصدير","viewer.export.subtitle":"مخرجاتٌ نظيفة ومتنقّلة","viewer.export.share":"مشاركة","viewer.export.shareCard":"بطاقة مشاركة","viewer.export.routeShareCard":"بطاقة مشاركة مسار","viewer.export.reachShareCard":"بطاقة مشاركة امتداد","viewer.export.copyDiagram":"انسخ المخطّط","viewer.export.clipboardPng":"PNG إلى الحافظة","viewer.export.raster":"صور نقطية","viewer.export.image":"صورة","viewer.export.lossless":"صورة بلا فقد","viewer.export.compact":"صورة مضغوطة","viewer.export.modern":"صورة حديثة","viewer.export.vectorMotion":"متجهاتٌ وحركة","viewer.export.vectorMotion.heading":"متجهاتٌ وحركة","viewer.export.editable":"متجهٌ قابل للتحرير","viewer.export.svg.auto":"SVG · تلقائي","viewer.export.svg.auto.hint":"يطابق ثيم المضيف","viewer.export.svg.light":"SVG · فاتح","viewer.export.svg.light.hint":"فاتحٌ دومًا","viewer.export.svg.dark":"SVG · داكن","viewer.export.svg.dark.hint":"داكنٌ دومًا","viewer.export.motion6s":"حركة ٦ ثوانٍ","viewer.export.unsupported":"لا يدعمه هذا المتصفح","viewer.export.clipboardUnsupported":"كتابةُ صورة في الحافظة لا يدعمها هذا المتصفح","viewer.export.clipboardUnsupported.short":"كتابةُ صورة في الحافظة لا يدعمها هذا المتصفح.","viewer.export.motionUnavailable":"التقاطُ الحركة غير متاح في هذا المتصفح","viewer.export.webmUnavailable":"WebM غير متاح في هذا المتصفح","viewer.export.failed":"فشل التصدير: {message}","viewer.export.unknownVariant":"نوعُ بطاقة مشاركة غير معروف: {variant}","viewer.export.routeRequired":"تتبّع مسارًا قبل تصدير بطاقة مشاركة مسار","viewer.export.reachRequired":"تتبّع امتدادًا مُؤَلَّفًا قبل تصدير بطاقة مشاركة امتداد","viewer.export.unknown":"غير معروف","viewer.export.routeFailed":"فشل تصدير بطاقة مشاركة مسار: {message}","viewer.export.reachFailed":"فشل تصدير بطاقة مشاركة امتداد: {message}","viewer.export.copyFailed":"فشل النسخ: {message}","viewer.export.copiedPng":"نُسخ PNG إلى الحافظة","viewer.export.downloadedRoute":"نُزّلت بطاقة مشاركة مسار","viewer.export.downloadedReach":"نُزّلت بطاقة مشاركة امتداد","viewer.export.downloadedWebm":"نُزّل WebM","viewer.export.recording":"يُسجّل ٦ ثوانٍ من الحركة…","viewer.export.card.routeSummary.one":"المسار: من {source} إلى {target} · عدد الخطوات: {count}","viewer.export.card.routeSummary.other":"المسار: من {source} إلى {target} · عدد الخطوات: {count}","viewer.export.card.reachSummary":"الامتداد المُؤَلَّف نحو {direction} من {origin} · {nodes} · {links} · {hops} كحد أقصى","viewer.export.card.node.one":"عدد العُقد: {count}","viewer.export.card.node.other":"عدد العُقد: {count}","viewer.export.card.link.one":"عدد الروابط: {count}","viewer.export.card.link.other":"عدد الروابط: {count}","viewer.export.card.hop.one":"عدد القفزات: {count}","viewer.export.card.hop.other":"عدد القفزات: {count}","viewer.export.card.routeBadge":"ARCHIFY · مسار · {hops}","viewer.export.card.reachBadge":"ARCHIFY · امتداد {direction}","viewer.export.direction.upstream":"المنبع","viewer.export.direction.downstream":"المصبّ","viewer.export.error.canvasUnavailable":"لوحة الرسم غير متاحة لـ{label}","viewer.export.error.contextUnavailable":"سياقُ لوحة الرسم ثنائيِّ الأبعاد غير متاح لـ{label}","viewer.export.error.toBlobUnavailable":"canvas.toBlob غير متاح لـ{label}","viewer.export.error.toBlobNull":"canvas.toBlob لم يُعِد بياناتٍ لـ{label}","viewer.export.error.variantsCombined":"لا يمكن جمع أنواع بطاقة المشاركة","viewer.export.error.viewerState":"لم يستطع تصديرُ بطاقة المشاركة إزالةَ حالة العارض المؤقّتة","viewer.export.error.routeState":"لم تستطع بطاقة المسار حفظَ المسار المحسوم بأمان","viewer.export.error.reachState":"لم تستطع بطاقة الامتداد حفظَ الامتداد المُؤَلَّف بأمان","viewer.export.error.webmRequirements":"تصديرُ حركة WebM يحتاج حركةَ تتبّع ودعمَ MediaRecorder في المتصفح","viewer.export.error.mediaRecorder":"فشل MediaRecorder","viewer.export.error.emptyWebm":"أنتج MediaRecorder ملفَّ WebM فارغًا","viewer.export.error.webmBackground":"لم تُحمَّل خلفيةُ SVG لتصدير WebM","viewer.guide.title":"استكشف هذا النظام","viewer.focus.selectedNodes":"{count} عقدة مختارة","viewer.guide.eyebrow":"دليلُ المخطّط","viewer.guide.close":"أغلق دليل المخطّط","viewer.guide.inspecting":"يفحص الدلالاتِ المُصرَّفة","viewer.guide.actions":"إجراءاتُ استكشاف المخطّط","viewer.guide.find":"ابحث عن أي عقدة","viewer.guide.find.hint":"ابحث في التسميات والمسؤوليات والأنواع والمعرّفات الثابتة.","viewer.guide.route":"تتبّع مسارًا","viewer.guide.route.aria":"تتبّع مسارًا موجَّهًا","viewer.guide.route.hint":"اسأل كيف تتّصل عقدتان دلاليتان في الاتجاه المُؤَلَّف.","viewer.guide.map":"شاهد النظام كاملًا","viewer.guide.map.hint":"افتح الرادار الدلالي بنافذةٍ حيّة وعُقدٍ ثابتة.","viewer.guide.lens":"قارن الأنواع الدلالية","viewer.guide.lens.hint":"عُدّ الأدوار، واكشف حركتها، وقارن الروابط المُؤَلَّفة المباشرة.","viewer.guide.present":"ادخل منصّة العرض","viewer.guide.present.hint":"امنح المخطّطَ الحيّ نافذةَ العرض بلا تغيير التصدير.","viewer.guide.shortcuts":"اختصاراتُ لوحة المفاتيح الإضافية","viewer.guide.shortcut.export":"تصدير","viewer.guide.shortcut.theme":"الثيم","viewer.guide.shortcut.style":"الهوية","viewer.guide.shortcut.reset":"إعادة الضبط","viewer.guide.shortcut.zoomIn":"تكبير","viewer.guide.shortcut.zoomOut":"تصغير","viewer.guide.shortcut.close":"إغلاق","viewer.guide.credit":"أفادك Archify؟ نجمةٌ على GitHub تُساعد","viewer.guide.star":"نجمة","viewer.guide.facts":"{nodes} · {relationships}","viewer.guide.fact.node.one":"{count} عقدة دلالية","viewer.guide.fact.node.other":"{count} عقدة دلالية","viewer.guide.fact.relationship.one":"{count} علاقة","viewer.guide.fact.relationship.other":"{count} علاقة","viewer.guide.open":"افتح دليل المخطّط","viewer.finder.title":"ابحث عن عقدة","viewer.finder.close":"أغلق باحث العُقد","viewer.finder.placeholder":"ابحث في التسميات أو المعرّفات","viewer.finder.search":"ابحث في عُقد المخطّط","viewer.finder.results":"عُقد المخطّط","viewer.finder.empty":"لا عُقدَ مطابقة","viewer.finder.result.focus":"إبراز {label}","viewer.finder.result.routeStart":"اختر {label} بدايةً للمسار","viewer.finder.result.routeTarget":"اختر {label} نهايةً للمسار، {links}","viewer.finder.status.empty":"لا عُقدَ مطابقة","viewer.finder.status.count.one":"{count} عقدة مطابقة","viewer.finder.status.count.other":"{count} عقدة مطابقة","viewer.finder.noun.nodes":"عقدة","viewer.finder.link.one":"{count} رابط","viewer.finder.link.other":"{count} روابط","viewer.finder.result.focus.one":"إبراز {label}، {count} اتّصالٌ مرتبط","viewer.finder.result.focus.other":"إبراز {label}، {count} اتّصالًا مرتبطًا","viewer.finder.status.filtered":"{visible} من {available} {noun}","viewer.finder.status.all":"{available} {noun}","viewer.passport.eyebrow":"الجواز الدلالي","viewer.passport.metadata":"بياناتُ العقدة","viewer.passport.evidence":"أدلةٌ مصدرية مُتحقَّق منها","viewer.passport.verified":"مصدرٌ مُتحقَّق منه","viewer.passport.verificationScope":"مُتحقَّق منه مقابل Git المحلي عند الالتزام المثبَّت. ولم يُفحَص الوصولُ إلى الريموت.","viewer.passport.reach":"امتدادٌ مُؤَلَّف","viewer.passport.reach.trace":"تتبّعُ الوصول المُؤَلَّف","viewer.passport.upstream":"المنبع","viewer.passport.downstream":"المصبّ","viewer.passport.upstream.trace":"تتبّعُ الوصول المُؤَلَّف نحو المنبع","viewer.passport.downstream.trace":"تتبّعُ الوصول المُؤَلَّف نحو المصبّ","viewer.passport.close":"أغلق الجواز الدلالي","viewer.passport.move":"حرّك الجواز الدلالي. اسحب، أو استخدم أسهم المفاتيح، أو اضغط Home لإعادته.","viewer.passport.copy":"انسخ الرابط","viewer.passport.copy.focus":"انسخ رابط العقدة المُبرَزة","viewer.passport.relations":"العلاقات","viewer.passport.relations.show":"أظهر العلاقات المتّصلة","viewer.passport.relations.hide":"أخفِ العلاقات المتّصلة","viewer.passport.relations.list":"العلاقات المتّصلة","viewer.passport.copyRelation":"انسخ العلاقة","viewer.passport.copyNode":"انسخ العقدة","viewer.passport.copyPinned":"انسخ رابط العلاقة المثبَّتة","viewer.passport.copySource":"انسخ رابط عقدة المصدر","viewer.passport.copy.focused.success":"نُسخ رابط العقدة المُبرَزة","viewer.passport.copy.pinned.success":"نُسخ رابط العلاقة المثبَّتة","viewer.passport.copy.focused.failed":"تعذّر نسخُ رابط العقدة المُبرَزة","viewer.passport.copy.pinned.failed":"تعذّر نسخُ رابط العلاقة المثبَّتة","viewer.passport.relationship.none":"لا علاقاتٍ متّصلة","viewer.passport.relationship.count.one":"{count} علاقة","viewer.passport.relationship.count.other":"{count} علاقة","viewer.passport.relationship.show.one":"أظهر {count} علاقة متّصلة","viewer.passport.relationship.show.other":"أظهر {count} علاقة متّصلة","viewer.passport.relationship.summary":"{out} صادر · {in} وارد{loops}","viewer.passport.relationship.loops":" · {count} حلقة","viewer.passport.relationship.explorer":"مستكشفُ العلاقات المباشر","viewer.passport.relationship.help":"استخدم أسهم المفاتيح لاستكشاف العلاقات. اضغط Enter أو Space لتثبيت التفاصيل، وEscape للمسح.","viewer.passport.relationship.loopsBack":"يعود إلى نفسه","viewer.passport.relationship.connectsTo":"يتّصل بـ","viewer.passport.relationship.connectsFrom":"يتّصل منه","viewer.passport.relationship.pinned":"علاقةٌ مثبَّتة · من {from} إلى {to} · {label}","viewer.passport.relationship.inspect":"افحص العلاقة {index} من {total}: من {from} إلى {to}، {label}. اضغط Enter للتفاصيل.","viewer.passport.relationship.group.out":"صادر","viewer.passport.relationship.group.in":"وارد","viewer.passport.relationship.group.loop":"حلقاتٌ ذاتية","viewer.passport.relationship.row":"{group}: {relationship}، {neighbor}","viewer.passport.relationship.direction.out":"صادر","viewer.passport.relationship.direction.in":"وارد","viewer.passport.relationship.direction.loop":"حلقة","viewer.passport.sourceCount.one":"{count} مرجعٌ مصدري مُتحقَّق منه","viewer.passport.sourceCount.other":"{count} مراجعَ مصدرية مُتحقَّق منها","viewer.passport.repository.open":"افتح التزام المستودع المُتحقَّق منه {revision}","viewer.passport.source.open":"افتح المصدرَ المُتحقَّق منه {path} عند الالتزام {revision}","viewer.passport.source.openLink":"افتح ↗","viewer.passport.reach.upstream.one":"تتبّع العُقد المُؤَلَّفة نحو المنبع (العدد: {count})","viewer.passport.reach.upstream.other":"تتبّع العُقد المُؤَلَّفة نحو المنبع (العدد: {count})","viewer.passport.reach.downstream.one":"تتبّع العُقد المُؤَلَّفة نحو المصبّ (العدد: {count})","viewer.passport.reach.downstream.other":"تتبّع العُقد المُؤَلَّفة نحو المصبّ (العدد: {count})","viewer.passport.reach.noUpstream":"لا عُقدَ مُؤَلَّفة نحو المنبع","viewer.passport.reach.noDownstream":"لا عُقدَ مُؤَلَّفة نحو المصبّ","viewer.passport.reach.status":"{direction} · عدد العُقد: {nodes} · عدد الروابط: {links} · أقصى عدد للقفزات: {hops}","viewer.route.eyebrow":"مسار","viewer.route.start":"انقر حيث يبدأ المسار","viewer.route.start.find":"ابحث عن بداية","viewer.route.start.find.aria":"ابحث عن بداية مسار","viewer.route.copy":"انسخ الرابط","viewer.route.copy.aria":"انسخ رابط المسار المتتبَّع","viewer.route.clear":"مسح","viewer.route.clear.aria":"امسح مسبار المسار","viewer.route.traced":"المسار","viewer.route.pickTwo":"انقر عقدتين على المخطّط","viewer.route.pickOne":"انقر عقدةً على المخطّط","viewer.route.controls":"أدواتُ رحلة المسار","viewer.route.previous":"موضعُ المسار السابق","viewer.route.play":"شغّل رحلة المسار","viewer.route.pause":"أوقف رحلة المسار","viewer.route.replay":"أعِد رحلة المسار","viewer.route.next":"موضعُ المسار التالي","viewer.route.journey":"الرحلة","viewer.route.pause.label":"إيقاف","viewer.route.replay.label":"إعادة","viewer.route.overview":"نظرة عامة","viewer.route.overview.aria":"أظهر نظرة المسار الكاملة","viewer.route.instructions":"انقر بدايةً ثم نهاية. المسارات تتبع الأسهم.","viewer.route.destination":"إلى أين ينتهي المسار من {label}؟","viewer.route.destination.find":"ابحث عن وجهة","viewer.route.destination.find.aria":"ابحث عن وجهةِ مسارٍ يمكن الوصول إليها","viewer.route.differentDestination":"اختر وجهةً أخرى","viewer.route.distinct":"اختر عقدتين مختلفتين.","viewer.route.unreachable":"لا يمكن الوصول إلى {label} من هنا","viewer.route.unreachable.detail":"لا يمكن الوصول من {source} إلى {target} عبر الأسهم. اختر عقدةً مُضاءة.","viewer.route.start.instructions":"بعدها اختر النهاية. ستُضاء العُقد التي يمكن الوصول إليها فقط.","viewer.route.copy.success":"نُسخ رابط المسار المتتبَّع","viewer.route.copy.failed":"تعذّر نسخُ رابط المسار المتتبَّع","viewer.route.position":"موضعُ المسار {index} من {total}: {label}","viewer.route.step":"الخطوة {index} من {total} · {phase} · {label}","viewer.route.motionRequired":"الرحلةُ التلقائية تحتاج الحركة الحيّة","viewer.route.trigger.clear":"امسح المسار المتتبَّع","viewer.route.overview.status":"{nodes} · {hops} · أقصر مسار","viewer.route.overview.node.one":"{count} عقدة","viewer.route.overview.node.other":"{count} عقدة","viewer.route.overview.hop.one":"{count} خطوة","viewer.route.overview.hop.other":"{count} خطوات","viewer.route.phase.playing":"قيد التشغيل","viewer.route.phase.complete":"مكتمل","viewer.route.phase.inspecting":"قيد الفحص","viewer.route.destination.count.one":"{count} عقدة قابلة للوصول مُضاءة. انقرها.","viewer.route.destination.count.other":"{count} عقدة قابلة للوصول مُضاءة. انقر إحداها.","viewer.route.noOutgoing":"لا أسهمَ تخرج من هذه العقدة. امسحها واختر بدايةً أخرى.","viewer.route.result.title":"من {source} إلى {target}","viewer.route.finder.source.title":"اختر بداية المسار","viewer.route.finder.source.placeholder":"ابحث في بدايات المسار","viewer.route.finder.source.empty":"لا بداياتِ مسارٍ مطابقة","viewer.route.finder.source.results":"عُقدٌ تصلح بدايةً للمسار","viewer.route.finder.source.noun":"بداياتُ المسار","viewer.route.finder.source.badge":"بداية","viewer.route.finder.target.title":"الوجهة من {label}","viewer.route.finder.target.placeholder":"ابحث في الوجهات القابلة للوصول","viewer.route.finder.target.empty":"لا وجهاتٍ مطابقة قابلة للوصول","viewer.route.finder.target.results":"وجهاتُ المسار القابلة للوصول","viewer.route.finder.target.noun":"وجهاتٌ قابلة للوصول","viewer.route.hop.one":"{count} قفزة","viewer.route.hop.other":"{count} قفزات","viewer.lens.eyebrow":"العدسة الدلالية","viewer.lens.title":"قارن أدوار النظام","viewer.lens.close":"أغلق العدسة الدلالية","viewer.lens.instruction":"اختر نوعين دلاليين على الأكثر. الواحد يكشف حركته الحقيقية، والاثنان يقارنان الروابط المُؤَلَّفة المباشرة فقط.","viewer.lens.kinds":"الأنواع الدلالية","viewer.lens.choose":"اختر نوعًا لتفحص عُقده وعلاقاته الملامسة.","viewer.lens.copy":"انسخ رابط العدسة الدلالية","viewer.lens.clear":"أفرغ العدسة الدلالية","viewer.lens.open":"افتح العدسة الدلالية","viewer.lens.openActive":"افتح العدسة الدلالية النشطة","viewer.lens.legend":"المفتاح الدلالي","viewer.lens.legend.inspect.one":"افحص {label}، {count} عقدة","viewer.lens.legend.inspect.other":"افحص {label}، {count} عقدة","viewer.lens.kind.count.one":"{label}، {count} عقدة","viewer.lens.kind.count.other":"{label}، {count} عقدة","viewer.lens.compare.one":"{first} إلى {second}: {forward} · {second} إلى {first}: {reverse} · {count} علاقة مباشرة","viewer.lens.compare.other":"{first} إلى {second}: {forward} · {second} إلى {first}: {reverse} · {count} علاقة مباشرة","viewer.lens.single":"{nodes} · {relationships} · تبقى الأقران المتّصلة ظاهرة","viewer.lens.node.one":"{count} عقدة {label}","viewer.lens.node.other":"{count} عقدة {label}","viewer.lens.relationship.one":"{count} علاقةٌ ملامسة","viewer.lens.relationship.other":"{count} علاقةٌ ملامسة","viewer.radar.title":"رادار دلالي","viewer.radar.building":"جارٍ إنشاء النظرة العامة","viewer.radar.openFull":"افتح الرادار الدلالي الكامل","viewer.radar.open":"افتح الرادار","viewer.radar.close":"أغلق الرادار الدلالي","viewer.radar.surface":"نظرةٌ عامة على المخطّط. انقر عقدةً لإبرازها، أو حرّك بأسهم المفاتيح.","viewer.radar.click":"انقر عقدة","viewer.radar.drag":"اسحب للتحريك","viewer.radar.space":"الرادار الدلالي يحتاج مساحةَ خريطةٍ أكبر.","viewer.radar.nodes":"عُقد الرادار الدلالي في المخطّط","viewer.radar.focus":"أبرِز {label} من الرادار الدلالي","viewer.radar.status":"{count} عقدة · {viewport}","viewer.radar.fullMap":"{count} عقدة · الخريطة كاملة","viewer.radar.compacted":"طُوي الرادار لئلّا يغطّي الجواز الدلالي أو أدوات الخريطة.","viewer.radar.cancelWaiting":"ألغِ انتظار الرادار الدلالي مساحةَ خريطةٍ أكبر","viewer.radar.needsSpace":"الرادار الدلالي يحتاج مساحةَ خريطةٍ مرئية أكبر","viewer.radar.viewport.full":"الخريطة كاملة","viewer.radar.viewport.width":"{percent}% عرضًا","viewer.radar.viewport.scale":"{percent}% من نافذة العرض","viewer.nav.controls":"أدواتُ عرض المخطّط","viewer.nav.route":"تتبّع مسارًا موجَّهًا","viewer.nav.route.title":"تتبّع مسار (R)","viewer.nav.route.short":"مسار","viewer.nav.radar":"افتح الرادار الدلالي","viewer.nav.radar.title":"الرادار الدلالي (M)","viewer.nav.radar.short":"خريطة","viewer.nav.lens":"افتح العدسة الدلالية","viewer.nav.lens.title":"العدسة الدلالية (L)","viewer.nav.lens.short":"عدسة","viewer.nav.find":"ابحث عن عقدة","viewer.nav.find.title":"ابحث عن عقدة (/)","viewer.outline.title":"فهرسُ العُقد","viewer.rail.show":"ملاحظاتٌ وفهرس","viewer.rail.controls":"لوحةٌ جانبية","viewer.rail.collapse":"اطوِ اللوحة الجانبية","viewer.rail.bottom":"انقل اللوحة أسفل المخطّط","viewer.rail.right":"انقل اللوحة بجانب المخطّط","viewer.nav.guide":"افتح دليل المخطّط","viewer.nav.guide.title":"دليل المخطّط (?)","viewer.nav.zoomOut":"تصغير","viewer.nav.zoomOut.title":"تصغير (-)","viewer.nav.reset":"أعِد ضبط عرض المخطّط","viewer.nav.reset.title":"أعِد الضبط (0)","viewer.nav.read":"قراءة","viewer.nav.zoomIn":"تكبير","viewer.nav.zoomIn.title":"تكبير (+)","viewer.nav.camera":"{hint}. إعادةُ ضبط عرض المخطّط","viewer.nav.camera.title":"{semantic}{hint} · إعادة الضبط (0)","viewer.nav.camera.semantic":"كاميرا دلالية نشطة · ","viewer.nav.level.map":"خريطة","viewer.nav.level.read":"قراءة","viewer.nav.level.full":"كامل","viewer.nav.level.auto":"تلقائي","viewer.nav.detail.map":"كبّر لتكشف تسميات العلاقات وسياق العُقد","viewer.nav.detail.read":"كبّر مرةً أخرى لتكشف الوسوم والتعليقات","viewer.nav.detail.full":"تفاصيل المخطّط كاملة","viewer.intent.summary":"{label}. {out} صادر، {in} وارد{loops}. {total} اتّصالًا. اضغط Enter للتفاصيل.","viewer.intent.loops":"، {count} حلقة ذاتية","viewer.common.copied":"نُسخ","viewer.common.copyFailed":"فشل النسخ","viewer.common.copyLink":"انسخ الرابط","viewer.common.clear":"مسح","viewer.common.close":"إغلاق","viewer.export.downloadedPngFallback":"تعذّر النسخ؛ نُزّل المخطّط كـPNG.","viewer.export.sharedPng":"تمت مشاركة المخطّط كـPNG."}}</script>
     <!-- Main Diagram -->
     <div class="diagram-container" data-detail-level="read"
          data-preset-badge-editorial-plate="ARCHIFY / لوحة ٠٤">
       <svg viewBox="0 0 1006 530" role="img" lang="ar" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-node-ui="" data-reader-fit="intrinsic-height" data-reader-min-text="7.5" data-reader-primary-text="14">
-        <title id="archify-diagram-title">المكوّنات والحدود — مُدقّق كشوف الراجحي</title>
-        <desc id="archify-diagram-description">من المسح الضوئي إلى جوابٍ موثّق</desc>
+        <title id="archify-diagram-title">المكوّنات والحدود</title>
+        <desc id="archify-diagram-description">AI Bank Statement Auditor · من المسح الضوئي إلى جوابٍ موثّق</desc>
         <!-- Definitions -->
         <defs>
           <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -5691,7 +5751,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <span class="overview-map-live" aria-hidden="true"></span>
           <span class="overview-map-copy">
             <strong id="overview-map-title">رادار دلالي</strong>
-            <small id="overview-map-status" aria-live="polite">يُبني المنظر العام</small>
+            <small id="overview-map-status" aria-live="polite">جارٍ إنشاء النظرة العامة</small>
           </span>
           <button class="overview-map-expand" id="overview-map-expand" type="button" aria-label="افتح الرادار الدلالي الكامل">افتح الرادار</button>
           <button class="overview-map-close" id="overview-map-close" type="button" aria-label="أغلق الرادار الدلالي">&#215;</button>
@@ -5720,7 +5780,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     </div>
     <!-- Info Cards -->
     <div class="cards">
-      <div class="card">
+      <div class="card" dir="auto">
         <div class="card-header">
           <div class="card-dot cyan"></div>
           <h3>قاعدةُ الأمانة</h3>
@@ -5732,7 +5792,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </ul>
       </div>
 
-      <div class="card">
+      <div class="card" dir="auto">
         <div class="card-header">
           <div class="card-dot rose"></div>
           <h3>حدودٌ مُعلَنة</h3>
@@ -5746,7 +5806,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </ul>
       </div>
 
-      <div class="card">
+      <div class="card" dir="auto">
         <div class="card-header">
           <div class="card-dot emerald"></div>
           <h3>ما يُسلَّم</h3>
@@ -5859,6 +5919,34 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       });
     }
 
+    (function () {
+      function attachToolbarNavigation(toolbar, selector) {
+        if (!toolbar) return;
+        toolbar.addEventListener('keydown', function (event) {
+          if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+          if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+          var controls = Array.from(toolbar.querySelectorAll(selector)).filter(function (control) {
+            return !control.disabled && !control.hidden && control.getClientRects().length;
+          });
+          var current = controls.indexOf(event.target.closest('button'));
+          if (current < 0) return;
+          var next = event.key === 'Home' ? 0
+            : event.key === 'End' ? controls.length - 1
+              : (current + (event.key === 'ArrowRight' ? 1 : -1) + controls.length) % controls.length;
+          if (next === current) return;
+          event.preventDefault();
+          controls[next].focus();
+        });
+      }
+
+      attachToolbarNavigation(
+        document.querySelector('.toolbar'),
+        ':scope > .toolbar-group > button, :scope > .toolbar-group > .preset-wrap > #btn-preset, :scope > .export-wrap > #btn-export'
+      );
+      attachToolbarNavigation(document.querySelector('.diagram-nav'), ':scope > button');
+      attachToolbarNavigation(document.querySelector('.rail-controls'), ':scope > button');
+    })();
+
     /* ============================================================
        Visual style try-on — one topology, four bundled presets.
        The reader's choice is intentionally session-only: it updates the
@@ -5935,6 +6023,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         else open(false);
       });
       btn.addEventListener('keydown', function (e) {
+        if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
           e.preventDefault();
           if (!isOpen()) open(e.key === 'ArrowUp');
@@ -5951,6 +6040,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       menu.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') { e.preventDefault(); close(true); return; }
         if (e.key === 'Tab') { close(false); return; }
+        if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
         var available = options();
         var active = available.indexOf(document.activeElement);
         switch (e.key) {
@@ -6701,6 +6791,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           cardBorder: root.getPropertyValue('--panel-border').trim() || 'transparent',
           dot: card && /radial-gradient/.test(card.backgroundImage) ? (root.getPropertyValue('--canvas-dot').trim() || '') : '',
           light: (document.documentElement.getAttribute('data-theme') || 'dark') === 'light',
+          rtl: getComputedStyle(document.documentElement).direction === 'rtl',
           header: header,
           cardWidth: cardWidth,
           cardHeight: cardHeight,
@@ -6715,18 +6806,27 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         ctx.fillRect(0, 0, layout.width, layout.height);
         if (layout.title) {
           var titleMid = m + 16;
+          // Local addition: an RTL page anchors its header on the reading start,
+          // which is the right edge, and the canvas baseline direction follows.
+          var figureRtl = layout.rtl === true;
+          ctx.save();
+          if (figureRtl) { ctx.direction = 'rtl'; ctx.textAlign = 'right'; }
+          var dotX = figureRtl ? layout.width - m - 5 : m + 5;
           ctx.fillStyle = layout.accent;
           ctx.globalAlpha = 0.16;
-          ctx.beginPath(); ctx.arc(m + 5, titleMid, 9, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(dotX, titleMid, 9, 0, Math.PI * 2); ctx.fill();
           ctx.globalAlpha = 1;
-          ctx.beginPath(); ctx.arc(m + 5, titleMid, 5, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(dotX, titleMid, 5, 0, Math.PI * 2); ctx.fill();
           ctx.textBaseline = 'middle';
           ctx.fillStyle = layout.text;
-          ctx.fillText(fitCanvasText(ctx, layout.title, layout.width - m * 2 - 22, FIGURE_TITLE_SIZE, 14, '650', layout.family), m + 22, titleMid + 1);
+          var titleX = figureRtl ? layout.width - m - 22 : m + 22;
+          ctx.fillText(fitCanvasText(ctx, layout.title, layout.width - m * 2 - 22, FIGURE_TITLE_SIZE, 14, '650', layout.family), titleX, titleMid + 1);
           if (layout.subtitle) {
             ctx.fillStyle = layout.muted;
-            ctx.fillText(fitCanvasText(ctx, layout.subtitle, layout.width - m * 2, FIGURE_SUBTITLE_SIZE, 11, '400', layout.family), m, titleMid + 30);
+            var subtitleX = figureRtl ? layout.width - m : m;
+            ctx.fillText(fitCanvasText(ctx, layout.subtitle, layout.width - m * 2, FIGURE_SUBTITLE_SIZE, 11, '400', layout.family), subtitleX, titleMid + 30);
           }
+          ctx.restore();
           ctx.textBaseline = 'alphabetic';
         }
         var x = m, y = m + layout.header, w = layout.cardWidth, h = layout.cardHeight, r = 16;
@@ -6904,22 +7004,27 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
               ctx.fillRect(0, 0, SHARE_CARD_WIDTH, SHARE_CARD_HEIGHT);
 
               // Header: a short accent rule and badge over the title and summary.
+              // Local addition: an RTL card puts the rule, title and summary on
+              // the reading start (right) and the badge on the opposite corner.
+              var cardRtl = getComputedStyle(document.documentElement).direction === 'rtl';
               ctx.fillStyle = accent;
-              ctx.fillRect(SHARE_CARD_PADDING, 34, 28, 3);
+              ctx.fillRect(cardRtl ? SHARE_CARD_WIDTH - SHARE_CARD_PADDING - 28 : SHARE_CARD_PADDING, 34, 28, 3);
               ctx.textBaseline = 'alphabetic';
               ctx.font = '600 12px ' + family;
-              ctx.textAlign = 'right';
+              ctx.textAlign = cardRtl ? 'left' : 'right';
               ctx.fillStyle = muted;
-              ctx.fillText(cardLabel, SHARE_CARD_WIDTH - SHARE_CARD_PADDING, 40);
-              ctx.textAlign = 'left';
+              ctx.fillText(cardLabel, cardRtl ? SHARE_CARD_PADDING : SHARE_CARD_WIDTH - SHARE_CARD_PADDING, 40);
 
+              ctx.save();
+              if (cardRtl) { ctx.direction = 'rtl'; ctx.textAlign = 'right'; } else { ctx.textAlign = 'left'; }
               ctx.fillStyle = text;
               var fittedTitle = fitCanvasText(ctx, title, SHARE_CARD_WIDTH - SHARE_CARD_PADDING * 2 - 260, 30, 18, '650', family);
-              ctx.fillText(fittedTitle, SHARE_CARD_PADDING, 74);
+              ctx.fillText(fittedTitle, cardRtl ? SHARE_CARD_WIDTH - SHARE_CARD_PADDING : SHARE_CARD_PADDING, 74);
 
               ctx.fillStyle = muted;
               var fittedSubtitle = fitCanvasText(ctx, subtitle, SHARE_CARD_WIDTH - SHARE_CARD_PADDING * 2, 15, 12, '400', family);
-              ctx.fillText(fittedSubtitle, SHARE_CARD_PADDING, 99);
+              ctx.fillText(fittedSubtitle, cardRtl ? SHARE_CARD_WIDTH - SHARE_CARD_PADDING : SHARE_CARD_PADDING, 99);
+              ctx.restore();
 
               // The diagram sits on one soft rounded panel with an even inset.
               var panelX = SHARE_CARD_PADDING;
@@ -7374,6 +7479,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       });
       // APG menu-button pattern: ArrowDown/ArrowUp on the trigger opens the menu.
       btn.addEventListener('keydown', function (e) {
+        if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
           e.preventDefault();
           if (!isOpen()) open(e.key === 'ArrowUp');
@@ -7389,6 +7495,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       menu.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') { e.preventDefault(); close(true); return; }
         if (e.key === 'Tab')    { close(false); return; }
+        if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
 
         var available = items().filter(function (i) { return !i.hidden && !i.disabled; });
         var current = available.indexOf(document.activeElement);
@@ -7563,21 +7670,53 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         }
       }
 
+      // A phone can reach this code even when the Clipboard API exists and then
+      // rejects: local files and in-app browsers often deny clipboard writes,
+      // and a permission prompt can expire while rasterize() is running. The
+      // old path turned that into a dead-end alert. Prefer the native share
+      // sheet when it accepts the PNG; otherwise use the ordinary download path,
+      // which does not need a secure context or clipboard permission.
+      function fallbackPngTransfer(blob) {
+        var base = diagramFilename();
+        var file = null;
+        try { file = new File([blob], base + '.png', { type: 'image/png' }); } catch (_) {}
+        if (file && navigator.share && navigator.canShare) {
+          try {
+            if (navigator.canShare({ files: [file] })) {
+              return navigator.share({ files: [file], title: document.title }).then(function () {
+                toast(viewerText('viewer.export.sharedPng'));
+              }).catch(function (shareError) {
+                // A cancelled share is a user decision, not a copy failure.
+                if (shareError && shareError.name === 'AbortError') return;
+                download(blob, base + '.png');
+                toast(viewerText('viewer.export.downloadedPngFallback'));
+              });
+            }
+          } catch (_) {}
+        }
+        download(blob, base + '.png');
+        toast(viewerText('viewer.export.downloadedPngFallback'));
+        return Promise.resolve();
+      }
+
+      function reportCopyFailure(err) {
+        console.error(err);
+        alert(viewerText('viewer.export.copyFailed', {
+          message: exportMessage(err)
+        }));
+      }
+
       function runCopy() {
         close(true);
         clearExportReceipt();
-        if (!canCopyImage()) {
-          alert(viewerText('viewer.export.clipboardUnsupported.short'));
-          return;
-        }
         var blobPromise = rasterize('png');
+        if (!canCopyImage()) {
+          return blobPromise.then(fallbackPngTransfer).catch(reportCopyFailure);
+        }
         return writePngToClipboard(blobPromise).then(function () {
           toast(viewerText('viewer.export.copiedPng'));
         }).catch(function (err) {
-          console.error(err);
-          alert(viewerText('viewer.export.copyFailed', {
-            message: exportMessage(err)
-          }));
+          return blobPromise.then(fallbackPngTransfer).catch(reportCopyFailure);
         });
       }
 
@@ -9430,6 +9569,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           inspectRelationship(target.getAttribute('data-relationship-key'));
         });
         relationshipHitOverlay.addEventListener('keydown', function (event) {
+          if (event.isComposing || event.keyCode === 229) return;
           var target = event.target.closest('[data-relationship-hit-key]');
           if (!target) return;
           if (event.key === 'Escape' && pinnedRelationshipKey) {
@@ -10016,6 +10156,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         syncRelationshipPreview();
       });
       relationshipList.addEventListener('keydown', function (event) {
+        if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
         if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Home' && event.key !== 'End') return;
         var buttons = Array.prototype.slice.call(relationshipList.querySelectorAll('[data-relationship-target]'));
         if (!buttons.length) return;
@@ -10863,6 +11004,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         chooseRail(RAIL_PLACEMENT_KEY, toBottom ? 'bottom' : 'right');
       });
       document.addEventListener('keydown', function (event) {
+        if (event.isComposing || event.keyCode === 229) return;
         if (event.key === 'Escape' && html.getAttribute('data-reader-rail') === 'overlay') collapseRail();
       });
       document.addEventListener('pointerdown', function (event) {
@@ -10963,6 +11105,18 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           height: height
         };
       }
+      /* The mobile dock can wrap to more than one row, so its height is a
+         measured value, not a constant. Publish it before the desktop-only
+         stage-rail gate so every phone surface (stage pad, probe, lens, finder)
+         can clear the real dock instead of guessing a row count. */
+      var dockHeight = -1;
+      function publishDockHeight() {
+        if (!nav || !container) return;
+        var height = visible(nav) ? Math.ceil(nav.getBoundingClientRect().height) : 0;
+        if (height === dockHeight) return;
+        dockHeight = height;
+        container.style.setProperty('--archify-dock-h', height + 'px');
+      }
       function eligible() {
         return Boolean(
           container && svg && nav &&
@@ -11054,6 +11208,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       }
       function measure() {
         frame = 0;
+        publishDockHeight();
         scheduleLift();
         if (probingBaseline) return null;
         if (!eligible()) return clear({ preserveBaseline: !cameraAtBaseline() });
@@ -11303,21 +11458,76 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
       var viewBox = svg.viewBox && svg.viewBox.baseVal;
 
+      /* Local addition: the camera treats the container's scroll offset as a
+         positive distance from the reading start, which is what `scrollLeft`
+         means in a left-to-right scroller. In an RTL scroller the same position
+         is reported as 0 at the right edge and negative going left, so using it
+         raw doubles the offset instead of cancelling it: the fitted scene drifts
+         left by |scrollLeft| after every camera re-apply (zoom, resize) and
+         never recenters. */
+      function readingScroll() {
+        var scroll = container.scrollLeft;
+        return getComputedStyle(container).direction === 'rtl' ? -scroll : scroll;
+      }
       function clamp() {
         var width = svg.clientWidth || 1;
         var height = svg.clientHeight || 1;
-        if (state.scale < 1) {
-          var visibleWidth = Math.min(width, container.clientWidth);
-          var availableX = visibleWidth - width * state.scale;
-          state.x = availableX >= 0 ? container.scrollLeft + availableX / 2
-            : Math.max(container.scrollLeft + availableX, Math.min(container.scrollLeft, state.x));
-          // Long sequences keep their first rows in view instead of centering
-          // inside a layout box that can be several screens tall.
-          state.y = height > window.innerHeight ? 0 : height * (1 - state.scale) / 2;
+        var scale = state.scale;
+        if (Math.abs(scale - 1) < 0.001) {
+          // At fit scale the container scrolls natively; the camera must not
+          // add a second offset on top of it.
+          state.x = 0;
+          state.y = 0;
           return;
         }
-        state.x = Math.min(0, Math.max(width - width * state.scale, state.x));
-        state.y = Math.min(0, Math.max(height - height * state.scale, state.y));
+        var box = container.getBoundingClientRect();
+        var applied = sampleRenderedState();
+        var rect = svg.getBoundingClientRect();
+        var layoutLeft = rect.left - applied.x;
+        var layoutTop = rect.top - applied.y;
+        var scaledW = width * scale;
+        var scaledH = height * scale;
+        // The container's border box includes the dock reserve and inner
+        // padding. Using that padded box as the camera viewport made a scene
+        // that fits the content area look "too short" and re-centred `y` on
+        // every apply(), so vertical drags were discarded while horizontal
+        // drags worked. Measure the content box instead, and clamp both axes
+        // without the unconditional centring assignment.
+        var style = getComputedStyle(container);
+        var padTop = parseFloat(style.paddingTop) || 0;
+        var padBottom = parseFloat(style.paddingBottom) || 0;
+        var padLeft = parseFloat(style.paddingLeft) || 0;
+        var padRight = parseFloat(style.paddingRight) || 0;
+        var visibleTop = Math.max(box.top, 0);
+        var visibleBottom = Math.min(box.bottom, window.innerHeight);
+        var visibleLeft = Math.max(box.left, 0);
+        var visibleRight = Math.min(box.right, window.innerWidth);
+        var contentTop = visibleTop + padTop;
+        var contentBottom = visibleBottom - padBottom;
+        var contentLeft = visibleLeft + padLeft;
+        var contentRight = visibleRight - padRight;
+        if (contentBottom <= contentTop) {
+          contentTop = visibleTop;
+          contentBottom = visibleBottom;
+        }
+        if (contentRight <= contentLeft) {
+          contentLeft = visibleLeft;
+          contentRight = visibleRight;
+        }
+        if (scaledW <= Math.max(1, contentRight - contentLeft)) {
+          state.x = Math.max(contentLeft - layoutLeft,
+            Math.min(contentRight - layoutLeft - scaledW, state.x));
+        } else {
+          state.x = Math.max(contentRight - layoutLeft - scaledW,
+            Math.min(contentLeft - layoutLeft, state.x));
+        }
+        if (scaledH <= Math.max(1, contentBottom - contentTop)) {
+          state.y = Math.max(contentTop - layoutTop,
+            Math.min(contentBottom - layoutTop - scaledH, state.y));
+        } else {
+          state.y = Math.max(contentBottom - layoutTop - scaledH,
+            Math.min(contentTop - layoutTop, state.y));
+        }
       }
       function reducedMotion() {
         return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -11344,12 +11554,12 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         var width;
         var height;
         if (window.innerWidth <= 720 && container.hasAttribute('data-wide-diagram') && camera.scale >= 1) {
-          x = viewBox.x + container.scrollLeft / metrics.scale;
+          x = viewBox.x + readingScroll() / metrics.scale;
           y = viewBox.y;
           width = Math.min(viewBox.width, Math.max(1, container.clientWidth / metrics.scale));
           height = viewBox.height;
         } else {
-          x = viewBox.x + (((container.scrollLeft - camera.x) / camera.scale) - metrics.offsetX) / metrics.scale;
+          x = viewBox.x + (((readingScroll() - camera.x) / camera.scale) - metrics.offsetX) / metrics.scale;
           y = viewBox.y + ((-camera.y / camera.scale) - metrics.offsetY) / metrics.scale;
           width = Math.min(viewBox.width, Math.min(metrics.width, container.clientWidth) / camera.scale / metrics.scale);
           height = Math.min(viewBox.height, metrics.height / camera.scale / metrics.scale);
@@ -11470,6 +11680,14 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       }
       function apply() {
         clamp();
+        // At fit scale a wide scene scrolls natively; once zoomed the camera
+        // owns the view, and leaving the native scroller live makes the two
+        // offsets fight and clips one edge of the scaled scene.
+        container.style.overflowX = Math.abs(state.scale - 1) > 0.001 ? 'hidden' : '';
+        // Local addition: without this the browser consumes part of the touch
+        // gesture for native scrolling, so the pan delta shrinks as the scene
+        // grows (and grows as it shrinks). The camera needs the raw delta.
+        container.style.touchAction = state.scale > 1.001 ? 'none' : '';
         svg.style.transform = 'translate(' + state.x + 'px,' + state.y + 'px) scale(' + state.scale + ')';
         svg.setAttribute('data-view-scale', String(state.scale));
         syncViewportClip();
@@ -11835,7 +12053,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       outBtn.addEventListener('click', function () { zoom(state.scale - 0.25); });
       resetBtn.addEventListener('click', reset);
       container.addEventListener('pointerdown', function (event) {
-        if (state.scale <= 1 || event.button !== 0 || event.target.closest('.diagram-nav, .focus-chip, .node-finder, .diagram-guide, .overview-map, .route-probe, .semantic-lens') || event.target.closest('[data-node-id]') || event.target.closest('[data-relationship-hit-key]')) return;
+        if (Math.abs(state.scale - 1) < 0.001 || event.button !== 0 || event.target.closest('.diagram-nav, .focus-chip, .node-finder, .diagram-guide, .overview-map, .route-probe, .semantic-lens')) return;
         interruptCamera();
         drag = { startX: event.clientX, startY: event.clientY, x: state.x, y: state.y, moved: false };
         container.classList.add('is-panning');
@@ -12453,6 +12671,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         if (node) focusNode(node.getAttribute('data-radar-node-id'));
       });
       surface.addEventListener('keydown', function (event) {
+        if (event.isComposing || event.keyCode === 229) return;
         if (event.key === 'Escape') {
           event.preventDefault();
           event.stopPropagation();
@@ -12481,6 +12700,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         sync();
       });
       document.addEventListener('keydown', function (event) {
+        if (event.isComposing || event.keyCode === 229) return;
         if (!panelDrag || event.key !== 'Escape') return;
         finishPanelDrag({
           pointerId: panelDrag.pointerId,
@@ -12518,6 +12738,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         count: function () { return nodes.length; }
       };
     })();
+
 
     /* ============================================================
        Presentation Stage — a shareable, viewport-filling live view.
@@ -12812,6 +13033,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       closeBtn.addEventListener('click', function () { close(); });
       input.addEventListener('input', function () { render(input.value); });
       input.addEventListener('keydown', function (event) {
+        if (event.isComposing || event.keyCode === 229) return;
+        if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
         var buttons = resultButtons();
         if (event.key === 'ArrowDown' && buttons.length) {
           event.preventDefault();
@@ -12822,6 +13045,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         }
       });
       results.addEventListener('keydown', function (event) {
+        if (event.isComposing || event.keyCode === 229) return;
+        if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
         var buttons = resultButtons();
         var index = buttons.indexOf(document.activeElement);
         if (index < 0 || !buttons.length) return;
@@ -12836,6 +13061,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         }
       });
       panel.addEventListener('keydown', function (event) {
+        if (event.isComposing || event.keyCode === 229) return;
         if (event.key !== 'Escape') return;
         event.preventDefault();
         event.stopPropagation();
@@ -12856,6 +13082,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         count: items.length
       };
     })();
+
 
     /* ============================================================
        Node Outline — a rail index of the semantic nodes, grouped by their
@@ -13961,6 +14188,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         if (journeyPlaying && event.target.closest('[data-route-journey-index]')) pauseJourney({ preserveElapsed: true });
       });
       path.addEventListener('keydown', function (event) {
+        if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
         var button = event.target.closest('[data-route-journey-index]');
         if (!button) return;
         var index = Number(button.getAttribute('data-route-journey-index'));
@@ -14636,6 +14864,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         select(button.getAttribute('data-kind'));
       });
       kindsRoot.addEventListener('keydown', function (event) {
+        if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
         var buttons = Array.prototype.slice.call(kindsRoot.querySelectorAll('button:not(:disabled)'));
         var index = buttons.indexOf(document.activeElement);
         var next = null;
@@ -14646,6 +14875,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         if (next !== null) { event.preventDefault(); buttons[next].focus(); }
       });
       panel.addEventListener('keydown', function (event) {
+        if (event.isComposing || event.keyCode === 229) return;
         if (event.key !== 'Escape') return;
         event.preventDefault();
         event.stopPropagation();
@@ -14807,6 +15037,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         execute(button.getAttribute('data-guide-action'));
       });
       panel.addEventListener('keydown', function (event) {
+        if (event.isComposing || event.keyCode === 229) return;
         if (event.key === 'Escape' || event.key === '?') {
           event.preventDefault();
           event.stopPropagation();
@@ -14873,6 +15104,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
        ============================================================ */
     document.addEventListener('keydown', function (e) {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.shiftKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End')) return;
       if (e.defaultPrevented) return;
       var t = e.target;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;

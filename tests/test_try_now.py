@@ -288,3 +288,18 @@ def test_the_evidence_panel_shows_every_row_the_tools_summed_and_marks_the_cited
     df3, note3 = app._typed_evidence(sess, res3)
     assert list(df3["#"]) == [9] and "دخلت في حساب الجواب" not in note3, note3
     assert "استشهد بها الجواب" in note3 and "صف 9" in note3, note3
+
+
+def test_the_try_now_table_carries_the_type_of_each_row(public):
+    """**مقيسٌ على الرابط الحيّ (2026-10-31):** جدولُ «جرّب الآن» كتب «حركة» في عمود النوع لكلّ صف، والقراءةُ الحيّةُ
+    للكشف نفسِه كتبت «سحب صراف آلي». **السبب:** التصنيفُ يُنادى في مسار القراءة وحده (`annotate_types` بعد البيان)،
+    وباني الاسترجاع من القاعدة (`_view_rows_from_contract` — «جرّب الآن» وما بعد إعادة التشغيل) لا يناديه، بينما أدواتُ
+    الوكيل تصنّف من القاعدة نفسِها ⇒ الشاشةُ تقول «حركة» والأداةُ تقول «سحب صراف آلي» للصفّ نفسه.
+    """
+    app, visitor = public
+    sess = visitor()
+    app.try_now(sess)
+    by_seq = {r["seq"]: r for r in sess.state["rows"]}
+    assert by_seq[7].get("type") == "سحب صراف آلي", by_seq[7]
+    untyped = [r["seq"] for r in sess.state["rows"] if not r.get("type")]
+    assert not untyped, f"صفوفٌ بلا نوع بعد «جرّب الآن»: {untyped[:5]}"

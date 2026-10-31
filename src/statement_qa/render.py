@@ -21,6 +21,16 @@ _BARE_REF_RE = re.compile(
     r"(?:^|[^\d٠-٩])صف(?:وف)?\s*([٠-٩0-9]+)(?:\s*[–\-—]\s*([٠-٩0-9]+))?")
 
 
+def count_ar(n: int, one: str, two: str, few: str, many: str) -> str:
+    """العددُ ومعدودُه بالعربيّة — **موضعٌ واحد** لصيغه الأربع: واحدٌ · اثنان · ٣–١٠ (جمعٌ) · ١١ فأكثر وصفرٌ (تمييزٌ مفرد).
+    `few` و`many` يحملان `{n}`. (البروفةُ الحيّة 2026-10-31: «1 سؤالًا» و«1 ملفًّا» — كلُّ موضعٍ كتب صيغةَ الكثرة وحدها.)"""
+    if n == 1:
+        return one
+    if n == 2:
+        return two
+    return (few if 3 <= n <= 10 else many).format(n=n)
+
+
 def money(v) -> str:
     """تُفوَّض إلى الموضع الواحد (`statement_qa.money`) — فلا نسختان تفترقان."""
     from statement_qa.money import money as _m                                   # noqa: PLC0415

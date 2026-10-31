@@ -55,6 +55,7 @@ from statement_qa.vlm_reader import (
 from statement_qa.bank_check import probe_bank
 from statement_qa.era import fingerprint_pages, summarize_ar as summarize_era_ar
 from statement_qa.render import (
+    count_ar,
     answer_refs as render_answer_refs,
     answer_text as render_answer_text,
     date_cell as render_date_cell,
@@ -224,6 +225,9 @@ RTL_CSS = """
    «(OpenRouter) ٢. مفتاحك» · «(PDF) ١. ملفّ الكشف» (مقيس 2026-10-31). فالعنوانُ عربيٌّ في كلّ مكوّن. */
 .gradio-container [data-testid="block-label"][dir="ltr"],
 .gradio-container [data-testid="block-info"][dir="ltr"] { direction: rtl; }
+/* واسمُ الملفّ تقسمه Gradio عنصرين في صفٍّ مرن (الاسم · الامتداد) ⇒ في RTL يسبق الامتدادُ الاسمَ: «pdf.statement_showcase»
+   (البروفةُ الحيّة 2026-10-31). والأسماءُ لاتينيّة: الصفُّ من اليسار، ويبقى في طرف الخليّة الأيمن كباقي الجدول. */
+.gradio-container td.filename { direction: ltr; justify-content: flex-end; }
 /* وأيقونةُ العنوان تُبعَد عن نصّه بهامشٍ أيمنَ فيزيائيّ ⇒ بعد القلب يقع الهامشُ خارجها وتلتصق بالرقم: هامشٌ منطقيّ */
 .gradio-container [data-testid="block-label"][dir="ltr"] > span { margin: 0; margin-inline-end: var(--size-2); }
 /* عرضُ الصفحة: Gradio تقيّده بقفزاتٍ على عرض النافذة (…١٥٣٦ ثمّ ١٩٢٠) ⇒ على شاشة ١٩٢٠ يكفي ظهورُ شريط التمرير
@@ -815,7 +819,12 @@ def _view_rows_from_contract(contract: list[dict]) -> list[dict]:
     تحتاج سطحَ العرض بلغته (`kind`/`ok`/`type`) — وهو **نفسُ الباني** المستعمل بعد القراءة، لا نسخةً
     ثانيةً منه. والترجمةُ الوحيدةُ `pg`⇒`page` (اسمُ العمود في القاعدة).
     """
-    return _view_rows([{**r, "page": r.get("page", r.get("pg"))} for r in contract])
+    rows = _view_rows([{**r, "page": r.get("page", r.get("pg"))} for r in contract])
+    # **والنوعُ هنا أيضًا (البروفةُ الحيّة 2026-10-31):** مسارُ القراءة يصنّف بعد البيان، وهذا البانيُ لم يكن يصنّف ⇒
+    # جدولُ «جرّب الآن» وما بعد إعادة التشغيل كتبا «حركة» لكلّ صف، وأدواتُ الوكيل تصنّف من القاعدة نفسِها. فالمصنِّفُ
+    # الواحدُ (`annotate_types`) يُنادى هنا، والبيانُ في القاعدة نهائيّ فلا يتغيّر التصنيفُ بعده.
+    annotate_types(rows)
+    return rows
 
 
 def _ledger_path_for(sess, key: str | None = None) -> Path:
@@ -1514,13 +1523,7 @@ _EVIDENCE_CAP = 150
 
 
 def _n_rows_ar(n: int) -> str:
-    if n == 1:
-        return "صف واحد"
-    if n == 2:
-        return "صفَّان"
-    if 3 <= n <= 10:
-        return f"{n} صفوف"
-    return f"{n} صفاً"
+    return count_ar(n, "صف واحد", "صفَّان", "{n} صفوف", "{n} صفاً")
 
 
 def _note_update(text: str):
@@ -1968,7 +1971,8 @@ def _conversation_export(sess=None) -> tuple[str | None, str]:
         out = Path(work) / "conversation.xlsx"
         wb.save(out)
         kept = _cache_path(sess, conv_file, out)
-    return kept, f"**{len(qa_rows)}** سؤالًا وجوابًا · ملفّ Excel (ورقةُ المحادثة وورقةُ الأدلّة)"
+    return kept, (count_ar(len(qa_rows), "سؤالٌ واحدٌ وجوابُه", "سؤالان وجواباهما", "{n} أسئلةٍ وأجوبتُها",
+                           "{n} سؤالًا وأجوبتُها") + " · ملفّ Excel (ورقةُ المحادثة وورقةُ الأدلّة)")
 
 
 def _record_qa_row(sess, res, question: str, displayed: str) -> None:
@@ -2017,7 +2021,9 @@ def _example_question(evt: gr.SelectData) -> str:
     return (evt.value or {}).get("text", "")
 
 
-EXAMPLE_QUESTIONS = ["كم مجموع السحوبات في الكشف؟", "ما أعلى رصيدٍ ومتى؟", "ما الصفوف التي تحتاج مراجعة؟"]
+# **المثالُ الأوّل باسم نوعه (البروفةُ الحيّة 2026-10-31):** «كم مجموع السحوبات في الكشف؟» قرأه النموذجُ سحوباتِ الصراف
+# وحدَها — والجوابُ صرّح بذلك، لكنّ المثالَ الذي يضغطه الزائرُ أوّلًا لا يُترك لاحتمالين.
+EXAMPLE_QUESTIONS = ["كم مجموع سحوبات الصراف الآلي؟", "ما أعلى رصيدٍ ومتى؟", "ما الصفوف التي تحتاج مراجعة؟"]
 
 with gr.Blocks(title="AI Bank Statement Auditor", delete_cache=DELETE_CACHE, fill_width=True) as demo:
     # **`delete_cache=(600, 600)` (R130-2):** ملفّاتُ الحافظة التي تُنشئها المكوّناتُ من مخرجاتنا

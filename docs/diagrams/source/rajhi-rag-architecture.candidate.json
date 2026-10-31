@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "المكوّنات والحدود — مُدقّق كشوف الراجحي",
+    "title": "المكوّنات والحدود",
     "locale": "ar",
     "output": ".archify/architecture-rajhi-rtl-20261013-2355/rajhi-rag-architecture.html",
     "quality_profile": "showcase",
@@ -11,7 +11,7 @@
       "provider": "github",
       "revision": "6350289e311bb8f8e642db4ff4cbdd851d6246ab"
     },
-    "subtitle": "من المسح الضوئي إلى جوابٍ موثّق"
+    "subtitle": "AI Bank Statement Auditor · من المسح الضوئي إلى جوابٍ موثّق"
   },
   "components": [
     {

@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 
 from . import ledger as L
+from .render import count_ar
 
 #: **مؤشّرُ الكشف النشِط** — ملفٌّ صغيرٌ في مجلّد بيانات المستخدم يُتيح للواجهة أن تعرف *أيّ* قاعدةٍ
 #: تفتح بعد إعادة التشغيل (وإلّا لم يُنزَّل الحوارُ بعد إغلاق التطبيق). ويُحذف مع بيانات الكشف.
@@ -89,7 +90,8 @@ def delete(root: Path, key: str | None) -> dict:
     active_clear(root, key)
     if not got["count"]:
         return {**got, "message": "**لا ملفَّ قاعدةٍ لهذا الكشف** — لا شيءَ ليُحذف (المؤشّرُ نُظِّف)."}
-    return {**got, "message": f"**حُذفت بياناتُ الكشف** — {got['count']} ملفًّا: "
+    return {**got, "message": "**حُذفت بياناتُ الكشف** — "
+                              + count_ar(got["count"], "ملفٌّ واحد", "ملفّان", "{n} ملفّات", "{n} ملفًّا") + ": "
                               + "، ".join(f"`{n}`" for n in got["removed"])}
 
 
