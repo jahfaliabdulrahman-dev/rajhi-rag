@@ -243,3 +243,16 @@ def test_a_cell_starting_with_equals_is_text_not_a_live_formula():
     write_sheet(ws, ["الوصف"], [["=1+1"], ["سحب عادي"]], [20])
     assert ws["A2"].data_type == "s" and ws["A2"].value == "=1+1"
     assert ws["A3"].data_type == "s"
+
+
+def test_the_per_page_flags_read_in_arabic(tmp_path):
+    """**صورُ حزمة التسليم (2026-11-01):** ورقةُ «التحقق لكل صفحة» عربيّةٌ كلُّها إلّا أعمدةَ الأعلام الأربعة: كانت تكتب قيمَ
+    بايثون المنطقيّة فيعرضها Excel «FALSE/TRUE». فالعلَمُ «نعم/لا» — والفارغُ (لا علَمَ مُسجَّلًا) يبقى فارغًا لا «لا»."""
+    out = tmp_path / "export.xlsx"
+    build(_synthetic_run(tmp_path), out, None, profile=PROFILE)
+    ws = load_workbook(out)["التحقق لكل صفحة"]
+    head = [c.value for c in ws[1]]
+    flags = [head.index(h) for h in ("تناقض داخلي", "استُدركت آلياً", "أُعيدت قراءتها", "خطأ قراءة")]
+    seen = {ws.cell(row=r, column=i + 1).value for r in range(2, ws.max_row + 1) for i in flags}
+    assert not any(isinstance(v, bool) for v in seen), seen
+    assert seen <= {"نعم", "لا", None}, seen

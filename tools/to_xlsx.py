@@ -713,6 +713,12 @@ def rows_from_ledger(db: Path) -> list[dict]:
     return [{k: v for k, v in r.items() if k not in ("pg", "proof_source")} for r in rows]
 
 
+def _yes_no(flag):
+    """علَمٌ في ورقةٍ عربيّة: «نعم/لا» — لا قيمةُ بايثون التي يعرضها Excel «TRUE/FALSE» (صورُ حزمة التسليم 2026-11-01).
+    والغائبُ (لا علَمَ مُسجَّلًا للصفحة) يبقى فارغًا، فلا يُقال «لا» عمّا لم يُقَس."""
+    return None if flag is None else ("نعم" if flag else "لا")
+
+
 def build(run: Path, out: Path, gate: Path | None,
           profile: Path | str | None = None, desc_column: bool = False,
           ledger_db: Path | None = None) -> dict:
@@ -902,9 +908,9 @@ def build(run: Path, out: Path, gate: Path | None,
              else (_page_no_label(p) or "غيرُ مقروء")), e.get("rows"),
           page_verdict(e, max(per_page) if per_page else 0,
                        verdict_map=verdict_map),
-          e.get("suspects"), e.get("origin"), e.get("ms_read"), bool(e.get("paradox")),
-          (flags.get(p) or {}).get("recovered"), (flags.get(p) or {}).get("reread"),
-          (flags.get(p) or {}).get("error")]
+          e.get("suspects"), e.get("origin"), e.get("ms_read"), _yes_no(bool(e.get("paradox"))),
+          _yes_no((flags.get(p) or {}).get("recovered")), _yes_no((flags.get(p) or {}).get("reread")),
+          _yes_no((flags.get(p) or {}).get("error"))]
          for p, e in sorted(per_page.items())],
         [13, 16, 13, 32, 12, 11, 18, 13, 13, 15, 11])
 
