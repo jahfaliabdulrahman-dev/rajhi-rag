@@ -150,63 +150,6 @@ def test_the_table_filter_uses_a_chosen_column_and_a_date_range(app, sess):
     assert len(app.filter_rows("", "", "2026-04-01", sess=sess)) == 1, "حدُّ «من» لم يُطبَّق"
 
 
-def test_rebuilding_the_ledger_after_a_restart_does_not_wipe_the_rows(app, sess):
-    """**العطب P0 الذي اتّفق عليه المقاعد الثلاثة:** `_load_from_ledger` كان يضع صفوفَ القاعدة
-    (`pg` بلا `page`) في `rows_contract`، وزرُّ «أعد بناء الدفتر» يُعيد إدخالها ⇒ `dropped_no_page`
-    والصفوفُ كلُّها تُقلَّم (قِيس: ٦ ⇒ ٠) والرسالةُ تقول «بُني ✅». فالسطحُ يقرأ الآن `page` من
-    `read_rows`، وهذا الضابطُ يفشل على الشيفرة قبل الإصلاح.
-    """
-    key = app._ledger_key(sess)
-    path = _db(app, sess)
-    conn = L.read_ledger(path)
-    try:
-        before = len(L.read_rows(conn))
-    finally:
-        conn.close()
-    assert before == 5
-
-    sess.state.clear()                          # إعادةُ تشغيل
-    assert app._load_from_ledger(sess, key)
-    msg, _status = app._ledger_build_click(sess)   # الزرُّ الذي كان يمحو
-
-    conn = L.read_ledger(path)
-    try:
-        after = len(L.read_rows(conn))
-    finally:
-        conn.close()
-    assert after == before, f"أعاد البناءُ كتابةً محت؟ {before} ⇒ {after} — الرسالة: {msg}"
-    assert "0 صفًّا" not in msg, msg
-
-
-def test_rebuilding_after_a_restart_keeps_every_rows_proof(app, sess):
-    """**الصنفُ نفسُه في عمودٍ آخر (2026-10-30):** الضابطُ أعلاه عدَّ الصفوفَ وحدَها، فمرّ عطبُ
-    `proof_source`: `read_rows` يُعيده باسم العمود، و`_row_values` يقرأ اسمَ الرندر `source` ⇒ إعادةُ
-    البناء بعد إعادة التشغيل تكتب كلَّ إثباتٍ فارغًا، فيصير كلُّ صفٍّ «بلا إثبات» والرسالةُ «بُني ✅».
-    فيُقاس الإثباتُ صفًّا صفًّا، ومعه عددُ «بلا إثبات».
-    """
-    key = app._ledger_key(sess)
-    path = _db(app, sess)
-
-    def proofs():
-        conn = L.read_ledger(path)
-        try:
-            return ([r["proof_source"] for r in L.read_rows(conn)],
-                    L.answer(conn, "coverage")["unproven"])
-        finally:
-            conn.close()
-
-    before, unproven_before = proofs()
-    assert any(before), "العيّنةُ بلا إثباتٍ أصلًا — الضابطُ لا يقيس شيئًا"
-
-    sess.state.clear()                          # إعادةُ تشغيل
-    assert app._load_from_ledger(sess, key)
-    app._ledger_build_click(sess)
-
-    after, unproven_after = proofs()
-    assert after == before, f"إعادةُ البناء محت الإثبات: {before} ⇒ {after}"
-    assert unproven_after == unproven_before, (unproven_before, unproven_after)
-
-
 def test_pages_are_counted_from_the_database_not_from_rows(app, sess):
     """**عددُ الصفحات بعد إعادة التشغيل (مقعدُ المواصفة P2):** ٦٢٦ صفًّا لا تعني ٦٢٦ صفحة — الصفحةُ
     بلا صفٍّ (غلاف/ملخّص) تبقى في جدول `pages`، و`n_pages` من الصفوف كان يقول «ينتهي عند 626»."""
@@ -279,8 +222,12 @@ def test_the_app_writes_the_question_and_the_intent_reads_it(app, sess):
 
     res = SimpleNamespace(used_row_nos=[2], cited_row_ids=[], refused=False)
     app._record_qa_row(sess, res, "كم مجموع السحوبات؟", "المجموع 20.00 (صفحة 1، صف 2)")
-    got = app._ledger_ui.ask(app.DATA_HOME, app._ledger_key(sess), "الأسئلةُ المسجَّلة")
-    flat = " | ".join(str(c) for row in got["rows"] for c in row)
+    conn = L.read_ledger(app._ledger_ui.ledger_file(app.DATA_HOME, app._ledger_key(sess)))
+    try:
+        got = L.answer(conn, "qa")
+    finally:
+        conn.close()
+    flat = " | ".join(str(v) for row in got["qa"] for v in row.values())
     assert "كم مجموع السحوبات؟" in flat, flat
     assert "10.00" in flat or "صفحة 1" in flat, flat      # دليلُ الصفّ وصل من القاعدة لا من الرام
 
@@ -444,8 +391,6 @@ def test_a_page_never_read_survives_the_restart(app, sess):
     assert missing.kind == "no_such_data", missing
     assert "لم تُقرأ" in missing.answer and "ينتهي عند" not in missing.answer, missing.answer
 
-    status = app._ledger_ui.status_text(app.DATA_HOME, key, len(sess.state["rows"]))
-    assert "ص2" in status and "جاهز" not in status, status
 
 
 def test_a_question_starting_with_equals_round_trips_as_text(app, sess):

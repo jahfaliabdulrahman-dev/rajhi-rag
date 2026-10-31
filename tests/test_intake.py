@@ -277,8 +277,8 @@ def test_a_rejected_page_stops_the_read_and_is_named_without_a_checkbox(app_run)
     assert not touched, f"قُرئت صفحةٌ (ودُفعت) والقراءةُ يجب أن تتوقّف: {touched}"
     assert "لم تبدأ القراءة ولم يُدفع شيء" in out[0], out[0]
     assert "ص2" in out[0] and "إعادة تصوير" in out[0], out[0]
-    assert "ص2" in out[9], out[9]
-    assert "استُبعدت" not in out[9] and "مستبعدة" not in out[9], \
+    assert "ص2" in out[8], out[8]
+    assert "استُبعدت" not in out[8] and "مستبعدة" not in out[8], \
         "الرسالةُ ادّعت استبعادًا — والسياسةُ توقّفٌ لا استبعاد"
 
 
@@ -290,12 +290,12 @@ def test_ticking_the_skip_choice_reads_the_rest_and_names_the_excluded(app_run):
     read = {img for kind, img in calls if kind == "rows"}
     assert pages[1] not in read, "الصفحةُ المرفوضةُ قُرئت رغم الاستبعاد"
     assert len(read) == 2, read
-    assert "استُبعدت" in out[9] and "ص2" in out[9], out[9]
+    assert "استُبعدت" in out[8] and "ص2" in out[8], out[8]
 
 
 def test_the_outcome_message_says_nothing_was_excluded_when_everything_was_read(app_run):
     out, _calls, _pages, _state = app_run([("10", "0"), ("20", "0"), ("30", "0")])
-    assert "لم يُستبعد شيء — قُرئت الصفحاتُ كلُّها" in out[9], out[9]
+    assert "لم يُستبعد شيء — قُرئت الصفحاتُ كلُّها" in out[8], out[8]
 
 
 def test_the_read_button_carries_the_skip_choice_at_false_by_default():

@@ -1,12 +1,9 @@
-"""بوّاباتُ واجهة الدفتر (`statement_qa.ledger_ui`) — المنطقُ الذي تراه الشاشة، يُقاس بلا شاشة.
+"""قاعدةُ الكشف في جلسة التطبيق (`statement_qa.ledger_ui` ومسارُ `ledger`) — تُقاس بلا شاشة.
 
-**العِلّة في وجود هذا الملفّ:** واجهةُ الشاشة تحتاج: بناءً من حالة التطبيق، ونصَّ حالة، وصياغةَ جواب،
-ورفضًا مسمّى. ولو عاشت هذه في `app.py` لكانت **منطقًا لا يُقاس إلّا بتشغيل التطبيق** — وهو بعينه
-صنفُ العطب الذي أمسكه مقعدُ الترتيب (قياسُ المسار الواحد). فالقاعدةُ المُنفَّذة: **ما يُقاس بلا شاشةٍ
-يُخرَج من الشاشة**، وما بقي في `app.py` توصيلٌ رقيقٌ لا منطق.
-
-**والبوّابةُ الأهمّ:** «بلا كلفة» دعوى في الواجهة ⇒ تُقاس **بفخّ شبكةٍ مُصاد**: يُمنع الاتصالُ الصادرُ
-كلُّه، فتمرّ الأقصدُ الستّة. فإن جرى نداءُ نموذجٍ واحدٌ في هذا المسار، يسقط الضابط.
+كان هذا الملفُّ يقيس لوحةَ «دفترُ الكشف — أسئلةٌ بلا نموذج وبلا كلفة» (أقصدُها وجداولُها وزرُّ إعادة البناء).
+**وأُزيلت اللوحةُ بقرار المالك (2026-10-31)**، فأُزيلت ضوابطُها معها، **وبقيت هنا خصائصُ القاعدة نفسِها**
+التي كانت تُقاس عبر اللوحة: مصدرا البناء يتّفقان، والقاعدةُ تُجيب بلا شبكة (أدواتُ الوكيل وسطرُ الأوامر يسألانها
+بأقصدها الثابتة)، والمفتاحُ من بصمة الكشف، والصفُّ بلا صفحةٍ يُستبعَد ويُعدّ ثمّ يُعلَن في سطر الحالة.
 """
 from __future__ import annotations
 
@@ -43,18 +40,11 @@ def _built(tmp_path: Path, rows=None, footers=None, key: str | None = None) -> P
     """دفترٌ مبنيٌّ كما تبنيه الشاشةُ: من حالة التطبيق لا من `to_xlsx`."""
     rows = rows if rows is not None else _rows()
     footers = footers if footers is not None else {1: {"verdict": "ok"}, 2: {"verdict": "gap"}}
-    db = U.ledger_file(tmp_path, key or U.statement_key("t-1"))
+    db = U.ledger_file(tmp_path, key or L.statement_key("t-1"))
     conn = L.open_ledger(db)
     L.ingest(conn, rows, L.pages_from_state(rows, footers))
     conn.close()
     return db
-
-
-def test_every_label_maps_to_a_declared_intent():
-    """**القائمةُ المغلقةُ في الشاشة هي القائمةُ المغلقةُ في الوحدة** — لا اسمَ حرٌّ ثالث."""
-    assert set(U.INTENT_LABELS.values()) == set(L.INTENTS), sorted(U.INTENT_LABELS.values())
-    assert len(U.INTENT_LABELS) == 6, "ستّةُ أقصدٍ في الشاشة كما في الوحدة"
-    assert set(U.NEEDS_VALUE) <= set(L.INTENTS)
 
 
 def test_the_state_source_agrees_with_the_run_source(tmp_path):
@@ -103,8 +93,9 @@ def test_the_ledger_answers_with_the_network_booby_trapped(tmp_path, monkeypatch
 
     النسخةُ الأولى اعترضت `socket.create_connection` وحدَه: قِيس أنّ `requests.get` **يمرّ بلا**
     اعتراض (urllib3 يبني اتصالَه بنفسه). فالفخُّ الآن على أربعة منافذ (`create_connection` ·
-    `socket.connect` · `connect_ex` · `getaddrinfo`)، ويُمرَّر من **مداخل الأزرار** (`U.ask` ·
-    `U.build` · `U.status_text`) لا من `L.answer` وحدَه. **وحدُّه يُعلَن:** يثبت غيابَ DNS/Socket في
+    `socket.connect` · `connect_ex` · `getaddrinfo`)، ويُمرَّر من **المداخل الباقية** (الكتابةُ من حالةٍ كما
+    يكتب مسارُ القراءة، ثمّ كلُّ قصدٍ ثابت تسأل به أدواتُ الوكيل وسطرُ الأوامر؛ وكانت أزرارُ اللوحة قبل إزالتها).
+    **وحدُّه يُعلَن:** يثبت غيابَ DNS/Socket في
     هذا المسار، ولا يثبت غيابَ نقلٍ لا يمرّ بها (كتابةٌ على واصفٍ مفتوحٍ سابقًا).
     """
     def _refuse(*a, **k):
@@ -122,66 +113,16 @@ def test_the_ledger_answers_with_the_network_booby_trapped(tmp_path, monkeypatch
     with _pytest.raises(AssertionError):
         socket.socket().connect(("example.com", 443))
 
-    # (ب) والمداخلُ كلُّها تمرّ: بناءٌ من حالةٍ ثمّ أسئلةٌ من الشاشة
-    rows = _rows()
-    msg = U.build(tmp_path, rows, {1: {"verdict": "ok"}, 2: {"verdict": "gap"}},
-                  U.statement_key("x-1"))
-    assert "بُني الدفترُ" in msg, msg
-    assert "تعذّر" not in U.status_text(tmp_path, U.statement_key("x-1"), len(rows))
-    for label in U.INTENT_LABELS:
-        got = U.ask(tmp_path, U.statement_key("x-1"), label,
-                    "1" if "أحكام" in label else "حوالة")
-        text = got["note"] + " ".join(str(c) for row in got["rows"] for c in row)
-        assert text.strip() and "Traceback" not in text, (label, text[:120])
-
-
-def test_a_missing_or_unreadable_ledger_shows_a_named_message(tmp_path):
-    """**الشاشةُ لا تعرض traceback**: غائبٌ ⇒ رسالةُ بناءٍ مسمّاة؛ وقصدٌ بغير القائمة ⇒ رفضٌ بالاسم؛
-    وقيمةٌ ناقصةٌ لقصدٍ يحتاجها ⇒ طلبٌ صريح. (وهذا هو عقدُ الوحدة نفسُه، مُقاسًا من باب الشاشة.)
-    """
-    key = U.statement_key("t-1")
-    ghost = U.ask(tmp_path, key, "المجاميع (مدين/دائن)")
-    assert "تعذّر فتحُ الدفتر" in ghost["note"] and "أعد قراءة الكشف" in ghost["note"]
-    _built(tmp_path, key=key)                             # باسم الملفّ الذي تطلبه الشاشة
-    status = U.status_text(tmp_path, key, 3)
-    assert "مبنيٌّ وجاهز" in status and "تعذّر" not in status, status
-    out = U.ask(tmp_path, key, "قصدٌ مُخترَع")
-    assert "قصدٌ غيرُ مُعدَّد" in out["note"] and "المجاميع" in out["note"]
-    assert "يحتاج رقمَ الصفحة" in U.ask(tmp_path, key, "أحكامُ الصفحات")["note"]
-    assert "يحتاج نصَّ البحث" in U.ask(tmp_path, key, "بحثٌ في البيان", "   ")["note"]
-    assert "ليس رقمَ صفحة" in U.ask(tmp_path, key, "أحكامُ الصفحات", "كذا")["note"]
-    # والمسارُ: داخل مجلّدٍ مُهمَلٍ تحت data/ وباسمٍ من بصمة الكشف لا بعدد صفحاته
-    f = U.ledger_file(tmp_path, key)
-    assert f.name.startswith("st_") and str(f.parent).endswith("data/ledgers"), f
-
-
-def test_the_answers_render_as_arabic_tables(tmp_path):
-    """الجوابُ **بياناتٌ لجدول** (R130-3): عناوينُ عربيةٌ وصفوفٌ تحمل الأرقامَ — لا نصٌّ سائل.
-    ووصفٌ فيه سطرٌ جديد يبقى في خانته (وهو القبولُ المنصوص: جدولُ Markdown كان ينكسر).
-    """
-    key = U.statement_key("t-9")
-    db = _built(tmp_path, key=key)
-    assert db.exists()
-    totals = U.ask(tmp_path, key, "المجاميع (مدين/دائن)")
-    assert totals["headers"][:2] == ["البند", "المبلغ"]
-    assert totals["rows"][0][0] == "المجموع المدين"
-    pages = U.ask(tmp_path, key, "أحكامُ الصفحات", "2")
-    assert pages["headers"] == ["صفحة", "مطبوع", "الحكم", "صفوف"]
-    assert pages["rows"][0][0] == 2
-    assert U.ask(tmp_path, key, "أحكامُ الصفحات", "٢")["rows"]        # أرقامٌ عربية تُقبل
-    assert "لا صفحةَ بهذا الرقم" in U.ask(tmp_path, key, "أحكامُ الصفحات", "99")["note"]
-    search = U.ask(tmp_path, key, "بحثٌ في البيان", "حوالة")
-    assert search["rows"] and search["headers"] == ["صفحة", "صفّ", "البيان", "المبلغ"]
-    # **والسطرُ الجديد يبقى في خانته:** وصفٌ بسطرين يُكتب كما هو في الخليّة (لا يُقطع ولا يكسر صفًّا).
-    conn = L.open_ledger(db)                 # الكتابةُ في الضابط تحتاج فتحًا كاملًا
+    # (ب) والمداخلُ الباقيةُ كلُّها تمرّ: بناءٌ من حالةٍ (كما يكتب مسارُ القراءة)، ثمّ كلُّ قصدٍ ثابت
+    db = _built(tmp_path, key=L.statement_key("x-1"))
+    conn = L.read_ledger(db)
     try:
-        conn.execute("UPDATE rows_verified SET desc = ? WHERE pg = 1 AND row_no = 2",
-                     ("سطرٌ أول\nسطرٌ ثانٍ",))
-        conn.commit()
+        for intent in L.INTENTS:
+            got = L.answer(conn, intent, pg=1 if intent == "pages" else None,
+                           q="حوالة" if intent == "search" else None)
+            assert got["intent"] == intent, got
     finally:
         conn.close()
-    got = U.ask(tmp_path, key, "بحثٌ في البيان", "سطرٌ أول")
-    assert any("\n" in str(cell) for row in got["rows"] for cell in row), got
 
 
 def test_the_ledger_key_identifies_the_statement_not_its_page_count(tmp_path):
@@ -190,15 +131,15 @@ def test_the_ledger_key_identifies_the_statement_not_its_page_count(tmp_path):
     بصمة المحتوى ⇒ الكشفُ نفسُه مفتاحُه نفسُه، وكشفٌ آخرُ لا يُصادمه؛ وبلا بصمةٍ يُعلَن النقصُ في الاسم.
     **والسابقةُ `st_` لا `ui_` (R130):** المفتاحُ صار مشتركًا مع سطر الأوامر، فاسمُ «واجهة» يكذب.
     """
-    a = U.statement_key("sha-a")
-    b = U.statement_key("sha-b")
+    a = L.statement_key("sha-a")
+    b = L.statement_key("sha-b")
     assert a != b, "مصدران مختلفان بمفتاحٍ واحد ⇒ تصادم"
-    assert U.statement_key("sha-a") == a, "المصدرُ نفسُه تغيّر مفتاحُه"
+    assert L.statement_key("sha-a") == a, "المصدرُ نفسُه تغيّر مفتاحُه"
     # **وبلا هويّةٍ لا مفتاح (R132-2):** لا تُصنَع `st_nop-<N>p` من عدد الصفحات.
     import pytest as _pytest                         # noqa: PLC0415
 
     with _pytest.raises(ValueError):
-        U.statement_key("")
+        L.statement_key("")
 
 
 def test_a_row_without_a_page_is_dropped_and_declared(tmp_path):
@@ -217,5 +158,10 @@ def test_a_row_without_a_page_is_dropped_and_declared(tmp_path):
     conn.close()
     assert got["dropped_no_page"] == 1, got
     assert n == len(rows) - 1, f"الصفُّ بلا صفحة دخل الدفترَ ({n} مقابل {len(rows) - 1})"
-    assert "بلا حقل صفحةٍ في المصدر" in U.build(tmp_path, rows, {1: {"verdict": "ok"}},
-                                                U.statement_key("x-2"))
+    # **ويُعلَن في سطر الحالة** (كان يُعلَن في لوحة الدفتر قبل إزالتها): العددُ نفسُه بنصٍّ يُقرأ.
+    import app                                       # noqa: PLC0415
+
+    note = app._ledger_note({"ok": True, "stats": got}, [])
+    assert "1 صفًّا بلا حقل صفحةٍ في المصدر" in note, note
+    assert "تعذّرت كتابةُ قاعدة الكشف: سبب" in app._ledger_note({"ok": False, "message": "سبب"}, [])
+    assert "لم تُقرأ هذه المرّة: ص2" in app._ledger_note({"ok": True, "stats": {}}, [2])

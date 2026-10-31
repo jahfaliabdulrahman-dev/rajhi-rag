@@ -103,19 +103,3 @@ def test_the_download_button_builds_a_workbook_from_the_app_state(read_sample, s
         assert "None" not in " ".join(str(v) for v in row if v is not None), row
 
 
-def test_the_ledger_buttons_build_refresh_and_answer(read_sample, sess, tmp_path,
-                                                     monkeypatch) -> None:
-    """**زرّا الدفتر (R98-1 · مراجعة ٩٨ · وعُدِّلا R130):** «أعد بناء الدفتر» ثمّ «حدّث» ثمّ سؤالٌ ثابت.
-
-    سقطت الثلاثةُ في كلّ ضغطةٍ منذ 10-04 (`_ledger_ui.pages_of` لا وجودَ له)، ولم يضغطها اختبارٌ عبر
-    التطبيق. **والدفترُ يُكتب في مجلّد بيانات المستخدم** (`DATA_HOME`)، فتُستبدل هنا بمجلّدٍ مؤقّت.
-    """
-    app = read_sample
-    monkeypatch.setattr(sess, "home", tmp_path)
-    msg, status = app._ledger_build_click(sess)
-    assert msg and status, "زرُّ «أعد بناء الدفتر» لم يُعِد رسالةً ولا حالة"
-    assert list(tmp_path.rglob("*.sqlite")), f"لم يُكتب دفتر: {msg}"
-    assert app._ledger_refresh_click(sess), "زرُّ «حدّث» لم يُعِد حالة"
-    df, note = app._ledger_ask_click("تغطيةُ الكشف (صفوف · صفحات · بلا إثبات)", "", sess)
-    assert note and "تعذّر" not in note, note[:200]
-    assert not df.empty and "صفوف" in list(df.iloc[:, 0]), df

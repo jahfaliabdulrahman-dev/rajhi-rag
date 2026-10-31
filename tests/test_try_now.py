@@ -140,19 +140,21 @@ def public(monkeypatch, tmp_path):
 def test_try_now_needs_no_key_and_calls_nothing(public):
     app, visitor = public
     sess = visitor()
-    ticker, table, kpi, gallery, *filters, ledger_status, intake_note, back = app.try_now(sess)
+    ticker, table, kpi, gallery, *filters, intake_note, back = app.try_now(sess)
     assert back is sess, "«جرّب الآن» لم يُعِد جلستَه — فلا تعرفها Gradio ولا تحذفها"
     assert len(table) == 54, len(table)
     assert "قراءةٌ مسجَّلة" in ticker and "بلا مفتاح" in ticker, ticker
-    assert "مبنيٌّ وجاهز" in ledger_status, ledger_status
     assert ">1<" in kpi and ">54<" in kpi, kpi           # الصفوفُ ٥٤ والمشبوهُ واحد
     assert len(gallery) == 5
     assert filters == ["كل الأعمدة", "", "", ""]
     path = app._ledger_ui.ledger_file(sess.home, app._ledger_key(sess))
     assert path.exists() and path.is_relative_to(sess.home), path
-    # أسئلةُ الدفتر وتنزيلُ Excel يعملان على القراءة المسجَّلة بلا مفتاح
-    df, note = app._ledger_ask_click("المجاميع (مدين/دائن)", "", sess)
-    assert len(df) == 2 and "جمعٌ عشريٌّ" in note, note
+    # الدفترُ مبنيٌّ من القراءة المسجَّلة بلا مفتاح (منه تحسب أدواتُ الوكيل)، وتنزيلُ Excel يعمل
+    conn = L.read_ledger(path)
+    try:
+        assert L.answer(conn, "totals")["rows_counted"] > 0
+    finally:
+        conn.close()
     xlsx, xnote = app.export_xlsx(sess)
     assert xlsx and Path(xlsx).exists(), xnote
 
@@ -178,10 +180,16 @@ def test_two_visitors_get_two_ledgers_and_never_see_each_others_questions(public
     assert pa != pb and pa.name == pb.name, (pa, pb)    # الكشفُ نفسُه، ودفتران
     res = SimpleNamespace(used_row_nos=[2], cited_row_ids=[], refused=False)
     app._record_qa_row(a, res, "سؤالُ الزائر الأوّل", "جوابٌ له")
-    _, seen_by_b = app._ledger_ask_click("الأسئلةُ المسجَّلة", "", b)
-    assert "لا سؤالَ مسجَّلًا" in seen_by_b, seen_by_b
-    _, seen_by_a = app._ledger_ask_click("الأسئلةُ المسجَّلة", "", a)
-    assert "لا سؤالَ مسجَّلًا" not in seen_by_a, seen_by_a
+
+    def questions(path):
+        conn = L.read_ledger(path)
+        try:
+            return L.answer(conn, "qa")["qa"]
+        finally:
+            conn.close()
+
+    assert questions(pb) == [], questions(pb)
+    assert questions(pa), "سؤالُ الزائر الأوّل لم يُسجَّل في دفتره"
 
 
 def test_the_session_end_takes_its_try_now_ledger(public):
@@ -232,7 +240,7 @@ def test_the_owners_surface_does_not_offer_it(monkeypatch, tmp_path):
     import app
 
     assert app.SURFACE == "local"                       # الضوابطُ محلّيّةٌ بإعلان conftest
-    assert app.try_btn.visible is False
+    assert app.try_card.visible is False
     owner = tmp_path / "owner-data"
     owner.mkdir()
     monkeypatch.setattr(app, "DATA_HOME", owner)

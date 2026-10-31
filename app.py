@@ -11,12 +11,12 @@ Design direction locked (2026-09-13, after research pass):
 - Dark mode is designed independently: «السجل الليلي» (ink blue-black with
   warm paper text), never auto-inverted.
 
-3 tabs:
-١. قراءة وتحقق — upload → page renders → VLM+chain rows → KPI ledger strip,
-   results table, visual gallery of the scanned pages.
-٢. سؤال وجواب — a real Chatbot surface over the Faiss retrieval + the
-   deterministic LangChain tools (the model calls, it never computes).
-٣. عن المشروع — architecture + privacy rule.
+3 tabs (the layout the owner approved on 2026-10-31):
+الكشف — two ways in (try the pre-read synthetic statement · read yours: file → key → read), then,
+   once a statement is loaded, the KPI strip, the filters, the results table and the scanned pages.
+اسأل — a full-width Chatbot over the Faiss retrieval + the deterministic LangChain
+   tools (the model calls, it never computes), its evidence rows, and two downloads.
+عن المشروع — architecture + privacy rule.
 
 Gate compatibility: process_pdf output[0]=summary text and output[1]=table keep
 their exact shape (tools/qa_gate.py depends on them).
@@ -123,8 +123,7 @@ def _new_session() -> Session:
 
 def _start_session():
     """`demo.load`: لكلّ زائرٍ جلستُه — تُكتب في `gr.State` فتعرفها Gradio وتحذفها بانتهاء الجلسة."""
-    sess = _new_session()
-    return sess, _ledger_ui.status_text(sess.home, None, 0)
+    return _new_session()
 
 
 def _end_session(sess) -> None:
@@ -225,15 +224,23 @@ RTL_CSS = """
 footer { direction: ltr; }
 
 /* ————— البطل (hero) والختم ————— */
-.hero { position: relative; overflow: hidden; border: 1px solid var(--border-color-primary);
-        border-radius: 12px; background: var(--background-fill-primary);
-        padding: 26px 30px 18px; }
-.hero h1 { font-family: 'Noto Naskh Arabic', serif !important; font-weight: 700;
-           font-size: 2.1rem; line-height: 1.3; margin: 0 0 8px; }
-.hero .sub { color: var(--body-text-color-subdued); font-size: .97rem; max-width: 78%; }
-.hero .rule { height: 1px; background: #A98A4A; opacity: .45; margin-top: 16px; }
-.seal { position: absolute; top: 50%; transform: translateY(-50%); inset-inline-end: 24px;
-        width: 98px; height: 98px; opacity: .95; }
+.hero { display: flex; align-items: center; justify-content: space-between; gap: 18px;
+        border: 1px solid var(--border-color-primary); border-radius: 12px;
+        background: var(--background-fill-primary); padding: 16px 22px; }
+.hero h1 { font-family: 'Noto Naskh Arabic', serif !important; font-weight: 700; text-align: right;
+           font-size: 1.7rem; line-height: 1.3; margin: 0 0 4px; }
+.hero .sub { color: var(--body-text-color-subdued); font-size: .95rem; }
+.seal { flex: none; width: 72px; height: 72px; opacity: .95; }
+@media (max-width: 640px) { .seal { display: none; } .hero h1 { font-size: 1.35rem; } }
+
+/* ————— الطريقان: «جرّب» و«اقرأ كشفك» ————— */
+.start-card { border: 1px solid var(--border-color-primary); border-radius: 12px;
+              padding: 14px 16px !important; background: var(--background-fill-primary); }
+.start-card h3 { margin: 0 0 4px !important; font-family: 'Noto Naskh Arabic', serif; }
+.start-card.try { border-color: var(--color-accent); justify-content: space-between; }
+.start-card button { flex: 0 0 auto !important; }
+/* المفتاحُ لاتينيّ: يُكتب ويُعرض مثالُه من اليسار */
+#key-in input { direction: ltr; text-align: left; }
 
 /* ————— شريط المؤشرات (جدول دفاتر مُسطَّر) ————— */
 .ledger-kpi { display: grid; grid-template-columns: repeat(4, 1fr);
@@ -255,7 +262,8 @@ footer { direction: ltr; }
 .ticker.block { border: 1px dashed #C9BFA6; border-radius: 10px;
                 padding: 14px 18px !important; }
 .ticker.prose { border: none !important; padding: 0 !important;
-                background: transparent; line-height: 1.7; }
+                background: transparent; line-height: 1.7;
+                display: flex; align-items: baseline; gap: 2px; }   /* النقطةُ على سطر النصّ */
 .ticker.prose::before { content: "●"; color: var(--color-accent); font-size: .72rem;
                         margin-inline-end: 8px; }
 .ticker p { margin: 0 !important; }
@@ -269,6 +277,8 @@ footer { direction: ltr; }
 /* ————— المحادثة ————— */
 #chat-surface { border: 1px solid var(--border-color-primary); border-radius: 12px;
                 overflow: hidden; }
+/* نصُّ المحادثة الفارغة لا يلامس حدَّها (قِيس على الجوال: يلتصق بالحافة اليمنى) */
+#chat-surface .placeholder { padding-inline: 16px; }
 
 /* ————— شارة الملف: زر الإكس لا يعلو شريحة العنوان ————— */
 #file-panel .icon-button-wrapper.top-panel {
@@ -278,7 +288,6 @@ footer { direction: ltr; }
 
 /* الوضع الليلي: ترطيب الإبر — لا انقلاب آلي */
 @media (prefers-color-scheme: dark) {
-  .hero .rule { background: #C2A468; }
   .ticker.block { border-color: #3A4050; }
   .ledger-kpi .warn .num { color: #C96A57; }
 }
@@ -343,6 +352,10 @@ THEME.set(
     table_even_background_fill_dark=NIGHT_CARD,
     table_odd_background_fill_dark="#191C23",
     table_border_color_dark=NIGHT_HAIR,
+    # عناوينُ الخانات نصٌّ هادئ لا رقعٌ ملوّنة (إعادةُ التصميم 2026-10-31)
+    block_label_background_fill="transparent",
+    block_label_background_fill_dark="transparent",
+    block_label_border_width="0px",
 )
 
 HEAD = """
@@ -353,6 +366,10 @@ HEAD = """
 
 HERO = """
 <div class="hero">
+  <div class="hero-text">
+    <h1 lang="en" dir="ltr">AI Bank Statement Auditor</h1>
+    <div class="sub">يقرأ كشفَ الحساب الممسوح صفًّا صفًّا، ويراجع كلَّ رقمٍ بحساب الرصيد، ثمّ يجيب عن أسئلتك بأدواتٍ تحسب.</div>
+  </div>
   <svg class="seal" viewBox="0 0 100 100" aria-hidden="true">
     <defs>
       <path id="sealArc" d="M 50,50 m -34,0 a 34,34 0 1,1 68,0 a 34,34 0 1,1 -68,0"/>
@@ -365,9 +382,6 @@ HERO = """
     <text x="50" y="54" text-anchor="middle" font-family="'Noto Naskh Arabic', serif" font-size="21" fill="#0E6B57">مُدقَّق</text>
     <text x="50" y="70" text-anchor="middle" font-size="8.5" fill="#6B6355">آلياً</text>
   </svg>
-  <h1>AI Bank Statement Auditor</h1>
-  <div class="sub">من المسح الضوئي إلى الجواب الموثّق: قراءة حرفية، سلسلة رصيدية هي الحَكَم، وأدوات حسابية لا تخطئ — لأن الرقم أمانة.</div>
-  <div class="rule"></div>
 </div>
 """
 
@@ -739,15 +753,13 @@ def try_now(sess=None):
     n_susp = sum(1 for r in rows if not r["ok"])
     summary = (f"**قراءةٌ مسجَّلة لا حيّة** — قرأ النظامُ هذا الكشفَ الاصطناعيّ (`{rec['source']}`) مرّةً "
                f"يوم {rec['read_on']}، ودفترُه بُني الآن في جلستك من نصٍّ في المستودع. "
-               f"**بلا مفتاحٍ وبلا كلفة:** الجدولُ وأسئلةُ الدفتر وتنزيلُ Excel؛ والمحادثةُ في التبويب ٢ "
-               f"بمفتاحك. • {len(rows)} صفًّا · {sess.state['n_pages']} صفحات · مشبوهٌ بالسلسلة {n_susp}")
-    ledger_status = _ledger_ui.status_text(sess.home, _ledger_key(sess), len(_ledger_rows(sess)),
-                                           _ledger.rows_without_page(_ledger_rows(sess)))
+               f"**بلا مفتاحٍ وبلا كلفة:** الجدولُ وتنزيلُ Excel؛ والأسئلةُ في تبويب «اسأل» بمفتاحك. "
+               f"• {len(rows)} صفًّا · {sess.state['n_pages']} صفحات · مشبوهٌ بالسلسلة {n_susp}")
     intake_note = ("**فحصُ الصفحات قبل القراءة:** لا قراءةَ في هذه الجلسة — القراءةُ مسجَّلة، "
                    "فلا فحصَ ولا نداء.")
     gallery_out = _close_pages(sess, _pages_to_pngs(str(_showcase.PDF)))
     return (summary, filter_rows(sess=sess), _kpi_of(rows), gallery_out,
-            "كل الأعمدة", "", "", "", ledger_status, intake_note, sess)
+            "كل الأعمدة", "", "", "", intake_note, sess)
 
 
 def _view_rows(contract: list[dict], offset: int = 0) -> list[dict]:
@@ -849,6 +861,22 @@ def _ledger_write(sess) -> dict:
     note = (f"قاعدةُ الكشف: **{stats['rows']}** صفًّا · **{stats['pages']}** صفحة · "
             f"**{stats.get('pruned_rows', 0)}** صفًّا قديمًا أُزيل")
     return {"ok": True, "key": key, "path": str(path), "stats": stats, "message": note}
+
+
+def _ledger_note(written: dict, missed: list[int]) -> str:
+    """**حالةُ القاعدة في سطر الحالة الواحد** (كانت في لوحة الدفتر، وأُزيلت بقرار المالك 2026-10-31):
+    كتابةٌ تعذّرت تُسمّى، وقاعدةٌ ناقصةٌ تُسمّى صفحاتُها (فلا يُقرأ «جاهز» كاملًا وهو ناقص · R131-3)، وصفٌّ
+    بلا حقل صفحةٍ لم يدخلها يُعدّ (لا إسقاطَ صامت). ونصٌّ فارغٌ حين لا شيءَ يُقال."""
+    if not written.get("ok"):
+        return f" • ⚠ تعذّرت كتابةُ قاعدة الكشف: {written.get('message') or 'سببٌ غيرُ مسمّى'}"
+    note = ""
+    if missed:
+        note += (" • قاعدةُ الكشف غيرُ مكتملة — لم تُقرأ هذه المرّة: " + "، ".join(f"ص{p}" for p in missed)
+                 + " (أرقامُ الصفوف من هذه القراءة وحدَها)")
+    dropped = (written.get("stats") or {}).get("dropped_no_page") or 0
+    if dropped:
+        note += f" • {dropped} صفًّا بلا حقل صفحةٍ في المصدر لم تدخل القاعدة (المخطَّطُ يمنع صفًّا بلا صفحة)"
+    return note
 
 
 def _load_from_ledger(sess, key: str | None = None, *, index: bool = True) -> bool:
@@ -998,8 +1026,7 @@ def _process_pdf_locked(sess, pdf_path: str, progress, skip_rejected: bool = Fal
         sess.state.clear()   # لا تُجيب الأسئلةُ عن ملفٍّ سابقٍ بعد رفعِ ملفٍّ لم يُقرأ
         sess.state["intake"] = {"gate": intake.gate, "kinds": intake.kinds, **decision}
         return (blocked_message_ar(intake), _rows_df([], {}), "", _close_pages(sess, pages),
-                "كل الأعمدة", "", "", "",
-                _ledger_ui.status_text(sess.home, None, 0), intake_note)
+                "كل الأعمدة", "", "", "", intake_note)
 
     # «بنك غير مدعوم» جملة واضحة بدل فشل غامض — فحص واحد للصفحة الأولى،
     # ويفشل مفتوحاً: أي التباس يمرّر التشغيل (لا قرار على تخمين).
@@ -1421,20 +1448,11 @@ def _process_pdf_locked(sess, pdf_path: str, progress, skip_rejected: bool = Fal
     # قراءةٍ سابقة تبقى بأرقامها فتشير إلى صفّين.
     incomplete = bool(failed_pages or pages_without_rows)
     written = _ledger_write(sess)
-    ledger_status = _ledger_ui.status_text(sess.home, _ledger_key(sess), len(_ledger_rows(sess)),
-                                           _ledger.rows_without_page(_ledger_rows(sess)))
-    if not written.get("ok"):
-        ledger_status = f"### دفترُ الكشف\n**{written.get('message') or 'تعذّرت الكتابة'}**"
-    elif incomplete:
-        # **الصفحةُ المتعثّرة تُسمّى في حالة القاعدة أيضًا** (R131-3): القاعدةُ تحمل صفوفَ هذه
-        # القراءة وحدَها، فلا تُقرأ «جاهزةٌ» كاملةً وهي ناقصة.
-        missed = sorted(set(failed_pages or []) | set(pages_without_rows or []))
-        ledger_status += ("\n\n**قاعدةٌ غيرُ مكتملة** — لم تُقرأ هذه المرّة: "
-                          + "، ".join(f"ص{p}" for p in missed)
-                          + ". أرقامُ الصفوف من هذه القراءة وحدَها (لا صفوفَ من قراءةٍ سابقة).")
+    missed = sorted(set(failed_pages or []) | set(pages_without_rows or [])) if incomplete else []
+    summary += _ledger_note(written, missed)
     gallery_out = _close_pages(sess, pages)
     return (summary, rows_view, _kpi_of(all_rows), gallery_out,
-            "كل الأعمدة", "", "", "", ledger_status, intake_note)
+            "كل الأعمدة", "", "", "", intake_note)
 
 
 def prepare_ask(question: str, history, sess=None):
@@ -1794,7 +1812,7 @@ def _memory_path(sess):
     """ملفُّ `SqliteSaver` = **قاعدةُ الكشف نفسُها** — أو `None` إن لم تُقرأ بعد (لا ملفَّ يُنشأ).
 
     **ويُتحقّق من قابليّتها للقراءة قبل تسليمها للحافظة:** قاعدةٌ v1 (قديمة) أو تالفةٌ لا يُضاف إليها
-    مخطَّطُ الحافظة، بل تُترك للتشخيص المسمّى (`status_text`) ولإعادة القراءة.
+    مخطَّطُ الحافظة، بل تُترك لإعادة القراءة.
     """
     key = _ledger_key(sess)
     if not key:
@@ -1815,30 +1833,6 @@ def _memory_path(sess):
     except sqlite3.DatabaseError:
         return None
     return path if ver == _ledger.SCHEMA_VERSION else None
-
-
-def _ledger_refresh_click(sess=None) -> str:
-    if not isinstance(sess, Session):
-        return "### دفترُ الكشف\n**لا كشفَ في هذه الجلسة بعد.**"
-    rows = _ledger_rows(sess)
-    return _ledger_ui.status_text(sess.home, _ledger_key(sess), len(rows),
-                                  _ledger.rows_without_page(rows))
-
-
-def _ledger_build_click(sess=None):
-    if not isinstance(sess, Session):
-        return "لا صفوفَ في هذه الجلسة بعد.", _ledger_refresh_click(sess)
-    rows = _ledger_rows(sess)
-    msg = _ledger_ui.build(sess.home, rows, sess.state.get("footers") or {}, _ledger_key(sess),
-                           n_pages=sess.state.get("n_pages"))
-    return msg, _ledger_refresh_click(sess)
-
-
-def _ledger_ask_click(label: str, value: str, sess=None):
-    if not isinstance(sess, Session):
-        return pd.DataFrame(), "**لا كشفَ في هذه الجلسة بعد.**"
-    got = _ledger_ui.ask(sess.home, _ledger_key(sess), label, value)
-    return pd.DataFrame(got["rows"], columns=got["headers"]), got["note"]
 
 
 def _delete_display_copies(sess) -> str:
@@ -1867,7 +1861,7 @@ def _delete_statement_click(sess=None):
     if not isinstance(sess, Session):
         return ("**لا كشفَ في هذه الجلسة — لم يُحذف شيء.**",
                 gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
-                gr.update(), gr.update(), gr.update(), gr.update())
+                gr.update(), gr.update(), gr.update())
     key = _ledger_key(sess)
     path = _ledger_ui.ledger_file(sess.home, key) if key else None
     # **الحذفُ تحت قفل المهمّة نفسِه (R131-5):** كان يزيل ملفَّ القفل بلا شرط، فيأخذه مَن بعده
@@ -1883,10 +1877,9 @@ def _delete_statement_click(sess=None):
     except JobBusyError:
         return ("**لم يُحذف شيء — يوجد تشغيلٌ جارٍ الآن.** انتظر انتهاءه ثمّ أعد المحاولة.",
                 gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
-                gr.update(), gr.update(), gr.update(), gr.update())
+                gr.update(), gr.update(), gr.update())
     return (f"{got['message']}\n\n{display}", "", pd.DataFrame(), _kpi_html(0, 0, 0, None), [],
-            "", "", pd.DataFrame(), _hide_note(),
-            _ledger_ui.status_text(sess.home, None, 0))
+            "", "", pd.DataFrame(), _hide_note())
 
 
 def _conversation_export(sess=None) -> tuple[str | None, str]:
@@ -1984,6 +1977,19 @@ def _record_qa_row(sess, res, question: str, displayed: str) -> None:
 # عميل Gradio لها أسماءٌ ثابتةٌ ووصفٌ في صفحة الـAPI، وكلُّ توصيلٍ آخر (إظهارُ زرّ · مسحُ أسطح · فتحُ الجلسة)
 # خاصّ (`api_visibility="private"`): لا يظهر في الصفحة ولا تناديه مكتباتُ العميل. **والخاصُّ ليس حاجزَ أمان:**
 # الواجهةُ نفسُها تناديه، فلا يُخبَّأ خلفه ما يحتاج حماية. والقائمةُ يحرسها `tests/test_engine_api.py`.
+def _loaded_view(sess=None):
+    """أسطحُ الكشف (المؤشّرات · الفلترة · الجدول · الصفحات) تظهر حين يكون في الجلسة كشفٌ مقروء،
+    وتختفي قبله وبعد حذفه — فلا تُعرض أسطحٌ فارغةٌ تملأ الشاشة (إعادةُ التصميم 2026-10-31)."""
+    return gr.update(visible=bool(isinstance(sess, Session) and sess.state.get("rows")))
+
+
+def _example_question(evt: gr.SelectData) -> str:
+    """مثالُ سؤالٍ ضُغط في المحادثة الفارغة ⇒ يُوضع في خانة السؤال، والإرسالُ للزائر."""
+    return (evt.value or {}).get("text", "")
+
+
+EXAMPLE_QUESTIONS = ["كم مجموع السحوبات في الكشف؟", "ما أعلى رصيدٍ ومتى؟", "ما الصفوف التي تحتاج مراجعة؟"]
+
 with gr.Blocks(title="AI Bank Statement Auditor", delete_cache=DELETE_CACHE) as demo:
     # **`delete_cache=(600, 600)` (R130-2):** ملفّاتُ الحافظة التي تُنشئها المكوّناتُ من مخرجاتنا
     # (صورُ المعرض · الإكسل · المحادثة) يحذفها **مكوّنُ Gradio** بعد عشر دقائق، وكلَّها عند إغلاق
@@ -1992,185 +1998,168 @@ with gr.Blocks(title="AI Bank Statement Auditor", delete_cache=DELETE_CACHE) as 
     # **جلسةُ الزائر (المرحلة ١ · شروطُ (ب)):** حالتُه ومجلّدُه في مكوّن حالة الجلسة؛ و`delete_callback`
     # تناديه Gradio حين تحذف حالةَ الزائر — فيُمحى دفترُه ومحادثتُه ونسخُ عرضه معها.
     sess_state = gr.State(None, delete_callback=_end_session)
+    # **التخطيطُ (إعادةُ التصميم بقرار المالك 2026-10-31 · المخطّطُ المعتمَد):** طريقان في أعلى «الكشف»،
+    # وأسطحُ الكشف بعرض الشاشة بعد التحميل وحدَه، و«اسأل» محادثةٌ بعرض الشاشة. وأُزيلت لوحةُ «دفترُ الكشف —
+    # أسئلةٌ بلا نموذج» ونقاطُها الثلاث؛ والقاعدةُ نفسُها باقية: منها تحسب أدواتُ الوكيل، وفيها تُحفظ المحادثة.
     with gr.Tabs():
-        with gr.Tab("١. قراءة وتحقق"):
-            with gr.Row():
-                with gr.Column(scale=1, min_width=340):
-                    # **«جرّب الآن» (المرحلة ١):** على السطح العامّ وحده — الكشفُ الاصطناعيّ وقراءتُه
-                    # المسجَّلة، بلا مفتاحٍ وبلا كلفة (`try_now`). والمحلّيُّ يخفيه (مجلّدُ بيانات المالك).
-                    try_btn = gr.Button("جرّب الآن — كشفٌ اصطناعيّ قُرئ مسبقًا (بلا مفتاح)",
-                                        variant="primary", visible=SURFACE == "public")
-                    pdf_in = gr.File(label="كشف PDF (عينة تجريبية موصى بها)",
-                                     file_types=[".pdf"], elem_id="file-panel")
-                    btn = gr.Button("قراءة الكشف وبناء الفهرس", variant="primary",
-                                    interactive=False)
-                    # **مفتاحُ الزائر (المرحلة ١):** خانةُ كلمة مرور على السطح العامّ وحدَه — تُمرَّر قيمتُها
-                    # مع كلّ قراءةٍ وسؤال ولا تُحفظ في حالة. والمحلّيُّ يخفيها (مفتاحُ التطبيق على جهاز المالك).
-                    key_in = gr.Textbox(label="مفتاح OpenRouter الخاصّ بك", type="password",
-                                        placeholder="sk-or-…", visible=SURFACE == "public",
-                                        info="يُستعمل لقراءة كشفك والإجابة عن أسئلتك في هذه الجلسة "
-                                             "وحدها، ولا يُحفظ ولا يُسجَّل.")
-                    # **خانةُ المتابعة (R131-7):** تعود بقيمتها التصميميّة `False` — التوقّفُ هو
-                    # الافتراض، والاستبعادُ فعلٌ صريحٌ يُعلَّم فلا يُدفع مقابل كشفٍ ناقصٍ بلا قرار.
-                    skip_rejected_in = gr.Checkbox(
-                        label="متابعة مع استبعاد الصفحات المرفوضة (تُقرأ البقيةُ وتُسمّى المستبعَدة)",
-                        value=False)
-                    # **والبند ١١:** ورسالةٌ بما حدث فعلًا تُعرض بعد القراءة (لا خانةَ صامتة).
-                    intake_note = gr.Markdown(
-                        "**فحصُ الصفحات قبل القراءة:** تظهر نتيجتُه هنا بعد القراءة.",
-                        rtl=True)
-                    gr.Markdown(UPLOAD_NOTE_PUBLIC if SURFACE == "public" else UPLOAD_NOTE_LOCAL,
-                                rtl=True)
-                    ticker = gr.Markdown("في انتظار الكشف… ارفع ملفاً ثم ابدأ القراءة.",
-                                         rtl=True, elem_classes=["ticker"])
-                    # **زرُّ الحذف الظاهر (R130):** داخل تأكيدٍ صريح — لا يُمسح كشفٌ بنقرةٍ عابرة.
-                    delete_ack = gr.Checkbox(
-                        label="أؤكّد حذف بيانات هذا الكشف (القاعدة والمحادثة وملفّاتها)",
-                        value=False)
-                    delete_btn = gr.Button("احذف بيانات هذا الكشف", variant="stop",
-                                           interactive=False)
-                    delete_note = gr.Markdown(rtl=True)
-                with gr.Column(scale=2, min_width=420):
-                    kpi = gr.HTML("")
-            with gr.Row():
-                filter_col = gr.Dropdown(choices=list(FILTER_COLUMNS), value="كل الأعمدة",
-                                         label="عمود الفلترة", scale=2)
-                filter_value = gr.Textbox(
-                    label="القيمة", placeholder="مثال: العمود «النوع» والقيمة «سحب»",
-                    rtl=True, scale=3)
-                filter_from = gr.Textbox(label="من تاريخ (YYYY-MM-DD)", rtl=True, scale=2)
-                filter_to = gr.Textbox(label="إلى تاريخ (YYYY-MM-DD)", rtl=True, scale=2)
-                filter_clear = gr.Button("مسح الفلتر", scale=1)
-            table = gr.Dataframe(label="الجدول المُستخرج (بالسلسلة الرصيدية)",
-                                 interactive=False, elem_classes=["ledger-table"])
+        with gr.Tab("الكشف"):
+            with gr.Row(equal_height=True):
+                # **«جرّب الآن» (المرحلة ١):** على السطح العامّ وحده — الكشفُ الاصطناعيّ وقراءتُه
+                # المسجَّلة، بلا مفتاحٍ وبلا كلفة (`try_now`). والمحلّيُّ يخفيه (مجلّدُ بيانات المالك).
+                with gr.Column(scale=1, min_width=280, elem_classes=["start-card", "try"],
+                               visible=SURFACE == "public") as try_card:
+                    gr.Markdown("### جرّب كشفًا تجريبيًّا\nكشفٌ اصطناعيّ قُرئ مسبقًا: تصفّحه واسأل عنه، "
+                                "بلا مفتاحٍ وبلا كلفة.", rtl=True)
+                    try_btn = gr.Button("جرّب الآن", variant="primary")
+                with gr.Column(scale=2, min_width=320, elem_classes=["start-card"]):
+                    gr.Markdown("### اقرأ كشفك\n"
+                                + (UPLOAD_NOTE_PUBLIC if SURFACE == "public" else UPLOAD_NOTE_LOCAL), rtl=True)
+                    with gr.Row():
+                        pdf_in = gr.File(label="١. ملفّ الكشف (PDF)", file_types=[".pdf"],
+                                         elem_id="file-panel", height=150, scale=1)
+                        with gr.Column(scale=1):
+                            # **مفتاحُ الزائر (المرحلة ١):** خانةُ كلمة مرور على السطح العامّ وحدَه — تُمرَّر
+                            # قيمتُها مع كلّ قراءةٍ وسؤال ولا تُحفظ في حالة. **وقبل زرّ القراءة** (ترتيبُ الخطوات).
+                            key_in = gr.Textbox(label="٢. مفتاحك (OpenRouter)", type="password",
+                                                placeholder="sk-or-…", visible=SURFACE == "public",
+                                                elem_id="key-in",
+                                                info="لهذه الجلسة وحدها، لا يُحفظ ولا يُسجَّل.")
+                            btn = gr.Button("٣. اقرأ الكشف" if SURFACE == "public" else "٢. اقرأ الكشف",
+                                            variant="primary", interactive=False)
+                    with gr.Accordion("خيارات متقدّمة", open=False):
+                        # **خانةُ المتابعة (R131-7):** تعود بقيمتها التصميميّة `False` — التوقّفُ هو
+                        # الافتراض، والاستبعادُ فعلٌ صريحٌ يُعلَّم فلا يُدفع مقابل كشفٍ ناقصٍ بلا قرار.
+                        skip_rejected_in = gr.Checkbox(
+                            label="متابعة مع استبعاد الصفحات المرفوضة (تُقرأ البقيةُ وتُسمّى المستبعَدة)",
+                            value=False)
+            ticker = gr.Markdown("اختر طريقًا: جرّب كشفًا تجريبيًّا، أو اقرأ كشفك." if SURFACE == "public"
+                                 else "في انتظار الكشف… ارفع ملفاً ثم ابدأ القراءة.",
+                                 rtl=True, elem_classes=["ticker"])
+            # **والبند ١١:** ورسالةٌ بما حدث فعلًا تُعرض بعد القراءة (لا خانةَ صامتة).
+            intake_note = gr.Markdown(rtl=True)
+            with gr.Column(visible=False) as loaded:
+                kpi = gr.HTML("")
+                with gr.Row(equal_height=True):
+                    filter_col = gr.Dropdown(choices=list(FILTER_COLUMNS), value="كل الأعمدة",
+                                             label="عمود الفلترة", scale=2)
+                    filter_value = gr.Textbox(
+                        label="القيمة", placeholder="مثال: العمود «النوع» والقيمة «سحب»",
+                        rtl=True, scale=3)
+                    # **منتقي التاريخ (مكوّنُ Gradio):** يُعيد «YYYY-MM-DD» أو لا شيء — فلا يُكتب تاريخٌ باليد.
+                    filter_from = gr.DateTime(label="من تاريخ", include_time=False, type="string", scale=2)
+                    filter_to = gr.DateTime(label="إلى تاريخ", include_time=False, type="string", scale=2)
+                    filter_clear = gr.Button("مسح", size="sm", scale=1)
+                table = gr.Dataframe(label="الكشف كما قرأه النظام (بالسلسلة الرصيدية)",
+                                     interactive=False, elem_classes=["ledger-table"], max_height=520)
+                with gr.Accordion("صفحات الكشف (معاينة بصرية)", open=False):
+                    gallery = gr.Gallery(columns=5, show_label=False)
+            with gr.Accordion("الخصوصية وحذف بيانات الجلسة", open=False):
+                gr.Markdown("ما يُحفظ ومتى يُحذف مكتوبٌ في «عن المشروع». وتحذف بياناتِ هذا الكشف من هنا متى شئت.",
+                            rtl=True)
+                # **زرُّ الحذف الظاهر (R130):** داخل تأكيدٍ صريح — لا يُمسح كشفٌ بنقرةٍ عابرة.
+                delete_ack = gr.Checkbox(
+                    label="أؤكّد حذف بيانات هذا الكشف (القاعدة والمحادثة وملفّاتها)",
+                    value=False)
+                delete_btn = gr.Button("احذف بيانات هذا الكشف", variant="stop", size="sm",
+                                       interactive=False)
+                delete_note = gr.Markdown(rtl=True)
             _filter_inputs = [filter_col, filter_value, filter_from, filter_to]
-            # **نقطةُ فلترةٍ واحدة (عقدُ المحرّك):** كان لكلّ خانةٍ حدثان (`input` و`change`) ⇒ ثماني نقاطٍ للدالّة
-            # نفسِها في الـAPI. و`gr.on` (مكوّنُ Gradio) يربط المحفّزاتِ الثمانية بنقطةٍ واحدة، و`always_last`
-            # سلوكُ `.change` القائم: آخرُ قيمةٍ كُتبت تُطبَّق دائمًا.
-            gr.on([e for _c in _filter_inputs for e in (_c.input, _c.change)], filter_rows,
+            # **نقطةُ فلترةٍ واحدة (عقدُ المحرّك):** `gr.on` (مكوّنُ Gradio) يربط محفّزاتِ الخانات كلَّها بنقطةٍ
+            # واحدة، و`always_last` سلوكُ `.change` القائم: آخرُ قيمةٍ كُتبت تُطبَّق دائمًا. ومنتقي التاريخ
+            # لا حدثَ `input` له في هذا الإصدار (مقيس) ⇒ `change` وحدَه.
+            _filter_triggers = [filter_col.input, filter_col.change, filter_value.input, filter_value.change,
+                                filter_from.change, filter_to.change]
+            gr.on(_filter_triggers, filter_rows,
                   inputs=_filter_inputs + [sess_state], outputs=table, trigger_mode="always_last",
                   api_name="filter_rows",
                   api_description="يفلتر جدولَ كشف الجلسة: عمودٌ وقيمة، ومدى تاريخٍ بصيغة YYYY-MM-DD. "
                                   "والقيمُ الفارغة تُعيد الجدولَ كلَّه.")
-            filter_clear.click(lambda s: ("كل الأعمدة", "", "", "", filter_rows("", sess=s)),
+            filter_clear.click(lambda s: ("كل الأعمدة", "", None, None, filter_rows("", sess=s)),
                                inputs=[sess_state],
                                outputs=[filter_col, filter_value, filter_from, filter_to, table],
                                api_visibility="private")
-            with gr.Accordion("صفحات الكشف (معاينة بصرية)", open=False):
-                gallery = gr.Gallery(columns=5, show_label=False)
             pdf_in.change(lambda f: gr.update(interactive=bool(f)),
                           inputs=pdf_in, outputs=btn, api_visibility="private")
             delete_ack.change(lambda v: gr.update(interactive=bool(v)),
                               inputs=delete_ack, outputs=delete_btn, api_visibility="private")
-            # **توصيلُ زرّ القراءة مؤجَّلٌ إلى التبويب ٢** حيث تُعرَّف `ledger_state` — مستمعٌ واحدٌ
-            # يكتب سبعَ مخرجاتٍ ومنها حالةُ القاعدة (تعريفُ المكوّن قبل استعماله شرطُ البناء).
-        with gr.Tab("٢. سؤال وجواب"):
-            with gr.Row():
-                with gr.Column(scale=3, min_width=380):
-                    chat = gr.Chatbot(
-                        label="محادثة التحقق", rtl=True, height=460,
-                        elem_id="chat-surface",
-                        placeholder="اسأل عن أي مبلغ أو مجموع أو عدد أو رصيد — "
-                                    "يُحسب بالأدوات ثم يُصاغ لك.")
-                    with gr.Row():
-                        q = gr.Textbox(label="سؤالك بالعربية",
-                                       placeholder="مثال: كم مجموع السحوبات في الكشف؟",
-                                       rtl=True, scale=6)
-                        ask = gr.Button("اسأل", variant="primary", scale=1)
-                with gr.Column(scale=2, min_width=320):
-                    with gr.Accordion("الصفوف التي بُني عليها الجواب", open=True):
-                        raw_note = gr.Markdown(visible=False)
-                        raw = gr.Dataframe(interactive=False,
-                                           elem_id="evidence-table")
-                    # Internal retrieval bookkeeping (chunk IDs) — kept for
-                    # development diagnostics only, collapsed out of the way.
-                    with gr.Accordion("تفاصيل تقنية (قطع الاسترجاع)", open=False):
-                        src = gr.Markdown(rtl=True)
+        with gr.Tab("اسأل"):
+            chat = gr.Chatbot(
+                show_label=False, rtl=True, height=460, elem_id="chat-surface",
+                placeholder="اسأل عن أي مبلغ أو مجموع أو عدد أو رصيد — يُحسب بالأدوات ثم يُصاغ لك.",
+                examples=[{"text": t} for t in EXAMPLE_QUESTIONS])
+            q = gr.Textbox(show_label=False, placeholder="اكتب سؤالك عن الكشف بالعربية…",
+                           rtl=True, submit_btn="اسأل")
+            with gr.Accordion("الصفوف التي بُني عليها الجواب", open=True, visible=False) as evidence:
+                raw_note = gr.Markdown(visible=False)
+                raw = gr.Dataframe(interactive=False, elem_id="evidence-table", max_height=320)
+            # Internal retrieval bookkeeping (chunk IDs) — kept for
+            # development diagnostics only, collapsed out of the way.
+            with gr.Accordion("تفاصيل تقنية (قطع الاسترجاع)", open=False):
+                src = gr.Markdown(rtl=True)
             # **البند ٢ — زرُّ التنزيل:** الملفُّ يُبنى بالنواة نفسها التي يُبنى بها ملفُّ سطر الأوامر،
-            # فالمقابلةُ خليّةً بخليّة في `tests/test_app_excel_button.py` قائمةٌ لا موعودة.
+            # فالمقابلةُ خليّةً بخليّة في `tests/test_app_excel_button.py` قائمةٌ لا موعودة. **والملفُّ يظهر
+            # بعد بنائه وحدَه** — لا خانةَ ملفٍّ فارغةٌ تنتظر (إعادةُ التصميم).
             with gr.Row():
-                xlsx_btn = gr.Button("تنزيل الكشف - Excel", variant="secondary", scale=2)
-                xlsx_note = gr.Markdown(rtl=True, scale=3)
-            xlsx_file = gr.File(label="ملفّ الكشف (xlsx)")
+                xlsx_btn = gr.Button("تنزيل الكشف (Excel)", size="sm")
+                conv_btn = gr.Button("تنزيل المحادثة (سؤال · جواب · أدلّة)", size="sm")
+            xlsx_note = gr.Markdown(rtl=True)
+            xlsx_file = gr.File(label="ملفّ الكشف (xlsx)", visible=False, height=90)
+            conv_note = gr.Markdown(rtl=True)
+            conv_file = gr.File(label="ملفّ المحادثة (Excel)", visible=False, height=90)
             xlsx_btn.click(export_xlsx, inputs=[sess_state], outputs=[xlsx_file, xlsx_note],
-                           api_name="export_xlsx", api_description="ملفُّ Excel لكشف الجلسة.")
+                           api_name="export_xlsx", api_description="ملفُّ Excel لكشف الجلسة."
+                           ).then(lambda f: gr.update(visible=bool(f)), inputs=xlsx_file, outputs=xlsx_file,
+                                  api_visibility="private")
             # **البند ١٠ — تنزيلُ المحادثة:** سؤالٌ وجوابٌ وأدلّةٌ من القاعدة (تبقى بعد الإغلاق).
-            with gr.Row():
-                conv_btn = gr.Button("تنزيل المحادثة (سؤال · جواب · أدلّة)", scale=2)
-                conv_note = gr.Markdown(rtl=True, scale=3)
-            conv_file = gr.File(label="ملفّ المحادثة (Excel)")
             conv_btn.click(_conversation_export, inputs=[sess_state], outputs=[conv_file, conv_note],
                            api_name="download_conversation",
-                           api_description="ملفُّ محادثة الجلسة (سؤال · جواب · أدلّة) من دفترها.")
-            # **السؤالُ نقطتان في العقد** كما في الواجهة: `/add_question` يضعه في المحادثة فورًا، ثمّ `/answer`
-            # يجيب عنه. (كان اسمُ الأولى `ask_question` وهي لا تجيب: عميلٌ يناديها وحدَها لا يأخذ جوابًا.)
-            ask.click(prepare_ask, inputs=[q, chat, sess_state], outputs=[chat, q, sess_state],
-                      show_progress="hidden", api_name="add_question",
-                      api_description="الخطوةُ الأولى من السؤال: يضعه في المحادثة ويحفظه للجلسة — "
-                                      "ثمّ نادِ /answer."
-                      ).then(ask_followup, inputs=[chat, key_in, sess_state],
-                             outputs=[chat, src, raw, raw_note],
-                             show_progress_on=[chat], api_name="answer",
-                             api_description="الخطوةُ الثانية: يجيب عن السؤال المحفوظ بمفتاح OpenRouter "
-                                             "الخاصّ بالزائر، ويُعيد المحادثةَ والصفوفَ التي بُني عليها الجواب.")
+                           api_description="ملفُّ محادثة الجلسة (سؤال · جواب · أدلّة) من دفترها."
+                           ).then(lambda f: gr.update(visible=bool(f)), inputs=conv_file, outputs=conv_file,
+                                  api_visibility="private")
+            # **السؤالُ نقطتان في العقد**: `/add_question` يضعه في المحادثة فورًا، ثمّ `/answer` يجيب عنه.
+            # والإرسالُ زرُّ خانة السؤال نفسِها (`submit_btn`) — حدثُ `submit` واحدٌ للضغطة وزرّ الإدخال.
             q.submit(prepare_ask, inputs=[q, chat, sess_state], outputs=[chat, q, sess_state],
-                     show_progress="hidden", api_visibility="private"
+                     show_progress="hidden", api_name="add_question",
+                     api_description="الخطوةُ الأولى من السؤال: يضعه في المحادثة ويحفظه للجلسة — "
+                                     "ثمّ نادِ /answer."
                      ).then(ask_followup, inputs=[chat, key_in, sess_state],
                             outputs=[chat, src, raw, raw_note],
-                            show_progress_on=[chat], api_visibility="private")
+                            show_progress_on=[chat], api_name="answer",
+                            api_description="الخطوةُ الثانية: يجيب عن السؤال المحفوظ بمفتاح OpenRouter "
+                                            "الخاصّ بالزائر، ويُعيد المحادثةَ والصفوفَ التي بُني عليها الجواب."
+                            ).then(lambda df: gr.update(visible=df is not None and len(df) > 0),
+                                   inputs=raw, outputs=evidence, api_visibility="private")
+            chat.example_select(_example_question, outputs=q, api_visibility="private")
             # **R93-2 · حدثٌ ثانٍ على زرّ القراءة:** يمسح أسطحَ السؤال الأربعة. وموضعُه هذا لأنّ
             # الأسطحَ تُعرَّف في هذا التبويب، وهو مستقلٌّ عن مسار القراءة فلا يقف في طريقه ولا يُنتظره.
             btn.click(_reset_qa_surfaces, inputs=[sess_state], outputs=[chat, src, raw, raw_note],
-                      show_progress="hidden", api_visibility="private")
-            # **دفترُ الكشف — أسئلةٌ بلا نموذج وبلا كلفة:** الأسئلةُ البنيويّةُ (مجاميع · تغطية ·
-            # بلا إثبات · أحكام صفحات · بحث · سجلّ الأسئلة) تُجاب من SQL وحدَه. والمنطقُ في
-            # `statement_qa.ledger_ui` (نقيٌّ يُختبر بلا شاشة)، وهنا التوصيلُ فقط. **والنتائجُ في
-            # `gr.Dataframe` (R130-3)** فلا يكسر وصفٌ فيه سطرٌ جديد جدولَ Markdown.
-            with gr.Accordion("دفترُ الكشف — أسئلةٌ بلا نموذج وبلا كلفة", open=False):
-                # **حالةُ الدفتر تُملأ عند فتح الصفحة** (`demo.load` ⇒ `_start_session`) من مجلّد جلستها.
-                ledger_state = gr.Markdown("", rtl=True)
-                with gr.Row():
-                    l_intent = gr.Dropdown(choices=list(_ledger_ui.INTENT_LABELS),
-                                           value=next(iter(_ledger_ui.INTENT_LABELS)),
-                                           label="القصد", scale=4)
-                    l_value = gr.Textbox(label="القيمة (رقمُ صفحةٍ لقصد «أحكام الصفحات»، أو نصُّ بحث)",
-                                         rtl=True, scale=5)
-                    l_build = gr.Button("أعد بناء الدفتر", scale=2)
-                    l_ask = gr.Button("اسأل الدفتر", variant="primary", scale=2)
-                ledger_out = gr.Dataframe(interactive=False, label="نتيجةُ القصد")
-                ledger_note = gr.Markdown(rtl=True)
-                l_refresh = gr.Button("حدّث الحالة", size="sm")
-                l_build.click(_ledger_build_click, inputs=[sess_state],
-                              outputs=[ledger_note, ledger_state], api_name="ledger_build",
-                              api_description="يعيد بناءَ دفتر الجلسة من قراءتها.")
-                l_ask.click(_ledger_ask_click, inputs=[l_intent, l_value, sess_state],
-                            outputs=[ledger_out, ledger_note], api_name="ledger_ask",
-                            api_description="سؤالُ الدفتر بلا نموذجٍ وبلا كلفة: قصدٌ من القائمة وقيمةٌ "
-                                            "اختياريّة، يُجاب من SQL وحدها.")
-                l_refresh.click(_ledger_refresh_click, inputs=[sess_state], outputs=[ledger_state],
-                                api_name="ledger_status", api_description="حالةُ دفتر الجلسة.")
-            # **توصيلُ زرّ القراءة (٣):** بعد تعريف كلّ مخرجاتِه، ومنها `ledger_state`.
+                      show_progress="hidden", api_visibility="private"
+                      ).then(lambda: gr.update(visible=False), outputs=evidence, api_visibility="private")
             # **ومخرجاتُ كشفٍ محمَّل** — قائمةٌ واحدة لزرّ القراءة و«جرّب الآن» (يُعيدان الصيغةَ نفسَها).
             statement_outputs = [ticker, table, kpi, gallery, filter_col, filter_value,
-                                 filter_from, filter_to, ledger_state, intake_note, sess_state]
+                                 filter_from, filter_to, intake_note, sess_state]
             btn.click(process_pdf, inputs=[pdf_in, skip_rejected_in, key_in, sess_state],
                       outputs=statement_outputs, show_progress_on=[ticker], api_name="process_pdf",
                       api_description="يقرأ كشفَ PDF بمفتاح OpenRouter الخاصّ بالزائر (يُرفض بلا مفتاحٍ "
-                                      "على السطح العامّ) ويبني دفترَ الجلسة.")
+                                      "على السطح العامّ) ويبني دفترَ الجلسة."
+                      ).then(_loaded_view, inputs=[sess_state], outputs=loaded, api_visibility="private")
             # **«جرّب الآن»:** ومعه مسحُ أسطح السؤال (كشفٌ آخر ⇒ لا سؤالَ من القديم).
             try_btn.click(try_now, inputs=[sess_state], outputs=statement_outputs,
                           show_progress_on=[ticker], api_name="try_now",
                           api_description="«جرّب الآن»: الكشفُ الاصطناعيّ وقراءتُه المسجَّلة في جلستك، "
-                                          "بلا مفتاحٍ وبلا كلفة (السطحُ العامّ وحده).")
+                                          "بلا مفتاحٍ وبلا كلفة (السطحُ العامّ وحده)."
+                          ).then(_loaded_view, inputs=[sess_state], outputs=loaded, api_visibility="private")
             try_btn.click(_reset_qa_surfaces, inputs=[sess_state], outputs=[chat, src, raw, raw_note],
-                          show_progress="hidden", api_visibility="private")
+                          show_progress="hidden", api_visibility="private"
+                          ).then(lambda: gr.update(visible=False), outputs=evidence, api_visibility="private")
             delete_btn.click(_delete_statement_click, inputs=[sess_state], outputs=[
-                delete_note, ticker, table, kpi, gallery, chat, src, raw, raw_note, ledger_state],
+                delete_note, ticker, table, kpi, gallery, chat, src, raw, raw_note],
                 api_name="delete_statement",
-                api_description="يحذف دفترَ هذه الجلسة ومحادثتَها وملفّاتها.")
-        with gr.Tab("٣. عن المشروع"):
+                api_description="يحذف دفترَ هذه الجلسة ومحادثتَها وملفّاتها."
+                ).then(_loaded_view, inputs=[sess_state], outputs=loaded, api_visibility="private")
+        with gr.Tab("عن المشروع"):
             gr.Markdown(ABOUT, rtl=True)
-    demo.load(_start_session, outputs=[sess_state, ledger_state], api_visibility="private")
+    demo.load(_start_session, outputs=[sess_state], api_visibility="private")
 
 if __name__ == "__main__":
     # **البصمةُ تُكتب هنا وحدَه (R78-1):** هذا الموضعُ هو الذي تصير فيه هذه العمليةُ *هي التي تُجيب*

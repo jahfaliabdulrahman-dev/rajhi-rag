@@ -20,9 +20,10 @@ CONTRACT = {
     "try_now", "process_pdf",                                 # كشفٌ في الجلسة: مسجَّلٌ بلا مفتاح · أو حيٌّ بمفتاح الزائر
     "add_question", "answer",                                 # السؤالُ بخطوتيه
     "filter_rows", "export_xlsx", "download_conversation",    # الجدولُ وملفّاه
-    "ledger_ask", "ledger_build", "ledger_status",            # الدفترُ بلا نموذجٍ وبلا كلفة
     "delete_statement",
 }
+#: **وأُزيلت نقاطُ الدفتر الثلاث** (`ledger_ask` · `ledger_build` · `ledger_status`) مع لوحتها بقرار المالك
+#: (2026-10-31، إعادةُ تصميم الواجهة قبل CP1). والقاعدةُ نفسُها باقية: منها تحسب أدواتُ الوكيل.
 ALL_COLUMNS = "كل الأعمدة"
 
 
@@ -90,14 +91,6 @@ def test_two_clients_never_share_a_session(client):
     first.predict(api_name="/try_now")
     assert _rows(first.predict(ALL_COLUMNS, "", "", "", api_name="/filter_rows")) == 54
     assert _rows(second.predict(ALL_COLUMNS, "", "", "", api_name="/filter_rows")) == 0
-
-
-def test_the_ledger_answers_without_a_key(client):
-    visitor = client()
-    visitor.predict(api_name="/try_now")
-    assert "مبنيٌّ وجاهز" in visitor.predict(api_name="/ledger_status")
-    table, _ = visitor.predict("المجاميع (مدين/دائن)", "", api_name="/ledger_ask")
-    assert _rows(table) > 0
 
 
 def test_delete_empties_only_the_callers_session(client):

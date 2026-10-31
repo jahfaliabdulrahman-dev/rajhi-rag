@@ -175,7 +175,7 @@ def test_every_title_a_person_reads_carries_the_registered_name():
     assert space["title"] == OFFICIAL_NAME
     assert (ROOT / "README.md").read_text(encoding="utf-8").startswith(f"# {OFFICIAL_NAME}")
     app = (ROOT / "app.py").read_text(encoding="utf-8")
-    assert f"<h1>{OFFICIAL_NAME}</h1>" in app
+    assert re.search(rf"<h1[^>]*>{OFFICIAL_NAME}</h1>", app)
     assert f'gr.Blocks(title="{OFFICIAL_NAME}"' in app
 
 

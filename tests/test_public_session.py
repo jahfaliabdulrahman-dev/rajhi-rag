@@ -235,8 +235,7 @@ def test_condition_3_a_session_never_sees_another_sessions_ledger(public):
     _converse(app, a)
     # **قبل أن تقرأ ب:** لا كشفَ ولا دفترَ ولا محادثة — ولو قرأت أ الكشفَ نفسَه للتوّ.
     assert app._ledger_key(b) == ""
-    assert "لا كشف" in app._ledger_refresh_click(b) or "لم يُقرأ" in app._ledger_refresh_click(b), \
-        app._ledger_refresh_click(b)
+    assert not any(b.home.rglob("*.sqlite")), sorted(b.home.rglob("*.sqlite"))   # لا دفترَ في مجلّد ب
     got, note = app._conversation_export(b)
     assert got is None, note
     # **وبعد أن تقرأ ب الكشفَ نفسَه:** المفتاحُ واحد (بصمةُ الكشف) والدفتران ملفّان مختلفان.
