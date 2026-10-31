@@ -1,4 +1,5 @@
 {
+ "note": "2026-10-31, after the code review: the amounts basis written in these runs overstated what the chain holds. Both runs were recounted from their kept rows under the corrected basis (tools/measure_plain_read.py AMOUNTS_BASIS): same counts, because the flagged row lies between two rows the chain holds.",
  "runs": [
   {
    "measured_on": "2026-10-31",

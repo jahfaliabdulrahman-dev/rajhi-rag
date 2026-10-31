@@ -62,10 +62,16 @@ def test_a_flagged_row_says_which_figure_the_plain_answer_carried():
     assert fixed[0]["answer_has_balance_difference"] is True
 
 
-def test_an_amount_is_right_when_it_is_the_balance_difference_not_the_systems_misreading():
-    expected = [_row(7, "4501.20", "9000.00", derived="4510.20", ok=False)]
-    assert compare(expected, [{"amount": "4510.20", "balance": "9000.00"}])["amounts_matched"] == 1
-    assert compare(expected, [{"amount": "4501.20", "balance": "9000.00"}])["amounts_matched"] == 0
+def test_an_amount_is_scored_only_where_the_break_says_which_figure_is_wrong():
+    """Between two rows the chain holds, the balance difference is the amount; at any other break a balance may be
+    the misread figure, so that row is left out rather than scored against a guess."""
+    between = [_row(6, "10.00", "100.00"), _row(7, "4501.20", "9000.00", derived="4510.20", ok=False),
+               _row(8, "5.00", "8995.00")]
+    assert compare(between, [{"amount": "4510.20", "balance": "9000.00"}])["amounts_matched"] == 1
+    assert compare(between, [{"amount": "4501.20", "balance": "9000.00"}])["amounts_matched"] == 0
+    at_the_edge = between[1:]
+    counts = compare(at_the_edge, [{"amount": "4501.20", "balance": "9000.00"}, {"amount": "5.00", "balance": "8995.00"}])
+    assert counts["amounts_unknown"] == 1 and counts["amounts_expected"] == 1 and counts["amounts_matched"] == 1
 
 
 def test_with_rows_out_the_public_record_holds_counts_only(tmp_path, monkeypatch):
@@ -90,5 +96,14 @@ def test_with_rows_out_the_public_record_holds_counts_only(tmp_path, monkeypatch
     record = json.loads(out.read_text())["runs"]
     assert len(record) == 2 and all(r["pages_read"] == [1] for r in record)
     assert not any("returned_rows" in p for r in record for p in r["pages"]), "a returned figure in the public record"
-    assert [k["run"] for k in json.loads(rows.read_text())] == [1, 2]
+    assert [k["run"] for k in json.loads(rows.read_text())] == [1, 2] == [r["run"] for r in record]
     assert sum(r["spent"] for r in record) <= 0.05
+    # A later invocation appends under the next run numbers: earlier rows are never lost.
+    assert measure_plain_read.main(["--ledger", str(ledger), "--pages", "1", "--budget", "0.05",
+                                    "--out", str(out), "--rows-out", str(rows)]) == 0
+    assert [k["run"] for k in json.loads(rows.read_text())] == [1, 2, 3] == [r["run"] for r in json.loads(out.read_text())["runs"]]
+    # A page with no expected rows is refused before any call is paid for.
+    calls = []
+    monkeypatch.setattr(vlm_reader, "chat_vlm_image", lambda *a, **k: calls.append(1) or "[]")
+    assert measure_plain_read.main(["--ledger", str(ledger), "--pages", "1", "5", "--budget", "0.05",
+                                    "--out", str(out)]) == 2 and calls == []

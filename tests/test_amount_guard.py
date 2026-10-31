@@ -828,15 +828,45 @@ def test_the_one_published_file_passes_only_while_it_is_as_declared(tmp_path, mo
         (ROOT / elsewhere).unlink(missing_ok=True)
 
 
-def test_a_link_is_read_as_git_tracks_it(tmp_path, monkeypatch):
-    """الرابطُ الرمزيّ نصُّه مسارُ هدفه (كما يقرؤه `--pre-push` من الـblob)، والهدفُ يُفحص باسمه — لا مرّتين."""
+def test_a_link_is_read_as_git_tracks_it_unless_its_target_is_untracked(tmp_path, monkeypatch):
+    """رابطٌ إلى ملفٍّ مُتتبَّع نصُّه مسارُ هدفه (كما يقرؤه `--pre-push`)، والهدفُ يُفحص باسمه — لا مرّتين.
+    ورابطٌ إلى ملفٍّ غيرِ مُتتبَّع يُقرأ هدفُه، لأنّ نشرَ Pages يتبع الروابط (مراجعةُ الكود بعد خ٥ج)."""
     _key(tmp_path, monkeypatch)
     deny = {ag.fingerprint(FAKE)}
-    target, link = "docs/SECURITY_PROBE.md", "docs/SECURITY_LINK.md"
+    untracked, link, tracked_link = "docs/SECURITY_PROBE.md", "docs/SECURITY_LINK.md", "docs/SECURITY_LINK_2.md"
     try:
-        (ROOT / target).write_text(f"الرصيد: {FAKE}\n", encoding="utf-8")
+        (ROOT / untracked).write_text(f"الرصيد: {FAKE}\n", encoding="utf-8")
         (ROOT / link).symlink_to("SECURITY_PROBE.md")
-        assert ag.counts_by_file(deny, [target, link]) == {target: 1}
+        assert ag.counts_by_file(deny, [link]) == {link: 1}, "رابطٌ إلى ملفٍّ غيرِ مُتتبَّع لم يُقرأ هدفُه"
+        (ROOT / tracked_link).symlink_to("../README.md")
+        assert ag._text_of_rel(tracked_link) == "../README.md", "رابطٌ إلى ملفٍّ مُتتبَّع قُرئ هدفُه مرّتين"
     finally:
-        (ROOT / link).unlink(missing_ok=True)
-        (ROOT / target).unlink(missing_ok=True)
+        for rel in (link, tracked_link, untracked):
+            (ROOT / rel).unlink(missing_ok=True)
+
+
+def test_a_new_or_changed_declaration_blocks_by_name_and_a_removal_passes():
+    """**الإعلانُ يُقرأ ممّا نُشر في بوّابة الدفع وCI** — فإضافةُ إعفاءٍ أو تغييرُه بدفعةٍ يُسقط كرفع العتبة."""
+    base = {"a.json": {"count": 3, "set_fingerprint": "aa"}}
+    assert ag.published_violations(base, base, "x") == []
+    assert ag.published_violations({}, base, "x") == [], "حذفُ إعلانٍ تخفيضٌ يجوز"
+    assert len(ag.published_violations({**base, "b.json": {"count": 1, "set_fingerprint": "bb"}}, base, "x")) == 1
+    assert len(ag.published_violations({"a.json": {"count": 4, "set_fingerprint": "aa"}}, base, "x")) == 1
+    assert len(ag.published_violations({"a.json": {"count": 3, "set_fingerprint": "cc"}}, base, "x")) == 1
+
+
+def test_an_unreadable_declaration_blocks_by_name(tmp_path, monkeypatch):
+    bad = tmp_path / "published.json"
+    bad.write_text("<<<<<<< HEAD\n{", encoding="utf-8")
+    monkeypatch.setattr(ag, "PUBLISHED", bad)
+    with pytest.raises(SystemExit) as stop:
+        ag.published_files()
+    assert "إعلانُ النشر غيرُ مقروء" in str(stop.value)
+
+
+def test_the_repository_declares_exactly_the_one_page():
+    """قرارُ المالك 2026-10-31 (`docs/SHOWCASE_PLAN.md` §٦): صفحةٌ واحدة. إعلانٌ ثانٍ يُسقط هنا قبل أيّ بوّابة."""
+    declared = ag.published_files()
+    assert set(declared) == {"docs/measurements/real-page-43.json"}
+    entry = declared["docs/measurements/real-page-43.json"]
+    assert entry["count"] == 13 and "نعم موافق امضي بالصفحه 43" in entry["decision"]

@@ -449,36 +449,76 @@ def _text_of_rel(rel: str) -> str | None:
     path = ROOT / rel
     try:
         if path.is_symlink():
-            return os.readlink(path)
+            target = path.resolve()
+            try:
+                target_rel = target.relative_to(ROOT.resolve()).as_posix()
+            except ValueError:
+                target_rel = None
+            if target_rel and _git("ls-files", "--error-unmatch", target_rel).returncode == 0:
+                return os.readlink(path)
+            # هدفٌ غيرُ مُتتبَّع أو خارج المستودع: يُقرأ ما قد يُنشر عبر الرابط (نشرُ Pages يتبع الروابط)
+            return target.read_text(encoding="utf-8")
         return path.read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError):
         return None
 
 
-def published_files() -> dict[str, dict]:
+def published_files(rev: str | None = None) -> dict[str, dict]:
     """**القاعدة ١٢ باستثناءٍ واحدٍ مُعلَن** (قرارُ المالك 2026-10-31 · `docs/SHOWCASE_PLAN.md` §٦ «شرطُ الصدق»):
     صفحةٌ واحدةٌ من كشفٍ حقيقيّ مبالغُها ظاهرةٌ عمدًا في صفحة القصّة. والإعلانُ بالمسار **وبالعدد وببصمة
-    المجموعة معًا**، فلا يُعفى موضعٌ بمساره: أيُّ قيمةٍ تتبدّل أو تُزاد فيه تُعدّ كما في أيّ ملف."""
-    if not PUBLISHED.exists():
-        return {}
-    return json.loads(PUBLISHED.read_text(encoding="utf-8")).get("files", {})
+    المجموعة معًا**، فلا يُعفى موضعٌ بمساره: أيُّ قيمةٍ تتبدّل أو تُزاد فيه تُعدّ كما في أيّ ملف.
+
+    **ومن أين يُقرأ (مراجعةُ الكود بعد خ٥ج):** الشجرةُ للفحص المحلّيّ، **والتزامٌ منشورٌ (`rev`) لبوّابة الدفع
+    وCI** — كما تُقرأ العتبةُ ممّا نُشر لا ممّا في يد الدافع (`baseline_at`). فإعلانٌ يُضاف في الدفعة نفسِها لا يُعفي
+    شيئًا فيها، ويُسقطه `published_violations` باسمه. وإعلانٌ غيرُ مقروء يُسقط باسمه ولا يُعفي شيئًا."""
+    if rev is None:
+        if not PUBLISHED.exists():
+            return {}
+        text, where = PUBLISHED.read_text(encoding="utf-8"), _shown(PUBLISHED)
+    else:
+        r = _git("show", f"{rev}:{REL_PUBLISHED}")
+        if r.returncode != 0:
+            return {}                     # لا إعلانَ منشورًا ⇒ لا إعفاء (يُعدّ كلُّ شيء)
+        text, where = r.stdout, f"{rev}:{REL_PUBLISHED}"
+    try:
+        files = json.loads(text).get("files", {})
+        if not isinstance(files, dict):
+            raise TypeError(files)
+        return files
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        raise SystemExit(f"⛔ BLOCK — إعلانُ النشر غيرُ مقروء ({where}) ⇒ لا يُعفى شيءٌ ولا أمرّ "
+                         "(«غيرُ المقروء ليس نظيفاً» — القاعدة ١٢)")
 
 
-def is_published(rel: str, hits: list[tuple[str, str]]) -> bool:
-    declared = published_files().get(rel)
-    return bool(declared and hits) and declared.get("count") == len(hits) and \
-        declared.get("set_fingerprint") == _commitment({fingerprint(t) for t, _ in hits})
+def is_published(rel: str, hits: list[tuple[str, str]], declared: dict[str, dict]) -> bool:
+    entry = declared.get(rel)
+    return bool(entry and hits) and entry.get("count") == len(hits) and \
+        entry.get("set_fingerprint") == _commitment({fingerprint(t) for t, _ in hits})
+
+
+def published_violations(here: dict[str, dict], base: dict[str, dict], where: str) -> list[str]:
+    """إعلانٌ جديدٌ أو مُغيَّرٌ عمّا نُشر ⇒ يُسقط باسمه، كرفع العتبة تمامًا؛ والحذفُ يجوز (تخفيض)."""
+    bad = []
+    for rel, entry in sorted(here.items()):
+        published = base.get(rel)
+        if published is None:
+            bad.append(f"⛔ إعلانُ نشرٍ جديد: {rel} — {where} (لا يُضاف إعفاءٌ بدفعة)")
+        elif (entry.get("count"), entry.get("set_fingerprint")) != \
+                (published.get("count"), published.get("set_fingerprint")):
+            bad.append(f"⛔ إعلانُ نشرٍ تغيّر: {rel} — {where}")
+    return bad
 
 
 def counts_by_file(deny: set[str], files: list[str] | None = None) -> dict[str, int]:
     """عددُ الظهورات **ملفّاً ملفّاً** — لا قيمةَ ولا بصمة. هذا هو ما تُقارنه السقاطة."""
     counts: dict[str, int] = {}
+    declared = published_files()
     for rel in (files if files is not None else tracked_text_files()):
         txt = _text_of_rel(rel)
         if txt is None:
             continue
         hits = find_in_text(txt, deny)
-        if hits and not is_published(rel, hits):
+        if hits and not is_published(rel, hits, declared):
             counts[rel] = len(hits)
     return counts
 
@@ -550,6 +590,7 @@ def baseline_audit(ref: str) -> int:
         return 2
     here = read_baseline()
     bad_rows = ratchet_violations(here, base, f"خطُّ الأساس المدفوع مقابل {ref}")
+    bad_rows += published_violations(published_files(), published_files(ref), f"إعلانُ النشر مقابل {ref}")
     if bad_rows:
         print(f"⛔ BLOCK — خطُّ الأساس في هذه الشجرة يرفع العتبةَ عن {ref}:")
         for b in bad_rows[:25]:
@@ -577,12 +618,13 @@ def _commitment(fps: set[str]) -> str:
 
 def counts_with_commitment(deny: set[str], files: list[str] | None = None) -> dict[str, dict]:
     out: dict[str, dict] = {}
+    declared = published_files()
     for rel in (files if files is not None else tracked_text_files()):
         txt = _text_of_rel(rel)
         if txt is None:
             continue
         hits = find_in_text(txt, deny)
-        if hits and not is_published(rel, hits):
+        if hits and not is_published(rel, hits, declared):
             out[rel] = {"count": len(hits),
                         "commitment": _commitment({fingerprint(t) for t, _ in hits})}
     return out
@@ -710,6 +752,7 @@ class UnresolvedRange(RuntimeError):
 
 
 REL_BASELINE = "docs/security/amount-baseline.json"
+REL_PUBLISHED = "docs/security/published-real-amounts.json"
 
 
 # ── طبقةٌ واحدةٌ لسؤالٍ واحد: **ما يُنشَر؟** (مُحلِّلٌ واحد · وجهةٌ واحدة · قرارٌ واحد) ──
@@ -846,7 +889,7 @@ def _range_from_heads(heads: list[str], remote: str | None = None) -> list[str] 
     return sorted(revs)
 
 
-def pushed_counts(deny: set[str], revs: list[str]) -> dict[str, dict]:
+def pushed_counts(deny: set[str], revs: list[str], declared: dict[str, dict] | None = None) -> dict[str, dict]:
     """**كلُّ blob يُدفع** (لا الشجرةُ العاملة): أحدثَ ظهورٍ لكلّ مسار داخل المدى.
 
     والقارئُ **لا يفترض أنّ المدفوعَ نصّ**: أيُّ blobٍ لا يُفكّ بـ`utf-8` يُتخطّى بصمتٍ مقصود
@@ -868,7 +911,7 @@ def pushed_counts(deny: set[str], revs: list[str]) -> dict[str, dict]:
             except UnicodeDecodeError:
                 continue
             hits = find_in_text(txt, deny)
-            if hits and not is_published(rel, hits):
+            if hits and not is_published(rel, hits, declared or {}):
                 cur = {"count": len(hits),
                        "commitment": _commitment({fingerprint(t) for t, _ in hits})}
                 if rel not in counts or cur["count"] > counts[rel]["count"]:
@@ -1010,7 +1053,7 @@ def probe(rel: str, deny: set[str]) -> int:
         print(f"⛔ لا ملفَّ للفحص: {rel}", file=sys.stderr)
         return 5
     hits = find_in_text(txt, deny)
-    if hits and is_published(rel, hits):
+    if hits and is_published(rel, hits, published_files()):
         print(f"   منشورٌ بقرار المالك كما أُعلن في {_shown(PUBLISHED)} · {rel}")
         return 0
     if hits:
@@ -1115,6 +1158,10 @@ def history_forms(deny: set[str] | None = None, repo: Path | None = None) -> tup
     if listing.returncode != 0:
         raise UnresolvedRange("rev-list --all --objects فشل ⇒ لا تاريخَ أُثبته")
     shas = sorted({line.split()[0] for line in listing.stdout.splitlines() if line.split()})
+    # المسارُ الذي ظهر به كلُّ blob — ليُعفى الإعلانُ المنشورُ بعينه (مسارًا وعددًا وبصمة) في التاريخ كما في الشجرة
+    path_of = {parts[0]: parts[1] for parts in (line.split(" ", 1) for line in listing.stdout.splitlines())
+               if len(parts) == 2}
+    declared = published_files()
     batch = subprocess.run(["git", *prefix, "cat-file", "--batch"], input="\n".join(shas).encode(),
                            capture_output=True)
     if batch.returncode != 0:
@@ -1144,7 +1191,10 @@ def history_forms(deny: set[str] | None = None, repo: Path | None = None) -> tup
         except UnicodeDecodeError:
             continue
         if deny:
-            for tok, _ in find_in_text(text, deny):
+            hits = find_in_text(text, deny)
+            if hits and is_published(path_of.get(head[0], ""), hits, declared):
+                continue
+            for tok, _ in hits:
                 forms.add(tok)
     # **قيدٌ واحدٌ يُغني عن ثلاثةِ شروطٍ دفاعيّة:** قُرئ كلُّ كائنٍ؟ وإلّا فالمسحُ ناقصٌ (كائنٌ مفقود،
     # تدفّقٌ مقصوص، أو ترويسةٌ غيرُ متوقَّعة) ⇒ يُسقط. و«الصفرُ علامةُ قياسٍ ميّت»: صفرُ blobٍ ليس نظافة.
@@ -1302,7 +1352,7 @@ def main(argv=None) -> int:
             print("PASS — المدى فارغٌ **بالقياس مقابل وجهة الدفع**: لا التزامَ جديداً يُنشر "
                   "(فرعٌ تعرف الوجهةُ أساسَه، أو حذفُ فرع) ⇒ لا شيءَ يُنشر فلا شيءَ أُثبته")
             return 0
-        counts = pushed_counts(deny, revs)
+        counts = pushed_counts(deny, revs, published_files("origin/main"))
         base = baseline_at("origin/main")
         if base is None:
             # **البابُ ٣أ/٣ب (أمسكه مقعدان):** كان يسقط إلى خطّ الشجرة العاملة ⇒ الدافعُ يضع عتبتَه.
@@ -1313,6 +1363,8 @@ def main(argv=None) -> int:
         for head in _local_heads(refs):
             pushed_base = baseline_at(head)
             bad += ratchet_violations(pushed_base, base, f"خطُّ الأساس المنشورُ في {head[:8]}")
+            bad += published_violations(published_files(head), published_files("origin/main"),
+                                        f"إعلانُ النشر في {head[:8]} مقابل origin/main")
         if bad:
             head, shown, remedy = block_claim(bad)
             print(head)

@@ -166,15 +166,21 @@ function renderChain(page) {
   const shown = page.rows.filter((r) => !r.chain_ok).length;
   line(document.getElementById("chain-tally"), "في هذه الصفحة: حركاتٌ أثبتتها السلسلة ", n(proven),
        " · صفوفٌ تُعرض للمراجعة ", n(shown));
+  // Which figure is wrong is read from the break's shape, not from the footer: a break between two rows the
+  // chain holds means the balances on both sides agree with their neighbours, so the amount read is the odd one.
+  const i = page.rows.findIndex((r) => !r.chain_ok);
+  const isolated = shown === 1 && i > 0 && i < page.rows.length - 1 && page.rows[i - 1].chain_ok && page.rows[i + 1].chain_ok;
+  if (isolated) {
+    document.getElementById("chain-why").textContent =
+      "والصفُّ المعروض بين صفّين يُثبتهما الحساب، فالرصيدان على طرفيه يتّفقان مع ما قبلهما وما بعدهما، والمخالفُ هو المبلغُ المقروء.";
+  }
   const verdict = document.getElementById("footer-verdict");
   if (page.footer.verdict !== "ok") {
     verdict.textContent = "ذيلُ هذه الصفحة: ✗ لا يطابق.";
     verdict.classList.add("flagged");
     return;
   }
-  verdict.textContent = shown
-    ? "ذيلُ هذه الصفحة: ✓ يطابق. فالأرصدةُ ثابتة، وفرقُ الرصيدين هو المبلغُ الصحيح، والسلسلةُ محقّةٌ في أنّ المبلغ المقروء خطأ."
-    : "ذيلُ هذه الصفحة: ✓ يطابق.";
+  verdict.textContent = "ذيلُ هذه الصفحة: ✓ يطابق: مجموعا المدين والدائن ورصيدُ آخر الصفحة كما طُبعت.";
 }
 
 function renderReal(claims) {
@@ -197,6 +203,13 @@ function renderReal(claims) {
        "ولم تُثبت ", n(unproven), " صفحة، ولكلٍّ منها في التقرير اسمُها وسببُها: تخالف إطارها المطبوع ",
        n(claims.mismatch), " · فجوةٌ في الترقيم ", n(claims.gap), " · بلا سطر إجماليّاتٍ مقروء ", n(claims.absent),
        " · غيرُ محسومة ", n(claims.unchecked), ".");
+  // The guarded source declares two readings, not one (reader_stamp): the split is published beside the headline.
+  const [unstampedOk, unstamped] = String(claims.split_unstamped).split("/");
+  const [stampedOk, stamped] = String(claims.split_stamped).split("/");
+  line(document.getElementById("real-stamps"),
+       "وهي قراءتان لا واحدة: ", n(unstamped), " صفحةً قُرئت قبل أن يُختَم إصدارُ القارئ، طابق منها ذيولَه ", n(unstampedOk),
+       "، و", n(stamped), " بالقارئ المختوم، طابق منها ", n(stampedOk),
+       ". فالأرقامُ أعلاه تجمعهما، ولا تُنسب كلُّها إلى إصدارٍ واحد.");
 }
 
 async function fetchJson(path) {

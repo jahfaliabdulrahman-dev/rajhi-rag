@@ -34,7 +34,7 @@ SOURCES = {
     "claims.json": ROOT / "docs" / "claims.json",
 }
 #: The one real page (section 6): its bytes as the owner approved them. Re-running the tool on new inputs fails here.
-REAL_PAGE_SHA256 = "5c3b641f2bbf36b301e52ad7621fb218cdf5b5f332d3c828054cc448877e993a"
+REAL_PAGE_SHA256 = "bc52839bbf1c3adf84c3859380dea425a0a8499516551f997e9224c9b09dda2b"
 #: The only pictures on the page: the two crops of that page, each declared with its md5 for a visual check.
 REAL_IMAGES = {"real-rows.png", "real-row.png"}
 
@@ -111,6 +111,9 @@ def test_the_real_page_is_one_page_pinned_and_redacted():
     assert set(page["footer"]) == {"verdict", "basis"}, "مجاميعُ الذيل تبقى خارج الصفحة"
     for r in page["rows"]:
         assert not re.search(r"[0-9٠-٩۰-۹*]{5,}", r["desc"]), f"صفّ {r['seq']}: مرجعٌ أو رقمُ بطاقةٍ ظاهر"
+        first, *rest = r["desc"].split("\n")
+        if "تحويل" in first:
+            assert rest in ([], ["[محجوب]"]), f"صفّ {r['seq']}: تحويلٌ يُظهر ما تحت سطره الأوّل (أطرافُه)"
         for rule, level, rx, _ in TEXT_RULES:
             assert level != "BLOCK" or not rx.search(r["desc"]), f"صفّ {r['seq']}: {rule}"
     assert {p.name for p in SITE.iterdir() if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}} \
@@ -132,6 +135,9 @@ def test_each_kind_of_number_says_where_it_comes_from():
     html = (SITE / "index.html").read_text(encoding="utf-8")
     assert "من صفحةٍ واحدةٍ من كشف حسابٍ حقيقيّ، نُشرت بموافقة صاحبه" in html
     assert "أرقامٌ إجماليّةٌ من قراءة الكشف نفسه كاملًا" in html
+    js = (SITE / "app.js").read_text(encoding="utf-8")
+    assert "claims.split_unstamped" in js and "claims.split_stamped" in js, (
+        "المصدرُ يُعلن قراءتين لا واحدة (reader_stamp) ⇒ قسمتُهما تُنشر بجانب الرقم")
     footer = html[html.index("<footer>"):]
     assert "من صفحةٍ واحدةٍ من كشف حسابٍ حقيقيّ نُشرت بموافقة صاحبه" in footer
     assert "وزرُّ التجربة يفتح كشفًا اصطناعيًّا" in footer

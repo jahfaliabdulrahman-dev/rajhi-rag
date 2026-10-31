@@ -9,8 +9,9 @@ what the answer alone lets you know about which of its numbers are right.
     python3 tools/measure_plain_read.py --pdf <run>/slice_629p.pdf --ledger docs/measurements/real-page-43.json \
         --pages 43 --runs 2 --budget 0.05 --out docs/measurements/real-plain-read.json --rows-out <scratch>/rows.json
 
-Each run is appended to `--out`. With `--rows-out` the rows the model returned go there instead, so a real
-page's figures stay on the owner's machine and `--out` holds counts only. `--runs` repeats the same request
+Each run is appended to `--out`, numbered. With `--rows-out` the rows the model returned are appended there
+instead, under the same run number, so a real page's figures stay on the owner's machine, `--out` holds counts
+only, and any run can be recounted. `--runs` repeats the same request
 under one budget: the same request on the same page need not return the same figures twice.
 
 Same model (`vlm_reader.MODEL`), same transport (`chat_vlm_image`), same page images (200 DPI, as the app).
@@ -36,7 +37,8 @@ sys.path.insert(0, str(ROOT / "src"))
 PLAIN_PROMPT = ("This is one page of a scanned bank statement. Extract every transaction on it as a JSON array "
                 "of objects with the keys date, description, amount and balance. Return only the JSON.")
 RENDER_DPI = 200            # app.RENDER_DPI: the page images the system itself reads
-AMOUNTS_BASIS = "derived_movement: the balance difference, which the chain holds; the system's reading elsewhere"
+AMOUNTS_BASIS = ("the system's reading where the chain holds; the balance difference for a flagged row between two "
+                 "rows the chain holds; any other flagged row is left out (amounts_unknown)")
 FIRST_CALL_ESTIMATE = 0.03  # before any call is priced, assume one page costs this much
 _INDIC = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 
@@ -76,8 +78,19 @@ def compare(expected: list[dict], returned: list[dict]) -> dict:
     got_amounts = Counter(abs(a) for a in (number(r.get("amount")) for r in returned) if a is not None)
     # The opening balance is not a transaction, and the request asks for transactions only.
     want_balances = Counter(number(r["balance"]) for r in expected if r.get("balance") and not r.get("opening"))
-    # The chain's balance difference is the amount where the system's own reading was wrong (AMOUNTS_BASIS).
-    want_amounts = Counter(number(r.get("derived_movement") or r["movement"]) for r in expected if r.get("movement"))
+    # Which amount is right (AMOUNTS_BASIS): where the chain holds, the reading; where it broke between two rows it
+    # holds, the balances on both sides agree with their neighbours, so the balance difference; any other break
+    # could be a misread balance, and that row is left out rather than scored against a guess.
+    want_amounts, unknown = Counter(), 0
+    for i, r in enumerate(expected):
+        if not r.get("movement"):
+            continue
+        if r.get("chain_ok") is not False:
+            want_amounts[number(r["movement"])] += 1
+        elif 0 < i < len(expected) - 1 and expected[i - 1].get("chain_ok") and expected[i + 1].get("chain_ok"):
+            want_amounts[number(r["derived_movement"])] += 1
+        else:
+            unknown += 1
     breaks = 0
     for prev, cur in zip(returned, returned[1:]):
         b0, b1, a = number(prev.get("balance")), number(cur.get("balance")), number(cur.get("amount"))
@@ -90,6 +103,7 @@ def compare(expected: list[dict], returned: list[dict]) -> dict:
         "balances_matched": sum((want_balances & got_balances).values()),
         "amounts_expected": sum(want_amounts.values()),
         "amounts_matched": sum((want_amounts & got_amounts).values()),
+        "amounts_unknown": unknown,
         "breaks_inside_the_answer": breaks,
         "rows_with_other_fields": sum(1 for r in returned if set(r) - {"date", "description", "amount", "balance"}),
     }
@@ -135,7 +149,13 @@ def main(argv: list[str] | None = None) -> int:
     ledger = json.loads(args.ledger.read_text(encoding="utf-8"))
     key = get_api_key("RAJHI_EVAL_OPENROUTER_KEY")
     wanted = args.pages or list(range(1, int(ledger["n_pages"]) + 1))
-    spent, worst, records, kept = 0.0, FIRST_CALL_ESTIMATE, [], []
+    empty = [page for page in wanted if not any(r["page"] == page for r in ledger["rows"])]
+    if empty:
+        print(f"refused before any call: no expected rows for page(s) {empty} in {args.ledger.name}")
+        return 2
+    runs = json.loads(args.out.read_text(encoding="utf-8"))["runs"] if args.out.exists() else []
+    kept = json.loads(args.rows_out.read_text(encoding="utf-8")) if args.rows_out and args.rows_out.exists() else []
+    spent, worst, records = 0.0, FIRST_CALL_ESTIMATE, []
     for run in range(args.runs):
         pages = []
         for page in wanted:
@@ -147,12 +167,12 @@ def main(argv: list[str] | None = None) -> int:
             cost = float(stats.get("cost") or 0.0)
             worst = max(worst if (pages or records) else 0.0, cost)
             spent += cost
-            expected = [r for r in ledger["rows"] if r["page"] == page]
+            expected = sorted((r for r in ledger["rows"] if r["page"] == page), key=lambda r: r["seq"])
             returned = rows_of(answer)
             entry = {"page": page, "cost": round(cost, 6), **compare(expected, returned),
                      "flagged": flagged_rows(expected, returned)}
             if args.rows_out:
-                kept.append({"run": len(records) + 1, "page": page, "returned_rows": returned})
+                kept.append({"run": len(runs) + len(records) + 1, "page": page, "returned_rows": returned})
             else:
                 entry["returned_rows"] = returned
             pages.append(entry)
@@ -160,16 +180,16 @@ def main(argv: list[str] | None = None) -> int:
         if not pages:
             break
         totals = {k: sum(p[k] for p in pages) for k in
-                  ("rows_expected", "rows_returned", "balances_expected", "balances_matched",
-                   "amounts_expected", "amounts_matched", "breaks_inside_the_answer", "rows_with_other_fields")}
-        records.append({"measured_on": date.today().isoformat(), "model": MODEL, "prompt": PLAIN_PROMPT,
+                  ("rows_expected", "rows_returned", "balances_expected", "balances_matched", "amounts_expected",
+                   "amounts_matched", "amounts_unknown", "breaks_inside_the_answer", "rows_with_other_fields")}
+        records.append({"run": len(runs) + len(records) + 1,
+                        "measured_on": date.today().isoformat(), "model": MODEL, "prompt": PLAIN_PROMPT,
                         "render_dpi": RENDER_DPI, "statement": ledger["source"], "source_sha256": ledger["source_sha256"],
                         "pages_read": [p["page"] for p in pages], "pages_total": int(ledger["n_pages"]),
                         "spent": round(sum(p["cost"] for p in pages), 6), "budget": args.budget,
                         "amounts_basis": AMOUNTS_BASIS, "rows_kept": "elsewhere" if args.rows_out else "here",
                         "totals": totals, "pages": pages})
         print("totals:", json.dumps(totals))
-    runs = json.loads(args.out.read_text(encoding="utf-8"))["runs"] if args.out.exists() else []
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps({"runs": runs + records}, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     if args.rows_out:

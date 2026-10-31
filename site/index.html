@@ -27,7 +27,7 @@
       <text x="50" y="54" text-anchor="middle" font-family="'Noto Naskh Arabic', serif" font-size="21" fill="#3FA98C">مُدقَّق</text>
       <text x="50" y="70" text-anchor="middle" font-size="8.5" fill="#9A927F">آلياً</text>
     </svg>
-    <h1 dir="ltr">AI Bank Statement Auditor</h1>
+    <h1 dir="ltr" lang="en">AI Bank Statement Auditor</h1>
     <p class="tag">مُدقّق كشوف الحساب الممسوحة ضوئيًّا</p>
     <p class="lede">يقرأ كشفَ الحساب الممسوح صفًّا صفًّا، ثمّ يراجع كلَّ رقمٍ بحساب الرصيد وذيول الصفحات. ما ثبت يُعرض مُثبتًا، وما لم يثبت يُعرض عليك بموضعه.</p>
     <div class="actions">
@@ -39,7 +39,7 @@
 
   <main id="story">
     <noscript><p class="note">أرقامُ هذه الصفحة تُقرأ عند فتحها من ملفّات القياس. فعّل JavaScript لتراها.</p></noscript>
-    <p class="note" id="load-error" hidden>تعذّر تحميل الأرقام. أعد تحميل الصفحة.</p>
+    <p class="note" id="load-error" role="alert" hidden>تعذّر تحميل الأرقام. أعد تحميل الصفحة.</p>
 
     <section class="beat" id="catch" aria-labelledby="catch-title" hidden>
       <h2 id="catch-title">هل يطابق هذا المبلغ؟</h2>
@@ -94,8 +94,9 @@
       <h3>السلسلة</h3>
       <p>كلُّ رصيدٍ يساوي الرصيدَ قبله زائدًا الإيداعَ أو ناقصًا السحب. فإن طابق ثبت الصفّ، وإن خالف وقف الحسابُ عنده وعُرض الصفُّ للمراجعة.</p>
       <p class="tally" id="chain-tally"></p>
+      <p id="chain-why"></p>
       <h3>التذييل</h3>
-      <p>في ذيل كلّ صفحةٍ مجموعٌ تراكميٌّ مطبوعٌ للمدين والدائن. والنظامُ يقابله بمجموع فروق الأرصدة التي قرأها، فيراجع عمودَ الأرصدة من خارج السلسلة.</p>
+      <p>في ذيل كلّ صفحةٍ مجموعٌ تراكميٌّ مطبوعٌ للمدين والدائن، ورصيدُ آخر الصفحة. والنظامُ يقابلها بمجموع فروق الأرصدة التي قرأها وبآخر رصيدٍ قرأه، فيراجع حسابَ الصفحة من خارج السلسلة.</p>
       <p class="verdict" id="footer-verdict"></p>
       <p class="source">أرقامُ هذا القسم وما قبله من صفحةٍ واحدةٍ من كشف حسابٍ حقيقيّ، نُشرت بموافقة صاحبه.</p>
     </section>
@@ -105,6 +106,7 @@
       <p>القراءةُ نفسُها والحَكَمان نفساهما على الكشف نفسه كاملًا:</p>
       <dl class="stats" id="real-stats"></dl>
       <p id="real-unproven"></p>
+      <p id="real-stamps"></p>
       <p class="source">أرقامٌ إجماليّةٌ من قراءة الكشف نفسه كاملًا. ومصدرُها لقطةُ الأرقام المحروسة في المستودع، وهي نفسُها في التقرير.</p>
     </section>
 
