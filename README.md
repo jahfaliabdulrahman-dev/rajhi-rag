@@ -45,19 +45,21 @@ python3 tools/to_pdf.py --md docs/WHO_IS_THIS_FOR.md --out who-is-this-for-ar.pd
 
 ## تشغيل محلي
 
-**ما يلزم:** Python 3.11 أو 3.12 · Poppler لتحويل صفحات PDF إلى صور (`brew install poppler` على macOS، `sudo apt install poppler-utils` على Linux) · مفتاح [OpenRouter](https://openrouter.ai) للقراءة والإجابة. وأول تشغيل ينزّل نموذج التضمين (نحو 110MB) مرة واحدة.
+**ما يلزم:** Python 3.11 أو 3.12 · Poppler لتحويل صفحات PDF إلى صور (`brew install poppler` على macOS، `sudo apt install poppler-utils` على Linux) · مفتاح [OpenRouter](https://openrouter.ai) للقراءة والإجابة. وأول سؤال ينزّل نموذج التضمين (نحو 465MB، مقيس) مرة واحدة.
 
 ```bash
 git clone https://github.com/jahfaliabdulrahman-dev/rajhi-rag.git
 cd rajhi-rag
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt     # نحو خمس دقائق على نسخة نظيفة
-cp .env.example .env                # ثم ضع مفتاحك: OPENROUTER_API_KEY=sk-or-...
 python app.py                       # واجهة Gradio عربية على http://127.0.0.1:7860
 ```
 
-**للتجربة بلا بيانات حقيقية:** ارفع العيّنة المصطنعة `data/sample/statement_sample.pdf` في تبويب «قراءة وتحقق»، ثم اسأل في تبويب «سؤال وجواب».
-**والمفتاح لا يدخل الكود:** يُقرأ من `.env` المستثنى من git، وفحص آلي في كل دفع يرفض أي مفتاح.
+**هكذا تعمل كما على الرابط العام:** «جرّب الآن» في تبويب «الكشف» يعرض كشفًا اصطناعيًا مقروءًا مسبقًا بلا مفتاح، و«اقرأ كشفك» يقرأ
+بمفتاح تلصقه في خانته لجلستك وحدها — وهذا السطح لا يقرأ `.env` أبدًا. ثم اسأل في تبويب «اسأل».
+**ولتشغيله بمفتاحك من `.env` على جهازك:** `cp .env.example .env` وضع فيه `OPENROUTER_API_KEY=sk-or-...`، ثم
+`RAJHI_SURFACE=local python app.py` — السطح المحلي يقرأ المفتاح من `.env`، ويحفظ قواعد الكشوف في مجلد المستخدم.
+**والمفتاح لا يدخل الكود:** `.env` مستثنى من git، وفحص آلي في كل دفع يرفض أي مفتاح.
 
 الخدمات الدائمة على macOS (launchd):
 
