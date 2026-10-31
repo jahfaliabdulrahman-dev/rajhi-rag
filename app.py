@@ -220,6 +220,16 @@ RTL_CSS = """
 /* ————— طبقات RTL (وصفة مُجرَّبة) ————— */
 .gradio-container { direction: rtl; }
 .gradio-container .block[dir="ltr"] { direction: rtl; }
+/* وGradio تختم عنوانَ كلّ مكوّنٍ غيرِ rtl بـdir="ltr" (وFile لا خيارَ rtl له) ⇒ عنوانٌ مختلطٌ يُعرض مقلوبًا:
+   «(OpenRouter) ٢. مفتاحك» · «(PDF) ١. ملفّ الكشف» (مقيس 2026-10-31). فالعنوانُ عربيٌّ في كلّ مكوّن. */
+.gradio-container [data-testid="block-label"][dir="ltr"],
+.gradio-container [data-testid="block-info"][dir="ltr"] { direction: rtl; }
+/* وأيقونةُ العنوان تُبعَد عن نصّه بهامشٍ أيمنَ فيزيائيّ ⇒ بعد القلب يقع الهامشُ خارجها وتلتصق بالرقم: هامشٌ منطقيّ */
+.gradio-container [data-testid="block-label"][dir="ltr"] > span { margin: 0; margin-inline-end: var(--size-2); }
+/* عرضُ الصفحة: Gradio تقيّده بقفزاتٍ على عرض النافذة (…١٥٣٦ ثمّ ١٩٢٠) ⇒ على شاشة ١٩٢٠ يكفي ظهورُ شريط التمرير
+   (طيُّ قسمٍ أو فتحُه) لتقفز الصفحةُ من ملءِ العرض إلى ١٥٣٦ بحواف (مقيس 2026-10-31). فتُطفأ القفزاتُ بخيار المكتبة
+   (`fill_width=True`) ويُوضع سقفٌ واحدٌ مرن هنا على صنف التطبيق الموثَّق: العرضُ لا يتبع شريطَ التمرير. */
+.gradio-container { width: 100%; max-width: 1536px !important; margin-inline: auto !important; }
 .gradio-container label.float { left: auto !important; right: 6px !important; }
 footer { direction: ltr; }
 
@@ -238,7 +248,14 @@ footer { direction: ltr; }
               padding: 14px 16px !important; background: var(--background-fill-primary); }
 .start-card h3 { margin: 0 0 4px !important; font-family: 'Noto Naskh Arabic', serif; }
 .start-card.try { border-color: var(--color-accent); justify-content: space-between; }
-.start-card button { flex: 0 0 auto !important; }
+.start-card.try button { flex: 0 0 auto !important; }
+/* الصفُّ الأخير في «اقرأ كشفك» على أرض البطاقة، وعناصرُه على حافّته السفلى ⇒ زرُّ القراءة بمحاذاة «جرّب الآن»
+   (البطاقتان بارتفاعٍ واحد) حتى حين يلتفّ نصُّ الخانة سطرين (مقيس على ١٤٤٠: التوسيطُ رفعه ١٠ بكسل) */
+.start-card .start-actions { margin-top: auto; align-items: flex-end; }
+/* منطقةُ الإسقاط بإطارٍ متقطّع يقول «أسقط هنا»، ويكتمل لونُه حين يمرّ المؤشّر */
+#file-panel { border: 1.5px dashed color-mix(in srgb, var(--color-accent) 55%, transparent) !important;
+              border-radius: 10px !important; }
+#file-panel:hover { border-color: var(--color-accent) !important; }
 /* المفتاحُ لاتينيّ: يُكتب ويُعرض مثالُه من اليسار */
 #key-in input { direction: ltr; text-align: left; }
 
@@ -1974,7 +1991,7 @@ def _example_question(evt: gr.SelectData) -> str:
 
 EXAMPLE_QUESTIONS = ["كم مجموع السحوبات في الكشف؟", "ما أعلى رصيدٍ ومتى؟", "ما الصفوف التي تحتاج مراجعة؟"]
 
-with gr.Blocks(title="AI Bank Statement Auditor", delete_cache=DELETE_CACHE) as demo:
+with gr.Blocks(title="AI Bank Statement Auditor", delete_cache=DELETE_CACHE, fill_width=True) as demo:
     # **`delete_cache=(600, 600)` (R130-2):** ملفّاتُ الحافظة التي تُنشئها المكوّناتُ من مخرجاتنا
     # (صورُ المعرض · الإكسل · المحادثة) يحذفها **مكوّنُ Gradio** بعد عشر دقائق، وكلَّها عند إغلاق
     # الخادم (`route_utils.create_lifespan_handler`، مقروءٌ من النسخة المثبَّتة) — لا منظّفٌ يدويّ.
@@ -2001,21 +2018,22 @@ with gr.Blocks(title="AI Bank Statement Auditor", delete_cache=DELETE_CACHE) as 
                     with gr.Row():
                         pdf_in = gr.File(label="١. ملفّ الكشف (PDF)", file_types=[".pdf"],
                                          elem_id="file-panel", height=150, scale=1)
-                        with gr.Column(scale=1):
-                            # **مفتاحُ الزائر (المرحلة ١):** خانةُ كلمة مرور على السطح العامّ وحدَه — تُمرَّر
-                            # قيمتُها مع كلّ قراءةٍ وسؤال ولا تُحفظ في حالة. **وقبل زرّ القراءة** (ترتيبُ الخطوات).
-                            key_in = gr.Textbox(label="٢. مفتاحك (OpenRouter)", type="password",
-                                                placeholder="sk-or-…", visible=SURFACE == "public",
-                                                elem_id="key-in",
-                                                info="لهذه الجلسة وحدها، لا يُحفظ ولا يُسجَّل.")
-                            btn = gr.Button("٣. اقرأ الكشف" if SURFACE == "public" else "٢. اقرأ الكشف",
-                                            variant="primary", interactive=False)
-                    with gr.Accordion("خيارات متقدّمة", open=False):
+                        # **مفتاحُ الزائر (المرحلة ١):** خانةُ كلمة مرور على السطح العامّ وحدَه — تُمرَّر
+                        # قيمتُها مع كلّ قراءةٍ وسؤال ولا تُحفظ في حالة. **وقبل زرّ القراءة** (ترتيبُ الخطوات).
+                        key_in = gr.Textbox(label="٢. مفتاحك (OpenRouter)", type="password",
+                                            placeholder="sk-or-…", visible=SURFACE == "public",
+                                            elem_id="key-in", scale=1,
+                                            info="لهذه الجلسة وحدها، لا يُحفظ ولا يُسجَّل.")
+                    # **الصفُّ الأخير على أرض البطاقة (ملاحظاتُ المالك 2026-10-31):** خانةُ المتابعة ظاهرةٌ بلا طيّ،
+                    # وزرُّ القراءة تحت المفتاح بمحاذاة «جرّب الآن».
+                    with gr.Row(elem_classes=["start-actions"]):
                         # **خانةُ المتابعة (R131-7):** تعود بقيمتها التصميميّة `False` — التوقّفُ هو
                         # الافتراض، والاستبعادُ فعلٌ صريحٌ يُعلَّم فلا يُدفع مقابل كشفٍ ناقصٍ بلا قرار.
                         skip_rejected_in = gr.Checkbox(
                             label="متابعة مع استبعاد الصفحات المرفوضة (تُقرأ البقيةُ وتُسمّى المستبعَدة)",
-                            value=False)
+                            value=False, scale=1)
+                        btn = gr.Button("٣. اقرأ الكشف" if SURFACE == "public" else "٢. اقرأ الكشف",
+                                        variant="primary", interactive=False, scale=1)
             ticker = gr.Markdown("اختر طريقًا: جرّب كشفًا تجريبيًّا، أو اقرأ كشفك." if SURFACE == "public"
                                  else "في انتظار الكشف… ارفع ملفاً ثم ابدأ القراءة.",
                                  rtl=True, elem_classes=["ticker"])
