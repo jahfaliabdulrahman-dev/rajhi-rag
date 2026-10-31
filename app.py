@@ -1554,20 +1554,54 @@ def _reset_qa_surfaces(sess=None):
     return [], "", pd.DataFrame(), _hide_note()
 
 
-def _evidence_from_numbers(sess, nos: list[int]) -> tuple[pd.DataFrame, str]:
+def _evidence_from_numbers(sess, nos: list[int], cited: set[int] | None = None,
+                           role: str = "دخلت في حساب الجواب") -> tuple[pd.DataFrame, str]:
     """Rows by their GLOBAL statement numbers — the SAME numbers the tools
-    cite and the main table shows, so # stays identical across surfaces."""
+    cite and the main table shows, so # stays identical across surfaces.
+
+    **`cited`** (الاستشهادُ المُنوَّع): عمودٌ يُعلِّم ما استشهد به الجواب من الصفوف المعروضة، ويبقى داخل
+    السقف إن قُصَّت. **و`role`** ما تقوله الملاحظةُ عن الصفوف — فلا تُسمّى استشهاداتٌ بلا أثرٍ «دخلت في الحساب».
+    """
     rows = sess.state.get("rows") or []
     pairs = [(i, rows[i - 1]) for i in nos if 1 <= i <= len(rows)]
     if not pairs:
         return pd.DataFrame(), ""
-    note = f"◽ {_n_rows_ar(len(pairs))} دخلت في حساب الجواب."
+    note = f"◽ {_n_rows_ar(len(pairs))} {role}."
     if len(pairs) > _EVIDENCE_CAP:
         note = (f" عُرضت أول {_EVIDENCE_CAP} من أصل "
-                f"{_n_rows_ar(len(pairs))} دخلت في حساب الجواب.")
-        pairs = pairs[:_EVIDENCE_CAP]
+                f"{_n_rows_ar(len(pairs))} {role}.")
+        # المُستشهَدُ به أوّلًا في القصّ ثمّ بترتيب الكشف — فلا يُقصّ ما يُعلَّم
+        pairs = sorted(sorted(pairs, key=lambda p: p[0] not in (cited or ()))[:_EVIDENCE_CAP])
     verdicts = sess.state.get("verdicts") or {}
-    return (pd.DataFrame([_row_record(i, r, verdicts) for i, r in pairs]), note)
+    df = pd.DataFrame([_row_record(i, r, verdicts) for i, r in pairs])
+    if cited:
+        df.insert(1, "استشهد به الجواب", ["✓" if i in cited else "" for i, _ in pairs])
+        k = sum(1 for i, _ in pairs if i in cited)
+        if k < len(pairs):
+            note += f" وعلامةُ ✓ على ما استشهد به الجواب منها ({_n_rows_ar(k)})."
+    return df, note
+
+
+def _typed_evidence(sess, res) -> tuple[pd.DataFrame, str]:
+    """**الاستشهادُ المُصرَّح به من النوع (أ-٤)** — يُعلَّم في اللوحة، وكلُّ استشهادٍ لا شاهدَ له في
+    الأثرِ **يُسمّى** بدل أن يُمرَّر كأنّه مُثبت.
+
+    **واللوحةُ تعرض ما بنى الجواب — الأثر (`used_row_nos`)، لا الاستشهادَ وحده (بروفةُ CP1 · 2026-10-31):**
+    كانت تعرض الاستشهادَ وتكتب «دخلت في حساب الجواب» ⇒ قِيس على الرابط الحيّ: أداةُ الجمع جمعت أربعًا
+    ولا تُري النموذجَ إلا ثلاثةَ أمثلة، فاستشهد بثلاثٍ وعرضت اللوحةُ ثلاثًا تحت جوابٍ يقول «عبر 4 حركات».
+    والأثرُ هو ما يحفظه ملفُّ المحادثة المُصدَّر (`_record_qa_row`) ⇒ **مصدرٌ واحدٌ للسطحين**. وبلا أثرٍ
+    أصلًا تُعرض الاستشهاداتُ بلفظها، ولا يُدَّعى أنّها دخلت الحساب.
+    """
+    cited = set(res.cited_row_ids or [])
+    if res.used_row_nos:
+        df, note = _evidence_from_numbers(sess, res.used_row_nos, cited=cited)
+    else:
+        df, note = _evidence_from_numbers(sess, res.cited_row_ids, role="استشهد بها الجواب")
+    if getattr(res, "unsupported_citations", None):
+        note = ((note + " · ") if note else "") + (
+            "⚠ استشهادٌ بلا شاهدِ أثر: "
+            + ", ".join(f"صف {n}" for n in res.unsupported_citations))
+    return df, note
 
 
 def _scope_n_pages(sess, rows: list[dict]) -> int:
@@ -1727,13 +1761,7 @@ def ask_followup(history, api_key: str = "", sess=None):
                 _note_update("⛔ لا أدلة: تعذّرت الأدوات — هذا الجواب لم "
                              "يُحسَب من الكشف (أُفرغت اللوحة عمداً)."))
     if mode == "typed":
-        # **الاستشهادُ المُصرَّح به من النوع (أ-٤)** — يُعرض هو، وكلُّ استشهادٍ لا شاهدَ له في
-        # الأثرِ **يُسمّى في اللوحة** بدل أن يُمرَّر كأنّه مُثبت.
-        df, note = _evidence_from_numbers(sess, res.cited_row_ids)
-        if getattr(res, "unsupported_citations", None):
-            note = ((note + " · ") if note else "") + (
-                "⚠ استشهادٌ بلا شاهدِ أثر: "
-                + ", ".join(f"صف {n}" for n in res.unsupported_citations))
+        df, note = _typed_evidence(sess, res)
         return history, sources_md, df, _note_update(note)
     if mode == "tools":
         df, note = _evidence_from_numbers(sess, res.used_row_nos)

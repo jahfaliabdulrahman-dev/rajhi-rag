@@ -158,7 +158,8 @@ def evidence_mode(res) -> str:
                  evidence assembled from the model's own citations is evidence
                  for a claim that was never computed (audit P2-10);
     'typed'    — **الاستشهادُ من النوع (أ-٤)**: أرقامُ الصفوف جاءت في كائنٍ مُقيَّد لا من نثرٍ
-                 يُقتطع بتعبيرٍ نمطيّ ⇒ فهي تُعرض هي، وكلُّ استشهادٍ بلا شاهدِ أثرٍ يُعلَن؛
+                 يُقتطع بتعبيرٍ نمطيّ ⇒ فهي **تُعلَّم** في لوحة ما بنى الجواب (الأثر — `app._typed_evidence`،
+                 بروفةُ CP1 2026-10-31)، وكلُّ استشهادٍ بلا شاهدِ أثرٍ يُعلَن؛
     'tools'    — rows a tool actually touched (the strong case);
     'fallback' — a descriptive answer: citations, else retrieval pages.
     """

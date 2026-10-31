@@ -257,3 +257,34 @@ def test_the_button_is_wired_with_the_session():
     assert len(wired) == 1, "«جرّب الآن» غيرُ موصولٍ بزرّ"
     assert app.sess_state in wired[0].inputs and app.sess_state in wired[0].outputs
     assert (app.try_btn._id, "click") in wired[0].targets, wired[0].targets
+
+
+def test_the_evidence_panel_shows_every_row_the_tools_summed_and_marks_the_cited(public):
+    """**بروفةُ CP1 على الرابط الحيّ (2026-10-31) — مقيس:** «كم مجموع السحوبات في الكشف؟» جمعت أداةُ
+    الجمع **أربعَ** حركاتٍ والجوابُ قال «عبر 4 حركات»، واللوحةُ عرضت **ثلاثًا** وكتبت «3 صفوف دخلت في حساب
+    الجواب». **والسبب:** في وضع الاستشهاد المُنوَّع كانت اللوحةُ تعرض ما استشهد به النموذج — وأداةُ الجمع لا
+    تُريه إلا ثلاثةَ أمثلة — بينما ملفُّ المحادثة المُصدَّر يحفظ ما بنى الجواب (`used_row_nos`) ⇒ سطحان
+    بمصدرين. **والثابت:** اللوحةُ تعرض ما بنى الجواب (الأثر)، وتُعلِّم ما استشهد به، وتسمّي ما لا شاهدَ له.
+    """
+    app, visitor = public
+    sess = visitor()
+    app.try_now(sess)
+    res = SimpleNamespace(citation_mode="typed", cited_row_ids=[7, 20, 30], used_row_nos=[7, 20, 30, 35],
+                          unsupported_citations=[], tools_failed=False, ungrounded=False)
+    df, note = app._typed_evidence(sess, res)
+    assert list(df["#"]) == [7, 20, 30, 35], list(df["#"])
+    assert "4 صفوف دخلت في حساب الجواب" in note, note
+    marks = dict(zip(df["#"], df["استشهد به الجواب"]))
+    assert marks == {7: "✓", 20: "✓", 30: "✓", 35: ""}, marks
+    # **وما استشهد به ولا شاهدَ له يُسمّى ولا يُعرض صفًّا بنى الجواب**
+    res2 = SimpleNamespace(citation_mode="typed", cited_row_ids=[7, 40], used_row_nos=[7],
+                           unsupported_citations=[40], tools_failed=False, ungrounded=False)
+    df2, note2 = app._typed_evidence(sess, res2)
+    assert list(df2["#"]) == [7] and "صف واحد دخلت في حساب الجواب" in note2, (list(df2["#"]), note2)
+    assert "⚠ استشهادٌ بلا شاهدِ أثر: صف 40" in note2, note2
+    # **وبلا أثرٍ أصلًا لا يُدَّعى «دخلت في الحساب»:** تُعرض الاستشهاداتُ بلفظها وتُسمّى بلا شاهد
+    res3 = SimpleNamespace(citation_mode="typed", cited_row_ids=[9], used_row_nos=[],
+                           unsupported_citations=[9], tools_failed=False, ungrounded=False)
+    df3, note3 = app._typed_evidence(sess, res3)
+    assert list(df3["#"]) == [9] and "دخلت في حساب الجواب" not in note3, note3
+    assert "استشهد بها الجواب" in note3 and "صف 9" in note3, note3
