@@ -1,13 +1,13 @@
 // Every number on this page is read here, at load time, from a tracked file. None is typed into the page;
 // tests/test_pages_site.py holds that. The four files, each a link to its source in the repository:
-//   statement_showcase.ledger.json  the system's own reading of the synthetic statement (tools/ledger.py)
-//   pypdfloader.json                LangChain's PyPDFLoader on the same PDF (docs/measurements/)
-//   plain-read.json                 the same model with a plain request, no chain and no footer (tools/measure_plain_read.py)
-//   claims.json                     the guarded aggregate figures of the real 629-page run (tools/render_claims.py)
+//   page.json         one page of a real statement as the system read it, names hidden (tools/publish_real_page.py)
+//   pypdfloader.json  LangChain's PyPDFLoader on the same statement (docs/measurements/)
+//   plain-read.json   the same model with a plain request on the same page, counts only (tools/measure_plain_read.py)
+//   claims.json       the guarded aggregate figures of the same statement's full run (tools/render_claims.py)
 "use strict";
 
 const SOURCES = {
-  ledger: "statement_showcase.ledger.json",
+  page: "page.json",
   loader: "pypdfloader.json",
   plain: "plain-read.json",
   claims: "claims.json",
@@ -38,6 +38,13 @@ function line(node, ...parts) {
 }
 const n = (value) => ({ value });
 
+// "a of b" kept on one line: the two numbers and the word between them never wrap apart.
+function outOf(a, b) {
+  const span = el("span", undefined, "pair");
+  span.append(num(a), " من ", num(b));
+  return span;
+}
+
 function cell(row, content, header) {
   const td = el(header ? "th" : "td");
   if (header) td.scope = "row";
@@ -49,106 +56,125 @@ function firstLine(text) {
   return (text || "").split("\n")[0];
 }
 
+// The kind of movement: the description's first line up to its first bracket or Latin letter.
+function kind(text) {
+  return firstLine(text).split(/[([A-Za-z]/)[0].trim();
+}
+
+// How a misread amount differs from the balances' difference, said from the digits themselves.
+function howItDiffers(read, derived) {
+  const a = money(read).replace(/\D/g, "");
+  const b = money(derived).replace(/\D/g, "");
+  if (a.length === b.length) {
+    const at = [...a].map((d, i) => (d === b[i] ? -1 : i)).filter((i) => i >= 0);
+    if (at.length === 1) return "رقمٌ واحدٌ قُرئ خطأً";
+    if (at.length === 2 && at[1] === at[0] + 1 && a[at[0]] === b[at[1]] && a[at[1]] === b[at[0]]) {
+      return "رقمان تبادلا موضعَيهما";
+    }
+  }
+  return "قراءةٌ تخالف فرقَ الرصيدين";
+}
+
 function renderCatch(rows) {
-  const i = rows.findIndex((r) => !r.chain_ok && r.movement);
-  // The row is never made up: with no row flagged in this reading, the section stays hidden.
+  const i = rows.findIndex((r) => r.chain_ok === false && r.movement);
+  // The row is never made up: with no row flagged on this page, the section stays hidden.
   if (i < 1) return;
   const prev = rows[i - 1];
   const r = rows[i];
-  document.getElementById("catch-desc").textContent = `«${firstLine(r.desc)}»`;
-  const figures = document.getElementById("catch-figures");
-  for (const [label, value] of [
-    ["الرصيدُ قبله", money(prev.balance)],
-    ["الرصيدُ بعده", money(r.balance)],
-    [r.side === "credit" ? "الإيداعُ كما قُرئ" : "السحبُ كما قُرئ", money(r.movement)],
+  const debit = r.side === "debit";
+  const sum = document.getElementById("catch-sum");
+  for (const [op, label, value, last] of [
+    ["", "الرصيدُ قبله", prev.balance, false],
+    [debit ? "−" : "+", debit ? "السحبُ كما قرأه النظام" : "الإيداعُ كما قرأه النظام", r.movement, false],
+    ["=", "الرصيدُ بعده", r.balance, true],
   ]) {
-    const item = el("div");
-    item.append(el("dt", label));
-    const dd = el("dd");
-    dd.append(num(value));
-    item.append(dd);
-    figures.append(item);
+    const row = el("div", undefined, last ? "line result" : "line");
+    const name = el("span", label, "label");
+    if (last) name.append(el("span", "؟", "ask"));
+    row.append(name, el("span", op, "op"), num(money(value)));
+    sum.append(row);
   }
   line(document.getElementById("catch-answer"),
-       "لا يطابق. الفرقُ بين الرصيدين ", n(money(r.derived_movement)), "، والمقروء ", n(money(r.movement)),
-       ": رقمان تبادلا موضعَيهما.");
+       "لا يطابق. الفرقُ بين الرصيدين ", n(money(r.derived_movement)), "، والنظامُ قرأ ", n(money(r.movement)),
+       `: ${howItDiffers(r.movement, r.derived_movement)}.`);
   document.getElementById("catch").hidden = false;
 }
 
 function runSentence(run, index, rows) {
-  const pages = run.pages.filter((p) => p.balances_expected > 0);
-  const worst = pages.reduce((a, b) => (b.balances_matched / b.balances_expected < a.balances_matched / a.balances_expected ? b : a));
   const node = el("li");
   node.append(el("strong", `المرّة ${ORDINALS[index] || index + 1}: `));
-  if (worst.balances_matched < worst.balances_expected) {
-    line(node, "أرصدةُ الصفحة ", n(worst.page), ": ", n(worst.balances_matched), " من ", n(worst.balances_expected),
-         " تطابق الكشف. ");
-    node.append(worst.breaks_inside_the_answer === 0
-      ? "والجوابُ متّسقٌ مع نفسه، فلا شيء فيه يدلّ على الخطأ. "
-      : "وفي الجواب تناقضٌ لم يذكره. ");
+  const t = run.totals;
+  if (t.rows_returned < t.rows_expected) {
+    node.append("أعاد من الصفوف ", outOf(t.rows_returned, t.rows_expected), ". ");
+  }
+  if (t.balances_matched === t.balances_expected && t.amounts_matched === t.amounts_expected) {
+    node.append("صحّت أرصدتُه ومبالغُه كلُّها، ", outOf(t.amounts_matched, t.amounts_expected), ". ");
   } else {
-    node.append("أرصدةُ الصفحات كلُّها تطابق الكشف. ");
+    node.append("صحّ من الأرصدة ", outOf(t.balances_matched, t.balances_expected), "، ومن المبالغ ",
+                outOf(t.amounts_matched, t.amounts_expected), ". ");
+    node.append(t.breaks_inside_the_answer === 0
+      ? "والجوابُ متّسقٌ مع نفسه، فلا شيء فيه يدلّ على الخطأ. "
+      : "وفي جوابه تناقضٌ لم يذكره. ");
   }
   for (const f of run.pages.flatMap((p) => p.flagged)) {
-    const name = firstLine((rows.find((r) => r.seq === f.seq) || {}).desc);
-    if (f.answer_has_printed_amount) {
-      node.append(`وجاء صفُّ «${name}» بالقراءة الخاطئة نفسها التي أخطأها قارئُ النظام، ولم يذكر الجوابُ ذلك.`);
-    } else if (f.answer_has_balance_difference) {
-      node.append(`وقرأ صفَّ «${name}» صحيحًا.`);
+    if (!rows.some((r) => r.seq === f.seq)) continue;
+    if (f.answer_has_balance_difference) {
+      node.append("ومنها قرأ صحيحًا الصفَّ الذي أخطأه قارئُ النظام.");
+    } else if (f.answer_has_systems_reading) {
+      node.append("وأخطأ الصفَّ الذي أخطأه قارئُ النظام، بالقراءة نفسها، ولم يذكر ذلك.");
+    } else {
+      node.append("وجاء الصفُّ الذي أخطأه قارئُ النظام بقراءةٍ ثالثة.");
     }
   }
   return node;
 }
 
 function renderHard(loader, plain, rows) {
-  const chars = loader.characters_per_page.reduce((a, b) => a + b, 0);
-  line(document.getElementById("fact-loader"),
-       "محمّلُ PyPDFLoader في LangChain، أوّلُ خطوةٍ في سلسلة RAG التي درسناها، يعيد من الملفّ ", n(loader.documents),
-       " مستندات، وعددُ الحروف فيها ", n(chars), ".");
-  // Whether the two answers differed is read from the runs, not asserted.
-  const shape = (run) => run.pages.map((p) => `${p.page}:${p.balances_matched}:${p.amounts_matched}`).join("|");
-  const differed = plain.runs.length > 1 && new Set(plain.runs.map(shape)).size > 1;
-  document.getElementById("fact-plain").textContent =
-    "ثمّ أُرسلت الصفحاتُ نفسُها إلى النموذج نفسه الذي يقرأ به النظام، بطلبٍ بسيط: «استخرج كلَّ حركةٍ JSON»، بلا سلسلةٍ ولا تذييل." +
-    (plain.runs.length > 1 ? (differed ? " والطلبُ نفسُه أُعيد، فاختلف الجوابان:" : " والطلبُ نفسُه أُعيد، فجاء الجوابُ نفسُه:") : "");
+  const first = document.getElementById("step-loader");
+  first.append(el("strong", "المحاولة الأولى: "));
+  line(first, "محمّلُ PyPDFLoader في LangChain، أوّلُ خطوةٍ في سلسلة RAG التي درسناها. أعاد من الكشف ",
+       n(loader.documents), " مستندًا، وعددُ الحروف فيها كلّها ", n(loader.characters_total),
+       loader.characters_total === 0 ? ": لا نصَّ يُقرأ." : ".");
+  const plainStep = document.getElementById("step-plain");
+  plainStep.append(el("strong", "المحاولة الثانية: "),
+    "الصفحةُ نفسُها إلى النموذج نفسه الذي يقرأ به النظام، بطلبٍ بسيط: «استخرج كلَّ حركةٍ JSON»، بلا سلسلةٍ ولا تذييل." +
+    (plain.runs.length > 1 ? " وأُعيد الطلبُ نفسُه:" : ""));
   ["fact-run-1", "fact-run-2"].forEach((id, i) => {
     const slot = document.getElementById(id);
     if (plain.runs[i]) slot.replaceWith(runSentence(plain.runs[i], i, rows)); else slot.remove();
   });
   const spent = plain.runs.reduce((a, r) => a + r.spent, 0);
-  line(document.getElementById("fact-cost"), "كلفةُ القياسين ", n(`$${spent.toFixed(3)}`), " · النموذج ", n(plain.runs[0].model));
+  line(document.getElementById("fact-cost"), "كلفةُ القراءتين ", n(`$${spent.toFixed(3)}`), " · النموذج ", n(plain.runs[0].model));
 }
 
-function renderReading(rows) {
+function renderReading(page) {
+  line(document.getElementById("scan-caption"), "الصفحةُ ", n(page.page), " من كشفٍ طولُه ", n(page.n_pages),
+       " صفحة. اضغط الصورة لتراها بحجمها.");
   const body = document.querySelector("#reading tbody");
-  for (const r of rows.filter((x) => x.page === 1).slice(0, 6)) {
-    const tr = el("tr");
-    cell(tr, firstLine(r.desc), true);
-    cell(tr, r.printed_movement ? num(r.printed_movement) : "—");
+  for (const r of page.rows) {
+    const tr = el("tr", undefined, r.chain_ok ? "ok" : "flagged");
+    cell(tr, kind(r.desc), true);
     cell(tr, r.movement ? num(money(r.movement)) : "—");
     cell(tr, num(money(r.balance)));
+    cell(tr, r.chain_ok ? "✓" : "✗ يُراجَع");
     body.append(tr);
   }
 }
 
-function renderChain(rows) {
-  const proven = rows.filter((r) => r.chain_ok && !r.opening).length;
-  const opening = rows.filter((r) => r.opening).length;
-  const shown = rows.filter((r) => !r.chain_ok).length;
-  line(document.getElementById("chain-tally"), "حركاتٌ أثبتتها السلسلة: ", n(proven), " · رصيدٌ افتتاحيّ: ", n(opening),
-       " · صفوفٌ تُعرض عليك: ", n(shown));
-}
-
-function renderFooters(footers) {
-  const body = document.querySelector("#footers tbody");
-  for (const f of Object.values(footers).sort((a, b) => a.page - b.page)) {
-    const tr = el("tr", undefined, f.verdict === "ok" ? "ok" : "flagged");
-    cell(tr, num(f.page), true);
-    cell(tr, num(f.debits));
-    cell(tr, num(f.credits));
-    cell(tr, f.verdict === "ok" ? "✓ يطابق" : "✗ لا يطابق");
-    body.append(tr);
+function renderChain(page) {
+  const proven = page.rows.filter((r) => r.chain_ok).length;
+  const shown = page.rows.filter((r) => !r.chain_ok).length;
+  line(document.getElementById("chain-tally"), "في هذه الصفحة: حركاتٌ أثبتتها السلسلة ", n(proven),
+       " · صفوفٌ تُعرض للمراجعة ", n(shown));
+  const verdict = document.getElementById("footer-verdict");
+  if (page.footer.verdict !== "ok") {
+    verdict.textContent = "ذيلُ هذه الصفحة: ✗ لا يطابق.";
+    verdict.classList.add("flagged");
+    return;
   }
+  verdict.textContent = shown
+    ? "ذيلُ هذه الصفحة: ✓ يطابق. فالأرصدةُ ثابتة، وفرقُ الرصيدين هو المبلغُ الصحيح، والسلسلةُ محقّةٌ في أنّ المبلغ المقروء خطأ."
+    : "ذيلُ هذه الصفحة: ✓ يطابق.";
 }
 
 function renderReal(claims) {
@@ -181,13 +207,12 @@ async function fetchJson(path) {
 
 async function main() {
   try {
-    const [ledger, loader, plain, claims] = await Promise.all(Object.values(SOURCES).map(fetchJson));
-    const rows = [...ledger.rows].sort((a, b) => a.seq - b.seq);
+    const [page, loader, plain, claims] = await Promise.all(Object.values(SOURCES).map(fetchJson));
+    const rows = [...page.rows].sort((a, b) => a.seq - b.seq);
     renderCatch(rows);
     renderHard(loader, plain, rows);
-    renderReading(rows);
-    renderChain(rows);
-    renderFooters(ledger.footers);
+    renderReading({ ...page, rows });
+    renderChain({ ...page, rows });
     renderReal(claims);
   } catch (error) {
     document.getElementById("load-error").hidden = false;

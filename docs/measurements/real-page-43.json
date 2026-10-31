@@ -1,0 +1,130 @@
+{
+ "source": "slice_629p.pdf",
+ "source_sha256": "3e2d360a665c88aa1569111fc8ed591b460aa14cdf53c27a419df650e78cb0d4",
+ "n_pages": 629,
+ "read_on": "2026-10-31",
+ "page": 43,
+ "footer": {
+  "verdict": "ok",
+  "basis": "cumulative"
+ },
+ "rows": [
+  {
+   "seq": 412,
+   "row_no": 1,
+   "page": 43,
+   "date_iso": "2016-03-25",
+   "desc": "مدفوعات نقاط البيع ([محجوب]) SALAH ALSAFA MARKETING, DAMMAM, SA",
+   "side": "debit",
+   "printed_movement": "۹.۰۰",
+   "movement": "9.00",
+   "derived_movement": "9.00",
+   "balance": "2.45",
+   "chain_ok": true
+  },
+  {
+   "seq": 413,
+   "row_no": 2,
+   "page": 43,
+   "date_iso": "2016-03-25",
+   "desc": "خصم مستحقات البطاقات الائتمانية W -\nVisa/Mastercard : Advance\npayment - [محجوب]",
+   "side": "debit",
+   "printed_movement": "۲.۰۰",
+   "movement": "2.00",
+   "derived_movement": "2.00",
+   "balance": "0.45",
+   "chain_ok": true
+  },
+  {
+   "seq": 414,
+   "row_no": 3,
+   "page": 43,
+   "date_iso": "2016-04-03",
+   "desc": "ايداع الصراف الالي\nCash\nDeposit CA-AL RAKKAH -AL\nKHOBAR ۱ ,ALKHOBAR",
+   "side": "credit",
+   "printed_movement": "۳,۵۰۰.۰۰",
+   "movement": "3500.00",
+   "derived_movement": "3500.00",
+   "balance": "3500.45",
+   "chain_ok": true
+  },
+  {
+   "seq": 415,
+   "row_no": 4,
+   "page": 43,
+   "date_iso": "2016-04-03",
+   "desc": "سحب الصراف الالي\nAL\nMASHREQEEN, KHOBAR",
+   "side": "debit",
+   "printed_movement": "۱۰۰.۰۰",
+   "movement": "100.00",
+   "derived_movement": "100.00",
+   "balance": "3400.45",
+   "chain_ok": true
+  },
+  {
+   "seq": 416,
+   "row_no": 5,
+   "page": 43,
+   "date_iso": "2016-04-03",
+   "desc": "التحويل من الحساب الصراف\nالالي\nالى\nحساب [محجوب]",
+   "side": "debit",
+   "printed_movement": "۱۰۰.۰۰",
+   "movement": "100.00",
+   "derived_movement": "100.00",
+   "balance": "3300.45",
+   "chain_ok": true
+  },
+  {
+   "seq": 417,
+   "row_no": 6,
+   "page": 43,
+   "date_iso": "2016-04-03",
+   "desc": "تحويل\n[محجوب]",
+   "side": "credit",
+   "printed_movement": "۲۰,۰۰۰.۰۰",
+   "movement": "20000.00",
+   "derived_movement": "20000.00",
+   "balance": "23300.45",
+   "chain_ok": true
+  },
+  {
+   "seq": 418,
+   "row_no": 7,
+   "page": 43,
+   "date_iso": "2016-04-03",
+   "desc": "سحب الصراف الالي\nDANA\nCENTER FOR F, AL KHOBAR",
+   "side": "debit",
+   "printed_movement": "٤٠٠.۰۰",
+   "movement": "400.00",
+   "derived_movement": "400.00",
+   "balance": "22900.45",
+   "chain_ok": true
+  },
+  {
+   "seq": 419,
+   "row_no": 8,
+   "page": 43,
+   "date_iso": "2016-04-03",
+   "desc": "خصم مستحقات البطاقات الائتمانية\nW -\nVisa/Mastercard : Advance\npayment - [محجوب]",
+   "side": "debit",
+   "printed_movement": "۲۰۰.۰۰",
+   "movement": "200.00",
+   "derived_movement": "100.00",
+   "balance": "22800.45",
+   "chain_ok": false
+  },
+  {
+   "seq": 420,
+   "row_no": 9,
+   "page": 43,
+   "date_iso": "2016-04-03",
+   "desc": "خصم مستحقات البطاقات الائتمانية\nW -\nVisa/Mastercard : Advance",
+   "side": "debit",
+   "printed_movement": "۵۰.۰۰",
+   "movement": "50.00",
+   "derived_movement": "50.00",
+   "balance": "22750.45",
+   "chain_ok": true
+  }
+ ]
+}

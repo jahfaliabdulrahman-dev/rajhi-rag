@@ -31,7 +31,7 @@
     <p class="tag">مُدقّق كشوف الحساب الممسوحة ضوئيًّا</p>
     <p class="lede">يقرأ كشفَ الحساب الممسوح صفًّا صفًّا، ثمّ يراجع كلَّ رقمٍ بحساب الرصيد وذيول الصفحات. ما ثبت يُعرض مُثبتًا، وما لم يثبت يُعرض عليك بموضعه.</p>
     <div class="actions">
-      <a class="button primary" href="https://huggingface.co/spaces/jahfaliabdulrahman-dev/arabic-statement-reader">جرّب الآن بلا مفتاح</a>
+      <a class="button primary" href="https://huggingface.co/spaces/jahfaliabdulrahman-dev/arabic-statement-reader">جرّبه على عيّنةٍ تجريبيّة</a>
       <a class="button" href="https://github.com/jahfaliabdulrahman-dev/rajhi-rag">اقرأ الكود</a>
     </div>
     <p class="scope">المدعومُ الآن: كشوفُ مصرف الراجحي الممسوحةُ وحدها.</p>
@@ -43,67 +43,69 @@
 
     <section class="beat" id="catch" aria-labelledby="catch-title" hidden>
       <h2 id="catch-title">هل يطابق هذا المبلغ؟</h2>
-      <p>صفُّ <span id="catch-desc"></span> من صفحةٍ ممسوحة. الرصيدُ قبله والرصيدُ بعده يحدّدان المبلغ، وهذا ما قرأه النظام:</p>
-      <dl class="figures" id="catch-figures"></dl>
+      <p>صفٌّ من صفحةٍ ممسوحة في كشف حسابٍ حقيقيّ، كما قرأه النظام. الرصيدُ قبله مع حركته يجب أن يساوي الرصيدَ بعده. <strong>خمّن أولًا:</strong> هل يستقيم الحساب؟</p>
+      <div class="sum" id="catch-sum" role="group" aria-label="الحسابُ كما قرأه النظام"></div>
       <details class="reveal">
         <summary>اكشف الجواب</summary>
         <p id="catch-answer"></p>
-        <p>قارئُ النظام نفسُه أخطأ في هذا الصفّ، فأمسكت السلسلةُ خطأه، وعُرض الصفُّ عليك قبل أن يدخل أيَّ مجموعٍ أو جواب.</p>
+        <figure>
+          <img src="real-row.png" width="540" height="36" loading="lazy"
+               alt="سطرُ الصفّ كما طُبع في الكشف: المبلغُ بالأرقام الهنديّة، ثمّ بيانُ الحركة.">
+          <figcaption>الصفُّ كما طُبع في الكشف: المبلغُ الصحيحُ بالأرقام الهنديّة.</figcaption>
+        </figure>
+        <p>أمسكت السلسلةُ هذا الخطأ، فعُرض الصفُّ للمراجعة قبل أن يدخل أيَّ مجموعٍ أو جواب.</p>
       </details>
     </section>
 
     <section class="beat" aria-labelledby="hard-title">
       <h2 id="hard-title">لماذا يصعب هذا الملفّ على ما تعلّمناه</h2>
-      <p>الكشفُ صورٌ ممسوحة، بلا طبقة نصّ تحتها، وأرقامُه هنديّة، ووصفُ الحركة يمتدّ أسطرًا تحت مبلغها.</p>
-      <ul class="facts">
-        <li id="fact-loader"></li>
-        <li><span id="fact-plain"></span>
+      <p class="thesis">قارئُ الصور يخطئ أحيانًا، وقارئُ هذا النظام منها، والصفُّ أعلاه من أخطائه. والمهمُّ أن يُعرف موضعُ الخطأ.</p>
+      <p>والكشفُ صورٌ ممسوحة، بلا طبقة نصٍّ تحتها، وأرقامُه هنديّة، ووصفُ الحركة يمتدّ أسطرًا تحت مبلغها.</p>
+      <ol class="steps">
+        <li id="step-loader"></li>
+        <li><span id="step-plain"></span>
           <ul class="runs">
             <li id="fact-run-1"></li>
             <li id="fact-run-2"></li>
           </ul>
         </li>
-      </ul>
+        <li><strong>لذلك:</strong> لا شيء في الجواب وحده، صحيحًا كان أو خاطئًا، يقول أيَّ رقمٍ فيه يُوثق به. فأضفنا حَكَمين يراجعان كلَّ رقم.</li>
+      </ol>
       <p class="tally" id="fact-cost"></p>
-      <figure>
-        <img src="page-1.png" width="794" height="1123" loading="lazy"
-             alt="الصفحة الأولى من الكشف الاصطناعيّ: رأسُ الحساب، ثمّ جدولُ حركاتٍ بأرقامٍ هنديّة، والوصفُ في أسطرٍ تحت كلّ مبلغ.">
-        <figcaption>الصفحة الأولى من الكشف الاصطناعيّ الذي قيست عليه هذه الأرقام.</figcaption>
-      </figure>
     </section>
 
     <section class="beat" aria-labelledby="judges-title">
       <h2 id="judges-title">حَكَمان يراجعان كلَّ رقم</h2>
+      <p>هذه صفوفُ الصفحة نفسها كما طُبعت. وحُجبت أسماءُ الأشخاص وأرقامُ الحسابات والبطاقات، وقُصّ رأسُ الصفحة وذيلُها.</p>
+      <figure class="scan">
+        <a href="real-rows.png"><img src="real-rows.png" width="1065" height="791" loading="lazy"
+           alt="صفوفُ صفحةٍ من الكشف كما طُبعت: تاريخٌ هجريٌّ وميلاديّ، ووصفٌ يمتدّ أسطرًا، ومبلغٌ ورصيدٌ بأرقامٍ هنديّة، ومربّعاتٌ سوداء فوق الأسماء وأرقام الحسابات والبطاقات."></a>
+        <figcaption id="scan-caption"></figcaption>
+      </figure>
       <h3>القراءة</h3>
-      <p>نموذجُ رؤيةٍ يقرأ كلَّ صفٍّ كما طُبع، والرقمُ الهنديُّ يصير رقمًا يُحسب به.</p>
+      <p>نموذجُ رؤيةٍ يقرأ كلَّ صفٍّ، والرقمُ الهنديُّ يصير رقمًا يُحسب به.</p>
       <div class="table-wrap" tabindex="0" role="region" aria-label="جدولُ القراءة">
         <table id="reading">
-          <caption>أوّلُ صفوف الصفحة الأولى، كما طُبعت وكما قُرئت</caption>
-          <thead><tr><th scope="col">البيان</th><th scope="col">المبلغ كما طُبع</th><th scope="col">كما قُرئ</th><th scope="col">الرصيد</th></tr></thead>
+          <caption>صفوفُ الصفحة كما قرأها النظام. ✓ صفٌّ أثبتته السلسلة، و✗ صفٌّ يُعرض للمراجعة.</caption>
+          <thead><tr><th scope="col">البيان</th><th scope="col">المبلغ كما قرأه النظام</th><th scope="col">الرصيد</th><th scope="col">السلسلة</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
       <h3>السلسلة</h3>
-      <p>كلُّ رصيدٍ يساوي الرصيدَ قبله زائدًا الإيداعَ أو ناقصًا السحب. فإن طابق ثبت الصفّ، وإن خالف وقفت السلسلةُ عنده.</p>
+      <p>كلُّ رصيدٍ يساوي الرصيدَ قبله زائدًا الإيداعَ أو ناقصًا السحب. فإن طابق ثبت الصفّ، وإن خالف وقف الحسابُ عنده وعُرض الصفُّ للمراجعة.</p>
       <p class="tally" id="chain-tally"></p>
       <h3>التذييل</h3>
-      <p>في ذيل كلّ صفحةٍ مجموعٌ تراكميٌّ مطبوع. والفرقُ بين ذيلين متتاليين يُقابَل بمجموع ما قرأه النظامُ من حركات الصفحة، وهو حَكَمٌ من خارج السلسلة.</p>
-      <div class="table-wrap" tabindex="0" role="region" aria-label="جدولُ التذييل">
-        <table id="footers">
-          <caption>المجاميعُ التراكميّةُ المطبوعة في ذيول الصفحات، وحكمُ المقابلة</caption>
-          <thead><tr><th scope="col">الصفحة</th><th scope="col">المدين التراكميّ</th><th scope="col">الدائن التراكميّ</th><th scope="col">الحكم</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-      <p class="source">أرقامُ هذا القسم وما قبله من كشفٍ اصطناعيّ قرأه النظام.</p>
+      <p>في ذيل كلّ صفحةٍ مجموعٌ تراكميٌّ مطبوعٌ للمدين والدائن. والنظامُ يقابله بمجموع فروق الأرصدة التي قرأها، فيراجع عمودَ الأرصدة من خارج السلسلة.</p>
+      <p class="verdict" id="footer-verdict"></p>
+      <p class="source">أرقامُ هذا القسم وما قبله من صفحةٍ واحدةٍ من كشف حسابٍ حقيقيّ، نُشرت بموافقة صاحبه.</p>
     </section>
 
     <section class="beat" aria-labelledby="real-title">
-      <h2 id="real-title">على كشفٍ حقيقيّ</h2>
-      <p>القراءةُ نفسُها والحَكَمان نفساهما على كشفِ حسابٍ حقيقيٍّ طويل:</p>
+      <h2 id="real-title">على الكشف كلّه</h2>
+      <p>القراءةُ نفسُها والحَكَمان نفساهما على الكشف نفسه كاملًا:</p>
       <dl class="stats" id="real-stats"></dl>
       <p id="real-unproven"></p>
-      <p class="source">أرقامٌ إجماليّةٌ من قراءة كشفٍ حقيقيّ لصاحب المشروع، ولا رقمَ هنا من صفوفه. ومصدرُها لقطةُ الأرقام المحروسة في المستودع، وهي نفسُها في التقرير.</p>
+      <p class="source">أرقامٌ إجماليّةٌ من قراءة الكشف نفسه كاملًا. ومصدرُها لقطةُ الأرقام المحروسة في المستودع، وهي نفسُها في التقرير.</p>
     </section>
 
     <section class="beat" aria-labelledby="ask-title">
@@ -139,13 +141,13 @@
 
     <section class="beat try" aria-labelledby="try-title">
       <h2 id="try-title">جرّبه بنفسك</h2>
-      <p>«جرّب الآن» يفتح هذا الكشفَ الاصطناعيَّ مقروءًا مسبقًا: تصفّح صفوفه واسأل دفتره عن المجاميع، بلا مفتاحٍ وبلا كلفة.</p>
-      <a class="button primary" href="https://huggingface.co/spaces/jahfaliabdulrahman-dev/arabic-statement-reader">جرّب الآن بلا مفتاح</a>
+      <p>زرُّ التجربة يفتح التطبيق على كشفٍ اصطناعيٍّ صنعناه لهذا الغرض، مقروءًا مسبقًا: تصفّح صفوفه واسأل دفتره، بلا مفتاحٍ وبلا كلفة.</p>
+      <a class="button primary" href="https://huggingface.co/spaces/jahfaliabdulrahman-dev/arabic-statement-reader">جرّبه على عيّنةٍ تجريبيّة</a>
     </section>
   </main>
 
   <footer>
-    <p class="source">الأرقام من كشفٍ اصطناعيّ قرأه النظام، إلّا قسمَ «على كشفٍ حقيقيّ» وهو أرقامٌ إجماليّة.</p>
+    <p class="source">الأرقامُ من صفحةٍ واحدةٍ من كشف حسابٍ حقيقيّ نُشرت بموافقة صاحبه، ومن قراءة الكشف نفسه كاملًا. وزرُّ التجربة يفتح كشفًا اصطناعيًّا.</p>
     <p>AI Bank Statement Auditor · مشروعٌ مستقلّ، لا صلةَ له بأيّ مصرف · <a href="https://github.com/jahfaliabdulrahman-dev/rajhi-rag">الكود على GitHub</a></p>
   </footer>
 </body>

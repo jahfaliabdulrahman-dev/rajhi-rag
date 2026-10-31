@@ -106,6 +106,7 @@ tr.ok td:last-child { color: var(--emerald); }
 tr.flagged td:last-child { color: var(--warn); }
 
 .num { font-variant-numeric: tabular-nums; unicode-bidi: isolate; white-space: nowrap; }
+.pair { white-space: nowrap; }
 
 .chain { list-style: none; padding: 0; margin: 22px 0 0; display: grid; gap: 12px; }
 .chain li {
@@ -139,17 +140,45 @@ footer .source { color: var(--text); }
 .figures div { background: var(--card); border: 1px solid var(--hair); border-radius: 10px; padding: 12px 16px; }
 .figures dt { color: var(--sub); font-size: .9rem; }
 .figures dd { margin: 4px 0 0; font-size: 1.35rem; font-weight: 600; }
-.reveal { background: var(--card); border: 1px solid var(--brass); border-radius: 10px; padding: 4px 16px; }
-.reveal summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--brass); font-weight: 500; }
-.reveal summary:focus-visible { outline: 3px solid var(--brass); outline-offset: 3px; border-radius: 6px; }
-.reveal[open] summary { color: var(--sub); }
-.reveal p:first-of-type { color: var(--warn); font-weight: 500; }
+/* The reveal is a button: compact, filled, centred, with an arrow that turns when it opens. */
+.reveal { margin-top: 18px; }
+.reveal summary {
+  list-style: none; cursor: pointer; display: flex; width: fit-content; margin: 0 auto;
+  align-items: center; gap: .5em; min-height: 48px; padding: 10px 26px;
+  background: var(--brass); color: #14161C; border-radius: 10px; font-weight: 600;
+}
+.reveal summary::-webkit-details-marker { display: none; }
+.reveal summary::after { content: "▾"; transition: transform .2s; }
+.reveal[open] summary::after { transform: rotate(180deg); }
+.reveal summary:hover { filter: brightness(1.08); }
+.reveal summary:focus-visible { outline: 3px solid var(--brass); outline-offset: 3px; }
+.reveal > p:first-of-type { color: var(--warn); font-weight: 500; margin-top: 18px; }
+
+/* The question as an addition on paper: label, sign, figure; the result under a rule, with its question mark. */
+.sum { max-width: 460px; margin: 20px auto 0; background: var(--card); border: 1px solid var(--hair);
+       border-radius: 10px; padding: 14px 18px; }
+.sum .line { display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; gap: 10px; padding: 6px 0; }
+.sum .label { color: var(--sub); font-size: .95rem; }
+.sum .op { color: var(--brass); font-weight: 600; min-width: 1ch; text-align: center; }
+.sum .num { font-size: clamp(1.1rem, 4.6vw, 1.4rem); font-weight: 600; }
+.sum .result { border-top: 2px solid var(--text); margin-top: 4px; padding-top: 10px; }
+.sum .ask { display: inline-flex; align-items: center; justify-content: center; width: 1.6em; height: 1.6em;
+            margin-inline-start: .5em; border-radius: 50%; background: var(--brass); color: #14161C; font-weight: 700; }
 .facts { padding-inline-start: 1.2em; margin: 14px 0; }
 .facts li { margin: 8px 0; }
 .note-inline { color: var(--sub); font-size: .95rem; }
 .beat > .source { color: var(--sub); font-size: .9rem; margin-top: 16px; }
-.facts .runs { padding-inline-start: 1.1em; margin: 8px 0 0; list-style: none; }
-.facts .runs li { background: var(--card); border: 1px solid var(--hair); border-radius: 10px; padding: 10px 14px; }
+.thesis { font-family: "Noto Naskh Arabic", serif; font-size: 1.2rem; color: var(--text); }
+.steps { list-style: none; padding: 0; margin: 18px 0 0; display: grid; gap: 14px; max-width: 680px; }
+.steps > li { border-inline-start: 3px solid var(--brass); padding-inline-start: 14px; }
+.steps strong { color: var(--brass); }
+.runs { padding: 0; margin: 10px 0 0; list-style: none; display: grid; gap: 10px; }
+.runs li { background: var(--card); border: 1px solid var(--hair); border-radius: 10px; padding: 10px 14px; }
+.runs strong { color: var(--text); }
+figure.scan img { width: min(100%, 880px); }
+.reveal figure img { width: min(100%, 540px); image-rendering: auto; }
+.verdict { color: var(--emerald); font-weight: 500; }
+.verdict.flagged { color: var(--warn); }
 .stats dd, .figures dd { font-size: clamp(1.1rem, 4.6vw, 1.5rem); }
 code { font-family: ui-monospace, "JetBrains Mono", monospace; font-size: .92em; direction: ltr; unicode-bidi: isolate; color: var(--brass); }
 .flow { list-style: none; padding: 0; margin: 22px 0 10px; display: grid; gap: 26px; max-width: 560px; }

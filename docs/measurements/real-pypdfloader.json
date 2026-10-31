@@ -1,0 +1,14 @@
+{
+ "measured_on": "2026-10-31",
+ "loader": "langchain_community.document_loaders.PyPDFLoader",
+ "versions": {
+  "langchain_community": "0.4.2",
+  "pypdf": "6.18.1"
+ },
+ "statement": "slice_629p.pdf",
+ "source_sha256": "3e2d360a665c88aa1569111fc8ed591b460aa14cdf53c27a419df650e78cb0d4",
+ "documents": 629,
+ "characters_total": 0,
+ "pages_with_any_character": 0,
+ "command": "PyPDFLoader('slice_629p.pdf').load() — the loader the course's RAG pipeline starts with"
+}

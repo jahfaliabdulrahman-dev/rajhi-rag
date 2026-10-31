@@ -5,6 +5,7 @@ public page, so the reading of a figure and the matching must hold on the shapes
 """
 from __future__ import annotations
 
+import json
 import sys
 from decimal import Decimal
 from pathlib import Path
@@ -12,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
+import measure_plain_read  # noqa: E402
 from measure_plain_read import compare, flagged_rows, number, rows_of  # noqa: E402
 
 
@@ -53,8 +55,40 @@ def test_matches_and_breaks_are_counted_per_figure():
 
 def test_a_flagged_row_says_which_figure_the_plain_answer_carried():
     expected = [_row(7, "4501.20", "9000.00", derived="4510.20", ok=False)]
-    printed = flagged_rows(expected, [{"amount": "٤,٥٠١.٢٠", "balance": "9000.00"}])
-    assert printed == [{"seq": 7, "page": 1, "answer_has_printed_amount": True,
-                        "answer_has_balance_difference": False}]
+    same_as_system = flagged_rows(expected, [{"amount": "٤,٥٠١.٢٠", "balance": "9000.00"}])
+    assert same_as_system == [{"seq": 7, "page": 1, "answer_has_systems_reading": True,
+                               "answer_has_balance_difference": False}]
     fixed = flagged_rows(expected, [{"amount": 4510.2, "balance": "9000.00"}])
     assert fixed[0]["answer_has_balance_difference"] is True
+
+
+def test_an_amount_is_right_when_it_is_the_balance_difference_not_the_systems_misreading():
+    expected = [_row(7, "4501.20", "9000.00", derived="4510.20", ok=False)]
+    assert compare(expected, [{"amount": "4510.20", "balance": "9000.00"}])["amounts_matched"] == 1
+    assert compare(expected, [{"amount": "4501.20", "balance": "9000.00"}])["amounts_matched"] == 0
+
+
+def test_with_rows_out_the_public_record_holds_counts_only(tmp_path, monkeypatch):
+    """A real page's returned figures go to the owner's machine; the tracked record carries counts."""
+    import statement_qa.api_key as api_key
+    import statement_qa.vlm_reader as vlm_reader
+
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({"source": "s.pdf", "source_sha256": "0" * 64, "n_pages": 9,
+                                  "rows": [_row(1, "10.00", "90.00"), {**_row(2, "5.00", "95.00"), "page": 2}]}))
+    monkeypatch.setattr(api_key, "get_api_key", lambda *_: "not-a-key")
+    monkeypatch.setattr(measure_plain_read, "_page_b64", lambda *_: "")
+
+    def answer(_image, _prompt, max_tokens, stats, api_key):
+        stats["cost"] = 0.01
+        return '[{"amount": "10.00", "balance": "90.00"}]'
+
+    monkeypatch.setattr(vlm_reader, "chat_vlm_image", answer)
+    out, rows = tmp_path / "out.json", tmp_path / "rows.json"
+    assert measure_plain_read.main(["--ledger", str(ledger), "--pages", "1", "--runs", "2", "--budget", "0.05",
+                                    "--out", str(out), "--rows-out", str(rows)]) == 0
+    record = json.loads(out.read_text())["runs"]
+    assert len(record) == 2 and all(r["pages_read"] == [1] for r in record)
+    assert not any("returned_rows" in p for r in record for p in r["pages"]), "a returned figure in the public record"
+    assert [k["run"] for k in json.loads(rows.read_text())] == [1, 2]
+    assert sum(r["spent"] for r in record) <= 0.05

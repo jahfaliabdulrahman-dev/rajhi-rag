@@ -1,4 +1,4 @@
-"""What a plain request gets from the same model on the synthetic statement — the page's baseline (step 5b).
+"""What a plain request gets from the same model on a statement page — the story page's baseline.
 
 The system's reader model is asked, page by page, the request a student would write ("extract every
 transaction as JSON"), with no balance chain and no footer check. Its answer is then compared with the
@@ -6,8 +6,12 @@ ledger the system wrote for the same statement. The point is not whether the mod
 what the answer alone lets you know about which of its numbers are right.
 
     python3 tools/measure_plain_read.py --budget 0.15 --out docs/measurements/plain-read.json
+    python3 tools/measure_plain_read.py --pdf <run>/slice_629p.pdf --ledger docs/measurements/real-page-43.json \
+        --pages 43 --runs 2 --budget 0.05 --out docs/measurements/real-plain-read.json --rows-out <scratch>/rows.json
 
-Each run is appended to `--out` with the rows the model returned (the statement is synthetic).
+Each run is appended to `--out`. With `--rows-out` the rows the model returned go there instead, so a real
+page's figures stay on the owner's machine and `--out` holds counts only. `--runs` repeats the same request
+under one budget: the same request on the same page need not return the same figures twice.
 
 Same model (`vlm_reader.MODEL`), same transport (`chat_vlm_image`), same page images (200 DPI, as the app).
 Paid with the evaluation key only (RAJHI_EVAL_OPENROUTER_KEY), and it stops before a call that could pass
@@ -32,6 +36,7 @@ sys.path.insert(0, str(ROOT / "src"))
 PLAIN_PROMPT = ("This is one page of a scanned bank statement. Extract every transaction on it as a JSON array "
                 "of objects with the keys date, description, amount and balance. Return only the JSON.")
 RENDER_DPI = 200            # app.RENDER_DPI: the page images the system itself reads
+AMOUNTS_BASIS = "derived_movement: the balance difference, which the chain holds; the system's reading elsewhere"
 FIRST_CALL_ESTIMATE = 0.03  # before any call is priced, assume one page costs this much
 _INDIC = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 
@@ -71,7 +76,8 @@ def compare(expected: list[dict], returned: list[dict]) -> dict:
     got_amounts = Counter(abs(a) for a in (number(r.get("amount")) for r in returned) if a is not None)
     # The opening balance is not a transaction, and the request asks for transactions only.
     want_balances = Counter(number(r["balance"]) for r in expected if r.get("balance") and not r.get("opening"))
-    want_amounts = Counter(number(r["movement"]) for r in expected if r.get("movement"))
+    # The chain's balance difference is the amount where the system's own reading was wrong (AMOUNTS_BASIS).
+    want_amounts = Counter(number(r.get("derived_movement") or r["movement"]) for r in expected if r.get("movement"))
     breaks = 0
     for prev, cur in zip(returned, returned[1:]):
         b0, b1, a = number(prev.get("balance")), number(cur.get("balance")), number(cur.get("amount"))
@@ -90,14 +96,15 @@ def compare(expected: list[dict], returned: list[dict]) -> dict:
 
 
 def flagged_rows(expected: list[dict], returned: list[dict]) -> list[dict]:
-    """For each row the chain flagged: did the plain answer carry the printed amount, the balances' difference, or neither?"""
+    """For each row the chain flagged: did the plain answer carry the system's own (wrong) reading of the amount,
+    the balances' difference, or neither?"""
     got = {abs(a) for a in (number(r.get("amount")) for r in returned) if a is not None}
     out = []
     for r in expected:
         if r.get("chain_ok") is False and r.get("movement"):
-            printed, derived = number(r["movement"]), number(r["derived_movement"])
+            systems, derived = number(r["movement"]), number(r["derived_movement"])
             out.append({"seq": r["seq"], "page": r["page"],
-                        "answer_has_printed_amount": printed in got,
+                        "answer_has_systems_reading": systems in got,
                         "answer_has_balance_difference": derived in got})
     return out
 
@@ -116,7 +123,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--pdf", type=Path, default=ROOT / "data" / "sample" / "statement_showcase.pdf")
     ap.add_argument("--ledger", type=Path, default=ROOT / "data" / "sample" / "statement_showcase.ledger.json")
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--budget", type=float, required=True, help="dollars; no call starts that could pass it")
+    ap.add_argument("--budget", type=float, required=True, help="dollars, for all runs; no call starts that could pass it")
+    ap.add_argument("--pages", type=int, nargs="+", default=None, help="the pages to read (all pages by default)")
+    ap.add_argument("--runs", type=int, default=1, help="how many times the same request is made")
+    ap.add_argument("--rows-out", type=Path, default=None, help="where the returned rows go instead of --out")
     args = ap.parse_args(argv)
 
     from statement_qa.api_key import get_api_key
@@ -124,34 +134,47 @@ def main(argv: list[str] | None = None) -> int:
 
     ledger = json.loads(args.ledger.read_text(encoding="utf-8"))
     key = get_api_key("RAJHI_EVAL_OPENROUTER_KEY")
-    spent, worst, pages = 0.0, FIRST_CALL_ESTIMATE, []
-    for page in range(1, int(ledger["n_pages"]) + 1):
-        if spent + worst * 1.5 > args.budget:
-            print(f"stopped before page {page}: spent {spent:.4f} + next {worst * 1.5:.4f} > budget {args.budget}")
+    wanted = args.pages or list(range(1, int(ledger["n_pages"]) + 1))
+    spent, worst, records, kept = 0.0, FIRST_CALL_ESTIMATE, [], []
+    for run in range(args.runs):
+        pages = []
+        for page in wanted:
+            if spent + worst * 1.5 > args.budget:
+                print(f"stopped before run {run + 1} page {page}: spent {spent:.4f} + next {worst * 1.5:.4f} > budget {args.budget}")
+                break
+            stats: dict = {}
+            answer = chat_vlm_image(_page_b64(args.pdf, page), PLAIN_PROMPT, max_tokens=6000, stats=stats, api_key=key)
+            cost = float(stats.get("cost") or 0.0)
+            worst = max(worst if (pages or records) else 0.0, cost)
+            spent += cost
+            expected = [r for r in ledger["rows"] if r["page"] == page]
+            returned = rows_of(answer)
+            entry = {"page": page, "cost": round(cost, 6), **compare(expected, returned),
+                     "flagged": flagged_rows(expected, returned)}
+            if args.rows_out:
+                kept.append({"run": len(records) + 1, "page": page, "returned_rows": returned})
+            else:
+                entry["returned_rows"] = returned
+            pages.append(entry)
+            print(f"run {run + 1} page {page}: rows {len(returned)}/{len(expected)} · cost {cost:.4f}")
+        if not pages:
             break
-        stats: dict = {}
-        answer = chat_vlm_image(_page_b64(args.pdf, page), PLAIN_PROMPT, max_tokens=6000, stats=stats, api_key=key)
-        cost = float(stats.get("cost") or 0.0)
-        spent += cost
-        worst = max(worst if pages else 0.0, cost)
-        expected = [r for r in ledger["rows"] if r["page"] == page]
-        returned = rows_of(answer)
-        pages.append({"page": page, "cost": round(cost, 6), **compare(expected, returned),
-                      "flagged": flagged_rows(expected, returned), "returned_rows": returned})
-        print(f"page {page}: rows {len(returned)}/{len(expected)} · cost {cost:.4f}")
-
-    totals = {k: sum(p[k] for p in pages) for k in
-              ("rows_expected", "rows_returned", "balances_expected", "balances_matched",
-               "amounts_expected", "amounts_matched", "breaks_inside_the_answer", "rows_with_other_fields")}
-    record = {"measured_on": date.today().isoformat(), "model": MODEL, "prompt": PLAIN_PROMPT,
-              "render_dpi": RENDER_DPI, "statement": ledger["source"], "source_sha256": ledger["source_sha256"],
-              "pages_read": len(pages), "pages_total": int(ledger["n_pages"]), "spent": round(spent, 6),
-              "budget": args.budget, "totals": totals, "pages": pages}
-    # Each run is appended: the same request on the same page need not return the same figures twice.
+        totals = {k: sum(p[k] for p in pages) for k in
+                  ("rows_expected", "rows_returned", "balances_expected", "balances_matched",
+                   "amounts_expected", "amounts_matched", "breaks_inside_the_answer", "rows_with_other_fields")}
+        records.append({"measured_on": date.today().isoformat(), "model": MODEL, "prompt": PLAIN_PROMPT,
+                        "render_dpi": RENDER_DPI, "statement": ledger["source"], "source_sha256": ledger["source_sha256"],
+                        "pages_read": [p["page"] for p in pages], "pages_total": int(ledger["n_pages"]),
+                        "spent": round(sum(p["cost"] for p in pages), 6), "budget": args.budget,
+                        "amounts_basis": AMOUNTS_BASIS, "rows_kept": "elsewhere" if args.rows_out else "here",
+                        "totals": totals, "pages": pages})
+        print("totals:", json.dumps(totals))
     runs = json.loads(args.out.read_text(encoding="utf-8"))["runs"] if args.out.exists() else []
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps({"runs": runs + [record]}, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    print("totals:", json.dumps(totals), f"· spent {spent:.4f} of {args.budget}")
+    args.out.write_text(json.dumps({"runs": runs + records}, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    if args.rows_out:
+        args.rows_out.write_text(json.dumps(kept, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    print(f"spent {spent:.4f} of {args.budget} over {len(records)} run(s)")
     return 0
 
 

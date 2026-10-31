@@ -801,3 +801,42 @@ def test_the_block_banner_does_not_claim_amounts_on_unreadable_input():
     head2, shown2, remedy2 = ag.block_claim(real + unreadable)
     assert "لمبالغَ حقيقيّة" in head2 and remedy2 is True
     assert shown2[:1] == real and "غيرُ مقروء" in " ".join(shown2), "يُعرض الاثنان، والسببُ مسمّى لا مخلوط"
+
+
+def test_the_one_published_file_passes_only_while_it_is_as_declared(tmp_path, monkeypatch):
+    """**القاعدة ١٢ باستثناءٍ واحد (قرارُ المالك 2026-10-31):** يُعفى الملفُّ المُعلَن بعينه ما دام عددُه وبصمتُه
+    كما أُعلنا؛ وتبديلُ قيمةٍ أو زيادتُها، أو المحتوى نفسُه في مسارٍ آخر، يُعدّ كما في أيّ ملف."""
+    _key(tmp_path, monkeypatch)
+    other = "543211.99"
+    deny = {ag.fingerprint(FAKE), ag.fingerprint(other)}
+    surface, elsewhere = "docs/SECURITY_PROBE.md", "docs/SECURITY_PROBE_2.md"
+    monkeypatch.setattr(ag, "PUBLISHED", tmp_path / "published.json")
+    try:
+        (ROOT / surface).write_text(f"الرصيد: {FAKE}\n", encoding="utf-8")
+        assert ag.declare_published(surface, "قرارٌ للاختبار", deny) == 0
+        assert ag.counts_with_commitment(deny, [surface]) == {}
+        assert ag.probe(surface, deny) == 0
+        (ROOT / elsewhere).write_text(f"الرصيد: {FAKE}\n", encoding="utf-8")
+        assert ag.counts_by_file(deny, [elsewhere]) == {elsewhere: 1}, "إعفاءٌ بالمحتوى لا بالمسار"
+        (ROOT / surface).write_text(f"الرصيد: {other}\n", encoding="utf-8")
+        assert ag.counts_by_file(deny, [surface]) == {surface: 1}, "تبديلُ قيمةٍ مرّ بإعلانٍ قديم"
+        (ROOT / surface).write_text(f"الرصيد: {FAKE} ثمّ {other}\n", encoding="utf-8")
+        assert ag.probe(surface, deny) == 1, "زيادةٌ مرّت بإعلانٍ قديم"
+        assert ag.declare_published(surface, " ", deny) == 2, "إعلانٌ بلا نصّ قرار"
+    finally:
+        (ROOT / surface).unlink(missing_ok=True)
+        (ROOT / elsewhere).unlink(missing_ok=True)
+
+
+def test_a_link_is_read_as_git_tracks_it(tmp_path, monkeypatch):
+    """الرابطُ الرمزيّ نصُّه مسارُ هدفه (كما يقرؤه `--pre-push` من الـblob)، والهدفُ يُفحص باسمه — لا مرّتين."""
+    _key(tmp_path, monkeypatch)
+    deny = {ag.fingerprint(FAKE)}
+    target, link = "docs/SECURITY_PROBE.md", "docs/SECURITY_LINK.md"
+    try:
+        (ROOT / target).write_text(f"الرصيد: {FAKE}\n", encoding="utf-8")
+        (ROOT / link).symlink_to("SECURITY_PROBE.md")
+        assert ag.counts_by_file(deny, [target, link]) == {target: 1}
+    finally:
+        (ROOT / link).unlink(missing_ok=True)
+        (ROOT / target).unlink(missing_ok=True)

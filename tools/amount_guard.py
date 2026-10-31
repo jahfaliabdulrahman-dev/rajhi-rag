@@ -79,6 +79,7 @@ MANIFEST = DATA_ROOT / "data" / "eval_pack" / "amount-manifest.json"   # **غي�
 KEY_FILE = DATA_ROOT / "data" / ".amount-guard-key"                    # **غيرُ منشور** (مُهمَل)
 REDACTION_MAP = DATA_ROOT / "data" / "eval_pack" / "amount_redaction_map.json"
 BASELINE = ROOT / "docs" / "security" / "amount-baseline.json"         # **منشور**: أعدادٌ فقط
+PUBLISHED = ROOT / "docs" / "security" / "published-real-amounts.json"  # **منشور**: موضعٌ واحدٌ بقرار المالك
 DECLARED_BINARIES = ROOT / "docs" / "security" / "tracked-binaries.txt"
 #: **المانيفستُ محمولًا في البيئة** (gzip ثمّ base64) لسطحٍ لا `data/` فيه — الجلسةُ السحابيّة.
 MANIFEST_ENV = "AMOUNT_GUARD_MANIFEST_B64"
@@ -440,10 +441,33 @@ def tracked_files() -> list[str]:
 
 
 def _text_of_rel(rel: str) -> str | None:
+    """نصُّ المسار **كما يتتبّعه git**: والرابطُ الرمزيّ نصُّه مسارُ هدفه، والهدفُ يُفحص باسمه.
+
+    (كان يُتبع الرابطُ فيُعدّ الهدفُ مرّتين في الشجرة العاملة، بينما `--pre-push` يقرأ الـblob — أي المسار —
+    فكان الحكمان يختلفان على الملفّ نفسه. قِيس على `site/page.json` ⇒ `docs/measurements/real-page-43.json`.)
+    """
+    path = ROOT / rel
     try:
-        return (ROOT / rel).read_text(encoding="utf-8")
+        if path.is_symlink():
+            return os.readlink(path)
+        return path.read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError):
         return None
+
+
+def published_files() -> dict[str, dict]:
+    """**القاعدة ١٢ باستثناءٍ واحدٍ مُعلَن** (قرارُ المالك 2026-10-31 · `docs/SHOWCASE_PLAN.md` §٦ «شرطُ الصدق»):
+    صفحةٌ واحدةٌ من كشفٍ حقيقيّ مبالغُها ظاهرةٌ عمدًا في صفحة القصّة. والإعلانُ بالمسار **وبالعدد وببصمة
+    المجموعة معًا**، فلا يُعفى موضعٌ بمساره: أيُّ قيمةٍ تتبدّل أو تُزاد فيه تُعدّ كما في أيّ ملف."""
+    if not PUBLISHED.exists():
+        return {}
+    return json.loads(PUBLISHED.read_text(encoding="utf-8")).get("files", {})
+
+
+def is_published(rel: str, hits: list[tuple[str, str]]) -> bool:
+    declared = published_files().get(rel)
+    return bool(declared and hits) and declared.get("count") == len(hits) and \
+        declared.get("set_fingerprint") == _commitment({fingerprint(t) for t, _ in hits})
 
 
 def counts_by_file(deny: set[str], files: list[str] | None = None) -> dict[str, int]:
@@ -453,9 +477,9 @@ def counts_by_file(deny: set[str], files: list[str] | None = None) -> dict[str, 
         txt = _text_of_rel(rel)
         if txt is None:
             continue
-        n = len(find_in_text(txt, deny))
-        if n:
-            counts[rel] = n
+        hits = find_in_text(txt, deny)
+        if hits and not is_published(rel, hits):
+            counts[rel] = len(hits)
     return counts
 
 
@@ -558,7 +582,7 @@ def counts_with_commitment(deny: set[str], files: list[str] | None = None) -> di
         if txt is None:
             continue
         hits = find_in_text(txt, deny)
-        if hits:
+        if hits and not is_published(rel, hits):
             out[rel] = {"count": len(hits),
                         "commitment": _commitment({fingerprint(t) for t, _ in hits})}
     return out
@@ -586,6 +610,26 @@ def write_baseline(deny: set[str], accept_increase: bool = False) -> int:
         "total": sum(v["count"] for v in counts.values()),
     }, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     print(f"خطُّ الأساس: {sum(v['count'] for v in counts.values())} ظهوراً في {len(counts)} ملفّاً ⇒ {_shown(BASELINE)}")
+    return 0
+
+
+def declare_published(rel: str, decision: str, deny: set[str]) -> int:
+    """يكتب إعلانَ `published_files()` لملفٍّ واحد: عددُ ظهوراته وبصمةُ مجموعتها الآن، ونصُّ القرار. أعدادٌ فقط."""
+    if not decision.strip():
+        print("⛔ لا إعلانَ بلا نصّ قرار المالك (--decision)", file=sys.stderr)
+        return 2
+    txt = _text_of_rel(rel)
+    hits = find_in_text(txt or "", deny)
+    if not hits:
+        print(f"⛔ لا ظهورَ في {rel} ⇒ لا شيءَ يُعلن", file=sys.stderr)
+        return 2
+    PUBLISHED.write_text(json.dumps({
+        "what": "موضعٌ واحدٌ منشورٌ بقرار المالك — **أعدادٌ وبصمةٌ لا قيم**؛ يُعفى بعينه ما دام كما أُعلن",
+        "rule": "القاعدة ١٢ باستثناءٍ واحد: أيُّ تبديلٍ أو زيادةٍ في قيمه ⇒ يُعدّ كأيّ ملف (tools/amount_guard.py)",
+        "files": {rel: {"count": len(hits), "set_fingerprint": _commitment({fingerprint(t) for t, _ in hits}),
+                        "decision": decision.strip()}},
+    }, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    print(f"أُعلن: {rel} ({len(hits)} ظهوراً) ⇒ {_shown(PUBLISHED)}")
     return 0
 
 
@@ -824,7 +868,7 @@ def pushed_counts(deny: set[str], revs: list[str]) -> dict[str, dict]:
             except UnicodeDecodeError:
                 continue
             hits = find_in_text(txt, deny)
-            if hits:
+            if hits and not is_published(rel, hits):
                 cur = {"count": len(hits),
                        "commitment": _commitment({fingerprint(t) for t, _ in hits})}
                 if rel not in counts or cur["count"] > counts[rel]["count"]:
@@ -966,6 +1010,9 @@ def probe(rel: str, deny: set[str]) -> int:
         print(f"⛔ لا ملفَّ للفحص: {rel}", file=sys.stderr)
         return 5
     hits = find_in_text(txt, deny)
+    if hits and is_published(rel, hits):
+        print(f"   منشورٌ بقرار المالك كما أُعلن في {_shown(PUBLISHED)} · {rel}")
+        return 0
     if hits:
         print(f"   سقط ✓ [{len(hits)} ظهوراً] · {rel}")
         return 1
@@ -1115,6 +1162,9 @@ def main(argv=None) -> int:
                     help="فحصُ المدفوع نفسِه: المراجعُ من stdin ⇒ rev-list <local> --not --remotes")
     ap.add_argument("--ratchet", action="store_true", help="السقاطةُ على الشجرة (ملفّاً ملفّاً)")
     ap.add_argument("--baseline-write", action="store_true", help="كتابةُ خطّ الأساس (أعدادٌ فقط)")
+    ap.add_argument("--declare-published", metavar="REL", default="",
+                    help="يُعلن ملفًّا واحدًا منشورًا بقرار المالك (عددُه وبصمتُه كما هما الآن) — مع --decision")
+    ap.add_argument("--decision", default="", help="نصُّ قرار المالك وتاريخُه، يُكتب مع الإعلان")
     ap.add_argument("--tracking-audit", action="store_true", help="فحصُ الإهمال واقعاً (بلا سرّ)")
     ap.add_argument("--accept-increase", metavar="REASON", default="",
                     help="رفعُ خطّ الأساس عمداً (يُعلَن؛ والخطّاف يُسقط دفعه)")
@@ -1175,6 +1225,8 @@ def main(argv=None) -> int:
         return probe(args.probe, deny)
     if args.baseline_write:
         return write_baseline(deny, accept_increase=bool(args.accept_increase))
+    if args.declare_published:
+        return declare_published(args.declare_published, args.decision, deny)
     if args.history_audit or args.history_rewrite:
         if args.history_rewrite:
             if not args.mirror:

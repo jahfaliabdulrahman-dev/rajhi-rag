@@ -1,0 +1,100 @@
+{
+ "runs": [
+  {
+   "measured_on": "2026-10-31",
+   "model": "google/gemini-3.7-flash",
+   "prompt": "This is one page of a scanned bank statement. Extract every transaction on it as a JSON array of objects with the keys date, description, amount and balance. Return only the JSON.",
+   "render_dpi": 200,
+   "statement": "slice_629p.pdf",
+   "source_sha256": "3e2d360a665c88aa1569111fc8ed591b460aa14cdf53c27a419df650e78cb0d4",
+   "pages_read": [
+    43
+   ],
+   "pages_total": 629,
+   "spent": 0.013758,
+   "budget": 0.05,
+   "amounts_basis": "derived_movement: the balance difference, which the chain holds; the system's reading elsewhere",
+   "rows_kept": "elsewhere",
+   "totals": {
+    "rows_expected": 9,
+    "rows_returned": 9,
+    "balances_expected": 9,
+    "balances_matched": 9,
+    "amounts_expected": 9,
+    "amounts_matched": 9,
+    "breaks_inside_the_answer": 0,
+    "rows_with_other_fields": 0
+   },
+   "pages": [
+    {
+     "page": 43,
+     "cost": 0.013758,
+     "rows_expected": 9,
+     "rows_returned": 9,
+     "balances_expected": 9,
+     "balances_matched": 9,
+     "amounts_expected": 9,
+     "amounts_matched": 9,
+     "breaks_inside_the_answer": 0,
+     "rows_with_other_fields": 0,
+     "flagged": [
+      {
+       "seq": 419,
+       "page": 43,
+       "answer_has_systems_reading": false,
+       "answer_has_balance_difference": true
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "measured_on": "2026-10-31",
+   "model": "google/gemini-3.7-flash",
+   "prompt": "This is one page of a scanned bank statement. Extract every transaction on it as a JSON array of objects with the keys date, description, amount and balance. Return only the JSON.",
+   "render_dpi": 200,
+   "statement": "slice_629p.pdf",
+   "source_sha256": "3e2d360a665c88aa1569111fc8ed591b460aa14cdf53c27a419df650e78cb0d4",
+   "pages_read": [
+    43
+   ],
+   "pages_total": 629,
+   "spent": 0.008891,
+   "budget": 0.05,
+   "amounts_basis": "derived_movement: the balance difference, which the chain holds; the system's reading elsewhere",
+   "rows_kept": "elsewhere",
+   "totals": {
+    "rows_expected": 9,
+    "rows_returned": 9,
+    "balances_expected": 9,
+    "balances_matched": 9,
+    "amounts_expected": 9,
+    "amounts_matched": 9,
+    "breaks_inside_the_answer": 0,
+    "rows_with_other_fields": 0
+   },
+   "pages": [
+    {
+     "page": 43,
+     "cost": 0.008891,
+     "rows_expected": 9,
+     "rows_returned": 9,
+     "balances_expected": 9,
+     "balances_matched": 9,
+     "amounts_expected": 9,
+     "amounts_matched": 9,
+     "breaks_inside_the_answer": 0,
+     "rows_with_other_fields": 0,
+     "flagged": [
+      {
+       "seq": 419,
+       "page": 43,
+       "answer_has_systems_reading": false,
+       "answer_has_balance_difference": true
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
