@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>قارئ كشوف الحساب العربية</title>
+  <meta name="description" content="يقرأ كشفَ حسابٍ بنكيٍّ ممسوحًا ضوئيًّا، ويتحقّق من كلّ صفٍّ بسلسلة الرصيد، ثمّ يجيب عن أسئلتك عنه بالعربيّة.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600&family=Noto+Naskh+Arabic:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#story">انتقل إلى القصّة</a>
+
+  <header class="hero">
+    <svg class="seal" viewBox="0 0 100 100" aria-hidden="true">
+      <defs>
+        <path id="sealArc" d="M 50,50 m -34,0 a 34,34 0 1,1 68,0 a 34,34 0 1,1 -68,0"/>
+      </defs>
+      <circle cx="50" cy="50" r="46.5" fill="none" stroke="#C2A468" stroke-width="1.1"/>
+      <circle cx="50" cy="50" r="40" fill="none" stroke="#C2A468" stroke-width="0.55"/>
+      <text font-size="7.6" fill="#C2A468" letter-spacing="0.6">
+        <textPath href="#sealArc" startOffset="25%" text-anchor="middle">السلسلة الرصيدية · حَكَم لا يخطئ</textPath>
+      </text>
+      <text x="50" y="54" text-anchor="middle" font-family="'Noto Naskh Arabic', serif" font-size="21" fill="#3FA98C">مُدقَّق</text>
+      <text x="50" y="70" text-anchor="middle" font-size="8.5" fill="#9A927F">آلياً</text>
+    </svg>
+    <h1>قارئ كشوف الحساب العربية</h1>
+    <p class="lede">يقرأ كشفَ حسابٍ بنكيٍّ ممسوحًا ضوئيًّا رقمًا رقمًا، ويتحقّق من كلّ صفٍّ بسلسلة الرصيد، ثمّ يجيب عن أسئلتك عنه بالعربيّة.</p>
+    <div class="actions">
+      <a class="button primary" href="https://huggingface.co/spaces/jahfaliabdulrahman-dev/arabic-statement-reader">افتح التطبيق</a>
+      <a class="button" href="https://github.com/jahfaliabdulrahman-dev/rajhi-rag">اقرأ الكود</a>
+    </div>
+    <p class="scope">المدعومُ الآن: كشوفُ مصرف الراجحي الممسوحةُ وحدها.</p>
+  </header>
+
+  <main id="story">
+    <noscript><p class="note">أرقامُ هذه الصفحة تُقرأ من ملفّ الكشف عند فتحها. فعّل JavaScript لتراها.</p></noscript>
+    <p class="note" id="load-error" hidden>تعذّر تحميل أرقام الكشف. أعد تحميل الصفحة.</p>
+
+    <section class="beat" aria-labelledby="beat-scan">
+      <h2 id="beat-scan">صفحةٌ ممسوحة</h2>
+      <p>يبدأ كلُّ شيءٍ بصورة. لا نصَّ مخفيًّا تحتها يُنسخ: الأرقامُ هنديّة، والوصفُ يمتدّ أسطرًا تحت المبلغ.</p>
+      <figure>
+        <img src="page-1.png" width="794" height="1123" loading="lazy"
+             alt="الصفحة الأولى من الكشف الاصطناعيّ: رأسُ الحساب، ثمّ جدولُ حركاتٍ بأرقامٍ هنديّة، والوصفُ في أسطرٍ تحت كلّ مبلغ.">
+        <figcaption>الصفحة الأولى من الكشف الاصطناعيّ، كما يراها النظام.</figcaption>
+      </figure>
+    </section>
+
+    <section class="beat" aria-labelledby="beat-read">
+      <h2 id="beat-read">القراءة</h2>
+      <p>نموذجُ رؤيةٍ يقرأ كلَّ صفٍّ كما طُبع: البيانَ والمبلغَ والرصيد. والرقمُ الهنديُّ يصير رقمًا يُحسب به.</p>
+      <div class="table-wrap" tabindex="0" role="region" aria-label="جدولُ القراءة">
+        <table id="reading">
+          <caption>أوّلُ صفوف الصفحة الأولى، كما طُبعت وكما قُرئت</caption>
+          <thead><tr><th scope="col">البيان</th><th scope="col">المبلغ كما طُبع</th><th scope="col">كما قُرئ</th><th scope="col">الرصيد</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="beat" aria-labelledby="beat-chain">
+      <h2 id="beat-chain">السلسلة</h2>
+      <p>كلُّ رصيدٍ يساوي الرصيدَ قبله زائدًا الإيداعَ أو ناقصًا السحب. فإن طابق ثبت الصفّ، وإن خالف وقفت السلسلةُ عنده.</p>
+      <ol class="chain" id="chain"></ol>
+      <p class="tally" id="chain-tally"></p>
+    </section>
+
+    <section class="beat" aria-labelledby="beat-footer">
+      <h2 id="beat-footer">التذييل</h2>
+      <p>في ذيل كلّ صفحةٍ مجموعٌ تراكميٌّ مطبوع. والفرقُ بين ذيلين متتاليين يُقابَل بمجموع ما قرأه النظامُ من حركات الصفحة.</p>
+      <div class="table-wrap" tabindex="0" role="region" aria-label="جدولُ التذييل">
+        <table id="footers">
+          <caption>المجاميعُ التراكميّةُ المطبوعة في ذيول الصفحات، وحكمُ المقابلة</caption>
+          <thead><tr><th scope="col">الصفحة</th><th scope="col">المدين التراكميّ</th><th scope="col">الدائن التراكميّ</th><th scope="col">الحكم</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="beat" aria-labelledby="beat-seal">
+      <h2 id="beat-seal">الختم</h2>
+      <p>يُختم الكشفُ «مُدقَّقًا آليًّا»، والقرارُ الأخيرُ لك: الصفُّ المشكوكُ لا يُخفى ولا يُصحَّح بصمت، بل يُعرض عليك.</p>
+      <dl class="stats" id="stats"></dl>
+    </section>
+
+    <section class="beat" aria-labelledby="beat-tower">
+      <h2 id="beat-tower">البرج</h2>
+      <p>الكشفُ الحقيقيُّ مئاتُ الصفحات. والقراءةُ نفسُها والسلسلةُ نفسُها تجريان على كلّ صفحةٍ منها.</p>
+    </section>
+
+    <section class="beat try" aria-labelledby="beat-try">
+      <h2 id="beat-try">جرّبه بنفسك</h2>
+      <div class="modes">
+        <div class="mode">
+          <h3>جرّب الآن</h3>
+          <p>هذا الكشفُ الاصطناعيُّ نفسُه، مقروءٌ مسبقًا. تصفّح صفوفه واسأل دفتره عن المجاميع، بلا مفتاحٍ وبلا كلفة.</p>
+        </div>
+        <div class="mode">
+          <h3>اقرأ كشفك</h3>
+          <p>بمفتاح OpenRouter الخاصّ بك وحده. وما يُحفظ ومتى يُحذف مكتوبٌ في «قاعدة الخصوصية» داخل التطبيق.</p>
+        </div>
+      </div>
+      <a class="button primary" href="https://huggingface.co/spaces/jahfaliabdulrahman-dev/arabic-statement-reader">افتح التطبيق</a>
+    </section>
+  </main>
+
+  <footer>
+    <p class="source">الأرقام من كشفٍ اصطناعيّ قرأه النظام.</p>
+    <p>مشروعٌ مستقلّ، لا صلةَ له بأيّ مصرف. · <a href="https://github.com/jahfaliabdulrahman-dev/rajhi-rag">الكود على GitHub</a></p>
+  </footer>
+</body>
+</html>

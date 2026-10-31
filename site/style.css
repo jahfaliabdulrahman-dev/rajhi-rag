@@ -1,0 +1,133 @@
+/* «أرشيفٌ في الليل» — the palette is the app's night ledger (app.py, the dark theme constants). */
+:root {
+  --night: #14161C;
+  --card: #1B1E26;
+  --deep: #171A21;
+  --text: #EDE6D6;
+  --sub: #9A927F;
+  --hair: #2A2E39;
+  --brass: #C2A468;
+  --emerald: #3FA98C;
+  --warn: #C96A57;
+  --paper: #F7F2E9;
+}
+
+* { box-sizing: border-box; }
+
+html { background: var(--night); }
+
+body {
+  margin: 0;
+  background: var(--night);
+  color: var(--text);
+  font-family: "IBM Plex Sans Arabic", system-ui, sans-serif;
+  font-size: 1.05rem;
+  line-height: 1.8;
+}
+
+a { color: var(--brass); }
+a:focus-visible, .button:focus-visible { outline: 3px solid var(--brass); outline-offset: 3px; }
+
+.skip { position: absolute; inset-inline-start: 16px; top: -48px; padding: 8px 14px;
+        background: var(--card); border-radius: 8px; z-index: 1; }
+.skip:focus { top: 12px; }
+
+.hero {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 72px 20px 48px;
+  text-align: center;
+  border-bottom: 1px solid var(--hair);
+}
+
+.seal { width: min(220px, 56vw); height: auto; display: block; margin: 0 auto 28px; }
+
+h1 {
+  font-family: "Noto Naskh Arabic", serif;
+  font-weight: 700;
+  font-size: clamp(2rem, 5vw, 2.9rem);
+  line-height: 1.3;
+  margin: 0 0 14px;
+}
+
+.lede { color: var(--text); max-width: 640px; margin: 0 auto 28px; }
+.scope { color: var(--sub); font-size: .95rem; margin: 22px 0 0; }
+
+.actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+
+.button {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 48px; padding: 10px 26px;
+  border: 1px solid var(--brass); border-radius: 10px;
+  color: var(--text); text-decoration: none; font-weight: 500;
+}
+.button.primary { background: var(--emerald); border-color: var(--emerald); color: #0F1216; }
+.button:hover { filter: brightness(1.08); }
+
+main { max-width: 880px; margin: 0 auto; padding: 8px 20px 40px; counter-reset: beat; }
+
+.beat { padding: 44px 0; border-bottom: 1px solid var(--hair); }
+.beat h2 {
+  font-family: "Noto Naskh Arabic", serif;
+  font-size: 1.7rem; margin: 0 0 10px; color: var(--brass);
+}
+.beat:not(.try) h2::before {
+  counter-increment: beat;
+  content: counter(beat, arabic-indic);
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.6em; height: 1.6em; margin-inline-end: .45em;
+  border: 1px solid var(--brass); border-radius: 50%;
+  font-family: "IBM Plex Sans Arabic", system-ui, sans-serif; font-size: .7em; vertical-align: .2em;
+}
+.beat > p { max-width: 680px; }
+
+figure { margin: 26px 0 0; }
+figure img {
+  display: block; width: min(100%, 520px); height: auto; margin: 0 auto;
+  border-radius: 4px; box-shadow: 0 18px 50px rgba(0, 0, 0, .55);
+  background: var(--paper);
+}
+figcaption { text-align: center; color: var(--sub); font-size: .9rem; margin-top: 12px; }
+
+.table-wrap { overflow-x: auto; margin-top: 18px; }
+table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 10px; overflow: hidden; }
+caption { text-align: start; color: var(--sub); font-size: .9rem; padding-bottom: 8px; }
+th, td { padding: 10px 14px; border-bottom: 1px solid var(--hair); text-align: start; vertical-align: top; }
+thead th { color: var(--sub); font-weight: 500; background: var(--deep); }
+tbody th { font-weight: 400; }
+td:last-child { white-space: nowrap; }
+.table-wrap:focus-visible { outline: 3px solid var(--brass); outline-offset: 3px; border-radius: 10px; }
+@media (max-width: 480px) {
+  th, td { padding: 8px 10px; }
+  body { font-size: 1rem; }
+}
+tr.ok td:last-child { color: var(--emerald); }
+tr.flagged td:last-child { color: var(--warn); }
+
+.num { font-variant-numeric: tabular-nums; unicode-bidi: isolate; white-space: nowrap; }
+
+.chain { list-style: none; padding: 0; margin: 22px 0 0; display: grid; gap: 12px; }
+.chain li {
+  background: var(--card); border: 1px solid var(--hair); border-inline-start: 4px solid var(--emerald);
+  border-radius: 10px; padding: 14px 18px;
+}
+.chain li.flagged { border-inline-start-color: var(--warn); }
+.chain p { margin: 4px 0 0; }
+.chain .verdict { color: var(--emerald); }
+.chain li.flagged .verdict { color: var(--warn); }
+.tally { color: var(--sub); margin-top: 16px; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 22px 0 0; }
+.stats div { background: var(--card); border: 1px solid var(--hair); border-radius: 10px; padding: 14px 18px; }
+.stats dt { color: var(--sub); font-size: .9rem; }
+.stats dd { margin: 4px 0 0; font-size: 1.5rem; font-weight: 600; }
+
+.modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 18px 0 26px; }
+.mode { background: var(--card); border: 1px solid var(--hair); border-radius: 10px; padding: 16px 20px; }
+.mode h3 { margin: 0 0 6px; font-size: 1.15rem; }
+.mode p { margin: 0; color: var(--text); }
+
+.note { background: var(--card); border: 1px solid var(--warn); border-radius: 10px; padding: 12px 16px; }
+
+footer { max-width: 880px; margin: 0 auto; padding: 28px 20px 56px; color: var(--sub); font-size: .95rem; }
+footer .source { color: var(--text); }

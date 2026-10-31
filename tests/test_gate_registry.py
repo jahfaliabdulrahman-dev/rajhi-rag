@@ -230,9 +230,14 @@ def unregistered_ci_steps(wf_text: str, declared: set[str]) -> list[str]:
     return out
 
 
-def phantom_registered_steps(wf_text: str, declared: set[str]) -> list[str]:
-    """معرّفٌ في السجلّ لا وجودَ له في الـworkflow = صفٌّ شبحٌ يُوهم حَرْساً غيرَ قائم."""
-    real = {st.get("id") for st in ci_steps(wf_text) if st.get("id")}
+def phantom_registered_steps(wf_texts: list[str], declared: set[str]) -> list[str]:
+    """معرّفٌ في السجلّ لا خطوةَ له في **أيّ** workflow = صفٌّ شبحٌ يُوهم حَرْساً غيرَ قائم.
+
+    والمدى **اتّحادُ الملفّات** كما ينصّ الاتّجاهُ الخامس في `docs/GATES.md`، لا كلُّ ملفٍّ وحده: قِيس
+    (2026-10-31) أنّ القياسَ لكلّ ملفٍّ يقرأ كلَّ معرّفٍ شبحًا في workflow ثانٍ لا بوّابةَ فيه (`pages.yml`)،
+    فيمنع أيَّ ملفٍّ ثانٍ ما لم ينسخ البوّاباتِ كلَّها.
+    """
+    real = {st.get("id") for wf in wf_texts for st in ci_steps(wf) if st.get("id")}
     return sorted(d for d in declared if d not in real)
 
 
@@ -243,9 +248,19 @@ def test_every_ci_run_step_is_registered_and_no_phantom_is_declared():
     texts = _wf_texts()
     assert texts, "لم أقرأ أيَّ workflow ⇒ فشلٌ مُغلَق (لا أُعلن تغطيةً لم أقرأها)"
     missing = [f"{name}: {x}" for name, wf in texts for x in unregistered_ci_steps(wf, declared)]
-    phantom = [f"{name}: {x}" for name, wf in texts for x in phantom_registered_steps(wf, declared)]
+    phantom = phantom_registered_steps([wf for _, wf in texts], declared)
     assert not missing, f"خطواتُ CI خارج السجلّ: {missing} ⇒ أضِف معرفَها واذكرْها في §٣"
-    assert not phantom, f"معرّفاتٌ في السجلّ بلا خطوةٍ في الـworkflow: {phantom}"
+    assert not phantom, f"معرّفاتٌ في السجلّ بلا خطوةٍ في أيّ workflow: {phantom}"
+
+
+def test_a_registered_step_lives_in_any_workflow_and_a_ghost_in_none_is_caught():
+    """**الشبحُ يُقاس على اتّحاد الملفّات:** ملفٌّ ثانٍ بلا بوّابةٍ لا يجعل معرّفاتِ الأوّل أشباحًا، ومعرّفٌ لا خطوةَ له
+    في أيّ ملفٍّ يبقى شبحًا يُمسَك (وهو ما كان الاتّجاهُ يقيسه حين كان الـworkflow ملفًّا واحدًا)."""
+    gated = "jobs:\n  guard:\n    steps:\n      - id: gate_suite\n        run: python3 -m pytest tests/test_ok.py\n"
+    pages = "jobs:\n  deploy:\n    steps:\n      - uses: actions/checkout@v5\n      - id: deployment\n        uses: actions/deploy-pages@v5\n"
+    assert phantom_registered_steps([gated, pages], {"gate_suite"}) == []
+    assert phantom_registered_steps([gated, pages], {"gate_suite", "gate_ghost"}) == ["gate_ghost"]
+    assert phantom_registered_steps([pages], {"gate_suite"}) == ["gate_suite"]
 
 
 def test_a_second_workflow_file_cannot_park_an_unregistered_step(tmp_path):
@@ -281,7 +296,7 @@ def test_the_fifth_direction_actually_bites():
         "بلا معرّف: Static gate (names that never resolve, bindings never read)"]
     stranger = wf.replace("id: gate_static", "id: gate_static_new_thing", 1)  # معرّفٌ لم يُسجَّل
     assert unregistered_ci_steps(stranger, declared) == ["غيرُ مسجَّلة: gate_static_new_thing"]
-    assert phantom_registered_steps(wf, declared | {"gate_ghost"}) == ["gate_ghost"]
+    assert phantom_registered_steps([wf], declared | {"gate_ghost"}) == ["gate_ghost"]
 
     # (أ) خطوةُ `run:` **خامّةٌ بلا اسمٍ ولا معرّف** (صيغةٌ مشروعةٌ في Actions) — كانت تمرّ صامتة
     nameless = "jobs:\n  guard:\n    steps:\n      - run: echo hi\n      - id: gate_ok\n        run: echo ok\n"
