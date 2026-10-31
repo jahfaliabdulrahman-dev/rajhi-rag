@@ -863,22 +863,6 @@ def _ledger_write(sess) -> dict:
     return {"ok": True, "key": key, "path": str(path), "stats": stats, "message": note}
 
 
-def _ledger_note(written: dict, missed: list[int]) -> str:
-    """**حالةُ القاعدة في سطر الحالة الواحد** (كانت في لوحة الدفتر، وأُزيلت بقرار المالك 2026-10-31):
-    كتابةٌ تعذّرت تُسمّى، وقاعدةٌ ناقصةٌ تُسمّى صفحاتُها (فلا يُقرأ «جاهز» كاملًا وهو ناقص · R131-3)، وصفٌّ
-    بلا حقل صفحةٍ لم يدخلها يُعدّ (لا إسقاطَ صامت). ونصٌّ فارغٌ حين لا شيءَ يُقال."""
-    if not written.get("ok"):
-        return f" • ⚠ تعذّرت كتابةُ قاعدة الكشف: {written.get('message') or 'سببٌ غيرُ مسمّى'}"
-    note = ""
-    if missed:
-        note += (" • قاعدةُ الكشف غيرُ مكتملة — لم تُقرأ هذه المرّة: " + "، ".join(f"ص{p}" for p in missed)
-                 + " (أرقامُ الصفوف من هذه القراءة وحدَها)")
-    dropped = (written.get("stats") or {}).get("dropped_no_page") or 0
-    if dropped:
-        note += f" • {dropped} صفًّا بلا حقل صفحةٍ في المصدر لم تدخل القاعدة (المخطَّطُ يمنع صفًّا بلا صفحة)"
-    return note
-
-
 def _load_from_ledger(sess, key: str | None = None, *, index: bool = True) -> bool:
     """يُعيد بناء أسطح السؤال من **القاعدة وحدها** — لتبقى بعد إغلاق التطبيق (قبولُ R130).
 
@@ -1449,7 +1433,7 @@ def _process_pdf_locked(sess, pdf_path: str, progress, skip_rejected: bool = Fal
     incomplete = bool(failed_pages or pages_without_rows)
     written = _ledger_write(sess)
     missed = sorted(set(failed_pages or []) | set(pages_without_rows or [])) if incomplete else []
-    summary += _ledger_note(written, missed)
+    summary += _ledger_ui.write_note(written, missed)
     gallery_out = _close_pages(sess, pages)
     return (summary, rows_view, _kpi_of(all_rows), gallery_out,
             "كل الأعمدة", "", "", "", intake_note)

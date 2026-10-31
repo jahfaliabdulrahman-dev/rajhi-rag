@@ -159,9 +159,7 @@ def test_a_row_without_a_page_is_dropped_and_declared(tmp_path):
     assert got["dropped_no_page"] == 1, got
     assert n == len(rows) - 1, f"الصفُّ بلا صفحة دخل الدفترَ ({n} مقابل {len(rows) - 1})"
     # **ويُعلَن في سطر الحالة** (كان يُعلَن في لوحة الدفتر قبل إزالتها): العددُ نفسُه بنصٍّ يُقرأ.
-    import app                                       # noqa: PLC0415
-
-    note = app._ledger_note({"ok": True, "stats": got}, [])
+    note = U.write_note({"ok": True, "stats": got}, [])
     assert "1 صفًّا بلا حقل صفحةٍ في المصدر" in note, note
-    assert "تعذّرت كتابةُ قاعدة الكشف: سبب" in app._ledger_note({"ok": False, "message": "سبب"}, [])
-    assert "لم تُقرأ هذه المرّة: ص2" in app._ledger_note({"ok": True, "stats": {}}, [2])
+    assert "تعذّرت كتابةُ قاعدة الكشف: سبب" in U.write_note({"ok": False, "message": "سبب"}, [])
+    assert "لم تُقرأ هذه المرّة: ص2" in U.write_note({"ok": True, "stats": {}}, [2])
