@@ -105,6 +105,7 @@ tests/test_scope_one_home.py
 tests/test_app_excel_button.py
 tests/test_money_unit.py
 tests/test_count_ar.py
+tests/test_table_fits.py
 tests/test_money_string_fields.py
 tests/test_the_price_limit_reaches_the_request.py
 tests/test_the_refusal_is_read_from_its_type.py

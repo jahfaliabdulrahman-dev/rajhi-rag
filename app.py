@@ -56,6 +56,8 @@ from statement_qa.bank_check import probe_bank
 from statement_qa.era import fingerprint_pages, summarize_ar as summarize_era_ar
 from statement_qa.render import (
     count_ar,
+    ROW_COLUMNS,
+    column_widths as render_column_widths,
     answer_refs as render_answer_refs,
     answer_text as render_answer_text,
     date_cell as render_date_cell,
@@ -1765,12 +1767,19 @@ def ask_followup(history, api_key: str = "", sess=None):
                              "يُحسَب من الكشف (أُفرغت اللوحة عمداً)."))
     if mode == "typed":
         df, note = _typed_evidence(sess, res)
-        return history, sources_md, df, _note_update(note)
+        return history, sources_md, _evidence_table(df), _note_update(note)
     if mode == "tools":
         df, note = _evidence_from_numbers(sess, res.used_row_nos)
-        return history, sources_md, df, _note_update(note)
+        return history, sources_md, _evidence_table(df), _note_update(note)
     return (history, sources_md,
-            _evidence_rows(sess, res.answer, res.sources), _hide_note())
+            _evidence_table(_evidence_rows(sess, res.answer, res.sources)), _hide_note())
+
+
+def _evidence_table(df: pd.DataFrame):
+    """لوحةُ الأدلّة في عرض صندوقها: أعمدتُها تتغيّر (عمودُ الاستشهاد حين يكون) ⇒ تُعطى حصصُها مع قيمتها من الموضع الواحد."""
+    if df is None or df.empty:
+        return df
+    return gr.update(value=df, column_widths=render_column_widths(list(df.columns)))
 
 
 def _page_rows_df(sess, hit):
@@ -2085,8 +2094,11 @@ with gr.Blocks(title="AI Bank Statement Auditor", delete_cache=DELETE_CACHE, fil
                     filter_from = gr.DateTime(label="من تاريخ", include_time=False, type="string", scale=2)
                     filter_to = gr.DateTime(label="إلى تاريخ", include_time=False, type="string", scale=2)
                     filter_clear = gr.Button("مسح", size="sm", scale=1)
+                # **الجدولُ في عرض صندوقه (خيارا المكتبة `column_widths` و`wrap`):** حصصُ الأعمدة من `render.column_widths`
+                # والبيانُ يلتفّ — قِيس قبلُ ١٥٧٣ في ١٤٧٢ (تمريرٌ جانبيٌّ دائم)، وبعدُ ١٣٧٤ في ١٣٧٦ على عرض ١٤٤٠.
                 table = gr.Dataframe(label="الكشف كما قرأه النظام (بالسلسلة الرصيدية)",
-                                     interactive=False, elem_classes=["ledger-table"], max_height=520)
+                                     interactive=False, elem_classes=["ledger-table"], max_height=520, wrap=True,
+                                     column_widths=render_column_widths(ROW_COLUMNS))
                 with gr.Accordion("صفحات الكشف (معاينة بصرية)", open=False):
                     gallery = gr.Gallery(columns=5, show_label=False)
             with gr.Accordion("الخصوصية وحذف بيانات الجلسة", open=False):
@@ -2127,7 +2139,7 @@ with gr.Blocks(title="AI Bank Statement Auditor", delete_cache=DELETE_CACHE, fil
                            rtl=True, submit_btn="اسأل")
             with gr.Accordion("الصفوف التي بُني عليها الجواب", open=True, visible=False) as evidence:
                 raw_note = gr.Markdown(visible=False)
-                raw = gr.Dataframe(interactive=False, elem_id="evidence-table", max_height=320)
+                raw = gr.Dataframe(interactive=False, elem_id="evidence-table", max_height=320, wrap=True)  # حصصُها مع قيمتها
             # Internal retrieval bookkeeping (chunk IDs) — kept for
             # development diagnostics only, collapsed out of the way.
             with gr.Accordion("تفاصيل تقنية (قطع الاسترجاع)", open=False):
