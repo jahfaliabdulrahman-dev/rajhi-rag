@@ -1,5 +1,5 @@
 ---
-title: قارئ كشوف الحساب العربية
+title: AI Bank Statement Auditor
 emoji: 🧾
 colorFrom: yellow
 colorTo: gray
@@ -15,7 +15,9 @@ preload_from_hub:
 
 <div dir="rtl">
 
-# قارئ كشوف الحساب العربية
+# AI Bank Statement Auditor
+
+مُدقّق كشوف الحساب الممسوحة ضوئيًّا.
 
 يقرأ كشفَ حسابٍ بنكيٍّ ممسوحًا ضوئيًّا، ثمّ يجيب عن أسئلتك عنه بالعربيّة، ويدلّك على موضع كلّ رقمٍ في صفحته.
 

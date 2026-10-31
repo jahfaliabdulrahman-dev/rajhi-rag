@@ -1,10 +1,11 @@
 """The public story page (site/) tells the truth about where its numbers come from.
 
-docs/SHOWCASE_PLAN.md section 6, «شرطُ الصدق»: every number on the page comes from the ledger the system
-wrote when it read the synthetic statement, the line «الأرقام من كشفٍ اصطناعيّ قرأه النظام» stands under
-it, and the owner's own statement never appears. The page reads its numbers at load time from that
-ledger, so no figure may be typed into it. And the live site changes only when someone publishes it
-(section 4, condition 1): the Pages workflow starts by hand and nothing else.
+docs/SHOWCASE_PLAN.md section 6, «شرطُ الصدق»: the story's numbers come from the ledger the system wrote when
+it read the synthetic statement, the measured-results section from the guarded aggregates of the real run
+(widened on the owner's word, 2026-10-31), and the owner's own statement never appears. The page reads every
+number at load time from a tracked file, so no figure may be typed into it. The live site changes only when
+someone publishes it (section 4, condition 1), and every title a person reads carries the registered name
+(section 6b).
 """
 from __future__ import annotations
 
@@ -19,6 +20,15 @@ ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / "site"
 LEDGER = ROOT / "data" / "sample" / "statement_showcase.ledger.json"
 SPACE_URL = "https://huggingface.co/spaces/jahfaliabdulrahman-dev/arabic-statement-reader"
+OFFICIAL_NAME = "AI Bank Statement Auditor"
+
+#: Each data file the page reads, and the tracked source it must be a link to (a copy would drift).
+SOURCES = {
+    "statement_showcase.ledger.json": LEDGER,
+    "pypdfloader.json": ROOT / "docs" / "measurements" / "pypdfloader.json",
+    "plain-read.json": ROOT / "docs" / "measurements" / "plain-read.json",
+    "claims.json": ROOT / "docs" / "claims.json",
+}
 
 #: A figure typed by hand: an amount with two decimals, or any Arabic-Indic digit.
 _TYPED_FIGURE = re.compile(r"\d[\d,]*\.\d{2}|[٠-٩]")
@@ -61,34 +71,65 @@ def _what_a_reader_meets() -> dict[str, list[str]]:
             "style.css": re.findall(r"content:\s*([^;]+);", css)}
 
 
-def test_the_numbers_come_from_the_systems_ledger_of_the_synthetic_statement():
-    link = SITE / "statement_showcase.ledger.json"
-    assert link.is_symlink(), "الصفحةُ تقرأ نسخةً من الدفتر لا الدفترَ نفسَه: نسختان تفترقان"
-    assert link.resolve() == LEDGER.resolve()
+def test_every_number_source_is_a_link_to_its_tracked_file():
+    js = (SITE / "app.js").read_text(encoding="utf-8")
+    for name, source in SOURCES.items():
+        link = SITE / name
+        assert link.is_symlink(), f"{name}: نسخةٌ لا رابط — نسختان تفترقان"
+        assert link.resolve() == source.resolve(), name
+        assert f'"{name}"' in js, f"app.js لا يقرأ {name}"
     ledger = json.loads(LEDGER.read_text(encoding="utf-8"))
     pdf = LEDGER.with_name(ledger["source"])
     assert hashlib.sha256(pdf.read_bytes()).hexdigest() == ledger["source_sha256"], (
         "الدفترُ لا يطابق بايتاتِ الكشف الاصطناعيّ المتتبَّع")
-    assert 'const LEDGER = "statement_showcase.ledger.json";' in (SITE / "app.js").read_text(encoding="utf-8")
 
 
 def test_no_figure_is_typed_into_the_page():
     typed = {name: sorted({f for text in texts for f in _TYPED_FIGURE.findall(text)})
              for name, texts in _what_a_reader_meets().items()}
     typed = {name: found for name, found in typed.items() if found}
-    assert typed == {}, f"أرقامٌ مكتوبةٌ باليد في الصفحة (تُقرأ من الدفتر لا تُكتب): {typed}"
+    assert typed == {}, f"أرقامٌ مكتوبةٌ باليد في الصفحة (تُقرأ من مصادرها لا تُكتب): {typed}"
 
 
-def test_the_source_line_stands_under_the_story():
+def test_each_kind_of_number_says_where_it_comes_from():
     html = (SITE / "index.html").read_text(encoding="utf-8")
-    assert "الأرقام من كشفٍ اصطناعيّ قرأه النظام." in html
-    assert html.index("الأرقام من كشفٍ اصطناعيّ قرأه النظام") > html.index('id="beat-tower"')
+    assert "من كشفٍ اصطناعيّ قرأه النظام" in html
+    assert "أرقامٌ إجماليّةٌ من قراءة كشفٍ حقيقيّ لصاحب المشروع، ولا رقمَ هنا من صفوفه" in html
+    footer = html[html.index("<footer>"):]
+    assert "الأرقام من كشفٍ اصطناعيّ قرأه النظام" in footer
+
+
+def test_the_plain_read_is_the_systems_model_and_stayed_in_its_budget():
+    """The page says the same model the system reads with: a model change makes that false until re-measured."""
+    source = (ROOT / "src" / "statement_qa" / "vlm_reader.py").read_text(encoding="utf-8")
+    model = re.search(r'MODEL = os\.environ\.get\("OPENROUTER_MODEL_VLM", "([^"]+)"\)', source).group(1)
+    runs = json.loads(SOURCES["plain-read.json"].read_text(encoding="utf-8"))["runs"]
+    assert runs, "لا قياسَ مسجَّل"
+    ledger = json.loads(LEDGER.read_text(encoding="utf-8"))
+    for run in runs:
+        assert run["model"] == model, f"قِيس بـ{run['model']} والنظامُ يقرأ بـ{model} ⇒ أعِد القياس"
+        assert run["spent"] <= run["budget"]
+        assert run["source_sha256"] == ledger["source_sha256"], "قِيس على كشفٍ غير الكشف المتتبَّع"
+    loader = json.loads(SOURCES["pypdfloader.json"].read_text(encoding="utf-8"))
+    assert loader["documents"] == ledger["n_pages"]
 
 
 def test_the_owners_statement_is_never_on_the_page():
     for name, text in _page_sources().items():
         for banned in ("local_sample", "sample_10p", "data/statements"):
             assert banned not in text, f"{name} يذكر {banned}"
+
+
+def test_every_title_a_person_reads_carries_the_registered_name():
+    html = (SITE / "index.html").read_text(encoding="utf-8")
+    assert f"<title>{OFFICIAL_NAME}</title>" in html
+    assert re.search(rf"<h1[^>]*>{OFFICIAL_NAME}</h1>", html)
+    space = yaml.safe_load((ROOT / "space" / "README.md").read_text(encoding="utf-8").split("---")[1])
+    assert space["title"] == OFFICIAL_NAME
+    assert (ROOT / "README.md").read_text(encoding="utf-8").startswith(f"# {OFFICIAL_NAME}")
+    app = (ROOT / "app.py").read_text(encoding="utf-8")
+    assert f"<h1>{OFFICIAL_NAME}</h1>" in app
+    assert f'gr.Blocks(title="{OFFICIAL_NAME}"' in app
 
 
 def test_the_seal_is_set_in_noto_naskh_arabic():
@@ -103,11 +144,12 @@ def test_the_gateway_opens_the_space():
     assert html.count(f'href="{SPACE_URL}"') == 2
 
 
-def test_the_scanned_page_image_is_described():
+def test_the_scanned_page_image_and_the_architecture_are_described():
     html = (SITE / "index.html").read_text(encoding="utf-8")
     for src in re.findall(r'<img src="([^"]+)"', html):
         assert (SITE / src).is_file(), src
     assert not re.search(r"<img(?![^>]*\balt=\"[^\"]+\")[^>]*>", html, re.S), "صورةٌ بلا وصف"
+    assert re.search(r'<ol class="flow" aria-label="[^"]+">', html), "مخطّطُ المعماريّة بلا وصف"
 
 
 def test_the_live_site_changes_only_when_someone_publishes_it():

@@ -365,7 +365,7 @@ HERO = """
     <text x="50" y="54" text-anchor="middle" font-family="'Noto Naskh Arabic', serif" font-size="21" fill="#0E6B57">مُدقَّق</text>
     <text x="50" y="70" text-anchor="middle" font-size="8.5" fill="#6B6355">آلياً</text>
   </svg>
-  <h1>مُدقّق كشوف الراجحي</h1>
+  <h1>AI Bank Statement Auditor</h1>
   <div class="sub">من المسح الضوئي إلى الجواب الموثّق: قراءة حرفية، سلسلة رصيدية هي الحَكَم، وأدوات حسابية لا تخطئ — لأن الرقم أمانة.</div>
   <div class="rule"></div>
 </div>
@@ -1984,7 +1984,7 @@ def _record_qa_row(sess, res, question: str, displayed: str) -> None:
 # عميل Gradio لها أسماءٌ ثابتةٌ ووصفٌ في صفحة الـAPI، وكلُّ توصيلٍ آخر (إظهارُ زرّ · مسحُ أسطح · فتحُ الجلسة)
 # خاصّ (`api_visibility="private"`): لا يظهر في الصفحة ولا تناديه مكتباتُ العميل. **والخاصُّ ليس حاجزَ أمان:**
 # الواجهةُ نفسُها تناديه، فلا يُخبَّأ خلفه ما يحتاج حماية. والقائمةُ يحرسها `tests/test_engine_api.py`.
-with gr.Blocks(title="مُدقّق كشوف الراجحي", delete_cache=DELETE_CACHE) as demo:
+with gr.Blocks(title="AI Bank Statement Auditor", delete_cache=DELETE_CACHE) as demo:
     # **`delete_cache=(600, 600)` (R130-2):** ملفّاتُ الحافظة التي تُنشئها المكوّناتُ من مخرجاتنا
     # (صورُ المعرض · الإكسل · المحادثة) يحذفها **مكوّنُ Gradio** بعد عشر دقائق، وكلَّها عند إغلاق
     # الخادم (`route_utils.create_lifespan_handler`، مقروءٌ من النسخة المثبَّتة) — لا منظّفٌ يدويّ.

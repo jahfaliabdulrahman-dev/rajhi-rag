@@ -1,0 +1,520 @@
+{
+ "runs": [
+  {
+   "measured_on": "2026-10-31",
+   "model": "google/gemini-3.7-flash",
+   "prompt": "This is one page of a scanned bank statement. Extract every transaction on it as a JSON array of objects with the keys date, description, amount and balance. Return only the JSON.",
+   "render_dpi": 200,
+   "statement": "statement_showcase.pdf",
+   "source_sha256": "a2c1287e17db81d9bd10b59e5768745f161e347d98b4d619052cbffb7aaad394",
+   "pages_read": 5,
+   "pages_total": 5,
+   "spent": 0.056314,
+   "budget": 0.15,
+   "totals": {
+    "rows_expected": 54,
+    "rows_returned": 53,
+    "balances_expected": 54,
+    "balances_matched": 41,
+    "amounts_expected": 53,
+    "amounts_matched": 40,
+    "breaks_inside_the_answer": 0
+   },
+   "pages": [
+    {
+     "page": 1,
+     "cost": 0.016244,
+     "rows_expected": 14,
+     "rows_returned": 13,
+     "balances_expected": 14,
+     "balances_matched": 13,
+     "amounts_expected": 13,
+     "amounts_matched": 13,
+     "breaks_inside_the_answer": 0,
+     "flagged": []
+    },
+    {
+     "page": 2,
+     "cost": 0.008861,
+     "rows_expected": 15,
+     "rows_returned": 15,
+     "balances_expected": 15,
+     "balances_matched": 15,
+     "amounts_expected": 15,
+     "amounts_matched": 14,
+     "breaks_inside_the_answer": 0,
+     "flagged": [
+      {
+       "seq": 22,
+       "page": 2,
+       "answer_has_printed_amount": false,
+       "answer_has_balance_difference": true
+      }
+     ]
+    },
+    {
+     "page": 3,
+     "cost": 0.016518,
+     "rows_expected": 13,
+     "rows_returned": 13,
+     "balances_expected": 13,
+     "balances_matched": 13,
+     "amounts_expected": 13,
+     "amounts_matched": 13,
+     "breaks_inside_the_answer": 0,
+     "flagged": []
+    },
+    {
+     "page": 4,
+     "cost": 0.012569,
+     "rows_expected": 12,
+     "rows_returned": 12,
+     "balances_expected": 12,
+     "balances_matched": 0,
+     "amounts_expected": 12,
+     "amounts_matched": 0,
+     "breaks_inside_the_answer": 0,
+     "flagged": []
+    },
+    {
+     "page": 5,
+     "cost": 0.002122,
+     "rows_expected": 0,
+     "rows_returned": 0,
+     "balances_expected": 0,
+     "balances_matched": 0,
+     "amounts_expected": 0,
+     "amounts_matched": 0,
+     "breaks_inside_the_answer": 0,
+     "flagged": []
+    }
+   ],
+   "note": "first run: counts only, the returned rows were not kept",
+   "balances_basis": "all ledger rows, the opening balance included (the returned rows were not kept, so it cannot be recounted)"
+  },
+  {
+   "measured_on": "2026-10-31",
+   "model": "google/gemini-3.7-flash",
+   "prompt": "This is one page of a scanned bank statement. Extract every transaction on it as a JSON array of objects with the keys date, description, amount and balance. Return only the JSON.",
+   "render_dpi": 200,
+   "statement": "statement_showcase.pdf",
+   "source_sha256": "a2c1287e17db81d9bd10b59e5768745f161e347d98b4d619052cbffb7aaad394",
+   "pages_read": 5,
+   "pages_total": 5,
+   "spent": 0.059757,
+   "budget": 0.0937,
+   "totals": {
+    "rows_expected": 54,
+    "rows_returned": 53,
+    "balances_expected": 53,
+    "balances_matched": 53,
+    "amounts_expected": 53,
+    "amounts_matched": 53,
+    "breaks_inside_the_answer": 1,
+    "rows_with_other_fields": 0
+   },
+   "pages": [
+    {
+     "page": 1,
+     "cost": 0.015903,
+     "rows_expected": 14,
+     "rows_returned": 13,
+     "balances_expected": 13,
+     "balances_matched": 13,
+     "amounts_expected": 13,
+     "amounts_matched": 13,
+     "breaks_inside_the_answer": 0,
+     "flagged": [],
+     "returned_rows": [
+      {
+       "date": "2026-01-01",
+       "description": "شراء عبر الإنترنت متجر إلكتروني تجريبي مرجع: WEB-K2",
+       "amount": -883.29,
+       "balance": 14365.77
+      },
+      {
+       "date": "2026-01-01",
+       "description": "شراء عبر الإنترنت متجر إلكتروني تجريبي مرجع: WEB-K2",
+       "amount": -849.59,
+       "balance": 13516.18
+      },
+      {
+       "date": "2026-01-03",
+       "description": "سداد فاتورة شركة خدمات تجريبية",
+       "amount": -733.43,
+       "balance": 12782.75
+      },
+      {
+       "date": "2026-01-05",
+       "description": "استرداد مبلغ شراء متجر تجريبي",
+       "amount": 72.9,
+       "balance": 12855.65
+      },
+      {
+       "date": "2026-01-05",
+       "description": "تحويل وارد من حساب آخر المحول: عميل تجريبي آخر",
+       "amount": 2557.48,
+       "balance": 15413.13
+      },
+      {
+       "date": "2026-01-05",
+       "description": "سحب نقدي من صراف آلي صراف الفرع التجريبي",
+       "amount": -923.74,
+       "balance": 14489.39
+      },
+      {
+       "date": "2026-01-06",
+       "description": "تحويل صادر إلى حساب آخر المستفيد: مستفيد تجريبي الغرض: مصاريف عائلية",
+       "amount": -1084.9,
+       "balance": 13404.49
+      },
+      {
+       "date": "2026-01-08",
+       "description": "سداد فاتورة شركة خدمات تجريبية",
+       "amount": -190.03,
+       "balance": 13214.46
+      },
+      {
+       "date": "2026-01-09",
+       "description": "استرداد مبلغ شراء متجر تجريبي",
+       "amount": 211.44,
+       "balance": 13425.9
+      },
+      {
+       "date": "2026-01-10",
+       "description": "شراء عبر الإنترنت متجر إلكتروني تجريبي مرجع: WEB-K2",
+       "amount": -791.84,
+       "balance": 12634.06
+      },
+      {
+       "date": "2026-01-11",
+       "description": "استرداد مبلغ شراء متجر تجريبي",
+       "amount": 261.72,
+       "balance": 12895.78
+      },
+      {
+       "date": "2026-01-12",
+       "description": "شراء عبر نقاط البيع مدى - متجر تجريبي مرجع: POS-A7",
+       "amount": -601.9,
+       "balance": 12293.88
+      },
+      {
+       "date": "2026-01-14",
+       "description": "تحويل صادر إلى حساب آخر المستفيد: مستفيد تجريبي الغرض: مصاريف عائلية",
+       "amount": -2253.83,
+       "balance": 10040.05
+      }
+     ],
+     "rows_with_other_fields": 0
+    },
+    {
+     "page": 2,
+     "cost": 0.01024,
+     "rows_expected": 15,
+     "rows_returned": 15,
+     "balances_expected": 15,
+     "balances_matched": 15,
+     "amounts_expected": 15,
+     "amounts_matched": 15,
+     "breaks_inside_the_answer": 1,
+     "flagged": [
+      {
+       "seq": 22,
+       "page": 2,
+       "answer_has_printed_amount": true,
+       "answer_has_balance_difference": false
+      }
+     ],
+     "returned_rows": [
+      {
+       "date": "2026/01/16",
+       "description": "سداد فاتورة\nشركة خدمات تجريبية",
+       "amount": -640.45,
+       "balance": 9399.6
+      },
+      {
+       "date": "2026/01/18",
+       "description": "رسوم خدمة",
+       "amount": -52.14,
+       "balance": 9347.46
+      },
+      {
+       "date": "2026/01/19",
+       "description": "شراء عبر الإنترنت\nمتجر إلكتروني تجريبي\nمرجع: WEB-K2",
+       "amount": -720.79,
+       "balance": 8626.67
+      },
+      {
+       "date": "2026/01/19",
+       "description": "تحويل صادر إلى حساب آخر\nالمستفيد: مستفيد تجريبي\nالغرض: مصاريف عائلية",
+       "amount": -523.32,
+       "balance": 8103.35
+      },
+      {
+       "date": "2026/01/21",
+       "description": "شراء عبر الإنترنت\nمتجر إلكتروني تجريبي\nمرجع: WEB-K2",
+       "amount": -194.92,
+       "balance": 7908.43
+      },
+      {
+       "date": "2026/01/23",
+       "description": "سحب نقدي من صراف آلي\nصراف الفرع التجريبي",
+       "amount": -757.99,
+       "balance": 7150.44
+      },
+      {
+       "date": "2026/01/25",
+       "description": "شراء عبر نقاط البيع\nمدى - متجر تجريبي\nمرجع: POS-A7",
+       "amount": -542.15,
+       "balance": 6608.29
+      },
+      {
+       "date": "2026/01/27",
+       "description": "راتب\nجهة العمل: منشأة تجريبية",
+       "amount": 12237.49,
+       "balance": 18935.78
+      },
+      {
+       "date": "2026/01/29",
+       "description": "شراء عبر نقاط البيع\nمدى - متجر تجريبي\nمرجع: POS-A7",
+       "amount": -194.31,
+       "balance": 18741.47
+      },
+      {
+       "date": "2026/01/29",
+       "description": "استرداد مبلغ شراء\nمتجر تجريبي",
+       "amount": 320.3,
+       "balance": 19061.77
+      },
+      {
+       "date": "2026/01/31",
+       "description": "شراء عبر نقاط البيع\nمدى - متجر تجريبي\nمرجع: POS-A7",
+       "amount": -471.93,
+       "balance": 18589.84
+      },
+      {
+       "date": "2026/02/02",
+       "description": "رسوم خدمة",
+       "amount": -45.72,
+       "balance": 18544.12
+      },
+      {
+       "date": "2026/02/04",
+       "description": "شراء عبر الإنترنت\nمتجر إلكتروني تجريبي\nمرجع: WEB-K2",
+       "amount": -415.19,
+       "balance": 18128.93
+      },
+      {
+       "date": "2026/02/05",
+       "description": "رسوم خدمة",
+       "amount": -40.91,
+       "balance": 18088.02
+      },
+      {
+       "date": "2026/02/06",
+       "description": "شراء عبر الإنترنت",
+       "amount": -593.07,
+       "balance": 17494.95
+      }
+     ],
+     "rows_with_other_fields": 0
+    },
+    {
+     "page": 3,
+     "cost": 0.020726,
+     "rows_expected": 13,
+     "rows_returned": 13,
+     "balances_expected": 13,
+     "balances_matched": 13,
+     "amounts_expected": 13,
+     "amounts_matched": 13,
+     "breaks_inside_the_answer": 0,
+     "flagged": [],
+     "returned_rows": [
+      {
+       "date": "2026-02-08",
+       "description": "سحب نقدي من صراف آلي\nصراف الفرع التجريبي",
+       "amount": "-1,406.58",
+       "balance": "16,088.37"
+      },
+      {
+       "date": "2026-02-09",
+       "description": "استرداد مبلغ شراء\nمتجر تجريبي",
+       "amount": "289.55",
+       "balance": "16,377.92"
+      },
+      {
+       "date": "2026-02-10",
+       "description": "شراء عبر نقاط البيع\nمدى - متجر تجريبي\nمرجع: POS-A7",
+       "amount": "-18.14",
+       "balance": "16,359.78"
+      },
+      {
+       "date": "2026-02-12",
+       "description": "شراء عبر الإنترنت\nمتجر إلكتروني تجريبي\nمرجع: WEB-K2",
+       "amount": "-143.87",
+       "balance": "16,215.91"
+      },
+      {
+       "date": "2026-02-13",
+       "description": "استرداد مبلغ شراء\nمتجر تجريبي",
+       "amount": "49.26",
+       "balance": "16,265.17"
+      },
+      {
+       "date": "2026-02-14",
+       "description": "سحب نقدي من صراف آلي\nصراف الفرع التجريبي",
+       "amount": "-505.69",
+       "balance": "15,759.48"
+      },
+      {
+       "date": "2026-02-14",
+       "description": "سداد فاتورة\nشركة خدمات تجريبية",
+       "amount": "-734.85",
+       "balance": "15,024.63"
+      },
+      {
+       "date": "2026-02-15",
+       "description": "تحويل صادر إلى حساب آخر\nالمستفيد: مستفيد تجريبي\nالغرض: مصاريف عائلية",
+       "amount": "-493.97",
+       "balance": "14,530.66"
+      },
+      {
+       "date": "2026-02-16",
+       "description": "استرداد مبلغ شراء\nمتجر تجريبي",
+       "amount": "124.93",
+       "balance": "14,655.59"
+      },
+      {
+       "date": "2026-02-17",
+       "description": "شراء عبر الإنترنت\nمتجر إلكتروني تجريبي\nمرجع: WEB-K2",
+       "amount": "-436.08",
+       "balance": "14,219.51"
+      },
+      {
+       "date": "2026-02-19",
+       "description": "شراء عبر نقاط البيع\nمدى - متجر تجريبي\nمرجع: POS-A7",
+       "amount": "-546.81",
+       "balance": "13,672.70"
+      },
+      {
+       "date": "2026-02-20",
+       "description": "شراء عبر الإنترنت\nمتجر إلكتروني تجريبي\nمرجع: WEB-K2",
+       "amount": "-545.32",
+       "balance": "13,127.38"
+      },
+      {
+       "date": "2026-02-20",
+       "description": "إيداع نقدي",
+       "amount": "1,994.16",
+       "balance": "15,121.54"
+      }
+     ],
+     "rows_with_other_fields": 0
+    },
+    {
+     "page": 4,
+     "cost": 0.010691,
+     "rows_expected": 12,
+     "rows_returned": 12,
+     "balances_expected": 12,
+     "balances_matched": 12,
+     "amounts_expected": 12,
+     "amounts_matched": 12,
+     "breaks_inside_the_answer": 0,
+     "flagged": [],
+     "returned_rows": [
+      {
+       "date": "٢٠٢٦٠٢٢١",
+       "description": "الفرع التجريبي\nشراء عبر الإنترنت\nمتجر إلكتروني تجريبي\nمرجع: WEB-K2",
+       "amount": "-٦٨.٥٣",
+       "balance": "١٥,٠٥٣.٠١"
+      },
+      {
+       "date": "٢٠٢٦٠٢٢٣",
+       "description": "شراء عبر نقاط البيع\nمدى - متجر تجريبي\nمرجع: POS-A7",
+       "amount": "-٢٣١.٦٧",
+       "balance": "١٤,٨٢١.٣٤"
+      },
+      {
+       "date": "٢٠٢٦٠٢٢٣",
+       "description": "تحويل صادر إلى حساب آخر\nالمستفيد: مستفيد تجريبي\nالغرض: مصاريف عائلية",
+       "amount": "-١,٧٧١.٦٣",
+       "balance": "١٣,٠٤٩.٧١"
+      },
+      {
+       "date": "٢٠٢٦٠٢٢٤",
+       "description": "استرداد مبلغ شراء\nمتجر تجريبي",
+       "amount": "١٥٥.٦٥",
+       "balance": "١٣,٢٠٥.٣٦"
+      },
+      {
+       "date": "٢٠٢٦٠٢٢٦",
+       "description": "تحويل صادر إلى حساب آخر\nالمستفيد: مستفيد تجريبي\nالغرض: مصاريف عائلية",
+       "amount": "-٧٦١.٦٥",
+       "balance": "١٢,٤٤٣.٧١"
+      },
+      {
+       "date": "٢٠٢٦٠٢٢٦",
+       "description": "شراء عبر نقاط البيع\nمدى - متجر تجريبي\nمرجع: POS-A7",
+       "amount": "-٤٤٢.١٦",
+       "balance": "١٢,٠٠١.٥٥"
+      },
+      {
+       "date": "٢٠٢٦٠٢٢٧",
+       "description": "راتب\nجهة العمل: منشأة تجريبية",
+       "amount": "١١,٨٢٩.٦٤",
+       "balance": "٢٣,٨٣١.١٩"
+      },
+      {
+       "date": "٢٠٢٦٠٢٢٧",
+       "description": "رسوم خدمة",
+       "amount": "-٢٠.٤٤",
+       "balance": "٢٣,٨١٠.٧٥"
+      },
+      {
+       "date": "٢٠٢٦٠٣٠١",
+       "description": "شراء عبر الإنترنت\nمتجر إلكتروني تجريبي\nمرجع: WEB-K2",
+       "amount": "-٢٠٤.٢٦",
+       "balance": "٢٣,٦٠٦.٤٩"
+      },
+      {
+       "date": "٢٠٢٦٠٣٠٢",
+       "description": "سداد فاتورة\nشركة خدمات تجريبية",
+       "amount": "-٢٧٠.٥١",
+       "balance": "٢٣,٣٣٥.٩٨"
+      },
+      {
+       "date": "٢٠٢٦٠٣٠٣",
+       "description": "شراء عبر نقاط البيع\nمدى - متجر تجريبي\nمرجع: POS-A7",
+       "amount": "-١٩٦.٧٨",
+       "balance": "٢٣,١٣٩.٢٠"
+      },
+      {
+       "date": "٢٠٢٦٠٣٠٥",
+       "description": "شراء عبر الإنترنت\nمتجر إلكتروني تجريبي\nمرجع: WEB-K2",
+       "amount": "-٥٣٧.٢٤",
+       "balance": "٢٢,٦٠١.٩٦"
+      }
+     ],
+     "rows_with_other_fields": 0
+    },
+    {
+     "page": 5,
+     "cost": 0.002197,
+     "rows_expected": 0,
+     "rows_returned": 0,
+     "balances_expected": 0,
+     "balances_matched": 0,
+     "amounts_expected": 0,
+     "amounts_matched": 0,
+     "breaks_inside_the_answer": 0,
+     "flagged": [],
+     "returned_rows": [],
+     "rows_with_other_fields": 0
+    }
+   ],
+   "balances_basis": "transaction rows (the opening balance is not asked for)"
+  }
+ ]
+}

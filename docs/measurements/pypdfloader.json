@@ -1,0 +1,18 @@
+{
+ "measured_on": "2026-10-31",
+ "loader": "langchain_community.document_loaders.PyPDFLoader",
+ "versions": {
+  "langchain_community": "0.4.2",
+  "pypdf": "6.18.1"
+ },
+ "statement": "statement_showcase.pdf",
+ "documents": 5,
+ "characters_per_page": [
+  0,
+  0,
+  0,
+  0,
+  0
+ ],
+ "command": "PyPDFLoader('data/sample/statement_showcase.pdf').load() — the loader the course's RAG pipeline starts with"
+}
