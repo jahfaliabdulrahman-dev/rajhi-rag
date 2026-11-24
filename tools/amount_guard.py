@@ -254,19 +254,38 @@ def _walk_amounts(obj, out: set[str]) -> None:
             _walk_amounts(v, out)
 
 
+def _tracked_under_data() -> frozenset[str]:
+    """ملفّاتُ `data/` المُتتبَّعةُ في git عند `DATA_ROOT` — وفارغةٌ إن تعذّر السؤال (فيبقى كلُّ شيءٍ مصدرًا)."""
+    try:
+        out = subprocess.run(["git", "-C", str(DATA_ROOT), "ls-files", "-z", "--", "data"],
+                             capture_output=True, check=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return frozenset()
+    return frozenset(p for p in out.decode("utf-8", "replace").split("\0") if p)
+
+
 def _artifacts(globs: tuple[str, ...] = ("data/**/*",)):
     """**المصدرُ يُقرأ من `DATA_ROOT` لا من `ROOT` (ثغرةُ مراجعة ٣٩ رقم ١).**
 
     كان يمشي على `ROOT` ⇒ بناءٌ من worktree مرتبط لا يجد الكوربوسَ ⇒ يكتب **مانيفستاً فارغاً
     إلى النسخة الرئيسيّة** ويُعلن نجاحاً (`rc=0`) ⇒ كلُّ دفعٍ بعده يمرّ. وهذا بعينه نمطُ
     العطب الأصليّ: *مصدرٌ أعمى يُنتج صفراً يُقرأ كنجاح*. والقاعدةُ هنا: **صفرُ مدخلٍ ليس نتيجةً**.
+
+    **والملفُّ المُتتبَّعُ في git ليس مصدرَ مبالغَ حقيقيّة (قرارُ المالك 2026-11-24 · «Fix the guard»):**
+    ما في git منشورٌ بالتعريف، والحارسُ موجودٌ ليمنع الحقيقيَّ من دخوله؛ فعدُّه مصدرًا يجعل المنشورَ
+    عمدًا (كشفَ العرض الاصطناعيّ `data/sample/statement_showcase.ledger.json`، ف٢ = ب) «حقيقيًّا».
+    قِيس: كلُّ شجرةٍ حديثةٍ لـ`main` عدّت ٩٣ قيمةً اصطناعيّةً زائدة ⇒ «المانيفستُ متعفّن» وسقطت خمسةُ
+    اختباراتٍ في `test_amount_guard`، ولم يُرَ ذلك لأنّ نسخةَ المالك الرئيسيّة على فرعٍ أقدم بلا الملفّ.
+    وما يُستبعد مقيسٌ قبل الإصلاح: **ملفٌّ واحدٌ من ١٦٧٩، وصفرُ ملفٍّ حقيقيّ**. **وإن تعذّر سؤالُ git**
+    يُعدّ كلُّ شيءٍ مصدرًا كما كان (الأشدُّ لا الأرخى).
     """
+    tracked = _tracked_under_data()
     for pat in globs:
         for f in sorted(DATA_ROOT.glob(pat)):
             if not f.is_file() or f.suffix.lower() not in {".json", ".jsonl"}:
                 continue
             rel = str(f.relative_to(DATA_ROOT))
-            if rel in NON_SOURCE:
+            if rel in NON_SOURCE or rel.replace("\\", "/") in tracked:
                 continue
             yield f, rel
 

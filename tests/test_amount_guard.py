@@ -870,3 +870,27 @@ def test_the_repository_declares_exactly_the_one_page():
     assert set(declared) == {"docs/measurements/real-page-43.json"}
     entry = declared["docs/measurements/real-page-43.json"]
     assert entry["count"] == 13 and "نعم موافق امضي بالصفحه 43" in entry["decision"]
+
+
+def test_a_file_tracked_in_git_is_not_a_source_of_real_amounts(tmp_path, monkeypatch):
+    """قرارُ المالك 2026-11-24 («Fix the guard»): ما في git منشورٌ بالتعريف، فليس مصدرَ مبالغَ حقيقيّة.
+
+    كشفُ العرض الاصطناعيّ المُتتبَّع كان يُعدّ مصدرًا ⇒ «المانيفستُ متعفّن» في كلّ شجرةٍ حديثة. والضابطُ
+    يعضّ في الاتجاهين: المُتتبَّعُ لا يُعدّ، وغيرُ المُتتبَّع يُعدّ — وإن تعذّر سؤالُ git يُعدّ الاثنان (الأشدّ).
+    """
+    repo = tmp_path / "repo"
+    (repo / "data" / "sample").mkdir(parents=True)
+    (repo / "data" / "local").mkdir()
+    shown = {"rows": [{"balance": "#,###.##".replace("#", "7")}]}
+    (repo / "data" / "sample" / "showcase.json").write_text(json.dumps(shown), encoding="utf-8")
+    (repo / "data" / "local" / "read.json").write_text(json.dumps(shown), encoding="utf-8")
+    git = ["git", "-C", str(repo), "-c", "user.email=t@t", "-c", "user.name=t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "add", "data/sample/showcase.json"], check=True)
+    subprocess.run([*git, "commit", "-qm", "showcase"], check=True)
+    monkeypatch.setattr(ag, "DATA_ROOT", repo)
+    seen = {rel for _, rel in ag._artifacts()}
+    assert seen == {"data/local/read.json"}, seen
+    # git لا يُجيب ⇒ لا يُستبعد شيء (الأشدّ لا الأرخى)
+    monkeypatch.setattr(ag, "_tracked_under_data", lambda: frozenset())
+    assert {rel for _, rel in ag._artifacts()} == {"data/local/read.json", "data/sample/showcase.json"}
