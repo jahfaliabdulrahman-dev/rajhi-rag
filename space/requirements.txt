@@ -1,5 +1,5 @@
 # The Space's Python packages: requirements.lock (the environment every measured number came from),
-# with three declared differences and nothing else. tests/test_space_files.py holds them.
+# with four declared differences and nothing else. tests/test_space_files.py holds them.
 #
 # 1. gradio is left out: the Space installs it itself at `sdk_version` in space/README.md, and the test
 #    ties that version to the lock's gradio pin. Its client and huggingface_hub stay pinned as measured
@@ -15,9 +15,12 @@
 #    allows pydantic up to 2.12.5 only. The first build failed on it (ResolutionImpossible, 2026-10-31).
 #    Measured before the change: the full suite on the lock with these two pins alone gives the same
 #    result, failure by failure, as on the lock.
+# 4. pymupdf is left out: AGPL-3.0, unused by the Space runtime (`app.py`, `src/`, and the subset of
+#    `tools/` uploaded via `space/include.txt` render PDFs via `pdf2image` + `poppler-utils`).
 #
-#   regenerate:  the lock's lines without gradio, the two pydantic pins of difference 3, and the torch line
-#                replaced by the link (with its #sha256) for that release from https://download.pytorch.org/whl/cpu/torch/
+#   regenerate:  the lock's lines without gradio, pymupdf (difference 4), the two pydantic pins of
+#                difference 3, and the torch line replaced by the link (with its #sha256) for that
+#                release from https://download.pytorch.org/whl/cpu/torch/
 Jinja2==3.1.6
 MarkupSafe==3.0.3
 PyYAML==6.0.3
@@ -106,7 +109,6 @@ pydantic-settings==2.15.0
 pydantic==2.12.5
 pydantic_core==2.41.5
 pydub==0.25.1
-pymupdf==1.28.2
 pypdf==6.18.1
 pypdfium2==5.13.0
 pytesseract==0.3.13

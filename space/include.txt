@@ -7,4 +7,9 @@ data/sample/statement_showcase.pdf
 data/sample/statement_showcase.ledger.json
 profiles
 src
-tools
+tools/__init__.py
+tools/page_gate.py
+tools/page_numbers.py
+tools/preflight.py
+tools/spend.py
+tools/to_xlsx.py

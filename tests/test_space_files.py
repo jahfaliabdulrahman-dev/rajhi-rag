@@ -19,6 +19,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 #: Installed by the Space itself at `sdk_version`; the README test ties that version to the lock.
 LEFT_TO_THE_SPACE = {"gradio"}
+#: Excluded intentionally from the Space runtime (difference 4 in space/requirements.txt): AGPL-3.0
+#: and unused by the Space runtime (`app.py`, `src/`, and uploaded `tools/`).
+EXCLUDED_FROM_SPACE = {"pymupdf"}
 #: The Space installs `gradio[oauth,mcp]` in the same pip command, and its mcp extra caps pydantic
 #: (difference 3 in the header of space/requirements.txt, with the measurement behind it).
 HELD_BY_THE_SPACE = {"pydantic": "2.12.5", "pydantic-core": "2.41.5"}
@@ -50,7 +53,8 @@ def test_the_space_installs_the_lock_with_only_the_declared_differences():
     lock = _pins(ROOT / "requirements.lock")
     space = _pins(SPACE / "requirements.txt")
     expected = {name: version for name, version in lock.items()
-                if name not in LEFT_TO_THE_SPACE and name != "torch"} | HELD_BY_THE_SPACE
+                if name not in (LEFT_TO_THE_SPACE | EXCLUDED_FROM_SPACE)
+                and name != "torch"} | HELD_BY_THE_SPACE
     rest = {name: version for name, version in space.items() if name != "torch"}
     assert rest == expected, (
         "space/requirements.txt انزاح عن requirements.lock: "
@@ -115,10 +119,12 @@ def _top_level_reads(path: Path, roots: set[str]) -> tuple[set[str], set[str]]:
 def test_every_top_level_folder_the_app_reads_is_uploaded():
     """The first live build refused the Excel export: `profiles/` was read by the code and not uploaded."""
     roots = {p.name for p in ROOT.iterdir() if not p.name.startswith(".")}
-    uploaded = {line.split("/")[0] for line in _lines(SPACE / "include.txt")}
+    raw_uploaded = set(_lines(SPACE / "include.txt"))
+    uploaded = {line.split("/")[0] for line in raw_uploaded}
     todo = [ROOT / "app.py", *sorted((ROOT / "src").rglob("*.py"))]
     seen: set[Path] = set()
     read: set[str] = set()
+    used_tools: set[str] = set()
     while todo:
         module = todo.pop()
         if module in seen or not module.is_file():
@@ -126,10 +132,42 @@ def test_every_top_level_folder_the_app_reads_is_uploaded():
         seen.add(module)
         found, tools = _top_level_reads(module, roots)
         read |= found
+        used_tools |= tools
         todo += [ROOT / "tools" / f"{name}.py" for name in tools]
     missing = sorted(read - uploaded)
     assert missing == [], f"الكودُ يقرأ {missing} ولا يُرفع إلى الـSpace (space/include.txt)"
+    if "tools" not in raw_uploaded:
+        missing_tools = sorted(
+            p for p in ["tools/__init__.py", *(f"tools/{n}.py" for n in used_tools)]
+            if p not in raw_uploaded
+        )
+        assert missing_tools == [], f"ملفّات tools المستعملة غائبة من space/include.txt: {missing_tools}"
     assert {"app.py", "src"} <= uploaded
+
+
+def test_no_agpl_pymupdf_reaches_the_space():
+    import ast
+
+    assert "pymupdf" not in _pins(SPACE / "requirements.txt")
+    py_files: list[Path] = []
+    for entry in _lines(SPACE / "include.txt"):
+        p = ROOT / entry
+        if p.is_dir():
+            py_files.extend(sorted(p.rglob("*.py")))
+        elif p.suffix == ".py" and p.is_file():
+            py_files.append(p)
+    offenders: list[str] = []
+    for path in py_files:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.split(".")[0] in {"fitz", "pymupdf"}:
+                        offenders.append(f"{path.relative_to(ROOT)}:{alias.name}")
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                if node.module.split(".")[0] in {"fitz", "pymupdf"}:
+                    offenders.append(f"{path.relative_to(ROOT)}:{node.module}")
+    assert offenders == [], f"استيراد AGPL (fitz/pymupdf) يصل إلى الـSpace: {offenders}"
 
 
 def test_poppler_is_installed_because_the_app_reads_pages_with_pdf2image():
