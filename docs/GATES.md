@@ -96,6 +96,7 @@ tests/test_qa_time_tools.py
 tests/test_ledger_search_reach.py
 tests/test_answer_type.py
 tests/test_scope_gate.py
+tests/test_the_gate_refuses_only_what_it_can_prove.py
 tests/test_date_encoding_filter.py
 tests/test_agent_prompt_memory.py
 tests/test_app_binds_history.py

@@ -64,7 +64,7 @@ def _mentions(text: str, token: str) -> bool:
 # «الجوال» alone is NOT here on purpose: «فاتورة الجوال» is a real row in this
 # statement, and a marker that refuses a real question is worse than none.
 PERSONAL_MARKERS = (
-    "رقم الجوال", "رقم جوال", "رقم هاتف", "الهوية", "رقم الهوية", "العنوان",
+    "رقم الجوال", "رقم جوال", "رقم هاتف", "الهوية", "رقم الهوية",
     "عنوان صاحب", "الإيميل", "إيميل",
     "الايميل", "البريد الإلكتروني", "تاريخ الميلاد", "رقم البطاقة",
     "الرقم السري", "كلمة المرور",
@@ -106,7 +106,7 @@ class Scope:
 
 
 def _norm(text: str) -> str:
-    return (text or "").translate(_AR_DIGITS).replace("٬", ",")
+    return (text or "").translate(_AR_DIGITS).replace("٬", ",").replace("٫", ".")
 
 
 def _has_our_bank(q: str) -> bool:
@@ -131,19 +131,24 @@ def _numbers_in(window: str) -> list[int]:
     return out
 
 
+def _page_windows(text: str):
+    """نوافذُ الصفحة في نصٍّ مُطبَّع الأرقام: (بداية · نهاية · أرقامها) — **مصدرُ `pages_in` الوحيد**،
+    ويقرؤها قارئُ المبلغ ليعرف أنّ «١٢» في «الصفحة ١٢» رقمُ صفحةٍ لا مبلغ (دورٌ واحدٌ لكلّ رقم)."""
+    for m in _PAGE_WORDS.finditer(text):
+        window = _PAGE_NUMBERS.match(text, m.end())
+        if window:
+            yield window.start(), window.end(), _numbers_in(window.group(0))
+
+
 def pages_in(q: str) -> list[int]:
     """**قارئُ الصفحة الواحد** — كلُّ صفحةٍ يسمّيها السؤال، بترتيبها وبلا تكرار، والمدى مُفكوك.
 
     (الصيغُ المسمّاة في البوّابة: «الصفحة ٧» · «صفحة ٧٠٠» · «الصفحه ٧٠٠» · «الصفحتين ٢ و٣» ·
     `page 700` · و«الصفحات ١٠–١٢».) **والدالّةُ خالصةٌ** فتُقاس بلا نموذجٍ وبلا كلفة.
     """
-    text = _norm(q)
     out: list[int] = []
-    for m in _PAGE_WORDS.finditer(text):
-        window = _PAGE_NUMBERS.match(text, m.end())
-        if not window:
-            continue
-        for v in _numbers_in(window.group(0)):
+    for _s, _e, nums in _page_windows(_norm(q)):
+        for v in nums:
             if v not in out:
                 out.append(v)
     return out
@@ -155,17 +160,124 @@ def page_in(q: str) -> int | None:
     return pages[0] if pages else None
 
 
-def amounts_in(q: str) -> list[Decimal]:
+#: **دورٌ واحدٌ لكلّ رقمٍ في السؤال.** كان كلُّ رقمٍ يُقرأ مبلغًا: السنةُ (٢٠٢٤ ⇒ 2,024.00) ورقمُ الصفحة
+#: (١٢ ⇒ 12.00) ويومُ التاريخ (١٥/٠٣ ⇒ 15.00)، ثمّ يُرفض السؤالُ لأنّ «المبلغ» غيرُ موجود. والمبلغُ الآن
+#: **ما يسمّيه السؤالُ مالًا** — رقمٌ تلاصقه كلمةُ عملة (ريال · ر.س · SAR) أو تسبقه كلمةُ «مبلغ» — وليس
+#: داخل نافذة صفحة (`_page_windows`) ولا جزءًا من مركّبٍ بشرطةٍ أو مائل (تاريخ · مدى · مرجع).
+#: **وما يُهمَل مُعلَن:** «هل يوجد سحب 777؟» بلا كلمة مال يمرّ إلى الوكيل وأدواته بدل رفضٍ حتميّ.
+_NUM_RUN = re.compile(r"\d(?:[\d,./-]*\d)?")
+_CURRENCY_AFTER = re.compile(r"\s*(?:ريال|ريالا|ريالات|ر\.?\s?س|sar|sr)(?![\w])", re.IGNORECASE)
+_AMOUNT_BEFORE = re.compile(r"(?:^|[^\w])(?:[وفبل]|بال|ال)?مبلغ(?:ا|\s+(?:قدره|وقدره))?\s*$")
+
+
+def _money_value(raw: str) -> Decimal | None:
+    """قيمةُ رمزٍ ماليّ: الفاصلةُ آلافٌ، **إلّا الأخيرةَ تتبعها خانتان بلا نقطة** («500,00») فهي عشريّة."""
+    if raw.count(".") > 1:
+        return None
+    if "." not in raw and re.search(r",\d{2}$", raw):
+        raw = raw[:-3].replace(",", "") + "." + raw[-2:]
+    try:
+        return Decimal(raw.replace(",", "")).quantize(Decimal("0.01"))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _money_spans(text: str) -> list[tuple[int, int, Decimal]]:
+    """الأرقامُ التي يسمّيها السؤالُ مالًا — في نصٍّ مُطبَّع الأرقام."""
+    paged = [(a, b) for a, b, _n in _page_windows(text)]
     out = []
-    for m in _AMOUNT.finditer(_norm(q)):
-        raw = m.group(1).replace(",", "")
-        if raw.count(".") > 1 or len(raw.replace(".", "")) < 1:
+    for m in _NUM_RUN.finditer(text):
+        raw = m.group(0)
+        if "/" in raw or "-" in raw:                       # تاريخ · مدى · مرجع — ليس مبلغًا
             continue
-        try:
-            out.append(Decimal(raw).quantize(Decimal("0.01")))
-        except (InvalidOperation, ValueError):
+        if any(a <= m.start() < b for a, b in paged):      # رقمُ صفحة
             continue
+        named = (_CURRENCY_AFTER.match(text, m.end())
+                 or _AMOUNT_BEFORE.search(text, 0, m.start()))
+        if not named:
+            continue
+        v = _money_value(raw)
+        if v is not None:
+            out.append((m.start(), m.end(), v))
     return out
+
+
+def amounts_in(q: str) -> list[Decimal]:
+    return [v for _a, _b, v in _money_spans(_norm(q))]
+
+
+def _years_not_money(q: str) -> list[int]:
+    """سنواتُ السؤال **إلّا رقمًا سمّاه مالًا** («بمبلغ 2000 ريال» ليس سنة 2000)."""
+    text = _norm(q)
+    money = [(a, b) for a, b, _v in _money_spans(text)]
+    return [int(m.group(1)) for m in _YEAR.finditer(text)
+            if not any(a <= m.start() < b for a, b in money)]
+
+
+#: **المصرفُ الآخر يُرفض حين يكون موضعَ الحساب المسؤول عنه، لا طرفًا في حركة.** «كم رصيدي في الأهلي؟»
+#: يسأل عن حسابٍ ليس هذا الكشف — يُثبَت من الكشف نفسه (هو كشفُ الراجحي). أمّا «تحويلٌ إلى بنك الرياض»
+#: و«دفعتُ للمستشفى الأهلي» فحركاتٌ في هذا الكشف تُجيب عنها أدواتُه. فالرفضُ يحتاج الأمرين معًا:
+#: ① السؤالُ يطلب صفةَ حساب (رصيد · كشف · حساب)، ② والمصرفُ **موضعُه**: يحكمه حرفُ ظرفٍ (في · لدى ·
+#: عند · بـ) أو يضاف إليه الحسابُ مباشرةً («رصيد بنك الرياض»). وما سوى ذلك (إلى · من · لـ · «صراف بنك
+#: الرياض») طرفٌ أو وصفٌ في حركة ⇒ يمرّ. **والحكمُ بالإثبات لا بالاستثناء:** ما لا يُثبت موضعًا يمرّ.
+_ACCOUNT_WORD = re.compile(r"^(?:[وف])?(?:[بلك])?(?:ال)?(?:رصيد|كشف|حساب)(?:ي|ه|ها|نا|ك|كم|ات|اتي)?$")
+_BANK_HEAD = re.compile(r"^(?:[وف])?(?P<cl>[بلك])?(?:ال|ل)?(?:بنك|مصرف)$")
+_LOCUS_WORDS = {"في", "لدي", "عند"}       # مُطبَّعة: «لدى» ⇒ «لدي»
+
+
+def _tokens(q: str) -> list[str]:
+    from statement_qa.ledger import norm_ar              # المُطبِّعُ الواحد (هو مُطبِّعُ `row_fts`)
+    return re.findall(r"[^\W_]+", norm_ar(q).lower())
+
+
+def _readings(tok: str):
+    """قراءاتُ الكلمة بلواصقها: (الحرفُ الملصق · الأصل) — «للاهلي» ⇒ (ل · الاهلي)، «بساب» ⇒ (ب · ساب)."""
+    t = tok[1:] if tok[:1] in "وف" and len(tok) > 3 else tok
+    yield "", tok
+    yield "", t
+    if t.startswith("لل"):
+        yield "ل", "ال" + t[2:]
+    if t[:1] in "بلك":
+        yield t[0], t[1:]
+
+
+def _bank_as_account(q: str) -> str | None:
+    """اسمُ المصرف الآخر **حين يكون موضعَ الحساب المسؤول عنه** — وإلّا None."""
+    from statement_qa.ledger import norm_ar
+    toks = _tokens(q)
+    if not any(_ACCOUNT_WORD.match(t) for t in toks):
+        return None
+    strong = {norm_ar(b).lower(): b for b in _STRONG_ONLY}
+    weak = {norm_ar(b): b for b in OTHER_BANKS_WEAK}
+    for i, t in enumerate(toks):
+        head = _BANK_HEAD.match(toks[i - 1]) if i > 0 else None
+        hit = next(((cl, strong.get(base) or (weak.get(base) if head else None))
+                    for cl, base in _readings(t)
+                    if strong.get(base) or (head and weak.get(base))), None)
+        if hit is None and t == "bank" and i > 0 and toks[i - 1] == "stc":
+            hit, head = ("", "stc bank"), None             # الاسمُ كلمتان: «stc bank»
+        if hit is None:
+            continue
+        cl, name = hit
+        start = i - 1 if (head or name == "stc bank") else i
+        if head:
+            cl = head.group("cl") or ""
+        prev = toks[start - 1] if start > 0 else ""
+        if cl == "ب" or prev in _LOCUS_WORDS or _ACCOUNT_WORD.match(prev):
+            return name                                    # موضعُ الحساب المسؤول عنه
+    return None
+
+
+_HOLDER = re.compile(r"^(?:[وفبل]|لل)?(?:ال)?صاحب")
+_ADDRESS = re.compile(r"^(?:[وفبل])?(?:ال)?عنوان(?P<own>ي|ه)?$")
+
+
+def _holder_address(q: str) -> bool:
+    """«العنوان» بياناتٌ شخصيّة **حين يُنسب إلى صاحب الحساب** — لا حين يكون اسمًا («فندق العنوان»)."""
+    toks = _tokens(q)
+    addr = [m for m in (_ADDRESS.match(t) for t in toks) if m]
+    return bool(addr) and (any(m.group("own") for m in addr)
+                           or any(_HOLDER.match(t) for t in toks))
 
 
 def classify(question: str, years=(), max_page: int | None = None,
@@ -182,11 +294,9 @@ def classify(question: str, years=(), max_page: int | None = None,
     """
     q = question or ""
 
-    # 1) another bank named — unless the owner's bank is the one named
+    # 1) another bank as the place of the account asked about — unless ours is named
     if not _has_our_bank(q):
-        bank = next((b for b in _STRONG_ONLY if _mentions(q, b)), None)
-        if bank is None and "بنك" in q:
-            bank = next((b for b in OTHER_BANKS_WEAK if _mentions(q, b)), None)
+        bank = _bank_as_account(q)
         if bank:
             return Scope(
                 "out_of_scope", f"سؤال عن {bank}",
@@ -194,18 +304,20 @@ def classify(question: str, years=(), max_page: int | None = None,
                 f"(مصرف آخر). لا أستطيع الجواب عنه من كشف الراجحي، ولا أُخمّن.")
 
     # 2) personal data a statement never carries
-    for marker in PERSONAL_MARKERS:
-        if marker in q:
-            return Scope(
-                "out_of_scope", marker,
-                f"{REFUSAL} — الكشف لا يحمل «{marker}» ولا أي بيانات شخصية "
-                f"من هذا النوع. الأرقام التي أستطيع إثباتها هي الحركات "
-                f"والأرصدة والإجماليات المطبوعة.")
+    #    («العنوان» وحدَه ليس في القائمة: «فندق العنوان» اسمٌ في حركة. يُرفض حين يُنسب إلى صاحب الحساب.)
+    asked = [m for m in PERSONAL_MARKERS if m in q] or (["العنوان"] if _holder_address(q) else [])
+    if asked:
+        marker = asked[0]
+        return Scope(
+            "out_of_scope", marker,
+            f"{REFUSAL} — الكشف لا يحمل «{marker}» ولا أي بيانات شخصية "
+            f"من هذا النوع. الأرقام التي أستطيع إثباتها هي الحركات "
+            f"والأرصدة والإجماليات المطبوعة.")
 
     # 3) a year the statement does not cover
     if years:
         known = {int(y) for y in years}
-        for y in years_in(q):
+        for y in _years_not_money(q):
             if y not in known:
                 span = (f"{min(known)}–{max(known)}" if len(known) > 1
                         else str(next(iter(known))))

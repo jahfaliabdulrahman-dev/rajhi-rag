@@ -130,7 +130,12 @@ def test_a_city_name_is_not_a_bank_without_the_word_bank():
 
     assert classify("كم سحب من الصراف في الرياض؟", (), None,
                     frozenset()).kind == "in_scope"
+    # **تغييرُ معنًى بكلمة المالك (2026-11-24، الخيار ١):** كان هذا السؤالُ يُرفض، وهو حركةٌ في
+    # هذا الكشف (سحبٌ ببطاقة الراجحي من صرّافٍ آخر) ⇒ رفضٌ كاذب. المصرفُ الآخر يُرفض حين يكون
+    # موضعَ الحساب المسؤول عنه وحدَه (`test_the_gate_refuses_only_what_it_can_prove.py`).
     assert classify("كم سحب من الصراف في بنك الرياض؟", (), None,
+                    frozenset()).kind == "in_scope"
+    assert classify("كم رصيدي في بنك الرياض؟", (), None,
                     frozenset()).kind == "out_of_scope"
 
 
