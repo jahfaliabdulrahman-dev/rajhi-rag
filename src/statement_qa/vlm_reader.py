@@ -282,8 +282,13 @@ def chat_vlm_image(image_b64: str | list[str], prompt: str,
     `statement_qa.api_key.resolve_key`.
     """
     images = [image_b64] if isinstance(image_b64, str) else list(image_b64)
+    # **`provider.zdr` من موضعه الواحد (قرارُ المالك 2026-11-24 · `provider_privacy`):** صورُ الصفحات
+    # لا تُوجَّه إلّا إلى نقطةٍ بـZDR (اليوم: Google Vertex، باحتفاظٍ أمنيٍّ مُعلَن هناك).
+    from statement_qa.provider_privacy import provider_fields
+
     base_payload = {
         "model": MODEL,
+        "provider": provider_fields(),
         "temperature": 0,
         "max_tokens": max_tokens,
         "messages": [{"role": "user", "content":

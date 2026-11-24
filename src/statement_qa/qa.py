@@ -283,7 +283,11 @@ def build_llm(model_name: str | None = None, *, callbacks: list | None = None,
     # **وميزانيّةُ الاستدلال في الجسم معه** (R124-1): خيارُ المزوّد نفسه الذي حمل حدَّ السعر ⇒
     # فيُحجز للجواب حيِّزٌ لا يأكله الاستدلال، **والقطعُ لا يعود يمحو أثرًا** (والحالةُ تُسمّى في
     # `QAResult.truncated` إن وقع رغم ذلك).
-    body = {"provider": {"max_price": dict(max_price or PROVIDER_MAX_PRICE)},
+    # **و`zdr` في الخانة نفسها (قرارُ المالك 2026-11-24):** من موضعه الواحد `provider_privacy` —
+    # فالمجيبُ لا يُوجَّه إلّا إلى نقطةٍ لا تحتفظ بالبيانات، والحدّان (السعر · ZDR) يجتمعان في `provider`.
+    from statement_qa.provider_privacy import provider_fields
+
+    body = {"provider": {"max_price": dict(max_price or PROVIDER_MAX_PRICE), **provider_fields()},
             "reasoning": {"max_tokens": REASONING_MAX_TOKENS}}
     return ChatOpenAI(
         model=model,

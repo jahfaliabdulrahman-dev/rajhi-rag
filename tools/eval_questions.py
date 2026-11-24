@@ -673,6 +673,32 @@ def provider_max_price(model_id: str) -> dict:
     return dict(PROVIDER_MAX_PRICE)
 
 
+def zdr_hosts_under(model_id: str, maxp: dict) -> int | None:
+    """كم نقطةً **بـZDR** تحت الحدّ — وهي وحدَها ما يُوجَّه إليه الطلبُ اليوم (`provider_privacy`).
+
+    **لماذا يُطبع (قرارُ المالك 2026-11-24):** الطلبُ يحمل `zdr: true` بجانب `max_price`، فالعددُ الذي
+    يخدم فعلًا **تقاطعُ الشرطين** لا «تحت الحدّ» وحدَه (قِيس يومَ القرار: ٢١ تحت الحدّ، و١٦ منها بـZDR).
+    ومصدرُه `GET /api/v1/endpoints/zdr` العامّ؛ وبلا قراءةٍ يُعاد `None` ويُطبع «غيرُ مقروء» لا صفر.
+    """
+    import urllib.request                                    # noqa: PLC0415
+    try:
+        req = urllib.request.Request("https://openrouter.ai/api/v1/endpoints/zdr",
+                                     headers={"User-Agent": "rajhi-rag/1.0"})
+        with urllib.request.urlopen(req, timeout=20) as r:      # noqa: S310 — URLٌ ثابتٌ لا يكتب
+            data = json.loads(r.read().decode()).get("data") or []
+    except Exception:                                            # noqa: BLE001 — بلا قراءةٍ لا عدَّ
+        return None
+    n = 0
+    for ep in data:
+        if ep.get("model_id") != model_id:
+            continue
+        pr = ep.get("pricing") or {}
+        if (float(pr.get("prompt") or 0.0) * 1e6 <= maxp["prompt"]
+                and float(pr.get("completion") or 0.0) * 1e6 <= maxp["completion"]):
+            n += 1
+    return n
+
+
 def hosts_total(model_id: str) -> int:
     """عددُ المضيفين الذين يخدمون النموذج (٠ = القائمةُ غيرُ مقروءة — تُعلن ولا تُخمَّن)."""
     return len(host_prices(model_id))
@@ -1467,6 +1493,9 @@ def run_questions(a, qs: list[dict], c: Corpus, pack: dict, spec: dict) -> int:
     print(f"      حدُّ سعر المزوّد: مدخلًا ${maxp['prompt']:.4f}/M · مخرجًا ${maxp['completion']:.4f}/M "
           f"⇒ **{hosts_under(model_id, maxp)} مضيفًا** يخدمون تحت الحدّ (من {hosts_total(model_id)})",
           flush=True)
+    _zdr = zdr_hosts_under(model_id, maxp)
+    print("      ومنها بـZDR (الطلبُ يُقيَّد بها · `provider_privacy`): "
+          + (f"**{_zdr}**" if _zdr is not None else "**غيرُ مقروء**"), flush=True)
     llm = build_llm(a.model, callbacks=[usage, finishes, costs], api_key=eval_key(), max_price=maxp)
     # **وأعلى سعر مضيفٍ يُقرأ مرّةً ويُعلَن** (R115-1): البديلُ حين لا يرسل المزوّدُ `cost`،
     # ولا يُستعمل سعرُ القائمة وحدَه حدًّا (فهو **حدٌّ أدنى**: ٣٣ مضيفًا بأسعارٍ تصل ستّةَ أضعافها).
