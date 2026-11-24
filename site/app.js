@@ -98,6 +98,37 @@ function renderCatch(rows) {
        "لا يطابق. الفرقُ بين الرصيدين ", n(money(r.derived_movement)), "، والنظامُ قرأ ", n(money(r.movement)),
        `: ${howItDiffers(r.movement, r.derived_movement)}.`);
   document.getElementById("catch").hidden = false;
+  wireGuess();
+}
+
+// The hero's question answers back: either pick opens the answer, and says whether the guess was right.
+function wireGuess() {
+  const reveal = document.getElementById("catch-reveal");
+  const result = document.getElementById("guess-result");
+  for (const button of document.querySelectorAll(".pick")) {
+    button.addEventListener("click", () => {
+      const right = button.dataset.guess === "no";
+      document.querySelectorAll(".pick").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
+      result.textContent = right ? "تخمينك صحيح." : "ليس كذلك، وهذا ما فات القارئ أيضًا.";
+      result.className = right ? "guess-result right" : "guess-result wrong";
+      reveal.open = true;
+    });
+  }
+}
+
+// The chain runs once, row by row, when the reading table comes into view: the one orchestrated motion on the page.
+function animateChain() {
+  const table = document.getElementById("reading");
+  const rows = [...table.querySelectorAll("tbody tr")];
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches || !("IntersectionObserver" in window);
+  if (still) { rows.forEach((tr) => tr.classList.add("checked")); return; }
+  table.classList.add("pending");
+  const watch = new IntersectionObserver((entries) => {
+    if (!entries.some((e) => e.isIntersecting)) return;
+    watch.disconnect();
+    rows.forEach((tr, i) => setTimeout(() => tr.classList.add("checked"), 260 * (i + 1)));
+  }, { threshold: 0.45 });
+  watch.observe(table);
 }
 
 function runSentence(run, index, rows) {
@@ -159,6 +190,7 @@ function renderReading(page) {
     cell(tr, r.chain_ok ? "✓" : "✗ يُراجَع");
     body.append(tr);
   }
+  animateChain();
 }
 
 function renderChain(page) {
