@@ -35,6 +35,7 @@ from decimal import Decimal, InvalidOperation
 # **المالُ في موضعٍ واحد (R93-7):** كان هنا `_MONEY` و`_dec` و`_m` — نسخةٌ ثانيةٌ من
 # `statement_qa.money`، **وفرقُهما مقيس:** `money(None)` ⇒ "" و`_m(None)` ⇒ «—» ⇒ افتراقٌ صامتٌ
 # ينتظر. فصارت الأدواتُ تنادي الموضعَ الواحد: `money` للتنسيق و`amount` للتحويل الرقميّ.
+from statement_qa.ledger import norm_ar
 from statement_qa.money import amount as _dec, money as _money
 
 
@@ -284,6 +285,10 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
     # ومجاميعُ الكشف تسمّي ما لم يدخلها — ولا كلمةَ زائدةً على قاعدةٍ كاملة.
     unread_pages = sorted(pg for pg, f in (footers or {}).items()
                           if (f or {}).get("basis") == "unread")
+    mismatch_pages = sorted(pg for pg, f in (footers or {}).items()
+                            if (f or {}).get("verdict") == "mismatch")
+    gap_pages = sorted(pg for pg, f in (footers or {}).items()
+                       if (f or {}).get("verdict") == "gap")
 
     def _unread_reply(pg) -> str | None:
         """رسالةُ صفحةٍ داخلةٍ في الكشف ولم تُقرأ — **لا دعوى غيابٍ ولا صفرٌ يُخترع**."""
@@ -294,11 +299,18 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
                 f"فلا أُعلن غيابًا فيها ولا أُخرج لها صفرًا.")
 
     def _unread_note() -> str:
-        """ذيلُ المجاميع: يسمّي ما لم يدخلها. **وفارغٌ على قاعدةٍ كاملة** (صفرُ كلمةٍ زائدة)."""
-        if not unread_pages:
-            return ""
-        listed = "، ".join(f"ص{p}" for p in unread_pages)
-        return f" · **ولم تُقرأ: {listed} — لا تدخلها هذه الأرقام**"
+        """ذيلُ المجاميع: يسمّي ما لم يدخلها وما خالف تذييله أو نقصت أوراقه. **وفارغٌ على قاعدةٍ كاملة**."""
+        parts: list[str] = []
+        if unread_pages:
+            listed = "، ".join(f"ص{p}" for p in unread_pages)
+            parts.append(f"**ولم تُقرأ: {listed} — لا تدخلها هذه الأرقام**")
+        if mismatch_pages:
+            listed = "، ".join(f"ص{p}" for p in mismatch_pages)
+            parts.append(f"⚠ صفحات غير مطابقة للتذييل: {listed}")
+        if gap_pages:
+            listed = "، ".join(f"ص{p}" for p in gap_pages)
+            parts.append(f"⚠ فجوة مسح (أوراق غائبة): {listed}")
+        return (" · " + " · ".join(parts)) if parts else ""
 
     def _strict_args(fn):
         """مخطّطُ وسائط الأداة: من **التوقيع نفسه** + منعُ المدخل المجهول (R109-3 · R118-1)."""
@@ -401,6 +413,7 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
                   base: list[dict] | None = None,
                   date_from: str | None = None, date_to: str | None = None) -> list[dict]:
         kw = (keyword or "").strip()
+        kw_norm = norm_ar(kw)
         tt = (tx_type or "").strip()
         amt = _parse_amount_arg(amount)
         pg = None if page is None else int(page)
@@ -417,12 +430,12 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
                 continue
             if not _side_match(r.get("side", ""), side):
                 continue
-            if kw and kw not in _desc(r):
+            if kw_norm and kw_norm not in norm_ar(_desc(r)):
                 continue
             if tt and tt not in (r.get("type") or ""):
                 continue
-            mv = r.get("movement")
-            if amt is not None and (mv is None or mv != amt):
+            mv = _dec(r.get("movement"))
+            if amt is not None and (mv is None or mv.quantize(Decimal("0.01")) != amt):
                 continue
             if d_from or d_to:
                 iso = _iso_date(r)
@@ -620,7 +633,7 @@ def make_qa_tools(rows: list[dict] | None = None, trace: list[dict] | None = Non
                      and r.get("movement") is not None]
         note = ""
         if undecided:
-            tot = sum((r["movement"] for r in undecided), Decimal("0"))
+            tot = sum((_dec(r.get("movement")) or Decimal("0") for r in undecided), Decimal("0"))
             note = (f" | تحفّظ: {len(undecided)} صف غير محسوم الاتجاه "
                     f"بإجمالي {_m(tot)} — غير مشمول في المجاميع")
         if not with_bal:
