@@ -102,6 +102,13 @@ DATA_HOME = _ledger.data_home()
 # قفل «مهمة واحدة» — نافذتان متزامنتان كانتا تخلطان النتائج والسجلات.
 LOCK_PATH = DATA_HOME / "job.lock"
 
+
+def _lock_path(sess) -> Path:
+    """Per-session lock for ephemeral public sessions; global LOCK_PATH for local."""
+    if isinstance(sess, Session) and sess.ephemeral:
+        return sess.home / "job.lock"
+    return LOCK_PATH
+
 # **السطحُ: محلّيٌّ للمالك أو عامٌّ للزائر (المرحلة ١ · G3 البند ٣ · قرارُ المالك 2026-10-28):** على
 # السطح العامّ تُقرأ الكشوفُ ويُسأل الوكيلُ **بمفتاح الزائر وحده**، ولا يُقرأ مفتاحُ التطبيق أبدًا.
 # **والافتراضُ هو العامّ (فشلٌ مُغلَق):** السطحُ المحلّيُّ يُعلَن صراحةً بـ`RAJHI_SURFACE=local` في
@@ -728,7 +735,7 @@ def process_pdf(pdf_path: str, skip_rejected: bool = False, api_key: str = "",
     # أحدهما يمحوها من تحت الآخر. فتحذفها المكتبةُ بعمرها (`DELETE_CACHE`: عشرُ دقائق، تُفحص كلَّ عشر)
     # — وهو ما يُقال في «قاعدة الخصوصية».
     try:
-        with job_lock(LOCK_PATH):
+        with job_lock(_lock_path(sess)):
             return (*_process_pdf_locked(sess, pdf_path, progress,
                                          skip_rejected=bool(skip_rejected), api_key=api_key),
                     sess)
@@ -1023,448 +1030,453 @@ def _process_pdf_locked(sess, pdf_path: str, progress, skip_rejected: bool = Fal
     sess.state["source_sha"] = (_file_sha256(pdf_path)
                            if Path(pdf_path).exists() else None)
     pages = _pages_to_pngs(pdf_path)
-
-    # فحصُ ما قبل القراءة (statement_qa.intake): مجانيٌّ ويسبق **أيَّ** استدعاءٍ مدفوع — حتى
-    # فحصَ المصرف. **والسياسةُ لم تتغيّر بإزالة الخانة (إصلاحُ مقعدَي المواصفة والمعايير P1):**
-    # الخانةُ كانت `value=False` بالتصميم ⇒ صفحةٌ مرفوضةٌ واحدة **توقف** القراءةَ وتُسمّى. وإزالتُها
-    # للرسالة لا تُحوّلها إلى استبعادٍ تلقائيّ: كان ذلك يقرأ ويدفع مقابل كشفٍ ناقصٍ بلا قرار العميل.
-    # فالمسارُ الباقي: توقّفٌ مسمًّى وإعادةُ تصوير؛ واستعادةُ «المتابعة بالاستبعاد» قرارُ المالك.
-    progress(0.0, "فحص الصفحات قبل القراءة…")
-    gate_fn, kind_fn = _local_checks(pages)
-    intake = inspect_locally(pages, gate_fn, kind_fn)
-    decision = plan(intake, bool(skip_rejected))
-    intake_note = _intake_outcome(intake, decision)
-    if decision["blocked"]:
-        sess.state.clear()   # لا تُجيب الأسئلةُ عن ملفٍّ سابقٍ بعد رفعِ ملفٍّ لم يُقرأ
-        sess.state["intake"] = {"gate": intake.gate, "kinds": intake.kinds, **decision}
-        return (blocked_message_ar(intake), _rows_df([], {}), "", _close_pages(sess, pages),
-                "كل الأعمدة", "", "", "", intake_note)
-
-    # «بنك غير مدعوم» جملة واضحة بدل فشل غامض — فحص واحد للصفحة الأولى،
-    # ويفشل مفتوحاً: أي التباس يمرّر التشغيل (لا قرار على تخمين).
-    bank_usage: dict = {}
     try:
-        bank = probe_bank(pages[0], stats=bank_usage, api_key=key)
-    except Exception:
-        bank = {"verdict": "unknown", "bank": None}
-    if bank["verdict"] == "other":
-        raise gr.Error(f"يبدو أن هذا الملف لا يخص مصرف الراجحي "
-                       f"(ظهر: «{bank['bank']}») — الإصدار الحالي يدعم "
-                       f"كشوف الراجحي فقط.")
 
-    all_rows = []
-    # **ونسخةُ العقد (`ledger.COLUMNS` · ٢٢ عمودًا) — للسطح الذي يستهلكها وحدَه:** زرُّ التنزيل
-    # (الدفتر ثمّ الإكسل). أما `all_rows` فهي سطحُ العرض/الأسئلة بلغته (`kind`/`ok`/`type`) — سطحان
-    # لاستهلاكين مختلفين، **والعقدُ له بانٍ واحد** (`statement_qa.contract_rows.build_page_rows`)
-    # يناديه سطرُ الأوامر أيضًا (قرارُ المالك 2026-10-07 · الخيار (أ) · مراجعة ٩٦).
-    rows_contract: list[dict] = []
-    failed_pages: list[int] = []
-    footer_checks: list[dict] = []
-    era_pages: dict[int, list] = {}
-    page_dates: dict[int, list] = {}
-    boundaries = {"txn": 0, "carry": 0, "anchor": 0}
-    usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cost": 0.0}
-    # cumulative debits/credits for the footer oracle (footer totals are
-    # cumulative-to-date — verified against real reads 2026-09-14)
-    cum = {"debits": Decimal("0"), "credits": Decimal("0")}
-    cum_broken = False
+        # فحصُ ما قبل القراءة (statement_qa.intake): مجانيٌّ ويسبق **أيَّ** استدعاءٍ مدفوع — حتى
+        # فحصَ المصرف. **والسياسةُ لم تتغيّر بإزالة الخانة (إصلاحُ مقعدَي المواصفة والمعايير P1):**
+        # الخانةُ كانت `value=False` بالتصميم ⇒ صفحةٌ مرفوضةٌ واحدة **توقف** القراءةَ وتُسمّى. وإزالتُها
+        # للرسالة لا تُحوّلها إلى استبعادٍ تلقائيّ: كان ذلك يقرأ ويدفع مقابل كشفٍ ناقصٍ بلا قرار العميل.
+        # فالمسارُ الباقي: توقّفٌ مسمًّى وإعادةُ تصوير؛ واستعادةُ «المتابعة بالاستبعاد» قرارُ المالك.
+        progress(0.0, "فحص الصفحات قبل القراءة…")
+        gate_fn, kind_fn = _local_checks(pages)
+        intake = inspect_locally(pages, gate_fn, kind_fn)
+        decision = plan(intake, bool(skip_rejected))
+        intake_note = _intake_outcome(intake, decision)
+        if decision["blocked"]:
+            sess.state.clear()   # لا تُجيب الأسئلةُ عن ملفٍّ سابقٍ بعد رفعِ ملفٍّ لم يُقرأ
+            sess.state["intake"] = {"gate": intake.gate, "kinds": intake.kinds, **decision}
+            return (blocked_message_ar(intake), _rows_df([], {}), "", _close_pages(sess, pages),
+                    "كل الأعمدة", "", "", "", intake_note)
 
-    def _merge_usage(stats: dict) -> None:
-        if not stats:
-            return
-        usage["calls"] += 1
-        for k in ("prompt_tokens", "completion_tokens"):
-            usage[k] += int(stats.get(k) or 0)
-        c = stats.get("cost")
-        if isinstance(c, (int, float)):
-            usage["cost"] = round(usage["cost"] + c, 6)
-
-    _merge_usage(bank_usage)
-    prev_closing = None
-    prev_footer = None
-    page_nos: list[tuple[int, int | None]] = []
-    prev_page_no: int | None = None
-    recoveries: list[dict] = []
-    page_rereads: list[dict] = []
-    fail_streak = 0
-    abort_reason = ""
-
-    def over_cap() -> bool:
-        return usage["cost"] > MAX_UI_COST_USD
-
-    # ١) التذييلاتُ أولًا (قصاصةٌ صغيرةٌ لكلّ صفحة): مفتاحُ الترتيب (ordering.footer_order)، وهي
-    # نفسُها تُستعمل في تحكيم الصفحة أدناه — فلا يُدفع التذييلُ مرّتين. **وللمرور حدّاه كالقراءة**
-    # (مراجعة ٧٠ · R70-2): سقفُ الكلفة قبل كلّ استدعاء، ووقفٌ بعد FAIL_STREAK_LIMIT إخفاقاتٍ متتالية —
-    # كان يسبقهما ويبتلع أخطاءه، فانقطاعُ المزوّد يُدفع ثمنُه صفحةً صفحة قبل أن يوقفه شيء.
-    footers: dict = {}
-    footer_failed: list[int] = []
-    n_proc = len(decision["process"])
-    for i, pg in enumerate(decision["process"]):
-        if over_cap():
-            abort_reason = (f"أُوقف التشغيل قبل قراءة الصفوف عند إطار الصفحة {pg}: تجاوز سقف "
-                            f"الكلفة (${MAX_UI_COST_USD:.2f} لهذا المسار).")
-            break
-        progress(0.05 * i / n_proc, f"قراءة إطار الإجماليات {i + 1}/{n_proc}…")
-        fst: dict = {}
+        # «بنك غير مدعوم» جملة واضحة بدل فشل غامض — فحص واحد للصفحة الأولى،
+        # ويفشل مفتوحاً: أي التباس يمرّر التشغيل (لا قرار على تخمين).
+        bank_usage: dict = {}
         try:
-            footers[pg] = read_footer(pages[pg - 1], stats=fst, api_key=key)
-            fail_streak = 0
+            bank = probe_bank(pages[0], stats=bank_usage, api_key=key)
         except Exception:
-            footers[pg] = None
-            footer_failed.append(pg)
-            fail_streak += 1
-        finally:
-            _merge_usage(fst)
-        if fail_streak >= FAIL_STREAK_LIMIT:
-            abort_reason = (f"أُوقف التشغيل قبل قراءة الصفوف عند إطار الصفحة {pg}: "
-                            f"{fail_streak} إخفاقات متتالية في قراءة الإطارات (انقطاع المزوّد؟).")
-            break
-    if abort_reason:
-        sess.state.clear()   # لا تُجيب الأسئلةُ عن ملفٍّ سابق
-        raise gr.Error("⛔ " + abort_reason + " لم يُقرأ صفٌّ واحد.")
+            bank = {"verdict": "unknown", "bank": None}
+        if bank["verdict"] == "other":
+            raise gr.Error(f"يبدو أن هذا الملف لا يخص مصرف الراجحي "
+                           f"(ظهر: «{bank['bank']}») — الإصدار الحالي يدعم "
+                           f"كشوف الراجحي فقط.")
 
-    # ٢) الصفوفُ بترتيب الملف — والترتيبُ يُقرَّر بعدها، لأن شاهدَيه الثانيين (الرقمُ المطبوع والتجاورُ
-    # المُثبت حسابًا) لا يوجدان إلا بعد القراءة (مراجعة ٧٠ · R70-1). عددُ الاستدعاءات لا يتغيّر.
-    raw_by_pg: dict[int, list] = {}
-    page_no_by_pg: dict[int, int | None] = {}
-    attempted: list[int] = []
-    pages_without_rows: list[int] = []
-    fail_streak = 0
-    for i, pg in enumerate(decision["process"]):
-        progress(0.05 + 0.8 * i / n_proc, f"قراءة صفحة {pg} ({i + 1}/{n_proc})…")
-        if over_cap():
-            abort_reason = (f"أُوقف التشغيل عند الصفحة {pg}: تجاوز سقف الكلفة "
-                            f"(${MAX_UI_COST_USD:.2f} لهذا المسار).")
-            break
-        attempted.append(pg)
-        st: dict = {}
-        try:
-            raw_by_pg[pg] = read_rows_vlm(pages[pg - 1], stats=st, api_key=key)
-            page_no_by_pg[pg] = st.get("page_no")
-            fail_streak = 0
-            # **وصفحةٌ بلا صفوفٍ ليست صفحةً فارغةً بالضرورة (قاسه قياسُ البروفة ٢٠٢٦-٠٩-٣٠):**
-            # إجابةٌ صحيحةُ الشكل لكنها مصفوفةٌ فارغة تمرّ بلا استثناء ⇒ كانت صفحةٌ كاملةٌ تُفقد
-            # صامتةً (الجدولُ ٩٤ صفًّا بدل ١٠٤، وإعادةُ قراءة الصفحة نفسِها أعادت صفوفَها العشرة).
-            # فما دام تذييلُ الصفحة يُظهر حركاتٍ لها (دلتا الإجماليات المتراكمة عن السابقة) ⇒ تُسمّى.
-            _prev_pg = decision["process"][i - 1] if i else None
-            if not (raw_by_pg.get(pg) or []) and _footer_delta_nonzero(
-                    footers.get(pg), footers.get(_prev_pg) if _prev_pg else None):
-                pages_without_rows.append(pg)
-        except Exception:
-            # one flaky page must never kill the whole run (transient VLM /
-            # JSON glitches) — record it, keep going, report it honestly.
-            # But EVERY page failing is a provider outage, not bad luck: four
-            # attempts with 10/20/40s backoff ≈ 70s per page, so 629 pages
-            # would spin ~12 hours and produce nothing. Five in a row stops it.
-            failed_pages.append(pg)
-            fail_streak += 1
-        finally:
-            _merge_usage(st)
-        if fail_streak >= FAIL_STREAK_LIMIT:
-            abort_reason = (f"أُوقف التشغيل عند الصفحة {pg}: "
-                            f"{fail_streak} إخفاقات قراءة متتالية "
-                            f"(انقطاع المزوّد؟) — والصفحات المقروءة محفوظة "
-                            f"في هذه النتيجة.")
-            break
+        all_rows = []
+        # **ونسخةُ العقد (`ledger.COLUMNS` · ٢٢ عمودًا) — للسطح الذي يستهلكها وحدَه:** زرُّ التنزيل
+        # (الدفتر ثمّ الإكسل). أما `all_rows` فهي سطحُ العرض/الأسئلة بلغته (`kind`/`ok`/`type`) — سطحان
+        # لاستهلاكين مختلفين، **والعقدُ له بانٍ واحد** (`statement_qa.contract_rows.build_page_rows`)
+        # يناديه سطرُ الأوامر أيضًا (قرارُ المالك 2026-10-07 · الخيار (أ) · مراجعة ٩٦).
+        rows_contract: list[dict] = []
+        failed_pages: list[int] = []
+        footer_checks: list[dict] = []
+        era_pages: dict[int, list] = {}
+        page_dates: dict[int, list] = {}
+        boundaries = {"txn": 0, "carry": 0, "anchor": 0}
+        usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cost": 0.0}
+        # cumulative debits/credits for the footer oracle (footer totals are
+        # cumulative-to-date — verified against real reads 2026-09-14)
+        cum = {"debits": Decimal("0"), "credits": Decimal("0")}
+        cum_broken = False
 
-    # ٣) الترتيب: ترتيبُ التذييلات مرشَّح، لا يُطبَّق إلا بلا تناقضٍ ولا تكرار وبشاهدٍ ثانٍ لكلّ صفحةٍ ينقلها
-    # (ordering.decide_order) — والشاهدان يُقاسان على الترتيب المرشَّح نفسه، مجّانًا.
-    footer_tuples = {pg: (f.debits, f.credits) if f else None
-                     for pg, f in footers.items() if pg in attempted}
-    fo = footer_order(footer_tuples)
-    printed_by_pg = {pg: n for pg, n in page_no_by_pg.items() if isinstance(n, int)}
-    cand_pairs = adjacency(fo["order"], footer_tuples, _own_sums(fo["order"], raw_by_pg),
-                           printed_by_pg)
-    order_now, order_held = decide_order(attempted, fo, printed_by_pg, cand_pairs)
+        def _merge_usage(stats: dict) -> None:
+            if not stats:
+                return
+            usage["calls"] += 1
+            for k in ("prompt_tokens", "completion_tokens"):
+                usage[k] += int(stats.get(k) or 0)
+            c = stats.get("cost")
+            if isinstance(c, (int, float)):
+                usage["cost"] = round(usage["cost"] + c, 6)
 
-    # ٤) الاشتقاقُ والتحكيمُ بالترتيب المقرَّر — والاستدراكاتُ المدفوعة تحترم السقف أيضًا.
-    own_by_pg: dict[int, tuple] = {}
-    for i, pg in enumerate(order_now):
-        img = pages[pg - 1]
-        progress(0.85 + 0.08 * i / max(1, len(order_now)), f"تحقّق الصفحة {pg}…")
-        if pg not in raw_by_pg:
-            cum_broken = True  # cumulative footer chain is now unverifiable
-            continue
-        raw_rows = raw_by_pg[pg]
-        rows = chain_derive(raw_rows, prev_balance=prev_closing)
-        page_no = page_no_by_pg.get(pg)
-        page_nos.append((pg, page_no))
-        gap_missing: list[int] = []
-        if (isinstance(page_no, int) and isinstance(prev_page_no, int)
-                and page_no > prev_page_no + 1):
-            # قفزة في الترقيم المطبوع ⇒ الأوراق بينهما غائبة من المسح، ودلتا
-            # الإطار التالية تقيس حركاتها لا خطأً في هذه الصفحة.
-            gap_missing = list(range(prev_page_no + 1, page_no))
-        # مرساة حدّية غير محسومة؟ استدراك مقيد: إعادة قراءة موضعية تُقبل
-        # فقط إذا أغلقت السلسلة (ما كشفه ص11 في السلايس).
-        if i > 0 and rows and rows[0].get("boundary") == "anchor" and not over_cap():
-            rst: dict = {}
-            raw_rows, recovered = recover_anchor(
-                raw_rows, prev_closing, img, pg, rst, api_key=key)
-            _merge_usage(rst)
-            if recovered is not None:
-                rows = chain_derive(raw_rows, prev_balance=prev_closing)
-                recoveries.append({"page": pg, "amount": str(recovered)})
-        footer = footers.get(pg)
-        # تحكيم الصفحة: انزياح عن الفوتر يُطلق قراءة جديدة واحدة، تُقبل فقط
-        # إذا كانت بلا شكوك وتُطابق دلتا الفوتر (معزولة عن أي تلوث سابق).
-        if (not gap_missing and not over_cap()
-                and page_diverged(rows, cum, prev_footer, footer, cum_broken)):
-            pst: dict = {}
-            fresh_raw, accepted, note = try_page_reread(
-                img, cum, prev_footer, footer, prev_closing, pst, api_key=key)
-            _merge_usage(pst)
-            if accepted and fresh_raw is not None:
-                raw_rows = fresh_raw
-                rows = chain_derive(raw_rows, prev_balance=prev_closing)
-                if i > 0 and rows and rows[0].get("boundary") == "anchor" and not over_cap():
-                    rst2: dict = {}
-                    raw_rows, rec = recover_anchor(
-                        raw_rows, prev_closing, img, pg, rst2, api_key=key)
-                    _merge_usage(rst2)
-                    if rec is not None:
-                        rows = chain_derive(raw_rows,
-                                            prev_balance=prev_closing)
-                        recoveries.append({"page": pg, "amount": str(rec)})
-                page_rereads.append({"page": pg, "note": note})
-        if i > 0 and rows:
-            b = rows[0].get("boundary")
-            if b in boundaries:
-                boundaries[b] += 1
-        era_pages[pg] = [t for r in rows
-                         for t in (r.get("raw_movement"), r.get("raw_balance"))
-                         if t]
-        page_dates[pg] = [r.get("date") for r in rows]
-        chk = check_page_footer(rows, footer, prior=cum, skip=cum_broken)
-        # أساس العرض = دلتا الصفحة متى توفّرت (تعزل الصفحة عن أي تلوث سابق).
-        if delta_checkable(prev_footer, footer):
-            dchk = delta_status(rows, prev_footer, footer)
-            if dchk["status"] != "unchecked":
-                chk = {**chk, **dchk, "basis": "delta"}
-        elif chk.get("status") == "mismatch":
-            chk = {**chk, "status": "unchecked"}
-        if gap_missing and delta_checkable(prev_footer, footer):
-            chk = {**chk, "status": "gap", "basis": "delta",
-                   "missing_sheets": gap_missing}
-        if chk.get("own"):
-            cum["debits"] += chk["own"]["debits"]
-            cum["credits"] += chk["own"]["credits"]
-        footer_checks.append({"page": pg, **chk})
-        if chk.get("own"):
-            own_by_pg[pg] = (chk["own"]["debits"], chk["own"]["credits"])
-        prev_footer = footer
-        prev_page_no = page_no
-        # **والعقدُ يُبنى أوّلًا، ثمّ يُشتقّ العرضُ منه (F5):** ترتيبٌ واحدٌ للمعنى — والعقدُ هو ما
-        # يقرؤه كاتبُ الإكسل والدفتر. (العلّةُ المقيسة: كانت ٩ حقولٍ من ٢٢ في موضع البناء ⇒ زرُّ
-        # التنزيل لا يُنتج ملفًّا: `IntegrityError: NOT NULL constraint failed: rows_verified.row_no`
-        # ثمّ `KeyError: None`.) والوسائطُ كما يحملها التطبيق: قراءتُه الخامّ (`raw_rows`) وأحكامُ
-        # السلسلة (`rows` من `chain_derive`) وحكمُ الصفحة وأعلامُها ورقمُها المطبوع.
-        page_contract = build_page_rows(
-            pg, raw_rows, rows,
-            {"footer": chk.get("status")},
-            # **والتحكيمُ غيرُ معلومٍ هنا بإعلانٍ صريح (R96-2):** يُسجَّل في كاش التشغيل (`arbitrated_by`)
-            # ويقرؤه مسارُ سطر الأوامر، فلا يعرفه التطبيق ⇒ فخليّةُ «مصدر الإثبات» لصفحةٍ محكَّمة تفرق
-            # بين الملفّين. وهذا **صنفُ فرقِ مصدرِ إدخالٍ مُعلَن** كالكلفة والزمن اللذين لا يملكهما التطبيق،
-            # لا انزياحُ عقد. (مقيس: لا تظهر على عيّنةٍ بلا تحكيم، وتظهر بـ«تحكيم موثَّق بمصدره».)
-            {"recovered": any(x.get("page") == pg for x in recoveries),
-             "reread": any(x.get("page") == pg for x in page_rereads)},
-            page_no=page_no)
-        rows_contract += page_contract
-        # **والموضعُ في العقد يُمرَّر** فيحمل صفُّ العرض رقمَه sess.stateMENT-WIDE كما تحمله الأدوات (R130).
-        all_rows += _view_rows(page_contract, offset=len(rows_contract) - len(page_contract))
-        # **و`prev_closing` كما كان:** آخرُ رصيدٍ مقروءٍ في الصفحة يقود سلسلةَ التالية — كان يُحدَّث
-        # صفًّا صفًّا في حلقة العرض، ويُقرأ الآن من الصفوف نفسِها فلا يُفقد أثرُه.
-        _last_bal = next((r["balance"] for r in reversed(rows) if r["balance"] is not None), None)
-        if _last_bal is not None:
-            prev_closing = _last_bal
+        _merge_usage(bank_usage)
+        prev_closing = None
+        prev_footer = None
+        page_nos: list[tuple[int, int | None]] = []
+        prev_page_no: int | None = None
+        recoveries: list[dict] = []
+        page_rereads: list[dict] = []
+        fail_streak = 0
+        abort_reason = ""
 
-    # التواريخُ أولًا: تُستعاد أحيانًا من نصّ بيان قراءة الصفحة، وبيانُ العمود بلا تاريخٍ عن قصد.
-    filled_dates = fill_missing_dates(all_rows)
-    progress(0.93, "قراءة البيان من عمود البيان…")
-    pairs = adjacency(order_now,
-                      {pg: (f.debits, f.credits) if f else None for pg, f in footers.items()},
-                      own_by_pg, {pos: n for pos, n in page_nos if isinstance(n, int)})
-    desc_rep = _desc_pass(order_now, pages, all_rows, pairs, _merge_usage,
-                          lambda: usage["cost"] > MAX_UI_COST_USD, api_key=key)
-    # والتصنيفُ بعد البيان الأصحّ.
-    annotate_types(all_rows)
-    # **وأحكامُ الصفحات تُحسب قبل الجدول (المرحلة ١):** كان الجدولُ يُبنى قبل كتابة أحكام هذه القراءة،
-    # فيقرأ عمودُ «التحقق» أحكامَ ما في الحالة قبلها (قراءةٍ سابقةٍ أو لا شيء) — ظهر حين صار الحكمُ
-    # وسيطًا صريحًا بدل قراءةٍ من الحالة العامّة. والأحكامُ لا تتغيّر بعد هذا الموضع (`footer_checks` تمّت).
-    verdicts = verdicts_from_checks(footer_checks)
-    rows_view = _rows_df(all_rows, verdicts)
+        def over_cap() -> bool:
+            return usage["cost"] > MAX_UI_COST_USD
 
-    progress(0.95, "بناء الفهرس…")
-    sess.state["rows"] = all_rows
-    # **وسطحُ العقد يُكتب باسمه (لا يُخلط بسطح العرض):** يقرؤه زرُّ التنزيل وحده، فيبقى التحويلُ
-    # في الدفتر على عقدٍ كامل — وهذا ما كان غائبًا فسقط الزرُّ.
-    sess.state["rows_contract"] = rows_contract
-    # **نطاقُ الكشف يُكتب حيث يُعرَف (R93-1):** `_scope_text` يقرأ `n_pages` و`source_name`، ولم يكن
-    # يكتبهما أحد ⇒ كان يقول للنموذج «0 صفحة» في **كلّ** سؤال، وهو نصٌّ كاذبٌ يبلغ التلقين. فيُكتبان
-    # هنا من الملفّ المقروء نفسِه — لا من افتراضٍ، ولا من عددٍ ثابت.
-    sess.state["n_pages"] = len(pages)
-    # **ولا سطرَ ولا مُساعدَ من الأداة المحذوفة (أغلقه مقعدُ المواصفة · SPEC-96-2):** كان هنا شرحٌ
-    # بنصّ الحاضر («يحتاجها زرُّ التنزيل…») و`_page_no` الجاهزةُ لإعادة شبكها — بعد أن حُذف مفتاحُ
-    # `read_pages` ومَن يناديه. فالسطرُ الذي يصف آليةً محذوفةً كنصّ حاضر يُعيد بناءَها، والمُساعدُ الذي
-    # لا يناديه أحدٌ يُغري بذلك. حُذفا معًا، والشاهدُ على الإزالة وسببُها في موضعه أعلاه.
-    # **ولا مفتاحَ حالةٍ لصفحاتٍ «بلا حركات» (حُذف بالقياس · الدعوى R95-1-a · تبنتها مراجعة ٩٦):** كان
-    # يُبنى من عدّ الصفحات المقروءة ليُمرَّر إلى ناقل الإكسل، وقِيس أنّه **لا يُحرّك الخليّةَ المُسلَّمة**
-    # (٤ = ٤ = ٤، وهو عددُ ملفّ سطر الأوامر) — فالعدُّ من أحكام الدفتر، **وأخطرُ منه** أنّه كان يُلصق
-    # وسمَ «لا حركات» على ما يُسمّيه التطبيقُ نفسُه «قراءةٌ فاشلة». فبقي المعنى في مصدره الواحد.
-    sess.state["source_name"] = Path(pdf_path).name
-    # **وخريطةُ الأرقام المطبوعة (R93-4):** يُمرّرها زرُّ التنزيل إلى ناقل الإكسل، فيُكتب رقمُ
-    # الصفحة المطبوع من **مصدره** (قراءةُ الورقة) لا من خريطةٍ محلّيّةٍ ولا `None`.
-    sess.state["printed_pages"] = dict(page_no_by_pg)
-    sess.state["chunks"] = chunk_rows(
-        [{**r, "row_no": int(r.get("seq") or i + 1)} for i, r in enumerate(all_rows, start=1)])
-    sess.state["store"] = build_index(sess.state["chunks"])
-    # **التذييلاتُ المطبوعةُ بصيغةٍ واحدة (R77):** تُبنى من القراءات والأحكام في موضعٍ واحد —
-    # `statement_qa.page_footers` — فيرثها مسارُ القراءة (هنا) ومسارُ القياس معًا، ولا نسخةَ ثانيةَ
-    # تزيغ بصمت. الأرقامُ كما ظهرت في الورقة، وحكمُها معها.
-    printed_footers = printed_footers_from(footers, footer_checks, money=_money)
-    sess.state["footer_checks"] = footer_checks
-    sess.state["footers"] = printed_footers
-    # أحكام الصفحة بلغة واحدة تُقرأ في كل سطح: الجدول والتصدير والأسئلة
-    sess.state["verdicts"] = verdicts
-    sess.state["usage"] = usage
-    sess.state["boundary_recoveries"] = recoveries
-    sess.state["page_rereads"] = page_rereads
-    sess.state["page_numbers"] = check_page_numbers(sorted(page_nos))   # بمواضع الملف
-    era_fp = fingerprint_pages(era_pages)
-    order = check_order(page_dates)
-    sess.state["era"] = era_fp
-    sess.state["order"] = order
-    sess.state["footer_order"] = fo
-    sess.state["order_held"] = order_held
-    sess.state["footer_failed"] = footer_failed
-    sess.state["desc_pass"] = desc_rep
-    sess.state["intake"] = {"gate": intake.gate, "kinds": intake.kinds, **decision}
-    if not all_rows:
-        raise gr.Error("تعذرت قراءة الكشف — انقطاع مؤقت من خدمة القراءة. أعد المحاولة.")
-    n_pages = len(pages)
-    if n_pages == 1:
-        pages_ar = "صفحة واحدة"
-    elif n_pages == 2:
-        pages_ar = "صفحتين"
-    elif 3 <= n_pages <= 10:
-        pages_ar = f"{n_pages} صفحات"
-    else:
-        pages_ar = f"{n_pages} صفحة"
-    if failed_pages:
-        base = (f"⚠ تمّت قراءة {n_pages - len(failed_pages)} من {n_pages} صفحة "
-                f"(تعذرت: {failed_pages}) — جاهز للسؤال عن المقروء")
-    else:
-        base = (f"✅ تمّت قراءة {pages_ar} وبناء الفهرس — "
-                f"جاهز للسؤال والجواب")
-    f_ok = [c for c in footer_checks if c["status"] == "ok"]
-    f_bad = [c for c in footer_checks if c["status"] == "mismatch"]
-    f_gap = [c for c in footer_checks if c["status"] == "gap"]
-    f_absent = [c for c in footer_checks if c["status"] == "absent"]
-    f_unchecked = [c for c in footer_checks if c["status"] == "unchecked"]
-    # صفحات لا يمكن الحكم عليها وحدها: مجموعها بين إطارين مقروءين هو الدليل.
-    # (الدليل تراكمي من بداية الكشف — انظر statement_qa.group_check)
-    f_group: list[int] = []
-    if f_absent or f_unchecked:
-        try:
-            from statement_qa.group_check import from_checks
+        # ١) التذييلاتُ أولًا (قصاصةٌ صغيرةٌ لكلّ صفحة): مفتاحُ الترتيب (ordering.footer_order)، وهي
+        # نفسُها تُستعمل في تحكيم الصفحة أدناه — فلا يُدفع التذييلُ مرّتين. **وللمرور حدّاه كالقراءة**
+        # (مراجعة ٧٠ · R70-2): سقفُ الكلفة قبل كلّ استدعاء، ووقفٌ بعد FAIL_STREAK_LIMIT إخفاقاتٍ متتالية —
+        # كان يسبقهما ويبتلع أخطاءه، فانقطاعُ المزوّد يُدفع ثمنُه صفحةً صفحة قبل أن يوقفه شيء.
+        footers: dict = {}
+        footer_failed: list[int] = []
+        n_proc = len(decision["process"])
+        for i, pg in enumerate(decision["process"]):
+            if over_cap():
+                abort_reason = (f"أُوقف التشغيل قبل قراءة الصفوف عند إطار الصفحة {pg}: تجاوز سقف "
+                                f"الكلفة (${MAX_UI_COST_USD:.2f} لهذا المسار).")
+                break
+            progress(0.05 * i / n_proc, f"قراءة إطار الإجماليات {i + 1}/{n_proc}…")
+            fst: dict = {}
+            try:
+                footers[pg] = read_footer(pages[pg - 1], stats=fst, api_key=key)
+                fail_streak = 0
+            except Exception:
+                footers[pg] = None
+                footer_failed.append(pg)
+                fail_streak += 1
+            finally:
+                _merge_usage(fst)
+            if fail_streak >= FAIL_STREAK_LIMIT:
+                abort_reason = (f"أُوقف التشغيل قبل قراءة الصفوف عند إطار الصفحة {pg}: "
+                                f"{fail_streak} إخفاقات متتالية في قراءة الإطارات (انقطاع المزوّد؟).")
+                break
+        if abort_reason:
+            sess.state.clear()   # لا تُجيب الأسئلةُ عن ملفٍّ سابق
+            raise gr.Error("⛔ " + abort_reason + " لم يُقرأ صفٌّ واحد.")
 
-            ok_pages = {c["page"] for c in f_ok}
-            f_group = [p for p in from_checks(footer_checks, all_rows)
-                       if p not in ok_pages]   # a page is counted once
-            sess.state["group_verified"] = f_group
-            won = set(f_group)
-            f_absent = [c for c in f_absent if c["page"] not in won]
-            f_unchecked = [c for c in f_unchecked if c["page"] not in won]
-        except Exception:  # noqa: BLE001 — a report must never break the read
-            f_group = []
-    f_possible = len(f_ok) + len(f_bad) + len(f_group)
-    # Two numbers, because one number hid the truth (audit P1-2): the
-    # denominator used to be ok+mismatch alone, so a file with four frameless
-    # pages and two scan gaps still read «621/621 مطابق» and never named them.
-    # ACCURACY says how the checked pages did; COVERAGE says how much of the
-    # file was checked — and every remaining class is named in Arabic.
-    if f_possible:
-        seg_f = (f"تحقق الفوتر: {len(f_ok)}/{f_possible} مطابق (دقة)، "
-                 f"وتغطية {f_possible}/{n_pages}")
-        if f_bad:
-            seg_f = ("⚠ " + seg_f + " — صفحات غير مطابقة: "
-                     + "، ".join(str(c["page"]) for c in f_bad))
-            if any(c.get("is_paradox") for c in f_bad):
-                seg_f += " (نمط زيغ ×100)"
-        if f_group:
-            seg_f += (" — مُوثّق بالمجموع بين إطارين مقروءين: "
-                      + "، ".join(str(p) for p in f_group))
-        _first_in_order = order_now[0] if order_now else None
+        # ٢) الصفوفُ بترتيب الملف — والترتيبُ يُقرَّر بعدها، لأن شاهدَيه الثانيين (الرقمُ المطبوع والتجاورُ
+        # المُثبت حسابًا) لا يوجدان إلا بعد القراءة (مراجعة ٧٠ · R70-1). عددُ الاستدعاءات لا يتغيّر.
+        raw_by_pg: dict[int, list] = {}
+        page_no_by_pg: dict[int, int | None] = {}
+        attempted: list[int] = []
+        pages_without_rows: list[int] = []
+        fail_streak = 0
+        for i, pg in enumerate(decision["process"]):
+            progress(0.05 + 0.8 * i / n_proc, f"قراءة صفحة {pg} ({i + 1}/{n_proc})…")
+            if over_cap():
+                abort_reason = (f"أُوقف التشغيل عند الصفحة {pg}: تجاوز سقف الكلفة "
+                                f"(${MAX_UI_COST_USD:.2f} لهذا المسار).")
+                break
+            attempted.append(pg)
+            st: dict = {}
+            try:
+                raw_by_pg[pg] = read_rows_vlm(pages[pg - 1], stats=st, api_key=key)
+                page_no_by_pg[pg] = st.get("page_no")
+                fail_streak = 0
+                # **وصفحةٌ بلا صفوفٍ ليست صفحةً فارغةً بالضرورة (قاسه قياسُ البروفة ٢٠٢٦-٠٩-٣٠):**
+                # إجابةٌ صحيحةُ الشكل لكنها مصفوفةٌ فارغة تمرّ بلا استثناء ⇒ كانت صفحةٌ كاملةٌ تُفقد
+                # صامتةً (الجدولُ ٩٤ صفًّا بدل ١٠٤، وإعادةُ قراءة الصفحة نفسِها أعادت صفوفَها العشرة).
+                # فما دام تذييلُ الصفحة يُظهر حركاتٍ لها (دلتا الإجماليات المتراكمة عن السابقة) ⇒ تُسمّى.
+                _prev_pg = decision["process"][i - 1] if i else None
+                if not (raw_by_pg.get(pg) or []) and _footer_delta_nonzero(
+                        footers.get(pg), footers.get(_prev_pg) if _prev_pg else None):
+                    pages_without_rows.append(pg)
+            except Exception:
+                # one flaky page must never kill the whole run (transient VLM /
+                # JSON glitches) — record it, keep going, report it honestly.
+                # But EVERY page failing is a provider outage, not bad luck: four
+                # attempts with 10/20/40s backoff ≈ 70s per page, so 629 pages
+                # would spin ~12 hours and produce nothing. Five in a row stops it.
+                failed_pages.append(pg)
+                fail_streak += 1
+            finally:
+                _merge_usage(st)
+            if fail_streak >= FAIL_STREAK_LIMIT:
+                abort_reason = (f"أُوقف التشغيل عند الصفحة {pg}: "
+                                f"{fail_streak} إخفاقات قراءة متتالية "
+                                f"(انقطاع المزوّد؟) — والصفحات المقروءة محفوظة "
+                                f"في هذه النتيجة.")
+                break
 
-        def _page_label(c: dict, label: str) -> str:
-            """**والصفحةُ تُسمّى بسببها لا برقمها وحدَه (R76-2 · مراجعة ٧٦):** «غير قابلة للتحقق» تُقرأ
-            فيُستنتج سببُها — وقد استنتجتُه خطأً فعلًا (رجّحتُ تخطّيًا بعد إعادة قراءةٍ لا يقع في الكود).
-            فيُذكر الأساسُ صريحًا: لا مرجعَ سابق (أوّلُ صفحة) · أو لا مكوّنَ قابلَ للمقارنة (الأساسُ
-            الفارق) · أو سلسلةٌ منكسرةٌ بتخطّي (صفحةٌ سابقةٌ لم تُقرأ صفوفُها).
-            """
-            if label != "غير قابلة للتحقق":
-                return str(c["page"])
-            if c.get("basis") == "delta":
-                return f"{c['page']} (لا مكوّنَ قابلَ للمقارنة)"
-            if c["page"] == _first_in_order:
-                return f"{c['page']} (أوّلُ صفحة — لا مرجعَ سابق)"
-            return f"{c['page']} (سلسلةٌ منكسرة/تخطّي)"
+        # ٣) الترتيب: ترتيبُ التذييلات مرشَّح، لا يُطبَّق إلا بلا تناقضٍ ولا تكرار وبشاهدٍ ثانٍ لكلّ صفحةٍ ينقلها
+        # (ordering.decide_order) — والشاهدان يُقاسان على الترتيب المرشَّح نفسه، مجّانًا.
+        footer_tuples = {pg: (f.debits, f.credits) if f else None
+                         for pg, f in footers.items() if pg in attempted}
+        fo = footer_order(footer_tuples)
+        printed_by_pg = {pg: n for pg, n in page_no_by_pg.items() if isinstance(n, int)}
+        cand_pairs = adjacency(fo["order"], footer_tuples, _own_sums(fo["order"], raw_by_pg),
+                               printed_by_pg)
+        order_now, order_held = decide_order(attempted, fo, printed_by_pg, cand_pairs)
 
-        for label, group in (("فجوة مسح", f_gap), ("بلا إطار مطبوع", f_absent),
-                             ("غير قابلة للتحقق", f_unchecked)):
-            if group:
-                seg_f += (f" — {label}: "
-                          + "، ".join(_page_label(c, label) for c in group))
-    else:
-        seg_f = "تقرير الفوتر: تعذرت قراءة الإطارات — لا حكم على أي صفحة"
-    _verdicts = sess.state.get("verdicts") or {}
-    _suspect_pages = sorted({r["page"] for r in all_rows if not r.get("ok")})
-    # **الكلفةُ في الملخّص (R74-4 · مراجعة ٧٤):** كانت تُحسب في `usage` ولا تُعرَض في أيّ مكان ⇒ تعذّر
-    # تسجيل كلفة تشغيلٍ مدفوع (ووقع فعلًا في بروفة ٢٠٢٦-٠٩-٣٠). وتُوضع **قبل** سطر الفوتر كي لا تدخل
-    # النافذةَ التي تقرؤها البوّابة (`تحقق الفوتر` ← أوّل `•`)، فلا تُشوّش حكمَ الفوتر.
-    _cost_seg = (f"الكلفة: ${usage['cost']:.4f} · نداءات {usage['calls']}"
-                 if usage.get("calls") else "الكلفة: بلا نداءاتٍ مُسجَّلة")
-    segs = [base, _cost_seg, seg_f,
-            summarize_era_ar(era_fp,
-                             format_effects(_verdicts, _suspect_pages)),
-            summarize_order_ar(order, boundaries),
-            summarize_footer_order(fo, applied=order_held is None and order_now != attempted,
-                                   held=order_held),
-            summarize_page_numbers(check_page_numbers(sorted(page_nos))),
-            summarize_intake_ar(intake, decision["skipped"]),
-            summarize_desc_ar(desc_rep, sum(1 for pg in order_now
-                                            if any(r["page"] == pg for r in all_rows)))]
-    if abort_reason:
-        segs.insert(0, "⛔ " + abort_reason)
-    if footer_failed:
-        segs.append("⚠ تعذّرت قراءةُ إطار الإجماليات (بلا تحكيمٍ لها): "
-                    + "، ".join(f"ص{p}" for p in footer_failed[:8])
-                    + (" …" if len(footer_failed) > 8 else ""))
-    if filled_dates:
-        segs.append(f"تواريخ مُستكملة: {filled_dates}* "
-                    f"(لا تاريخ مطبوع في سطرها — سُدّت من الصف السابق)")
-    if recoveries:
-        segs.append("استُدرك حدّ الصفحة: "
-                    + "، ".join(f"ص{r['page']} ({r['amount']})"
-                                for r in recoveries))
-    if page_rereads:
-        segs.append("أُعيدت قراءة صفحة (مُتحقق): "
-                    + "، ".join(f"ص{r['page']}" for r in page_rereads))
-    if pages_without_rows:
-        segs.append("⚠ صفحةٌ بلا صفوفٍ وتذييلُها يُظهر حركات (قراءةٌ فاشلة لا صفحةٌ فارغة): "
-                    + "، ".join(f"ص{p}" for p in pages_without_rows))
-    summary = " • ".join(segs)
-    # **وقاعدةُ الكشف تُكتب هنا — عند انتهاء المعالجة، لا بزرّ (R130 · الخيار ١).**
-    # والفشلُ يُعلَن في سطر الحالة ولا يُسقط قراءةً تمّت (القاعدةُ بياناتٌ مشتقّةٌ تُعاد).
-    # **وسياسةٌ واحدة (R131-3):** التقليمُ دائمًا، والصفحةُ المتعثّرة تُسمّى أدناه — لا صفوفَ من
-    # قراءةٍ سابقة تبقى بأرقامها فتشير إلى صفّين.
-    incomplete = bool(failed_pages or pages_without_rows)
-    written = _ledger_write(sess)
-    missed = sorted(set(failed_pages or []) | set(pages_without_rows or [])) if incomplete else []
-    summary += _ledger_ui.write_note(written, missed)
-    gallery_out = _close_pages(sess, pages)
-    return (summary, rows_view, _kpi_of(all_rows), gallery_out,
-            "كل الأعمدة", "", "", "", intake_note)
+        # ٤) الاشتقاقُ والتحكيمُ بالترتيب المقرَّر — والاستدراكاتُ المدفوعة تحترم السقف أيضًا.
+        own_by_pg: dict[int, tuple] = {}
+        for i, pg in enumerate(order_now):
+            img = pages[pg - 1]
+            progress(0.85 + 0.08 * i / max(1, len(order_now)), f"تحقّق الصفحة {pg}…")
+            if pg not in raw_by_pg:
+                cum_broken = True  # cumulative footer chain is now unverifiable
+                continue
+            raw_rows = raw_by_pg[pg]
+            rows = chain_derive(raw_rows, prev_balance=prev_closing)
+            page_no = page_no_by_pg.get(pg)
+            page_nos.append((pg, page_no))
+            gap_missing: list[int] = []
+            if (isinstance(page_no, int) and isinstance(prev_page_no, int)
+                    and page_no > prev_page_no + 1):
+                # قفزة في الترقيم المطبوع ⇒ الأوراق بينهما غائبة من المسح، ودلتا
+                # الإطار التالية تقيس حركاتها لا خطأً في هذه الصفحة.
+                gap_missing = list(range(prev_page_no + 1, page_no))
+            # مرساة حدّية غير محسومة؟ استدراك مقيد: إعادة قراءة موضعية تُقبل
+            # فقط إذا أغلقت السلسلة (ما كشفه ص11 في السلايس).
+            if i > 0 and rows and rows[0].get("boundary") == "anchor" and not over_cap():
+                rst: dict = {}
+                raw_rows, recovered = recover_anchor(
+                    raw_rows, prev_closing, img, pg, rst, api_key=key)
+                _merge_usage(rst)
+                if recovered is not None:
+                    rows = chain_derive(raw_rows, prev_balance=prev_closing)
+                    recoveries.append({"page": pg, "amount": str(recovered)})
+            footer = footers.get(pg)
+            # تحكيم الصفحة: انزياح عن الفوتر يُطلق قراءة جديدة واحدة، تُقبل فقط
+            # إذا كانت بلا شكوك وتُطابق دلتا الفوتر (معزولة عن أي تلوث سابق).
+            if (not gap_missing and not over_cap()
+                    and page_diverged(rows, cum, prev_footer, footer, cum_broken)):
+                pst: dict = {}
+                fresh_raw, accepted, note = try_page_reread(
+                    img, cum, prev_footer, footer, prev_closing, pst, api_key=key)
+                _merge_usage(pst)
+                if accepted and fresh_raw is not None:
+                    raw_rows = fresh_raw
+                    rows = chain_derive(raw_rows, prev_balance=prev_closing)
+                    if i > 0 and rows and rows[0].get("boundary") == "anchor" and not over_cap():
+                        rst2: dict = {}
+                        raw_rows, rec = recover_anchor(
+                            raw_rows, prev_closing, img, pg, rst2, api_key=key)
+                        _merge_usage(rst2)
+                        if rec is not None:
+                            rows = chain_derive(raw_rows,
+                                                prev_balance=prev_closing)
+                            recoveries.append({"page": pg, "amount": str(rec)})
+                    page_rereads.append({"page": pg, "note": note})
+            if i > 0 and rows:
+                b = rows[0].get("boundary")
+                if b in boundaries:
+                    boundaries[b] += 1
+            era_pages[pg] = [t for r in rows
+                             for t in (r.get("raw_movement"), r.get("raw_balance"))
+                             if t]
+            page_dates[pg] = [r.get("date") for r in rows]
+            chk = check_page_footer(rows, footer, prior=cum, skip=cum_broken)
+            # أساس العرض = دلتا الصفحة متى توفّرت (تعزل الصفحة عن أي تلوث سابق).
+            if delta_checkable(prev_footer, footer):
+                dchk = delta_status(rows, prev_footer, footer)
+                if dchk["status"] != "unchecked":
+                    chk = {**chk, **dchk, "basis": "delta"}
+            elif chk.get("status") == "mismatch":
+                chk = {**chk, "status": "unchecked"}
+            if gap_missing and delta_checkable(prev_footer, footer):
+                chk = {**chk, "status": "gap", "basis": "delta",
+                       "missing_sheets": gap_missing}
+            if chk.get("own"):
+                cum["debits"] += chk["own"]["debits"]
+                cum["credits"] += chk["own"]["credits"]
+            footer_checks.append({"page": pg, **chk})
+            if chk.get("own"):
+                own_by_pg[pg] = (chk["own"]["debits"], chk["own"]["credits"])
+            prev_footer = footer
+            prev_page_no = page_no
+            # **والعقدُ يُبنى أوّلًا، ثمّ يُشتقّ العرضُ منه (F5):** ترتيبٌ واحدٌ للمعنى — والعقدُ هو ما
+            # يقرؤه كاتبُ الإكسل والدفتر. (العلّةُ المقيسة: كانت ٩ حقولٍ من ٢٢ في موضع البناء ⇒ زرُّ
+            # التنزيل لا يُنتج ملفًّا: `IntegrityError: NOT NULL constraint failed: rows_verified.row_no`
+            # ثمّ `KeyError: None`.) والوسائطُ كما يحملها التطبيق: قراءتُه الخامّ (`raw_rows`) وأحكامُ
+            # السلسلة (`rows` من `chain_derive`) وحكمُ الصفحة وأعلامُها ورقمُها المطبوع.
+            page_contract = build_page_rows(
+                pg, raw_rows, rows,
+                {"footer": chk.get("status")},
+                # **والتحكيمُ غيرُ معلومٍ هنا بإعلانٍ صريح (R96-2):** يُسجَّل في كاش التشغيل (`arbitrated_by`)
+                # ويقرؤه مسارُ سطر الأوامر، فلا يعرفه التطبيق ⇒ فخليّةُ «مصدر الإثبات» لصفحةٍ محكَّمة تفرق
+                # بين الملفّين. وهذا **صنفُ فرقِ مصدرِ إدخالٍ مُعلَن** كالكلفة والزمن اللذين لا يملكهما التطبيق،
+                # لا انزياحُ عقد. (مقيس: لا تظهر على عيّنةٍ بلا تحكيم، وتظهر بـ«تحكيم موثَّق بمصدره».)
+                {"recovered": any(x.get("page") == pg for x in recoveries),
+                 "reread": any(x.get("page") == pg for x in page_rereads)},
+                page_no=page_no)
+            rows_contract += page_contract
+            # **والموضعُ في العقد يُمرَّر** فيحمل صفُّ العرض رقمَه sess.stateMENT-WIDE كما تحمله الأدوات (R130).
+            all_rows += _view_rows(page_contract, offset=len(rows_contract) - len(page_contract))
+            # **و`prev_closing` كما كان:** آخرُ رصيدٍ مقروءٍ في الصفحة يقود سلسلةَ التالية — كان يُحدَّث
+            # صفًّا صفًّا في حلقة العرض، ويُقرأ الآن من الصفوف نفسِها فلا يُفقد أثرُه.
+            _last_bal = next((r["balance"] for r in reversed(rows) if r["balance"] is not None), None)
+            if _last_bal is not None:
+                prev_closing = _last_bal
+
+        # التواريخُ أولًا: تُستعاد أحيانًا من نصّ بيان قراءة الصفحة، وبيانُ العمود بلا تاريخٍ عن قصد.
+        filled_dates = fill_missing_dates(all_rows)
+        progress(0.93, "قراءة البيان من عمود البيان…")
+        pairs = adjacency(order_now,
+                          {pg: (f.debits, f.credits) if f else None for pg, f in footers.items()},
+                          own_by_pg, {pos: n for pos, n in page_nos if isinstance(n, int)})
+        desc_rep = _desc_pass(order_now, pages, all_rows, pairs, _merge_usage,
+                              lambda: usage["cost"] > MAX_UI_COST_USD, api_key=key)
+        # والتصنيفُ بعد البيان الأصحّ.
+        annotate_types(all_rows)
+        # **وأحكامُ الصفحات تُحسب قبل الجدول (المرحلة ١):** كان الجدولُ يُبنى قبل كتابة أحكام هذه القراءة،
+        # فيقرأ عمودُ «التحقق» أحكامَ ما في الحالة قبلها (قراءةٍ سابقةٍ أو لا شيء) — ظهر حين صار الحكمُ
+        # وسيطًا صريحًا بدل قراءةٍ من الحالة العامّة. والأحكامُ لا تتغيّر بعد هذا الموضع (`footer_checks` تمّت).
+        verdicts = verdicts_from_checks(footer_checks)
+        rows_view = _rows_df(all_rows, verdicts)
+
+        progress(0.95, "بناء الفهرس…")
+        sess.state["rows"] = all_rows
+        # **وسطحُ العقد يُكتب باسمه (لا يُخلط بسطح العرض):** يقرؤه زرُّ التنزيل وحده، فيبقى التحويلُ
+        # في الدفتر على عقدٍ كامل — وهذا ما كان غائبًا فسقط الزرُّ.
+        sess.state["rows_contract"] = rows_contract
+        # **نطاقُ الكشف يُكتب حيث يُعرَف (R93-1):** `_scope_text` يقرأ `n_pages` و`source_name`، ولم يكن
+        # يكتبهما أحد ⇒ كان يقول للنموذج «0 صفحة» في **كلّ** سؤال، وهو نصٌّ كاذبٌ يبلغ التلقين. فيُكتبان
+        # هنا من الملفّ المقروء نفسِه — لا من افتراضٍ، ولا من عددٍ ثابت.
+        sess.state["n_pages"] = len(pages)
+        # **ولا سطرَ ولا مُساعدَ من الأداة المحذوفة (أغلقه مقعدُ المواصفة · SPEC-96-2):** كان هنا شرحٌ
+        # بنصّ الحاضر («يحتاجها زرُّ التنزيل…») و`_page_no` الجاهزةُ لإعادة شبكها — بعد أن حُذف مفتاحُ
+        # `read_pages` ومَن يناديه. فالسطرُ الذي يصف آليةً محذوفةً كنصّ حاضر يُعيد بناءَها، والمُساعدُ الذي
+        # لا يناديه أحدٌ يُغري بذلك. حُذفا معًا، والشاهدُ على الإزالة وسببُها في موضعه أعلاه.
+        # **ولا مفتاحَ حالةٍ لصفحاتٍ «بلا حركات» (حُذف بالقياس · الدعوى R95-1-a · تبنتها مراجعة ٩٦):** كان
+        # يُبنى من عدّ الصفحات المقروءة ليُمرَّر إلى ناقل الإكسل، وقِيس أنّه **لا يُحرّك الخليّةَ المُسلَّمة**
+        # (٤ = ٤ = ٤، وهو عددُ ملفّ سطر الأوامر) — فالعدُّ من أحكام الدفتر، **وأخطرُ منه** أنّه كان يُلصق
+        # وسمَ «لا حركات» على ما يُسمّيه التطبيقُ نفسُه «قراءةٌ فاشلة». فبقي المعنى في مصدره الواحد.
+        sess.state["source_name"] = Path(pdf_path).name
+        # **وخريطةُ الأرقام المطبوعة (R93-4):** يُمرّرها زرُّ التنزيل إلى ناقل الإكسل، فيُكتب رقمُ
+        # الصفحة المطبوع من **مصدره** (قراءةُ الورقة) لا من خريطةٍ محلّيّةٍ ولا `None`.
+        sess.state["printed_pages"] = dict(page_no_by_pg)
+        sess.state["chunks"] = chunk_rows(
+            [{**r, "row_no": int(r.get("seq") or i + 1)} for i, r in enumerate(all_rows, start=1)])
+        sess.state["store"] = build_index(sess.state["chunks"])
+        # **التذييلاتُ المطبوعةُ بصيغةٍ واحدة (R77):** تُبنى من القراءات والأحكام في موضعٍ واحد —
+        # `statement_qa.page_footers` — فيرثها مسارُ القراءة (هنا) ومسارُ القياس معًا، ولا نسخةَ ثانيةَ
+        # تزيغ بصمت. الأرقامُ كما ظهرت في الورقة، وحكمُها معها.
+        printed_footers = printed_footers_from(footers, footer_checks, money=_money)
+        sess.state["footer_checks"] = footer_checks
+        sess.state["footers"] = printed_footers
+        # أحكام الصفحة بلغة واحدة تُقرأ في كل سطح: الجدول والتصدير والأسئلة
+        sess.state["verdicts"] = verdicts
+        sess.state["usage"] = usage
+        sess.state["boundary_recoveries"] = recoveries
+        sess.state["page_rereads"] = page_rereads
+        sess.state["page_numbers"] = check_page_numbers(sorted(page_nos))   # بمواضع الملف
+        era_fp = fingerprint_pages(era_pages)
+        order = check_order(page_dates)
+        sess.state["era"] = era_fp
+        sess.state["order"] = order
+        sess.state["footer_order"] = fo
+        sess.state["order_held"] = order_held
+        sess.state["footer_failed"] = footer_failed
+        sess.state["desc_pass"] = desc_rep
+        sess.state["intake"] = {"gate": intake.gate, "kinds": intake.kinds, **decision}
+        if not all_rows:
+            raise gr.Error("تعذرت قراءة الكشف — انقطاع مؤقت من خدمة القراءة. أعد المحاولة.")
+        n_pages = len(pages)
+        if n_pages == 1:
+            pages_ar = "صفحة واحدة"
+        elif n_pages == 2:
+            pages_ar = "صفحتين"
+        elif 3 <= n_pages <= 10:
+            pages_ar = f"{n_pages} صفحات"
+        else:
+            pages_ar = f"{n_pages} صفحة"
+        if failed_pages:
+            base = (f"⚠ تمّت قراءة {n_pages - len(failed_pages)} من {n_pages} صفحة "
+                    f"(تعذرت: {failed_pages}) — جاهز للسؤال عن المقروء")
+        else:
+            base = (f"✅ تمّت قراءة {pages_ar} وبناء الفهرس — "
+                    f"جاهز للسؤال والجواب")
+        f_ok = [c for c in footer_checks if c["status"] == "ok"]
+        f_bad = [c for c in footer_checks if c["status"] == "mismatch"]
+        f_gap = [c for c in footer_checks if c["status"] == "gap"]
+        f_absent = [c for c in footer_checks if c["status"] == "absent"]
+        f_unchecked = [c for c in footer_checks if c["status"] == "unchecked"]
+        # صفحات لا يمكن الحكم عليها وحدها: مجموعها بين إطارين مقروءين هو الدليل.
+        # (الدليل تراكمي من بداية الكشف — انظر statement_qa.group_check)
+        f_group: list[int] = []
+        if f_absent or f_unchecked:
+            try:
+                from statement_qa.group_check import from_checks
+
+                ok_pages = {c["page"] for c in f_ok}
+                f_group = [p for p in from_checks(footer_checks, all_rows)
+                           if p not in ok_pages]   # a page is counted once
+                sess.state["group_verified"] = f_group
+                won = set(f_group)
+                f_absent = [c for c in f_absent if c["page"] not in won]
+                f_unchecked = [c for c in f_unchecked if c["page"] not in won]
+            except Exception:  # noqa: BLE001 — a report must never break the read
+                f_group = []
+        f_possible = len(f_ok) + len(f_bad) + len(f_group)
+        # Two numbers, because one number hid the truth (audit P1-2): the
+        # denominator used to be ok+mismatch alone, so a file with four frameless
+        # pages and two scan gaps still read «621/621 مطابق» and never named them.
+        # ACCURACY says how the checked pages did; COVERAGE says how much of the
+        # file was checked — and every remaining class is named in Arabic.
+        if f_possible:
+            seg_f = (f"تحقق الفوتر: {len(f_ok)}/{f_possible} مطابق (دقة)، "
+                     f"وتغطية {f_possible}/{n_pages}")
+            if f_bad:
+                seg_f = ("⚠ " + seg_f + " — صفحات غير مطابقة: "
+                         + "، ".join(str(c["page"]) for c in f_bad))
+                if any(c.get("is_paradox") for c in f_bad):
+                    seg_f += " (نمط زيغ ×100)"
+            if f_group:
+                seg_f += (" — مُوثّق بالمجموع بين إطارين مقروءين: "
+                          + "، ".join(str(p) for p in f_group))
+            _first_in_order = order_now[0] if order_now else None
+
+            def _page_label(c: dict, label: str) -> str:
+                """**والصفحةُ تُسمّى بسببها لا برقمها وحدَه (R76-2 · مراجعة ٧٦):** «غير قابلة للتحقق» تُقرأ
+                فيُستنتج سببُها — وقد استنتجتُه خطأً فعلًا (رجّحتُ تخطّيًا بعد إعادة قراءةٍ لا يقع في الكود).
+                فيُذكر الأساسُ صريحًا: لا مرجعَ سابق (أوّلُ صفحة) · أو لا مكوّنَ قابلَ للمقارنة (الأساسُ
+                الفارق) · أو سلسلةٌ منكسرةٌ بتخطّي (صفحةٌ سابقةٌ لم تُقرأ صفوفُها).
+                """
+                if label != "غير قابلة للتحقق":
+                    return str(c["page"])
+                if c.get("basis") == "delta":
+                    return f"{c['page']} (لا مكوّنَ قابلَ للمقارنة)"
+                if c["page"] == _first_in_order:
+                    return f"{c['page']} (أوّلُ صفحة — لا مرجعَ سابق)"
+                return f"{c['page']} (سلسلةٌ منكسرة/تخطّي)"
+
+            for label, group in (("فجوة مسح", f_gap), ("بلا إطار مطبوع", f_absent),
+                                 ("غير قابلة للتحقق", f_unchecked)):
+                if group:
+                    seg_f += (f" — {label}: "
+                              + "، ".join(_page_label(c, label) for c in group))
+        else:
+            seg_f = "تقرير الفوتر: تعذرت قراءة الإطارات — لا حكم على أي صفحة"
+        _verdicts = sess.state.get("verdicts") or {}
+        _suspect_pages = sorted({r["page"] for r in all_rows if not r.get("ok")})
+        # **الكلفةُ في الملخّص (R74-4 · مراجعة ٧٤):** كانت تُحسب في `usage` ولا تُعرَض في أيّ مكان ⇒ تعذّر
+        # تسجيل كلفة تشغيلٍ مدفوع (ووقع فعلًا في بروفة ٢٠٢٦-٠٩-٣٠). وتُوضع **قبل** سطر الفوتر كي لا تدخل
+        # النافذةَ التي تقرؤها البوّابة (`تحقق الفوتر` ← أوّل `•`)، فلا تُشوّش حكمَ الفوتر.
+        _cost_seg = (f"الكلفة: ${usage['cost']:.4f} · نداءات {usage['calls']}"
+                     if usage.get("calls") else "الكلفة: بلا نداءاتٍ مُسجَّلة")
+        segs = [base, _cost_seg, seg_f,
+                summarize_era_ar(era_fp,
+                                 format_effects(_verdicts, _suspect_pages)),
+                summarize_order_ar(order, boundaries),
+                summarize_footer_order(fo, applied=order_held is None and order_now != attempted,
+                                       held=order_held),
+                summarize_page_numbers(check_page_numbers(sorted(page_nos))),
+                summarize_intake_ar(intake, decision["skipped"]),
+                summarize_desc_ar(desc_rep, sum(1 for pg in order_now
+                                                if any(r["page"] == pg for r in all_rows)))]
+        if abort_reason:
+            segs.insert(0, "⛔ " + abort_reason)
+        if footer_failed:
+            segs.append("⚠ تعذّرت قراءةُ إطار الإجماليات (بلا تحكيمٍ لها): "
+                        + "، ".join(f"ص{p}" for p in footer_failed[:8])
+                        + (" …" if len(footer_failed) > 8 else ""))
+        if filled_dates:
+            segs.append(f"تواريخ مُستكملة: {filled_dates}* "
+                        f"(لا تاريخ مطبوع في سطرها — سُدّت من الصف السابق)")
+        if recoveries:
+            segs.append("استُدرك حدّ الصفحة: "
+                        + "، ".join(f"ص{r['page']} ({r['amount']})"
+                                    for r in recoveries))
+        if page_rereads:
+            segs.append("أُعيدت قراءة صفحة (مُتحقق): "
+                        + "، ".join(f"ص{r['page']}" for r in page_rereads))
+        if pages_without_rows:
+            segs.append("⚠ صفحةٌ بلا صفوفٍ وتذييلُها يُظهر حركات (قراءةٌ فاشلة لا صفحةٌ فارغة): "
+                        + "، ".join(f"ص{p}" for p in pages_without_rows))
+        summary = " • ".join(segs)
+        # **وقاعدةُ الكشف تُكتب هنا — عند انتهاء المعالجة، لا بزرّ (R130 · الخيار ١).**
+        # والفشلُ يُعلَن في سطر الحالة ولا يُسقط قراءةً تمّت (القاعدةُ بياناتٌ مشتقّةٌ تُعاد).
+        # **وسياسةٌ واحدة (R131-3):** التقليمُ دائمًا، والصفحةُ المتعثّرة تُسمّى أدناه — لا صفوفَ من
+        # قراءةٍ سابقة تبقى بأرقامها فتشير إلى صفّين.
+        incomplete = bool(failed_pages or pages_without_rows)
+        written = _ledger_write(sess)
+        missed = sorted(set(failed_pages or []) | set(pages_without_rows or [])) if incomplete else []
+        summary += _ledger_ui.write_note(written, missed)
+        gallery_out = _close_pages(sess, pages)
+        return (summary, rows_view, _kpi_of(all_rows), gallery_out,
+                "كل الأعمدة", "", "", "", intake_note)
+    finally:
+        close = getattr(pages, "close", None)
+        if callable(close):
+            close()
 
 
 def prepare_ask(question: str, history, sess=None):
@@ -1568,7 +1580,8 @@ def _evidence_from_numbers(sess, nos: list[int], cited: set[int] | None = None,
     السقف إن قُصَّت. **و`role`** ما تقوله الملاحظةُ عن الصفوف — فلا تُسمّى استشهاداتٌ بلا أثرٍ «دخلت في الحساب».
     """
     rows = sess.state.get("rows") or []
-    pairs = [(i, rows[i - 1]) for i in nos if 1 <= i <= len(rows)]
+    by_seq = {int(r.get("seq") or idx): r for idx, r in enumerate(rows, start=1)}
+    pairs = [(i, by_seq[i]) for i in nos if i in by_seq]
     if not pairs:
         return pd.DataFrame(), ""
     note = f"◽ {_n_rows_ar(len(pairs))} {role}."
@@ -1786,7 +1799,7 @@ def _page_rows_df(sess, hit):
     """One page's rows with GLOBAL # — same numbers the tools cite and the
     main table shows (real النوع + مدين/دائن split via the shared builder)."""
     rows = sess.state.get("rows") or []
-    pairs = [(i, r) for i, r in enumerate(rows, start=1)
+    pairs = [(int(r.get("seq") or i), r) for i, r in enumerate(rows, start=1)
              if r["page"] == hit["page"]]
     verdicts = sess.state.get("verdicts") or {}
     return pd.DataFrame([_row_record(i, r, verdicts) for i, r in pairs])
@@ -1909,7 +1922,7 @@ def _delete_statement_click(sess=None):
     # وقراءةٌ جاريةٌ ما زالت تعمل ⇒ مهمّتان وكتابةٌ تُعيد البيانات بعد «حُذفت». والعقدُ: إن كان
     # تشغيلٌ جارٍ **لا يُحذف شيء** ويُقال ذلك؛ وملفُّ القفل ليس بياناتِ كشفٍ فلا يُحسب في «صفر ملفّ».
     try:
-        with job_lock(LOCK_PATH):
+        with job_lock(_lock_path(sess)):
             if path is not None:
                 reset_memory(path)
             got = _ledger_ui.delete(sess.home, key)
