@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Bank Statement Auditor</title>
+  <meta name="description" content="مُدقّق كشوف الحساب الممسوحة ضوئيًّا: يقرأ الكشفَ صفًّا صفًّا، ويراجع كلَّ رقمٍ بحساب الرصيد وذيول الصفحات، ويعرض عليك ما لم يثبت.">
+  <meta name="theme-color" content="#0D1B2A">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Noto+Naskh+Arabic:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#story">انتقل إلى المحتوى</a>
+
+  <nav class="bar" aria-label="أقسام الصفحة">
+    <a class="brand" href="index.html">
+      <svg class="seal" viewBox="0 0 100 100" aria-hidden="true">
+        <defs>
+          <path id="sealArc" d="M 50,50 m -34,0 a 34,34 0 1,1 68,0 a 34,34 0 1,1 -68,0"/>
+        </defs>
+        <circle cx="50" cy="50" r="46.5" fill="none" stroke="#C2A468" stroke-width="1.1"/>
+        <circle cx="50" cy="50" r="40" fill="none" stroke="#C2A468" stroke-width="0.55"/>
+        <text font-size="7.6" fill="#C2A468" letter-spacing="0.6">
+          <textPath href="#sealArc" startOffset="25%" text-anchor="middle">السلسلة الرصيدية · حَكَم لا يخطئ</textPath>
+        </text>
+        <text x="50" y="54" text-anchor="middle" font-family="'Noto Naskh Arabic', serif" font-size="21" fill="#34C08E">مُدقَّق</text>
+        <text x="50" y="70" text-anchor="middle" font-size="8.5" fill="#93A4B7">آلياً</text>
+      </svg>
+      <span lang="en" dir="ltr">AI Bank Statement Auditor</span>
+    </a>
+    <ul class="links">
+      <li><a href="#hard-title">المشكلة</a></li>
+      <li><a href="#judges-title">الحَكَمان</a></li>
+      <li><a href="#real-title">النتائج</a></li>
+      <li><a href="#ask-title">المعماريّة</a></li>
+    </ul>
+    <a class="button small" href="#try-title">جرّبه</a>
+  </nav>
+
+  <header class="hero" id="top">
+    <div class="hero-copy">
+      <h1 dir="ltr" lang="en">AI Bank Statement Auditor</h1>
+      <p class="tag">مُدقّق كشوف الحساب الممسوحة ضوئيًّا</p>
+      <p class="display">النموذجُ يقرأ،<br>والحسابُ يحكم.</p>
+      <p class="lede">يقرأ كشفَ الحساب الممسوح صفًّا صفًّا، ثمّ يراجع كلَّ رقمٍ بحساب الرصيد وذيول الصفحات. ما ثبت يُعرض مُثبتًا، وما لم يثبت يُعرض عليك بموضعه.</p>
+      <div class="actions">
+        <a class="button primary" href="https://huggingface.co/spaces/jahfaliabdulrahman-dev/arabic-statement-reader">جرّبه على عيّنةٍ تجريبيّة</a>
+        <a class="button" href="https://github.com/jahfaliabdulrahman-dev/rajhi-rag">اقرأ الكود</a>
+      </div>
+      <p class="scope">المدعومُ الآن: كشوفُ مصرف الراجحي الممسوحةُ وحدها.</p>
+    </div>
+
+    <section class="catch" id="catch" aria-labelledby="catch-title" hidden>
+      <div class="ledger">
+        <h2 id="catch-title">هل يطابق هذا المبلغ؟</h2>
+        <p class="ledger-note">صفٌّ من صفحةٍ ممسوحة في كشف حسابٍ حقيقيّ، كما قرأه النظام. الرصيدُ قبله مع حركته يجب أن يساوي الرصيدَ بعده. <strong>خمّن أولًا:</strong> هل يستقيم الحساب؟</p>
+        <div class="sum" id="catch-sum" role="group" aria-label="الحسابُ كما قرأه النظام"></div>
+        <div class="guess" role="group" aria-label="تخمينك">
+          <button type="button" class="pick" data-guess="yes">يطابق</button>
+          <button type="button" class="pick" data-guess="no">لا يطابق</button>
+        </div>
+        <details class="reveal" id="catch-reveal">
+          <summary>اكشف الجواب</summary>
+          <p class="guess-result" id="guess-result" aria-live="polite"></p>
+          <p id="catch-answer"></p>
+          <figure>
+            <img src="real-row.png" width="540" height="36" loading="lazy"
+                 alt="سطرُ الصفّ كما طُبع في الكشف: المبلغُ بالأرقام الهنديّة، ثمّ بيانُ الحركة.">
+            <figcaption>الصفُّ كما طُبع في الكشف: المبلغُ الصحيحُ بالأرقام الهنديّة.</figcaption>
+          </figure>
+          <p>أمسكت السلسلةُ هذا الخطأ، فعُرض الصفُّ للمراجعة قبل أن يدخل أيَّ مجموعٍ أو جواب.</p>
+        </details>
+      </div>
+    </section>
+  </header>
+
+  <main id="story">
+    <noscript><p class="note">أرقامُ هذه الصفحة تُقرأ عند فتحها من ملفّات القياس. فعّل JavaScript لتراها.</p></noscript>
+    <p class="note" id="load-error" role="alert" hidden>تعذّر تحميل الأرقام. أعد تحميل الصفحة.</p>
+
+    <section class="band hard" aria-labelledby="hard-title">
+      <div class="band-head">
+        <h2 id="hard-title">لماذا يصعب هذا الملفّ على ما تعلّمناه</h2>
+        <p class="thesis">قارئُ الصور يخطئ أحيانًا، وقارئُ هذا النظام منها، والصفُّ أعلاه من أخطائه. والمهمُّ أن يُعرف موضعُ الخطأ.</p>
+        <p>والكشفُ صورٌ ممسوحة، بلا طبقة نصٍّ تحتها، وأرقامُه هنديّة، ووصفُ الحركة يمتدّ أسطرًا تحت مبلغها.</p>
+      </div>
+      <div class="band-body">
+        <ol class="steps">
+          <li id="step-loader"></li>
+          <li><span id="step-plain"></span>
+            <ul class="runs">
+              <li id="fact-run-1"></li>
+              <li id="fact-run-2"></li>
+            </ul>
+          </li>
+          <li class="therefore"><strong>لذلك:</strong> لا شيء في الجواب وحده، صحيحًا كان أو خاطئًا، يقول أيَّ رقمٍ فيه يُوثق به. فأضفنا حَكَمين يراجعان كلَّ رقم.</li>
+        </ol>
+        <p class="tally" id="fact-cost"></p>
+      </div>
+    </section>
+
+    <section class="band judges" aria-labelledby="judges-title">
+      <div class="band-head wide">
+        <h2 id="judges-title">حَكَمان يراجعان كلَّ رقم</h2>
+        <p>هذه صفوفُ الصفحة نفسها كما طُبعت. وحُجبت أسماءُ الأشخاص وأرقامُ الحسابات والبطاقات، وقُصّ رأسُ الصفحة وذيلُها.</p>
+      </div>
+      <div class="split">
+        <figure class="scan">
+          <a href="real-rows.png"><img src="real-rows.png" width="1065" height="791" loading="lazy"
+             alt="صفوفُ صفحةٍ من الكشف كما طُبعت: تاريخٌ هجريٌّ وميلاديّ، ووصفٌ يمتدّ أسطرًا، ومبلغٌ ورصيدٌ بأرقامٍ هنديّة، ومربّعاتٌ سوداء فوق الأسماء وأرقام الحسابات والبطاقات."></a>
+          <figcaption id="scan-caption"></figcaption>
+        </figure>
+
+        <div class="judge-steps">
+          <div class="judge">
+            <h3>القراءة</h3>
+            <p>نموذجُ رؤيةٍ يقرأ كلَّ صفٍّ، والرقمُ الهنديُّ يصير رقمًا يُحسب به.</p>
+            <div class="table-wrap" tabindex="0" role="region" aria-label="جدولُ القراءة">
+              <table id="reading">
+                <caption>صفوفُ الصفحة كما قرأها النظام. ✓ صفٌّ أثبتته السلسلة، و✗ صفٌّ يُعرض للمراجعة.</caption>
+                <thead><tr><th scope="col">البيان</th><th scope="col">المبلغ كما قرأه النظام</th><th scope="col">الرصيد</th><th scope="col">السلسلة</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="judge">
+            <h3><span class="mark proven" aria-hidden="true"></span>السلسلة</h3>
+            <p>كلُّ رصيدٍ يساوي الرصيدَ قبله زائدًا الإيداعَ أو ناقصًا السحب. فإن طابق ثبت الصفّ، وإن خالف وقف الحسابُ عنده وعُرض الصفُّ للمراجعة.</p>
+            <p class="tally" id="chain-tally"></p>
+            <p id="chain-why"></p>
+          </div>
+
+          <div class="judge">
+            <h3><span class="mark footer" aria-hidden="true"></span>التذييل</h3>
+            <p>في ذيل كلّ صفحةٍ مجموعٌ تراكميٌّ مطبوعٌ للمدين والدائن، ورصيدُ آخر الصفحة. والنظامُ يقابلها بمجموع فروق الأرصدة التي قرأها وبآخر رصيدٍ قرأه، فيراجع حسابَ الصفحة من خارج السلسلة.</p>
+            <p class="verdict" id="footer-verdict"></p>
+          </div>
+          <p class="source">أرقامُ هذا القسم وما قبله من صفحةٍ واحدةٍ من كشف حسابٍ حقيقيّ، نُشرت بموافقة صاحبه.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="band real" aria-labelledby="real-title">
+      <div class="band-head wide">
+        <h2 id="real-title">على الكشف كلّه</h2>
+        <p>القراءةُ نفسُها والحَكَمان نفساهما على الكشف نفسه كاملًا:</p>
+      </div>
+      <dl class="stats" id="real-stats"></dl>
+      <div class="real-notes">
+        <p id="real-unproven"></p>
+        <p id="real-stamps"></p>
+        <p class="source">أرقامٌ إجماليّةٌ من قراءة الكشف نفسه كاملًا. ومصدرُها لقطةُ الأرقام المحروسة في المستودع، وهي نفسُها في التقرير.</p>
+      </div>
+    </section>
+
+    <section class="band ask" aria-labelledby="ask-title">
+      <div class="band-head wide">
+        <h2 id="ask-title">اسأله: الأدواتُ تحسب</h2>
+        <p>الوكيلُ لا يجمع بنفسه. يستدعي أدواتٍ تحسب من دفتر SQLite الذي أثبتته السلسلة: المجموعُ والعدّ، وأعلى رصيدٍ وأدناه، وملخّصُ الصفحة، والبحثُ في البيان. وحين لا يجد جوابًا يقول ذلك.</p>
+      </div>
+      <ol class="flow" aria-label="معماريّة المشروع ومكوّنات LangChain فيها">
+        <li><strong>الكشفُ الممسوح</strong><span>صورٌ بلا طبقة نصّ</span></li>
+        <li class="outside"><strong>قارئُ الصفحات</strong><span>نموذجُ رؤيةٍ عبر OpenRouter مباشرةً، خارج LangChain</span></li>
+        <li class="judge-node"><strong>الحَكَمان</strong><span>السلسلة والتذييل</span></li>
+        <li><strong>الدفتر</strong><span><code>SQLite</code></span></li>
+        <li class="lc"><strong>وكيلُ LangChain</strong>
+          <ul class="parts">
+            <li><code>create_agent</code> و<code>@tool</code>: أدواتٌ تحسب من الدفتر</li>
+            <li><code>FAISS</code>: استرجاعٌ بمرشّح الصفحة</li>
+            <li><code>ChatPromptTemplate</code>: قالبُ التلقين</li>
+            <li><code>response_format</code>: جوابٌ منظَّم</li>
+            <li><code>SqliteSaver</code> و<code>trim_messages</code>: ذاكرةُ الحوار</li>
+          </ul>
+        </li>
+        <li><strong>الجواب</strong><span>مع موضع كلّ رقم</span></li>
+      </ol>
+      <p class="note-inline">قارئُ الصفحات وحده خارج LangChain بقرارٍ مقيس: الطلبُ الذي يبنيه غلافُها يختلف عن الطلب الذي قيست عليه القراءة (<a href="https://github.com/jahfaliabdulrahman-dev/rajhi-rag/blob/main/docs/langchain-reader-measurement.md">القياس</a>).</p>
+    </section>
+
+    <section class="band limits" aria-labelledby="limits-title">
+      <h2 id="limits-title">الحدود</h2>
+      <ul class="facts">
+        <li>المدعومُ الآن كشوفُ مصرف الراجحي الممسوحةُ وحدها، ولا يُفتح بنكٌ آخر قبل أن يُؤهَّل.</li>
+        <li>القراءةُ الحيّةُ لكشفك بمفتاح OpenRouter الخاصّ بك وحده، وما يُحفظ ومتى يُحذف مكتوبٌ في «قاعدة الخصوصية» داخل التطبيق.</li>
+        <li>الصفُّ الذي لا يُثبته الحساب يُعرض عليك لتحكم فيه. القارئُ الأخيرُ إنسان.</li>
+      </ul>
+    </section>
+
+    <section class="try" aria-labelledby="try-title">
+      <h2 id="try-title">جرّبه بنفسك</h2>
+      <p>زرُّ التجربة يفتح التطبيق على كشفٍ اصطناعيٍّ صنعناه لهذا الغرض، مقروءًا مسبقًا: تصفّح صفوفه واسأل دفتره، بلا مفتاحٍ وبلا كلفة.</p>
+      <a class="button primary large" href="https://huggingface.co/spaces/jahfaliabdulrahman-dev/arabic-statement-reader">جرّبه على عيّنةٍ تجريبيّة</a>
+    </section>
+  </main>
+
+  <footer>
+    <p class="source">الأرقامُ من صفحةٍ واحدةٍ من كشف حسابٍ حقيقيّ نُشرت بموافقة صاحبه، ومن قراءة الكشف نفسه كاملًا. وزرُّ التجربة يفتح كشفًا اصطناعيًّا.</p>
+    <p>AI Bank Statement Auditor · مشروعٌ مستقلّ، لا صلةَ له بأيّ مصرف · <a href="https://github.com/jahfaliabdulrahman-dev/rajhi-rag">الكود على GitHub</a></p>
+  </footer>
+</body>
+</html>

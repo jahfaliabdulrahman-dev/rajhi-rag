@@ -44,6 +44,11 @@ _TYPED_FIGURE = re.compile(r"\d[\d,]*\.\d{2}|[٠-٩]")
 _READ_ATTRS = {"alt", "aria-label", "title", "content"}
 
 
+#: The front page (short, links out) and the story page (every detail, every source sentence).
+FRONT = SITE / "index.html"
+STORY = SITE / "story.html"
+
+
 def _page_sources() -> dict[str, str]:
     return {p.name: p.read_text(encoding="utf-8") for p in sorted(SITE.glob("*")) if p.suffix in {".html", ".js", ".css"}}
 
@@ -70,13 +75,17 @@ def _what_a_reader_meets() -> dict[str, list[str]]:
             if not self.skip:
                 self.out.append(data)
 
-    parser = Text()
-    parser.feed((SITE / "index.html").read_text(encoding="utf-8"))
-    js = (SITE / "app.js").read_text(encoding="utf-8")
+    met: dict[str, list[str]] = {}
+    for page in (FRONT, STORY):
+        parser = Text()
+        parser.feed(page.read_text(encoding="utf-8"))
+        met[page.name] = parser.out
+    for script in ("app.js", "landing.js"):
+        js = (SITE / script).read_text(encoding="utf-8")
+        met[script] = [a or b for a, b in re.findall(r'"([^"\n]*)"|`([^`]*)`', js)]
     css = (SITE / "style.css").read_text(encoding="utf-8")
-    return {"index.html": parser.out,
-            "app.js": [a or b for a, b in re.findall(r'"([^"\n]*)"|`([^`]*)`', js)],
-            "style.css": re.findall(r"content:\s*([^;]+);", css)}
+    met["style.css"] = re.findall(r"content:\s*([^;]+);", css)
+    return met
 
 
 def _read(name: str) -> dict:
@@ -90,6 +99,8 @@ def test_every_number_source_is_a_link_to_its_tracked_file():
         assert link.is_symlink(), f"{name}: نسخةٌ لا رابط — نسختان تفترقان"
         assert link.resolve() == source.resolve(), name
         assert f'"{name}"' in js, f"app.js لا يقرأ {name}"
+    landing = (SITE / "landing.js").read_text(encoding="utf-8")
+    assert '"page.json"' in landing and '"claims.json"' in landing, "الواجهةُ لا تقرأ أرقامها من مصادرها"
 
 
 def test_every_number_on_the_page_comes_from_the_same_statement():
@@ -132,7 +143,10 @@ def test_no_figure_is_typed_into_the_page():
 
 
 def test_each_kind_of_number_says_where_it_comes_from():
-    html = (SITE / "index.html").read_text(encoding="utf-8")
+    front = FRONT.read_text(encoding="utf-8")
+    assert "أرقامٌ إجماليّةٌ من قراءة كشفٍ حقيقيّ كاملًا" in front, "أرقامُ الواجهة بلا مصدر"
+    assert "صفحةٍ حقيقيّة نُشرت بموافقة صاحبها" in front, "صفوفُ الواجهة بلا مصدر"
+    html = STORY.read_text(encoding="utf-8")
     assert "من صفحةٍ واحدةٍ من كشف حسابٍ حقيقيّ، نُشرت بموافقة صاحبه" in html
     assert "أرقامٌ إجماليّةٌ من قراءة الكشف نفسه كاملًا" in html
     js = (SITE / "app.js").read_text(encoding="utf-8")
@@ -168,9 +182,10 @@ def test_the_story_names_no_local_file_and_no_synthetic_statement():
 
 
 def test_every_title_a_person_reads_carries_the_registered_name():
-    html = (SITE / "index.html").read_text(encoding="utf-8")
-    assert f"<title>{OFFICIAL_NAME}</title>" in html
-    assert re.search(rf"<h1[^>]*>{OFFICIAL_NAME}</h1>", html)
+    for page in (FRONT, STORY):
+        html = page.read_text(encoding="utf-8")
+        assert f"<title>{OFFICIAL_NAME}</title>" in html, page.name
+        assert re.search(rf"<h1[^>]*>{OFFICIAL_NAME}</h1>", html), page.name
     space = yaml.safe_load((ROOT / "space" / "README.md").read_text(encoding="utf-8").split("---")[1])
     assert space["title"] == OFFICIAL_NAME
     assert (ROOT / "README.md").read_text(encoding="utf-8").startswith(f"# {OFFICIAL_NAME}")
@@ -180,19 +195,21 @@ def test_every_title_a_person_reads_carries_the_registered_name():
 
 
 def test_the_seal_is_set_in_noto_naskh_arabic():
-    html = (SITE / "index.html").read_text(encoding="utf-8")
-    assert "font-family=\"'Noto Naskh Arabic', serif\"" in html
-    assert "family=Noto+Naskh+Arabic" in html
-    assert "Amiri" not in html
+    for page in (FRONT, STORY):
+        html = page.read_text(encoding="utf-8")
+        assert "font-family=\"'Noto Naskh Arabic', serif\"" in html, page.name
+        assert "family=Noto+Naskh+Arabic" in html, page.name
+        assert "Amiri" not in html, page.name
 
 
 def test_the_gateway_opens_the_space():
-    html = (SITE / "index.html").read_text(encoding="utf-8")
-    assert html.count(f'href="{SPACE_URL}"') == 2
+    for page in (FRONT, STORY):
+        assert page.read_text(encoding="utf-8").count(f'href="{SPACE_URL}"') == 2, page.name
+    assert 'href="story.html"' in FRONT.read_text(encoding="utf-8"), "الواجهةُ لا تدلّ على القصة"
 
 
 def test_the_scanned_page_image_and_the_architecture_are_described():
-    html = (SITE / "index.html").read_text(encoding="utf-8")
+    html = STORY.read_text(encoding="utf-8")
     for src in re.findall(r'<img src="([^"]+)"', html):
         assert (SITE / src).is_file(), src
     assert not re.search(r"<img(?![^>]*\balt=\"[^\"]+\")[^>]*>", html, re.S), "صورةٌ بلا وصف"
