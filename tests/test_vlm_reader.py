@@ -15,6 +15,12 @@ import pytest
 from statement_qa import vlm_reader
 
 
+@pytest.fixture(autouse=True)
+def _fake_api_key(monkeypatch):
+    """Run offline monkeypatched tests in a clean HOME without owner keys."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-ci-only")
+
+
 class _FakeResp:
     def __init__(self, body: bytes):
         self._body = body

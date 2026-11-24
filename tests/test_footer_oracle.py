@@ -3,9 +3,17 @@
 import json
 from decimal import Decimal
 
+import pytest
+
 from statement_qa import footer_oracle as fo
 from statement_qa.footer_oracle import (FooterReading, check_page_footer,
                                        delta_status, page_totals)
+
+
+@pytest.fixture(autouse=True)
+def _fake_api_key(monkeypatch):
+    """Run offline monkeypatched tests in a clean HOME without owner keys."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-ci-only")
 
 
 def _chain_rows():

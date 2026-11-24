@@ -140,6 +140,16 @@ jobs:
                            tests/test_the_cut_keeps_the_trace.py \
                            tests/test_the_gate_verdict_is_read_from_the_gate.py \
                            tests/test_the_chain_is_scored_by_the_difference.py \
+                           tests/test_qa_tools.py \
+                           tests/test_qa_unread_page_state.py \
+                           tests/test_qa_footer_tool.py \
+                           tests/test_vlm_reader.py \
+                           tests/test_footer_oracle.py \
+                           tests/test_safety.py \
+                           tests/test_classify.py \
+                           tests/test_row_dates.py \
+                           tests/test_space_files.py \
+                           tests/test_track_a_fixes.py
           # **وأربعةُ ملفّاتِ أ-٣/أ-٤ دخلت القائمة (مراجعة ٩١ · الإصلاحُ المطلوب ①):** قِيس أنّ
           # العدّادَ يعدّ `tests/` كلَّها بينما **التشغيلُ** يقف على هذه القائمة ⇒ فبقيت اختباراتُ
           # الدفتر (٢٢) تجري هنا ولا تُذكر، **وأيُّ عطبٍ فيها يُخضرّ**. والقاعدة: **القائمةُ والعدّادُ
