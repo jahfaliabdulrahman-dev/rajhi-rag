@@ -48,12 +48,12 @@ def verdict_from_name(bank_name) -> str:
 
 
 def _band_png(image_path: str, lo: float, hi: float) -> bytes:
-    im = Image.open(image_path)
-    w, h = im.size
-    band = im.crop((0, int(h * lo), w, int(h * hi)))
-    buf = io.BytesIO()
-    band.save(buf, format="PNG")
-    return buf.getvalue()
+    with Image.open(image_path) as im:
+        w, h = im.size
+        band = im.crop((0, int(h * lo), w, int(h * hi)))
+        buf = io.BytesIO()
+        band.save(buf, format="PNG")
+        return buf.getvalue()
 
 
 def _probe_from_content(content: str) -> dict:

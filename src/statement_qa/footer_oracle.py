@@ -90,13 +90,13 @@ class FooterReading:
 
 
 def _footer_crop_png(image_path: str, crop_top: int | None = None) -> bytes:
-    im = Image.open(image_path)
-    w, h = im.size
-    top = crop_top if crop_top is not None else int(h * CROP_TOP)
-    band = im.crop((0, max(0, min(top, h - 1)), w, h))
-    buf = io.BytesIO()
-    band.save(buf, format="PNG")
-    return buf.getvalue()
+    with Image.open(image_path) as im:
+        w, h = im.size
+        top = crop_top if crop_top is not None else int(h * CROP_TOP)
+        band = im.crop((0, max(0, min(top, h - 1)), w, h))
+        buf = io.BytesIO()
+        band.save(buf, format="PNG")
+        return buf.getvalue()
 
 
 def _reading_from_content(content: str) -> FooterReading | None:
@@ -124,9 +124,8 @@ def read_footer(image_path: str, stats: dict | None = None,
     `referee_y` = the page gate's measured position of the printed band, when it
     measured one: the crop then starts just above it instead of at the fixed
     fraction (see `crop_top_px` for why that is safe)."""
-    im = Image.open(image_path)
-    top = crop_top_px(im.size[1], referee_y)
-    im.close()
+    with Image.open(image_path) as im:
+        top = crop_top_px(im.size[1], referee_y)
     b64 = base64.b64encode(_footer_crop_png(image_path, top)).decode()
     return chat_vlm_image(b64, FOOTER_PROMPT, max_tokens=1600, stats=stats,
                           parse=_reading_from_content, api_key=api_key)

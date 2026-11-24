@@ -20,14 +20,28 @@ Rules baked in (each one was discovered by a live failure):
 - Fraction length 1 or 3 after an explicit dot → return None (ambiguous,
   never guess; the balance chain will supply the value).
 """
+from decimal import Decimal, InvalidOperation
 import re
 
 DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 
-def norm_num(s):
+
+def _signed(v: Decimal, neg: bool) -> Decimal:
+    return -v if neg else v
+
+
+def norm_num_decimal(s) -> Decimal | None:
+    """Exact Decimal normalization for Arabic/Persian/Latin statement amounts."""
     if s is None:
         return None
-    raw = str(s).translate(DIGITS).replace("٫", ".").replace("٬", ",").replace("،", ",")
+    raw = (
+        str(s)
+        .translate(DIGITS)
+        .replace("٫", ".")
+        .replace("٬", ",")
+        .replace("،", ",")
+        .replace("\u2212", "-")
+    )
     if re.fullmatch(r"[\s.,]+", raw):
         # The old prints write a printed zero as «.,..» — several marks. A
         # SINGLE '.' or ',' is a blank/garbled cell, and promoting it to a hard
@@ -35,38 +49,52 @@ def norm_num(s):
         # live cases, latent by construction). Two-plus marks = printed zero.
         if len(raw.strip()) < 2:
             return None
-        return 0.0
-    neg = raw.strip().startswith("-") or raw.strip().endswith("-")
+        return Decimal("0.00")
+    stripped = raw.strip()
+    neg = stripped.startswith("-") or stripped.endswith("-")
     t = re.sub(r"[^0-9.,]", "", raw)
     if not t:
         return None
-    def f(v):
-        return -v if neg else v
-    if "." in t:
-        a, _, b = t.partition(".")
-        a = a.replace(",", "")
-        b = re.sub(r"\D", "", b)
-        if len(b) == 2 and a:
-            return f(round(float(a) + int(b) / 100, 2))
-        if len(b) == 0 and a:
-            return f(float(a))
+    try:
+        if "." in t:
+            if t.count(".") > 1:
+                return None
+            a, _, b = t.partition(".")
+            a = a.replace(",", "")
+            if "," in b:
+                return None
+            b = re.sub(r"\D", "", b)
+            if len(b) == 2 and a:
+                return _signed(Decimal(f"{a}.{b}"), neg)
+            if len(b) == 0 and a:
+                return _signed(Decimal(a), neg)
+            return None
+        if "," in t:
+            a, _, b = t.rpartition(",")
+            a = a.replace(",", "")
+            if not a or not b.isdigit():
+                return None
+            if len(b) == 2:
+                return _signed(Decimal(f"{a}.{b}"), neg)
+            if len(b) == 3:
+                return _signed(Decimal(f"{a}{b}"), neg)
+            if len(b) == 5:
+                return _signed(Decimal(f"{a}{b[:3]}.{b[3:5]}"), neg)
+            return None
+        return _signed(Decimal(t), neg)
+    except (InvalidOperation, ValueError):
         return None
-    if "," in t:
-        a, _, b = t.rpartition(",")
-        a = a.replace(",", "")
-        if len(b) == 2:
-            return f(round(float(a) + int(b) / 100, 2)) if a else f(float(b) / 100)
-        if len(b) == 3:
-            return f(float(a) * 1000 + float(b)) if a else f(float(b))
-        if len(b) > 3:
-            return f(round(float(a) * 1000 + float(b[:3]) + int(b[3:5]) / 100, 2))
-        return f(float(a)) if a else None
-    return f(float(t))
+
+
+def norm_num(s):
+    d = norm_num_decimal(s)
+    return float(d) if d is not None else None
+
 
 if __name__ == "__main__":
     cases = {
         "۳۰۰,۰۰": 300.00, "۱۰۰,۰۰": 100.00, "٥٠,٠٠": 50.00,       # قديمة: فاصلة عشرية
-        "3856.65": 9006.00, "3671.56": 9004.00,                   # جديدة: نقطة
+        "3856.65": 3856.65, "3671.56": 3671.56,                   # جديدة: نقطة
         "٦١,١٦٥,١٢": 61165.12, "61,16512": 61165.12,              # نقطة ضائعة
         ".,..": 0.0, "٠.٠٠": 0.0, "٥,٣٧٥٫٨٠-": -5375.80,           # صفر وناقص
         "٢٤٥.٠٠": 245.00, "٩,٠١٠.٠٠": 9010.00,                     # قيم عادية

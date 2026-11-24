@@ -30,9 +30,9 @@ from decimal import Decimal
 from statement_qa.legacy.prompts import (  # noqa: E402
     FRONTIER_PROMPT, FRONTIER_PROMPT_V2, TOP_BAND_PROMPT,
 )
-from statement_qa.legacy.arabic_digit_parser import norm_num as _legacy_norm_num
+from statement_qa.legacy.arabic_digit_parser import norm_num_decimal
 from statement_qa.api_key import resolve_key
-from statement_qa.contract_rows import normalize_date
+from statement_qa.contract_rows import normalize_date, to_ascii_digits
 
 MODEL = os.environ.get("OPENROUTER_MODEL_VLM", "google/gemini-3.7-flash")
 
@@ -92,6 +92,9 @@ def stamp_conflict(cached: dict | None, current: dict) -> str | None:
 _ATTEMPTS = 4
 
 
+_SENTINEL = object()
+
+
 def _parse_amount(tok: str | None) -> Decimal | None:
     """Printed Arabic-Indic money token -> Decimal (Western digits, dot halalas).
 
@@ -103,30 +106,110 @@ def _parse_amount(tok: str | None) -> Decimal | None:
     """
     if not tok:
         return None
-    v = _legacy_norm_num(tok)
+    v = norm_num_decimal(tok)
     if v is None:
         return None
     # money is 2dp forever: Decimal('300.0') would display as '300.0' —
     # quantize keeps the halala scale so every display/format shows 300.00
-    return Decimal(str(v)).quantize(Decimal("0.01"))
+    return v.quantize(Decimal("0.01"))
+
+
+def _balanced_json_span(text: str, start: int) -> str | None:
+    """Extract a balanced {...} or [...] slice starting at `start`."""
+    pairs = {"{": "}", "[": "]"}
+    stack: list[str] = []
+    in_str = False
+    escaped = False
+    for idx in range(start, len(text)):
+        ch = text[idx]
+        if in_str:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in pairs:
+            stack.append(pairs[ch])
+        elif stack and ch == stack[-1]:
+            stack.pop()
+            if not stack:
+                return text[start:idx + 1]
+        elif ch in ("}", "]"):
+            return None
+    return None
+
+
+def _parse_json_candidate(text: str):
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        repaired = re.sub(r",\s*([\]}])", r"\1", text)
+        return json.loads(repaired)
+
+
+def _is_structural_json(obj) -> bool:
+    if isinstance(obj, dict):
+        return True
+    return isinstance(obj, list) and (
+        not obj or any(isinstance(item, (dict, list)) for item in obj)
+    )
 
 
 def _extract_json(content: str):
     """Pull the JSON payload out of a VLM answer.
 
-    VLMs occasionally emit slightly malformed JSON (stray commas, truncation).
-    Repair what is safely repairable; anything else raises so the caller's
-    retry loop re-rolls the call instead of crashing the whole run.
+    VLMs occasionally emit slightly malformed JSON (stray commas, truncation) or
+    prose around the JSON object/array. Extract non-greedily so commentary
+    containing brackets before or after the payload does not poison parsing.
     """
-    m = re.search(r"[\[{].*[\]}]", content, re.DOTALL)
-    if not m:
-        raise ValueError(f"no JSON in VLM answer: {content[:120]}")
-    text = m.group(0)
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        repaired = re.sub(r",\s*([\]}])", r"\1", text)  # trailing commas
-        return json.loads(repaired)
+    stripped = content.strip()
+    if stripped.startswith(("{", "[")):
+        try:
+            obj = _parse_json_candidate(stripped)
+            if isinstance(obj, (dict, list)):
+                return obj
+        except json.JSONDecodeError:
+            pass
+
+    for fence in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", content, re.IGNORECASE):
+        inner = fence.group(1).strip()
+        if inner.startswith(("{", "[")):
+            try:
+                obj = _parse_json_candidate(inner)
+                if isinstance(obj, (dict, list)):
+                    return obj
+            except json.JSONDecodeError:
+                pass
+
+    decoder = json.JSONDecoder()
+    fallback = _SENTINEL
+    for idx, ch in enumerate(content):
+        if ch not in "{[":
+            continue
+        obj = _SENTINEL
+        try:
+            obj, _ = decoder.raw_decode(content, idx)
+        except json.JSONDecodeError:
+            span = _balanced_json_span(content, idx)
+            if span is not None:
+                try:
+                    obj = _parse_json_candidate(span)
+                except json.JSONDecodeError:
+                    obj = _SENTINEL
+        if obj is _SENTINEL:
+            continue
+        if _is_structural_json(obj):
+            return obj
+        if fallback is _SENTINEL:
+            fallback = obj
+
+    if fallback is not _SENTINEL:
+        return fallback
+    raise ValueError(f"no JSON in VLM answer: {content[:120]}")
 
 
 class AnswerTruncated(RuntimeError):
@@ -209,7 +292,7 @@ def chat_vlm_image(image_b64: str | list[str], prompt: str,
                         "image_url": {"url": f"data:image/png;base64,{b}"}}
                        for b in images]}],
     }
-    url = "https://openrouter.ai/api/v1/chat/completions"
+    url ="https://openrouter.ai/api/v1/chat/completions"
     headers = {"Authorization": f"Bearer {resolve_key(api_key)}",
                "Content-Type": "application/json"}
     delay = 10
@@ -367,7 +450,8 @@ def read_rows_vlm(image_path: str, prompt: str | None = None,
     Raises RuntimeError after retries; caller decides suspect handling.
     """
     user_prompt = prompt or FRONTIER_PROMPT_V2
-    b64 = base64.b64encode(open(image_path, "rb").read()).decode()
+    with open(image_path, "rb") as fh:
+        b64 = base64.b64encode(fh.read()).decode()
 
     def _parse(content: str):
         rows = _rows_from_content(content)
@@ -397,7 +481,8 @@ def reread_boundary(image_path: str, prev_closing, page_no: int = 1,
     """
     prompt = TOP_BAND_PROMPT.format(page_no=page_no,
                                     prev_closing=str(prev_closing))
-    b64 = base64.b64encode(open(image_path, "rb").read()).decode()
+    with open(image_path, "rb") as fh:
+        b64 = base64.b64encode(fh.read()).decode()
 
     def _pairs(content: str) -> list[tuple]:
         data = _extract_json(content)
@@ -459,6 +544,20 @@ def _looks_opening(r: dict) -> bool:
 
 _JUNK_DATES = {"none", "null", "nan", "nil", "غير مقروء", "غير واضح", "-", "--", "?"}
 _DATE_IN_TEXT = re.compile(r"[0-9٠-٩۰-۹]{8}")
+_SEP_DATE_IN_TEXT = re.compile(
+    r"[0-9٠-٩۰-۹]{4}[/\-][0-9٠-٩۰-۹]{2}[/\-][0-9٠-٩۰-۹]{2}"
+)
+_ANY_DATE_IN_TEXT = re.compile(
+    rf"{_SEP_DATE_IN_TEXT.pattern}|{_DATE_IN_TEXT.pattern}"
+)
+
+
+def _is_plausible_hijri(cand: str) -> bool:
+    digits = "".join(ch for ch in to_ascii_digits(cand) if ch.isdigit())
+    if len(digits) != 8:
+        return False
+    y, m, d = int(digits[:4]), int(digits[4:6]), int(digits[6:8])
+    return 1300 <= y <= 1599 and 1 <= m <= 12 and 1 <= d <= 30
 
 
 def _norm_col(value) -> str | None:
@@ -490,14 +589,16 @@ def _clean_date(value, desc=None) -> str | None:
     if text.lower() in _JUNK_DATES:
         text = ""
     if not text and desc:
-        for hit in _DATE_IN_TEXT.finditer(str(desc)):
-            cand = hit.group(0)
+        candidates = [m.group(0) for m in _ANY_DATE_IN_TEXT.finditer(str(desc))]
+        for cand in candidates:
             if normalize_date(cand)[1] == "ok":
                 text = cand
                 break
         else:
-            hit = _DATE_IN_TEXT.search(str(desc))
-            text = hit.group(0) if hit else ""
+            for cand in candidates:
+                if _is_plausible_hijri(cand):
+                    text = cand
+                    break
     return text or None
 
 
@@ -573,7 +674,7 @@ def chain_derive(rows: list[dict], prev_balance: Decimal | None = None) -> list[
                 out.append({**r, "derived_movement": Decimal("0"), "side": "",
                             "ok": True, "opening": True, "scale_fixed": False,
                             "boundary": "carry"})
-            elif printed is not None and printed == abs(delta):
+            elif printed is not None and abs(printed) == abs(delta):
                 side = "credit" if delta > 0 else "debit"
                 out.append({**r, "derived_movement": abs(delta), "side": side,
                             "ok": True, "opening": False, "scale_fixed": False,
@@ -590,7 +691,7 @@ def chain_derive(rows: list[dict], prev_balance: Decimal | None = None) -> list[
                 # transaction (printed amount + a real description) — keep its
                 # movement visible; side stays undecided (no previous balance
                 # to derive it from — never guess).
-                out.append({**r, "derived_movement": printed, "side": "",
+                out.append({**r, "derived_movement": abs(printed), "side": "",
                             "ok": True, "opening": False, "scale_fixed": False,
                             "boundary": None})
             else:
@@ -602,11 +703,12 @@ def chain_derive(rows: list[dict], prev_balance: Decimal | None = None) -> list[
             mv = abs(delta)
             side = "credit" if delta > 0 else "debit" if delta < 0 else ""
             printed = r["movement"]
-            ok = printed is None or printed == mv
+            printed_mag = abs(printed) if printed is not None else None
+            ok = printed_mag is None or printed_mag == mv
             scale_fixed = False
-            if not ok and printed is not None and printed != 0:
+            if not ok and printed_mag is not None and printed_mag != 0:
                 # ×100 ambiguity: printed*100 == mv or printed == mv*100
-                if printed * 100 == mv or printed == mv * 100:
+                if printed_mag * 100 == mv or printed_mag == mv * 100:
                     ok, scale_fixed = True, True
             out.append({**r, "derived_movement": mv, "side": side,
                         "ok": ok, "opening": False, "scale_fixed": scale_fixed,
